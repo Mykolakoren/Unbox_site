@@ -1,0 +1,44 @@
+import { useBookingStore } from '../../store/bookingStore';
+import { EXTRAS } from '../../utils/data';
+import { Card } from '../ui/Card';
+import { Check } from 'lucide-react';
+import clsx from 'clsx';
+
+export function OptionsStep() {
+    const { extras, toggleExtra } = useBookingStore();
+
+    return (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div>
+                <h2 className="text-2xl font-bold mb-2">Дополнительные опции</h2>
+                <p className="text-gray-500">Что вам понадобится для работы?</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {EXTRAS.map((extra) => {
+                    const isSelected = extras.includes(extra.id);
+                    return (
+                        <Card
+                            key={extra.id}
+                            className="p-6 flex items-center justify-between gap-4"
+                            selected={isSelected}
+                            onClick={() => toggleExtra(extra.id)}
+                        >
+                            <div>
+                                <h3 className="font-bold text-lg">{extra.name}</h3>
+                                <p className="text-gray-500 text-sm">{extra.price} ₾</p>
+                            </div>
+
+                            <div className={clsx(
+                                "w-6 h-6 rounded-full border flex items-center justify-center transition-colors",
+                                isSelected ? "bg-black border-black text-white" : "border-gray-300"
+                            )}>
+                                {isSelected && <Check size={14} />}
+                            </div>
+                        </Card>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
