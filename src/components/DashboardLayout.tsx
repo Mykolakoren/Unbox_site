@@ -6,17 +6,17 @@ import clsx from 'clsx';
 import { useEffect } from 'react';
 
 export function DashboardLayout() {
-    const { user, logout } = useUserStore();
+    const { currentUser, logout } = useUserStore();
     const navigate = useNavigate();
     const location = useLocation();
 
     useEffect(() => {
-        if (!user) {
+        if (!currentUser) {
             navigate('/login');
         }
-    }, [user, navigate]);
+    }, [currentUser, navigate]);
 
-    if (!user) return null;
+    if (!currentUser) return null;
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Обзор', path: '/dashboard' },
@@ -32,11 +32,11 @@ export function DashboardLayout() {
                 <div className="md:col-span-1 space-y-2">
                     <div className="bg-white p-4 rounded-xl border border-gray-200 mb-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center font-bold">
-                            {user.name[0].toUpperCase()}
+                            {currentUser.name[0].toUpperCase()}
                         </div>
                         <div>
-                            <div className="font-bold text-sm">{user.name}</div>
-                            <div className="text-xs text-gray-500 capitalize">{user.level} Member</div>
+                            <div className="font-bold text-sm">{currentUser.name}</div>
+                            <div className="text-xs text-gray-500 capitalize">{currentUser.level} Member</div>
                         </div>
                     </div>
 

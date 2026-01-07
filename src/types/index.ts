@@ -9,8 +9,15 @@ export interface Location {
 export interface Resource {
     id: string;
     name: string;
-    type: 'cabinet' | 'capsule';
-    locationId: string;
+    type: 'cabinet' | 'capsule' | 'cabinet-uni';
+    hourlyRate: number;
+    capacity: number;
+    locationId?: string; // Optional for backward compatibility
+    // New fields
+    description?: string;
+    area?: number;
+    minBookingHours?: number;
+    formats?: Format[];
 }
 
 export interface TimeSlot {
@@ -24,9 +31,12 @@ export interface BookingState {
     resourceId: string | null;
     format: Format;
     date: Date;
-    startTime: string | null; // HH:mm
-    duration: number; // minutes
+    startTime: string | null; // Deprecated - keeping for compatibility or single selection fallback
+    duration: number; // Deprecated
+    selectedSlots: string[]; // Format: "resourceId|HH:mm" - simplified for easy Set/check logic
     extras: string[]; // ids of selected extras
+    paymentMethod?: 'balance' | 'subscription';
+    hoursDeducted?: number;
 }
 
 export interface ExtraOption {

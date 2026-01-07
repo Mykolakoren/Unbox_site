@@ -1,72 +1,262 @@
 import { useUserStore } from '../store/userStore';
+import { useBookingStore } from '../store/bookingStore';
+import { SubscriptionCard } from '../components/SubscriptionCard';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { BadgeCheck, XCircle, Clock } from 'lucide-react';
+import { BadgeCheck, XCircle, Clock, Calendar as CalendarIcon } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { RESOURCES, EXTRAS } from '../utils/data';
+import { generateGoogleCalendarUrl } from '../utils/calendar';
 
 export function MyBookingsPage() {
-    const bookings = useUserStore(s => s.bookings);
+    const navigate = useNavigate();
+    const { currentUser, bookings, cancelBooking, listForReRent } = useUserStore();
+    const startEditing = useBookingStore(s => s.startEditing);
 
-    if (bookings.length === 0) {
-        return (
-            <div className="text-center py-20 text-gray-500">
-                <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Clock size={32} />
-                </div>
-                <h2 className="text-xl font-bold text-gray-900 mb-2">У вас пока нет бронирований</h2>
-                <p className="mb-6">Самое время забронировать кабинет!</p>
-                <Link to="/">
-                    <Button>Забронировать</Button>
-                </Link>
-            </div>
-        );
-    }
+    // Filter bookings for current user
+    const userBookings = bookings.filter(b => b.userId === currentUser?.email);
+
+    const handleEdit = (booking: any) => {
+        startEditing(booking);
+        navigate('/');
+    };
+
+    const handleCancel = (id: string) => {
+        if (window.confirm('Вы уверены, что хотите отменить бронирование?')) {
+            cancelBooking(id);
+        }
+    };
+
+    const handleReRent = (id: string) => {
+        if (window.confirm('Выставить время на переоренду? Если его забронируют, вам вернется часть средств.')) {
+            listForReRent(id);
+        }
+    };
+
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h1 className="text-2xl font-bold">Мои бронирования</h1>
+        <div className="space-y-6 pb-20">
+            <h1 className="text-2xl font-bold px-4 pt-6">Мои бронирования</h1>
 
-            <div className="space-y-4">
-                {bookings.map((booking) => (
-                    <Card key={booking.id} className="p-6">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <div className="text-xs text-gray-500 font-bold uppercase mb-1">
-                                    {format(new Date(booking.dateCreated), 'd MMM yyyy', { locale: ru })}
+            {currentUser?.subscription && (
+                <div className="px-4">
+                    <SubscriptionCard user={currentUser} />
+                </div>
+            )}
+
+            {userBookings.length === 0 ? (
+                <div className="text-center py-20 text-gray-500">
+                    <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Clock size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-900 mb-2">У вас пока нет бронирований</h2>
+                    <p className="mb-6">Самое время забронировать кабинет!</p>
+                    <Link to="/">
+                        <Button onClick={() => useBookingStore.getState().reset()}>Забронировать</Button>
+                    </Link>
+                </div>
+            ) : (
+                <div className="px-4 space-y-4">
+                    {userBookings.map((booking) => (
+                        <Card key={booking.id} className="p-6">
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <div className="text-xs text-gray-500 font-bold uppercase mb-1">
+                                        {format(new Date(booking.dateCreated), 'd MMM yyyy', { locale: ru })}
+                                    </div>
+                                    <h3 className="font-bold text-lg mb-1">
+                                        {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}
+                                    </h3>
+                                    <div className="text-sm text-gray-500 mb-2">
+                                        {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'} · {booking.format === 'individual' ? 'Индивидуальный' : 'Групповой'}
+                                    </div>
+
+                                    <div className="text-gray-900 mt-1 flex items-center gap-2 font-medium">
+                                        <Clock size={16} />
+                                        {format(new Date(booking.date), 'd MMMM', { locale: ru })}, {booking.startTime} ({booking.duration / 60}ч)
+                                    </div>
+
+                                    {/* Add to Calendar Link */}
+                                    {booking.status === 'confirmed' && (
+                                        <button
+                                            onClick={() => {
+                                                if (!booking.startTime) return;
+                                                const [h, m] = booking.startTime.split(':').map(Number);
+                                                const start = new Date(booking.date);
+                                                start.setHours(h, m, 0, 0);
+                                                const end = new Date(start.getTime() + booking.duration * 60000);
+
+                                                const event = {
+                                                    title: `Бронирование Unbox`,
+                                                    description: `Бронирование кабинета`,
+                                                    location: 'Unbox, Tbilisi',
+                                                    startTime: start,
+                                                    endTime: end
+                                                };
+                                                window.open(generateGoogleCalendarUrl(event), '_blank');
+                                            }}
+                                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
+                                        >
+                                            <CalendarIcon size={12} />
+                                            Добавить в календарь
+                                        </button>
+                                    )}
+
+                                    {booking.extras.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {booking.extras.map((extraId: string) => {
+                                                const extra = EXTRAS.find(e => e.id === extraId);
+                                                return extra ? (
+                                                    <span key={extraId} className="text-xs bg-gray-100 px-2 py-1 rounded-md text-gray-600 border border-gray-200">
+                                                        + {extra.name}
+                                                    </span>
+                                                ) : null;
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
-                                <h3 className="font-bold text-lg">
-                                    {booking.locationId === 'one' ? 'Unbox One' : 'Unbox Uni'} · {booking.format === 'individual' ? 'Индивидуальный' : 'Групповой'}
-                                </h3>
-                                <div className="text-gray-500 mt-1 flex items-center gap-2">
-                                    <Clock size={14} />
-                                    {format(new Date(booking.date), 'd MMM', { locale: ru })}, {booking.startTime} ({booking.duration / 60}ч)
+
+                                <div className={clsx(
+                                    "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1",
+                                    {
+                                        'bg-green-100 text-green-700': booking.status === 'confirmed',
+                                        'bg-red-100 text-red-700': booking.status === 'cancelled',
+                                        'bg-gray-100 text-gray-600': booking.status === 'completed',
+                                        'bg-blue-100 text-blue-700': booking.status === 're-rented',
+                                    }
+                                )}>
+                                    {booking.status === 'confirmed' && <><BadgeCheck size={12} /> Подтверждено</>}
+                                    {booking.status === 'cancelled' && <><XCircle size={12} /> Отменено</>}
+                                    {booking.status === 'completed' && 'Завершено'}
+                                    {booking.status === 're-rented' && 'Пересдано'}
                                 </div>
                             </div>
 
-                            <div className={clsx(
-                                "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1",
-                                {
-                                    'bg-green-100 text-green-700': booking.status === 'confirmed',
-                                    'bg-red-100 text-red-700': booking.status === 'cancelled',
-                                    'bg-gray-100 text-gray-600': booking.status === 'completed',
-                                }
-                            )}>
-                                {booking.status === 'confirmed' && <><BadgeCheck size={12} /> Подтверждено</>}
-                                {booking.status === 'cancelled' && <><XCircle size={12} /> Отменено</>}
-                                {booking.status === 'completed' && 'Завершено'}
-                            </div>
-                        </div>
+                            <div className="flex flex-col gap-2 pt-4 border-t border-gray-100">
+                                <div>
+                                    <div className="text-xs text-gray-400 mb-0.5 uppercase font-medium">Оплата</div>
+                                    <div className="font-medium text-gray-700 flex items-center gap-2">
+                                        {booking.paymentMethod === 'subscription' ? (
+                                            <>
+                                                <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                                                Абонемент
+                                            </>
+                                        ) : booking.paymentSource === 'credit' ? (
+                                            <>
+                                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                                Кредит
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                                Депозит
+                                            </>
+                                        )}
+                                    </div>
+                                    <div className="text-sm text-gray-500 mt-0.5">
+                                        {booking.paymentMethod === 'subscription' ? (
+                                            <span>Списано: <span className="font-bold text-gray-900">{booking.hoursDeducted || (booking.duration / 60)} ч</span></span>
+                                        ) : (
+                                            <span>
+                                                {booking.paymentSource === 'credit' ? 'Долг: ' : 'Оплачено: '}
+                                                <span className="font-bold text-gray-900">{booking.finalPrice} ₾</span>
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
 
-                        <div className="flex justify-between items-center text-sm pt-4 border-t border-gray-100">
-                            <span className="text-gray-500">Итоговая стоимость</span>
-                            <span className="font-bold text-lg">{booking.finalPrice} ₾</span>
-                        </div>
-                    </Card>
-                ))}
-            </div>
+                                {booking.price && booking.price.discountAmount > 0 && (
+                                    <div className="bg-orange-50 p-2 rounded-lg border border-orange-100 text-sm">
+                                        <div className="flex justify-between items-center text-orange-800">
+                                            <span className="font-medium">🏷️ Скидка применена</span>
+                                            <span className="font-bold">-{booking.price.discountAmount} ₾</span>
+                                        </div>
+                                        {booking.price.discountRule && (
+                                            <div className="text-xs text-orange-600 mt-0.5">
+                                                {booking.price.discountRule === 'volume' ? 'Скидка за объем (неделя)' : booking.price.discountRule}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Actions for active bookings */}
+                            {booking.status === 'confirmed' && (
+                                <div className="mt-4 pt-4 border-t border-gray-100">
+                                    {new Date(booking.date).getTime() - new Date().getTime() > 24 * 60 * 60 * 1000 ? (
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="flex-1"
+                                                onClick={() => handleEdit(booking)}
+                                            >
+                                                Перенести
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="flex-1 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                onClick={() => handleCancel(booking.id)}
+                                            >
+                                                Отменить
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="text-xs text-center text-gray-500 italic bg-gray-50 p-2 rounded-lg">
+                                                Менее 24ч до начала. Бесплатная отмена недоступна.
+                                            </div>
+
+                                            {booking.isReRentListed ? (
+                                                <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm text-center font-medium border border-blue-100">
+                                                    ⏳ Выставлено на переаренду
+                                                    <div className="text-xs text-blue-500 font-normal mt-1">
+                                                        Если время забронируют, средства вернутся на счет.
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col gap-2">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="w-full border-dashed"
+                                                        onClick={() => handleReRent(booking.id)}
+                                                    >
+                                                        ♻️ Выставить на переаренду
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="w-full text-gray-500 hover:text-black"
+                                                        onClick={() => window.open('https://t.me/UnboxCenter', '_blank')}
+                                                    >
+                                                        💬 Связаться с администратором
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {booking.status === 're-rented' && (
+                                <div className="mt-4 pt-4 border-t border-gray-100">
+                                    <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm text-center font-medium border border-green-100 flex flex-col items-center">
+                                        <span>💰 Средства возвращены на баланс</span>
+                                        <span className="text-lg font-bold text-green-800">
+                                            +{(booking.finalPrice * 0.5).toFixed(1)} ₾
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+                        </Card>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

@@ -21,12 +21,8 @@ export function LoginPage() {
         if (!formData.name || !formData.email) return;
 
         // Mock login/register logic
-        login({
-            name: formData.name,
-            email: formData.email,
-            phone: formData.phone || '+995 000 00 00 00',
-            level: 'silver', // Mock silver status for demo
-        });
+        // Mock login/register logic
+        login(formData.email, formData.name);
 
         navigate('/dashboard');
     };

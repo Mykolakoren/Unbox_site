@@ -2,9 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Summary } from './components/Summary';
 // Wizard Steps
-import { LocationStep } from './components/Wizard/LocationStep';
-import { FormatDateStep } from './components/Wizard/FormatDateStep';
-import { TimelineStep } from './components/Wizard/TimelineStep';
+import { ContextStep } from './components/Wizard/ContextStep';
+import { ChessboardStep } from './components/Wizard/ChessboardStep';
 import { OptionsStep } from './components/Wizard/OptionsStep';
 import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 // Store
@@ -15,20 +14,34 @@ import { LoginPage } from './pages/LoginPage';
 import { DashboardLayout } from './components/DashboardLayout';
 import { MyBookingsPage } from './pages/MyBookingsPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { DashboardOverview } from './pages/DashboardOverview';
 
 // Booking Flow Wrapper
 function BookingWizard() {
-  const step = useBookingStore(s => s.step);
+  const { step, editBookingId, reset } = useBookingStore();
 
   return (
     <Layout>
+      <div className="max-w-6xl mx-auto mb-8">
+        {editBookingId && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-top-4">
+            <span className="font-medium">✏️ Вы редактируете существующее бронирование</span>
+            <button
+              onClick={() => reset()}
+              className="text-sm font-bold underline hover:no-underline"
+            >
+              Отменить редактирование
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto">
         <div className="lg:col-span-8">
-          {step === 1 && <LocationStep />}
-          {step === 2 && <FormatDateStep />}
-          {step === 3 && <TimelineStep />}
-          {step === 4 && <OptionsStep />}
-          {step === 5 && <ConfirmationStep />}
+          {step === 1 && <ContextStep onNext={() => useBookingStore.getState().setStep(2)} />}
+          {step === 2 && <ChessboardStep />}
+          {step === 3 && <OptionsStep />}
+          {step === 4 && <ConfirmationStep />}
         </div>
 
         {step < 5 && (
@@ -52,7 +65,7 @@ function App() {
 
       {/* Dashboard */}
       <Route path="/dashboard" element={<DashboardLayout />}>
-        <Route index element={<div className="p-8 text-gray-500">Добро пожаловать в личный кабинет! Выберите раздел меню слева.</div>} />
+        <Route index element={<DashboardOverview />} />
         <Route path="bookings" element={<MyBookingsPage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>

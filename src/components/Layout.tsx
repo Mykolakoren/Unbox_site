@@ -1,17 +1,22 @@
 import { Box, User as UserIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
+import { useBookingStore } from '../store/bookingStore';
 import { Button } from './ui/Button';
 
 export function Layout({ children }: { children: React.ReactNode }) {
-    const user = useUserStore((s) => s.user);
+    const user = useUserStore((s) => s.currentUser);
 
     return (
         <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-black selection:text-white">
             {/* Header */}
             <header className="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/80 backdrop-blur-md">
                 <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-                    <Link to="/" className="flex items-center gap-2">
+                    <Link
+                        to="/"
+                        className="flex items-center gap-2"
+                        onClick={() => useBookingStore.getState().reset()}
+                    >
                         <div className="bg-black text-white p-1.5 rounded-lg">
                             <Box size={24} strokeWidth={2.5} />
                         </div>

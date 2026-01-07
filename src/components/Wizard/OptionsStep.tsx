@@ -1,11 +1,12 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { EXTRAS } from '../../utils/data';
 import { Card } from '../ui/Card';
-import { Check } from 'lucide-react';
+import { Check, ArrowRight } from 'lucide-react';
+import { Button } from '../ui/Button';
 import clsx from 'clsx';
 
 export function OptionsStep() {
-    const { extras, toggleExtra } = useBookingStore();
+    const { extras, toggleExtra, setStep } = useBookingStore();
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -38,6 +39,12 @@ export function OptionsStep() {
                         </Card>
                     );
                 })}
+            </div>
+
+            <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 p-4 -mx-6 -mb-6 mt-4 flex justify-end z-20 rounded-b-2xl">
+                <Button onClick={() => setStep(4)}>
+                    Продолжить <ArrowRight size={16} className="ml-2" />
+                </Button>
             </div>
         </div>
     );

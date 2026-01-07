@@ -1,0 +1,366 @@
+# Unbox Booking — Pricing & Loyalty Config (for antigravity)
+# Version: 1.0
+# Timezone: Asia/Tbilisi
+# Week definition: Monday 00:00 → Sunday 23:59
+
+meta:
+  currency: GEL
+  timezone: "Asia/Tbilisi"
+  week_start: "MONDAY"
+  week_end: "SUNDAY"
+  pricing_version: "2025-12-27"
+
+time_rules:
+  booking_step_minutes: 30            # UI step for choosing start/end
+  min_booking_minutes: 60             # minimum booking length
+  charge_unit_minutes: 30             # billing granularity for booked duration
+  hour_policy:
+    # Business meaning: user books time slots; "1 hour" includes 55 min work + 5 min buffer.
+    work_minutes_in_hour: 55
+    buffer_minutes_in_hour: 5
+  overstay_policy:
+    # Overstay is not part of automatic pricing; it is an admin action.
+    enabled: true
+    threshold_minutes: 10             # if actual overstay >= 10 min
+    extra_charge_minutes: 30          # add +30 min billed time
+    allowed_only_if_no_next_booking: true
+    admin_only: true                  # must be confirmed/added by admin
+    no_next_booking_grace_minutes: 9  # overstay <= 9 min is not charged
+
+inventory_and_rates:
+  formats:
+    individual:
+      code: "IND"
+      label: "Individual"
+    group:
+      code: "GRP"
+      label: "Group"
+
+  space_types:
+    room:
+      code: "ROOM"
+      label: "Cabinet"
+    capsule:
+      code: "CAP"
+      label: "Capsule"
+
+  base_rates:
+    # Base rate determined by (space_type, format)
+    - space_type: "ROOM"
+      format: "IND"
+      hourly_rate: 20
+    - space_type: "ROOM"
+      format: "GRP"
+      hourly_rate: 35
+    - space_type: "CAP"
+      format: "IND"
+      hourly_rate: 10
+
+manual_override:
+  enabled: true
+  # Manual override is a separate pricing path with high priority.
+  # antigravity should require a reason string and an author id for any override.
+  require_reason: true
+  require_actor: true
+
+cancellation_policy:
+  cancel_allowed_if_more_than_hours_before_start: 24
+  hot_booking_non_refundable: true
+  # Optional: define whether admin can override cancellation blocks.
+  admin_can_override: true
+  admin_override_requires_reason: true
+
+discounts:
+  # Discounts never stack. Only one discount applies at booking-time.
+  stacking: "none"
+
+  priority_order_booking_time:
+    # Highest → lowest
+    - "SUBSCRIPTION"
+    - "MANUAL_OVERRIDE"
+    - "WEEKLY_PROGRESSIVE"     # if you still want "in-moment" weekly tier applied
+    - "HOT_BOOKING"
+    - "NONE"
+
+  weekly_progressive:
+    enabled: true
+    basis: "USER_HOURS_IN_WEEK"          # total booked/fulfilled hours in the current week
+    period: "CALENDAR_WEEK"
+    apply_to: "BASE_PRICE"               # percent off base_price
+    tiers:
+      - min_hours_in_week: 0
+        max_hours_in_week: 4.999
+        discount_percent: 0
+      - min_hours_in_week: 5
+        max_hours_in_week: 10.999
+        discount_percent: 10
+      - min_hours_in_week: 11
+        max_hours_in_week: 15.999
+        discount_percent: 25
+      - min_hours_in_week: 16
+        max_hours_in_week: 9999
+        discount_percent: 50
+
+  hot_booking:
+    enabled: true
+    condition:
+      hours_before_start_lte: 12
+    discount_percent: 10
+    apply_to: "BASE_PRICE"
+    sets_flags:
+      non_refundable: true
+      non_reschedulable: true
+
+subscriptions:
+  # Subscriptions (abonements) are the primary mechanism.
+  # If an active subscription is applicable, it blocks booking-time discounts.
+  enabled: true
+  rules:
+    hours_deducted_on: "BOOKING_CONFIRMATION"  # when user confirms and payment/hold is finalized
+    free_hours_deduct_first: true
+    if_hours_limit_exceeded:
+      # Keep subscription discount even after hours are used up, but do not deduct hours.
+      keep_discount: true
+      deduct_hours: false
+    freeze:
+      enabled: true
+      max_freeze_days: 7
+      max_freeze_count_per_subscription: 1
+    rollover:
+      enabled: true
+      allowed_if_renewed_within_days: 7
+  plans:
+    - plan_id: "WARM_START"
+      name: "Тёплый старт"
+      duration_days: 30
+      included_hours: 10
+      discount_percent: 10
+      allowed:
+        formats: ["IND"]                 # individual only
+        space_types: ["ROOM", "CAP"]
+      price_total: 180
+      perks: []
+
+    - plan_id: "REGULAR_PRACTITIONER"
+      name: "Регулярный практик"
+      duration_days: 30
+      included_hours: 20
+      discount_percent: 15
+      allowed:
+        formats: ["IND"]
+        space_types: ["ROOM", "CAP"]
+      price_total: 340
+      perks:
+        - perk_id: "ONE_FREE_RESCHEDULE"
+          type: "RESCHEDULE"
+          quantity: 1
+          notes: "One free reschedule within policy; admin-approved."
+
+        - perk_id: "RECOMMENDED_LISTING"
+          type: "MARKETING"
+          quantity: 1
+          notes: "Include in recommended specialists list."
+
+    - plan_id: "PRO_PLUS"
+      name: "Профи+"
+      duration_days: 45
+      included_hours: 40
+      discount_percent: 20
+      allowed:
+        formats: ["IND", "GRP"]          # allows group bookings
+        space_types: ["ROOM", "CAP"]
+      price_total: 640
+      free_hours:
+        included_free_hours: 2           # gift hours
+        allowed:
+          formats: ["IND"]
+          space_types: ["ROOM", "CAP"]
+      perks:
+        - perk_id: "PRIORITY_BOOKING"
+          type: "PRIORITY"
+          quantity: 1
+          notes: "Priority booking rules to be defined in admin policy."
+        - perk_id: "CAPSULE_OFF_HOURS_ACCESS"
+          type: "ACCESS"
+          quantity: 1
+          notes: "Off-hours capsule access requires separate facility rules."
+        - perk_id: "RECOMMENDED_LISTING"
+          type: "MARKETING"
+          quantity: 1
+
+    - plan_id: "GROUP_MASTER"
+      name: "Групповой мастер"
+      duration_days: 30
+      included_hours: 16
+      discount_percent: 25
+      allowed:
+        formats: ["GRP"]
+        space_types: ["ROOM"]            # group rooms only
+      price_total: 420
+      perks:
+        - perk_id: "EVENT_BLAST"
+          type: "MARKETING"
+          quantity: 1
+          notes: "One event announcement to Unbox base."
+
+weekly_reconciliation_bonus:
+  # New rule: end-of-week recalculation creates bonus credit if week-tier discount
+  # would be better than booking-time applied discounts.
+  enabled: true
+
+  reconciliation_time:
+    # Run once after week closes; exact schedule handled by platform.
+    run_after_week_end: true
+    earliest_run_offset_minutes: 30
+
+  eligibility:
+    include_only_fulfilled_bookings: true        # only completed/occurred bookings count
+    exclude_cancelled_bookings: true
+    include_no_show_bookings: false              # if you track no-shows separately
+
+  bonus_wallet:
+    wallet_name: "bonus_balance"
+    currency: "GEL"
+    cashout_allowed: false
+    transferable: false
+    usable_for_payments: true
+    max_cover_percent_per_booking: 100
+    # Recommended: set expiry to drive repeat bookings (can be null for no expiry).
+    expiry_days: 60
+
+  interaction_with_subscriptions:
+    # Choose one of:
+    # - "EXCLUDE": do not grant weekly bonus for bookings priced via subscription
+    # - "INCLUDE_BASE_ONLY": allow bonus only for bookings not covered by subscription hours
+    # - "INCLUDE_ALL": include all (not recommended)
+    mode: "EXCLUDE"
+
+  reconciliation_logic:
+    # Steps:
+    # 1) Compute total_base_week_price from all eligible bookings (base_price without any discounts).
+    # 2) Determine weekly_discount_percent from total fulfilled hours in week using weekly_progressive tiers.
+    # 3) ideal_week_price = total_base_week_price * (1 - weekly_discount_percent)
+    # 4) actually_paid_week_price = sum(final_price_paid) for eligible bookings
+    # 5) delta = actually_paid_week_price - ideal_week_price
+    # 6) if delta > 0 => credit delta to bonus_wallet
+    basis_for_hours: "FULFILLED_HOURS"
+    basis_for_base_price: "BOOKED_BASE_PRICE"
+    basis_for_paid: "FINAL_PAID_AMOUNT"
+    credit_if_delta_greater_than: 0.01           # ignore tiny rounding noise
+    rounding:
+      method: "HALF_UP"
+      decimals: 2
+
+  transparency:
+    # Data that should be stored and shown to user/admin.
+    store_weekly_summary: true
+    summary_fields:
+      - "week_id"
+      - "fulfilled_hours"
+      - "weekly_discount_percent"
+      - "total_base_week_price"
+      - "actually_paid_week_price"
+      - "ideal_week_price"
+      - "delta_bonus_credited"
+      - "bonus_wallet_balance_after"
+
+payment_application_order:
+  # For each booking, calculation order should be:
+  # 1) compute base_price
+  # 2) apply subscription OR booking-time discount OR none
+  # 3) apply bonus wallet (optional user toggle)
+  steps:
+    - "BASE_PRICE"
+    - "PRICING_RULE"        # SUBSCRIPTION / MANUAL_OVERRIDE / WEEKLY_PROGRESSIVE / HOT_BOOKING / NONE
+    - "BONUS_WALLET"
+
+audit_requirements:
+  # Must be persisted per booking to prevent disputes.
+  booking_fields_to_store:
+    - "base_price"
+    - "hourly_rate"
+    - "booked_hours"
+    - "applied_pricing_rule"          # e.g., SUBSCRIPTION / WEEKLY_PROGRESSIVE / HOT_BOOKING / MANUAL_OVERRIDE / NONE
+    - "applied_discount_percent"
+    - "final_price"
+    - "flags.non_refundable"
+    - "flags.non_reschedulable"
+    - "subscription.plan_id_used"
+    - "subscription.hours_deducted"
+    - "bonus_wallet.used_amount"
+    - "manual_override.reason"
+    - "manual_override.actor_id"
+
+must_pass_test_cases:
+  - id: "TC1_SUBSCRIPTION_BEATS_HOT"
+    given:
+      active_subscription: "REGULAR_PRACTITIONER"
+      booking_start_in_hours: 6
+      space_type: "ROOM"
+      format: "IND"
+      booked_hours: 1
+    expect:
+      applied_pricing_rule: "SUBSCRIPTION"
+      hot_booking_applied: false
+
+  - id: "TC2_WEEKLY_BONUS_CREDIT"
+    given:
+      week_bookings:
+        - base_price: 20
+          final_paid: 20
+          fulfilled_hours: 1
+        - base_price: 20
+          final_paid: 20
+          fulfilled_hours: 1
+        - base_price: 20
+          final_paid: 20
+          fulfilled_hours: 1
+        - base_price: 20
+          final_paid: 20
+          fulfilled_hours: 1
+        - base_price: 20
+          final_paid: 20
+          fulfilled_hours: 1
+        - base_price: 20
+          final_paid: 20
+          fulfilled_hours: 1
+      # total hours = 6 => weekly tier 10%
+    expect:
+      weekly_discount_percent: 10
+      ideal_week_price: 108.00
+      actually_paid_week_price: 120.00
+      bonus_credited: 12.00
+
+  - id: "TC3_HOT_NON_REFUNDABLE"
+    given:
+      active_subscription: null
+      booking_start_in_hours: 10
+      space_type: "ROOM"
+      format: "IND"
+      booked_hours: 1
+    expect:
+      applied_pricing_rule: "HOT_BOOKING"
+      flags:
+        non_refundable: true
+        non_reschedulable: true
+
+  - id: "TC4_OVERSTAY_ADMIN_ONLY"
+    given:
+      booking:
+        booked_hours: 1
+        actual_overstay_minutes: 12
+        next_booking_exists: false
+      admin_action: false
+    expect:
+      extra_charge_applied: false
+
+  - id: "TC5_OVERSTAY_APPLIED_BY_ADMIN"
+    given:
+      booking:
+        booked_hours: 1
+        actual_overstay_minutes: 12
+        next_booking_exists: false
+      admin_action: true
+    expect:
+      extra_charge_minutes_added: 30
+      new_paid_hours: 1.5

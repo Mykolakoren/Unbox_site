@@ -1,18 +1,36 @@
 import { useBookingStore } from '../../store/bookingStore';
+import { useUserStore } from '../../store/userStore';
 import { addMinutes, format, isBefore, setHours, setMinutes, startOfToday } from 'date-fns';
 import clsx from 'clsx';
 import { useMemo } from 'react';
 
-// Mock blocked slots for demo purposes
-// In real app, this comes from API based on resourceId + date
-const getBlockedSlots = (resourceId: string | null) => {
-    if (!resourceId) return [];
-    // Mock: 14:00-15:00 is busy
-    return ['14:00', '14:30'];
+// Helpers
+const timeToMinutes = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+};
+const minutesToTime = (total: number) => {
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
+import { googleCalendarService } from '../../services/googleCalendarMock';
+import type { ExternalEvent } from '../../services/googleCalendarMock';
+import { useState, useEffect } from 'react';
+
+// ...
+
 export function TimelineStep() {
-    const { resourceId, startTime, duration, setTimeRange } = useBookingStore();
+    const { resourceId, startTime, duration, setTimeRange, date, editBookingId } = useBookingStore();
+    const bookings = useUserStore(s => s.bookings);
+    const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
+
+    useEffect(() => {
+        if (resourceId) {
+            setExternalEvents(googleCalendarService.getEvents(resourceId));
+        }
+    }, [resourceId]);
 
     // Generate slots 09:00 to 21:00 (last slot starts at 20:30)
     const slots = useMemo(() => {
@@ -27,7 +45,53 @@ export function TimelineStep() {
         return result;
     }, []);
 
-    const blockedSlots = useMemo(() => getBlockedSlots(resourceId), [resourceId]);
+    // Calculate blocked slots based on existing bookings AND external events
+    const blockedSlots = useMemo(() => {
+        if (!resourceId) return [];
+
+        const busySlots: string[] = [];
+
+        // 1. Internal Bookings
+        if (bookings) {
+            bookings.forEach(booking => {
+                if (
+                    booking.resourceId === resourceId &&
+                    format(new Date(booking.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') &&
+                    booking.status === 'confirmed' &&
+                    !booking.isReRentListed &&
+                    booking.id !== editBookingId &&
+                    booking.startTime
+                ) {
+                    const startMins = timeToMinutes(booking.startTime);
+                    const endMins = startMins + booking.duration;
+                    for (let m = startMins; m < endMins; m += 30) {
+                        busySlots.push(minutesToTime(m));
+                    }
+                }
+            });
+        }
+
+        // 2. External Google Calendar Events
+        externalEvents.forEach(event => {
+            const eventStart = new Date(event.start);
+            const eventEnd = new Date(event.end);
+
+            // Simple check: if event is on the same day (ignoring multi-day for now as out of scope for demo)
+            if (format(eventStart, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')) {
+                const startMins = eventStart.getHours() * 60 + eventStart.getMinutes();
+                const endMins = eventEnd.getHours() * 60 + eventEnd.getMinutes();
+
+                for (let m = startMins; m < endMins; m += 30) {
+                    const timeStr = minutesToTime(m);
+                    if (!busySlots.includes(timeStr)) {
+                        busySlots.push(timeStr);
+                    }
+                }
+            }
+        });
+
+        return busySlots;
+    }, [bookings, resourceId, date, editBookingId, externalEvents]);
 
     const handleSlotClick = (slotTime: string) => {
         if (blockedSlots.includes(slotTime)) return;
@@ -88,17 +152,6 @@ export function TimelineStep() {
                 setTimeRange(slotTime, 60);
             }
         }
-    };
-
-    // Helpes
-    const timeToMinutes = (t: string) => {
-        const [h, m] = t.split(':').map(Number);
-        return h * 60 + m;
-    };
-    const minutesToTime = (total: number) => {
-        const h = Math.floor(total / 60);
-        const m = total % 60;
-        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     };
 
     const isSlotSelected = (slot: string) => {
