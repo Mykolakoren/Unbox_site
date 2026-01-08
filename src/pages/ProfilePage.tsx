@@ -1,11 +1,15 @@
 import { useUserStore } from '../store/userStore';
 import { Button } from '../components/ui/Button';
-import { User, Phone, Mail, Plus } from 'lucide-react';
+import { User, Phone, Mail, Plus, RefreshCcw } from 'lucide-react';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import type { Format } from '../types';
 
+import { ReconciliationModal } from '../components/ReconciliationModal';
+import { useState } from 'react';
+
 export function ProfilePage() {
     const { currentUser, updateUser } = useUserStore();
+    const [isReconciliationModalOpen, setIsReconciliationModalOpen] = useState(false);
 
     if (!currentUser) return null;
 
@@ -126,18 +130,74 @@ export function ProfilePage() {
                     </div>
                     <div className="md:col-span-2 pt-4 border-t border-gray-200">
                         <label className="block text-sm font-medium mb-2">Абонемент</label>
-                        <Button
-                            variant="primary"
-                            className="w-full md:w-auto"
-                            onClick={handleGrantSubscription}
-                        >
-                            <Plus size={16} className="mr-2" />
-                            Начислить тестовый абонемент (50ч)
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                            <Button
+                                variant="primary"
+                                className="w-full md:w-auto"
+                                onClick={handleGrantSubscription}
+                            >
+                                <Plus size={16} className="mr-2" />
+                                Начислить тестовый абонемент (50ч)
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                className="w-full md:w-auto"
+                                onClick={() => setIsReconciliationModalOpen(true)}
+                            >
+                                <RefreshCcw size={16} className="mr-2" />
+                                Пересчет скидки (Текущая неделя)
+                            </Button>
+                        </div>
                         <p className="text-xs text-gray-400 mt-1">Добавит/перезапишет текущий абонемент</p>
                     </div>
                 </div>
+
+                {/* Admin Settings Block */}
+                <div className="mt-8 pt-6 border-t border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">👮‍♂️ Админ-панель: Настройки Клиента</h3>
+                    <div className="bg-gray-50 p-4 rounded-xl space-y-4">
+
+                        {/* Status Removed as per request */}
+
+                        {/* Pricing System Toggle */}
+                        <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                            <div>
+                                <div className="font-medium text-sm text-gray-900">Персональное ценообразование</div>
+                                <div className="text-xs text-gray-500">Отключает стандартные правила скидок</div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="sr-only peer"
+                                    checked={currentUser.pricingSystem === 'personal'}
+                                    onChange={(e) => useUserStore.getState().updateUser({ pricingSystem: e.target.checked ? 'personal' : 'standard' })}
+                                />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                        </div>
+
+                        {/* Personal Discount Input (Only if Personal System) */}
+                        {currentUser.pricingSystem === 'personal' && (
+                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                <label className="text-sm font-medium text-gray-700">Размер персональной скидки (%)</label>
+                                <input
+                                    type="number"
+                                    className="w-full p-2 rounded-lg border border-gray-200"
+                                    value={currentUser.personalDiscountPercent || 0}
+                                    onChange={(e) => useUserStore.getState().updateUser({ personalDiscountPercent: parseFloat(e.target.value) })}
+                                    placeholder="Например: 20"
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
+
+            <ReconciliationModal
+                isOpen={isReconciliationModalOpen}
+                onClose={() => setIsReconciliationModalOpen(false)}
+            />
         </div>
     );
 }

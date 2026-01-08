@@ -49,7 +49,7 @@ export interface PricingResult {
     basePrice: number;
     extrasPrice: number;
     discountAmount: number;
-    discountType: 'none' | 'duration' | 'hot' | 'loyalty';
+    discountType: 'none' | 'duration' | 'hot' | 'loyalty' | 'personal';
     finalPrice: number;
 }
 

@@ -1,5 +1,6 @@
 import { useBookingStore } from '../store/bookingStore';
-import { Button } from './ui/Button';
+import { useUserStore } from '../store/userStore';
+
 import { Users, Clock, Tag, ShoppingCart } from 'lucide-react';
 import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
@@ -43,7 +44,10 @@ export function Summary() {
                 endTime: endDateTime,
                 extras: selectedExtras,
                 paymentMethod: state.paymentMethod,
-                resourceId: b.resourceId // Pass resourceId instead of Type
+                resourceId: b.resourceId,
+                // Pass User Settings
+                personalDiscountPercent: useUserStore.getState().currentUser?.personalDiscountPercent,
+                pricingSystem: useUserStore.getState().currentUser?.pricingSystem
             });
 
             totalBase += p.basePrice;
@@ -65,18 +69,6 @@ export function Summary() {
         };
 
     }, [state.selectedSlots, state.date, state.format, state.extras]);
-
-    const canProceed = () => {
-        if (state.step === 1) return !!state.locationId; // Changed from resourceId since we select context first
-        if (state.step === 2) return state.selectedSlots.length > 0;
-        if (state.step === 3) return true;
-        if (state.step === 4) return true;
-        return false;
-    };
-
-    const handleNext = () => {
-        state.setStep(state.step + 1);
-    };
 
     const handleBack = () => {
         state.setStep(state.step - 1);
@@ -184,17 +176,12 @@ export function Summary() {
                 </div>
             </div>
 
-            {/* Hide "Continue" button on Step 3 (Chessboard) and Step 4 (Confirmation) as they have their own buttons */}
-            {state.step !== 3 && state.step !== 4 && (
-                <Button
-                    className="w-full mt-4"
-                    size="lg"
-                    disabled={!canProceed()}
-                    onClick={handleNext}
-                >
-                    {state.step === 4 ? 'Подтвердить' : 'Продолжить'}
-                </Button>
-            )}
+            {/* Navigation buttons are now handled within each Step component to avoid duplication.
+                Step 1: ContextStep has 'Show Schedule'
+                Step 2: ChessboardStep has 'Next'
+                Step 3: OptionsStep has 'Continue'
+                Step 4: ConfirmationStep has 'Pay'
+            */}
 
             {state.step > 1 && (
                 <button

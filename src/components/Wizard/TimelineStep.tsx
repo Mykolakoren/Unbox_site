@@ -52,40 +52,62 @@ export function TimelineStep() {
         const busySlots: string[] = [];
 
         // 1. Internal Bookings
-        if (bookings) {
-            bookings.forEach(booking => {
-                if (
-                    booking.resourceId === resourceId &&
-                    format(new Date(booking.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') &&
-                    booking.status === 'confirmed' &&
-                    !booking.isReRentListed &&
-                    booking.id !== editBookingId &&
-                    booking.startTime
-                ) {
-                    const startMins = timeToMinutes(booking.startTime);
-                    const endMins = startMins + booking.duration;
-                    for (let m = startMins; m < endMins; m += 30) {
-                        busySlots.push(minutesToTime(m));
-                    }
+        const relevantBookings = bookings ? bookings.filter(b =>
+            b.resourceId === resourceId &&
+            format(new Date(b.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') &&
+            b.status === 'confirmed'
+        ) : [];
+
+        console.log('[Timeline Debug] Relevant Bookings for', format(date, 'yyyy-MM-dd'), relevantBookings);
+
+        relevantBookings.forEach(booking => {
+            // If it's the booking we are currently editing, ignore it (don't block)
+            if (booking.id === editBookingId) return;
+
+            // If it is listed for Re-Rent, ignore it (don't block)
+            // Note: We explicitly check for true to specificy intent
+            if (booking.isReRentListed) {
+                console.log('[Timeline Debug] Skipping Re-Rented Booking:', booking.id, booking.startTime);
+                return;
+            }
+
+            if (booking.startTime) {
+                const startMins = timeToMinutes(booking.startTime);
+                const endMins = startMins + booking.duration;
+                console.log('[Timeline Debug] Blocking Internal:', booking.startTime, 'to', minutesToTime(endMins));
+                for (let m = startMins; m < endMins; m += 30) {
+                    busySlots.push(minutesToTime(m));
                 }
-            });
-        }
+            }
+        });
 
         // 2. External Google Calendar Events
         externalEvents.forEach(event => {
             const eventStart = new Date(event.start);
             const eventEnd = new Date(event.end);
 
-            // Simple check: if event is on the same day (ignoring multi-day for now as out of scope for demo)
             if (format(eventStart, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')) {
                 const startMins = eventStart.getHours() * 60 + eventStart.getMinutes();
                 const endMins = eventEnd.getHours() * 60 + eventEnd.getMinutes();
 
-                for (let m = startMins; m < endMins; m += 30) {
-                    const timeStr = minutesToTime(m);
-                    if (!busySlots.includes(timeStr)) {
-                        busySlots.push(timeStr);
+                // Check overlap with ANY Re-Rent listed booking
+                const overlapsReRent = relevantBookings.some(b =>
+                    b.isReRentListed &&
+                    b.startTime &&
+                    timeToMinutes(b.startTime) < endMins &&
+                    (timeToMinutes(b.startTime) + b.duration) > startMins
+                );
+
+                if (!overlapsReRent) {
+                    console.log('[Timeline Debug] Blocking External:', minutesToTime(startMins), 'to', minutesToTime(endMins));
+                    for (let m = startMins; m < endMins; m += 30) {
+                        const timeStr = minutesToTime(m);
+                        if (!busySlots.includes(timeStr)) {
+                            busySlots.push(timeStr);
+                        }
                     }
+                } else {
+                    console.log('[Timeline Debug] Skipping External Event due to Re-Rent overlap');
                 }
             }
         });

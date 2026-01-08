@@ -69,7 +69,10 @@ export function ConfirmationStep() {
                 extras: selectedExtras,
                 paymentMethod: state.paymentMethod,
                 resourceId: b.resourceId, // Use item's resourceId
-                accumulatedWeeklyHours: accumulatedWeeklyHours
+                accumulatedWeeklyHours: accumulatedWeeklyHours,
+                // User Settings
+                personalDiscountPercent: currentUser?.personalDiscountPercent,
+                pricingSystem: currentUser?.pricingSystem
             });
             console.log('Price for', b.startTime, p);
             total += p.finalPrice;

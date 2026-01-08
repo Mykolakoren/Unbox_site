@@ -16,8 +16,9 @@ export function MyBookingsPage() {
     const { currentUser, bookings, cancelBooking, listForReRent } = useUserStore();
     const startEditing = useBookingStore(s => s.startEditing);
 
-    // Filter bookings for current user
-    const userBookings = bookings.filter(b => b.userId === currentUser?.email);
+    const userBookings = bookings
+        .filter(b => b.userId === currentUser?.email)
+        .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
 
     const handleEdit = (booking: any) => {
         startEditing(booking);
@@ -64,8 +65,8 @@ export function MyBookingsPage() {
                         <Card key={booking.id} className="p-6">
                             <div className="flex justify-between items-start mb-4">
                                 <div>
-                                    <div className="text-xs text-gray-500 font-bold uppercase mb-1">
-                                        {format(new Date(booking.dateCreated), 'd MMM yyyy', { locale: ru })}
+                                    <div className="text-xs text-gray-500 mb-1">
+                                        Забронировано: {format(new Date(booking.dateCreated), 'd MMMM yyyy, HH:mm', { locale: ru })}
                                     </div>
                                     <h3 className="font-bold text-lg mb-1">
                                         {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}
@@ -181,6 +182,26 @@ export function MyBookingsPage() {
                                         )}
                                     </div>
                                 )}
+
+                                {/* Mock Admin Edit Price Action */}
+                                <div className="flex justify-end pt-1">
+                                    <button
+                                        className="text-[10px] text-gray-400 hover:text-blue-600 underline"
+                                        onClick={() => {
+                                            const newPriceString = prompt('👨‍💻 Админ: Введите новую финальную цену (GEL):', booking.finalPrice.toString());
+                                            if (newPriceString !== null) {
+                                                const newPrice = parseFloat(newPriceString);
+                                                if (!isNaN(newPrice)) {
+                                                    // Call store action
+                                                    useUserStore.getState().setManualPrice(booking.id, newPrice);
+                                                    alert(`Цена обновлена! Баланс пользователя скорректирован.`);
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        Изменить цену (Admin)
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Actions for active bookings */}

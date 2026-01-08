@@ -80,15 +80,27 @@ export function ChessboardStep() {
         }
 
         // Check Internal Bookings
-        const internal = bookings.find(b =>
+        // Check Internal Bookings
+        // Filter out cancelled ones first
+        // We find if there is a blocking booking
+        const internalBooking = bookings.find(b =>
             b.resourceId === resId &&
-            b.status !== 'cancelled' &&
+            b.status === 'confirmed' && // Only confirmed blocks
+            !b.isReRentListed && // Re-rent listed does NOT block
             isSameDay(new Date(b.date), new Date(date)) &&
-            b.startTime === timeStr
+            b.startTime &&
+            (() => {
+                const startMins = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
+                const endMins = startMins + b.duration;
+                const slotMins = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
+                return slotMins >= startMins && slotMins < endMins;
+            })()
         );
 
+        if (internalBooking) return true;
+
         // Check External Events
-        const external = externalEvents.find(e =>
+        const externalEvent = externalEvents.find(e =>
             e.resourceId === resId &&
             isSameDay(new Date(e.start), new Date(date)) &&
             // Simple overlap check
@@ -96,7 +108,30 @@ export function ChessboardStep() {
             format(new Date(e.end), 'HH:mm') > timeStr
         );
 
-        return internal || external;
+        if (externalEvent) {
+            // Check if this external event should be IGNORED because it overlaps with a valid Re-Rent booking
+            // We search for ANY booking that is confirmed, Re-Rent Listed, and covers this slot
+            const isCoveredByReRent = bookings.some(b =>
+                b.resourceId === resId &&
+                b.status === 'confirmed' &&
+                b.isReRentListed &&
+                isSameDay(new Date(b.date), new Date(date)) &&
+                b.startTime &&
+                (() => {
+                    const startMins = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
+                    const endMins = startMins + b.duration;
+                    const slotMins = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
+                    return slotMins >= startMins && slotMins < endMins;
+                })()
+            );
+
+            if (isCoveredByReRent) {
+                return false; // Ignored, so it's free
+            }
+            return true; // Blocked
+        }
+
+        return false;
     };
 
     // 5. Selection Logic
