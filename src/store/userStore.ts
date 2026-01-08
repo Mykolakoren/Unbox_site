@@ -71,6 +71,22 @@ interface UserStore {
     toggleSubscriptionFreeze: (userId: string) => void;
     runWeeklyReconciliation: () => { amount: number; totalHours: number; discountPercent: number; } | null;
     setManualPrice: (bookingId: string, newPrice: number) => void;
+
+    // Waitlist Actions
+    waitlist: WaitlistEntry[];
+    addToWaitlist: (entry: Omit<WaitlistEntry, 'id' | 'dateCreated' | 'status'>) => void;
+    removeFromWaitlist: (id: string) => void;
+}
+
+export interface WaitlistEntry {
+    id: string;
+    userId: string;
+    resourceId: string;
+    date: string; // ISO date YYYY-MM-DD
+    startTime: string; // HH:mm
+    endTime: string; // HH:mm
+    dateCreated: string; // ISO timestamp
+    status: 'active' | 'fulfilled' | 'cancelled';
 }
 
 // Helper to check overlap
@@ -393,6 +409,24 @@ export const useUserStore = create<UserStore>()(
 
                 return { users: updatedUsers, currentUser };
             }),
+
+            waitlist: [],
+
+            addToWaitlist: (entry) => set((state) => ({
+                waitlist: [
+                    ...state.waitlist,
+                    {
+                        ...entry,
+                        id: Math.random().toString(36).substr(2, 9),
+                        dateCreated: new Date().toISOString(),
+                        status: 'active'
+                    }
+                ]
+            })),
+
+            removeFromWaitlist: (id) => set((state) => ({
+                waitlist: state.waitlist.filter(w => w.id !== id)
+            })),
 
             toggleSubscriptionFreeze: (userId) => set((state) => {
                 const userIndex = state.users.findIndex(u => u.email === userId);

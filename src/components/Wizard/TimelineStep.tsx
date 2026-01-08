@@ -1,5 +1,6 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
+import { WaitlistModal } from '../WaitlistModal';
 import { addMinutes, format, isBefore, setHours, setMinutes, startOfToday } from 'date-fns';
 import clsx from 'clsx';
 import { useMemo } from 'react';
@@ -25,6 +26,10 @@ export function TimelineStep() {
     const { resourceId, startTime, duration, setTimeRange, date, editBookingId } = useBookingStore();
     const bookings = useUserStore(s => s.bookings);
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
+
+    // Waitlist State
+    const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
+    const [waitlistSlot, setWaitlistSlot] = useState<string | null>(null);
 
     useEffect(() => {
         if (resourceId) {
@@ -116,7 +121,11 @@ export function TimelineStep() {
     }, [bookings, resourceId, date, editBookingId, externalEvents]);
 
     const handleSlotClick = (slotTime: string) => {
-        if (blockedSlots.includes(slotTime)) return;
+        if (blockedSlots.includes(slotTime)) {
+            setWaitlistSlot(slotTime);
+            setIsWaitlistOpen(true);
+            return;
+        }
 
         // Logic: 
         // 1. If nothing selected -> select this as start (duration 60 min default? Or just start).
@@ -210,20 +219,20 @@ export function TimelineStep() {
                     return (
                         <button
                             key={slot}
-                            disabled={isBusy}
+                            // disabled={isBusy} // Allow for waitlist
                             onClick={() => handleSlotClick(slot)}
                             className={clsx(
                                 "relative py-3 rounded-lg border text-sm transition-all focus:outline-none",
                                 isBusy
-                                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                    ? "bg-red-50 border-red-100 text-red-300 cursor-help hover:bg-red-100"
                                     : getSlotStyle(slot),
                                 selected && !isBusy && "ring-1 ring-blue-500"
                             )}
                         >
                             {slot}
                             {isBusy && (
-                                <span className="absolute inset-0 flex items-center justify-center opacity-20">
-                                    /
+                                <span className="absolute inset-0 flex items-center justify-center opacity-30">
+                                    {/* Busy indicator */}
                                 </span>
                             )}
                         </button>
@@ -246,6 +255,15 @@ export function TimelineStep() {
                     <span>Выбрано</span>
                 </div>
             </div>
+
+            <WaitlistModal
+                isOpen={isWaitlistOpen}
+                onClose={() => setIsWaitlistOpen(false)}
+                resourceId={resourceId || ''}
+                startTime={waitlistSlot || ''}
+                date={date}
+            />
         </div>
+
     );
 }

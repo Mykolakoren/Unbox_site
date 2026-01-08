@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, Users, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Settings, LogOut, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
 
@@ -11,7 +11,7 @@ export function AdminLayout() {
         { path: '/admin', icon: LayoutDashboard, label: 'Обзор', exact: true },
         { path: '/admin/bookings', icon: Calendar, label: 'Бронирования' },
         { path: '/admin/users', icon: Users, label: 'Клиенты' },
-        // { path: '/admin/settings', icon: Settings, label: 'Настройки' },
+        { path: '/admin/waitlist', icon: Clock, label: 'Лист ожидания' },
     ];
 
     const isActive = (path: string, exact: boolean) => {

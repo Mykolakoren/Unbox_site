@@ -1,5 +1,6 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
+import { WaitlistModal } from '../WaitlistModal';
 import { RESOURCES } from '../../utils/data';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -22,6 +23,10 @@ export function ChessboardStep() {
 
     // Week View State
     const [weekStart, setWeekStart] = useState(() => startOfWeek(date, { weekStartsOn: 1 }));
+
+    // Waitlist State
+    const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
+    const [waitlistData, setWaitlistData] = useState<{ resourceId: string; time: string } | null>(null);
 
     // Sync weekStart when date changes externally
     useEffect(() => {
@@ -141,6 +146,12 @@ export function ChessboardStep() {
     };
 
     const handleSlotClick = (resId: string, timeStr: string) => {
+        if (isSlotBlocked(resId, timeStr)) {
+            setWaitlistData({ resourceId: resId, time: timeStr });
+            setIsWaitlistOpen(true);
+            return;
+        }
+
         const isCurrentlySelected = isSelected(resId, timeStr);
 
         // Toggle the clicked slot
@@ -304,12 +315,12 @@ export function ChessboardStep() {
                                         return (
                                             <td key={`${r.id}-${time}`} className="p-1 border-r border-gray-100 last:border-0 h-12">
                                                 <button
-                                                    disabled={!!isBlocked}
+                                                    // disabled={!!isBlocked} // Allow Waitlist
                                                     onClick={() => handleSlotClick(r.id, time)}
                                                     className={clsx(
                                                         "w-full h-full rounded transition-all flex items-center justify-center text-xs relative",
                                                         isBlocked
-                                                            ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                                            ? "bg-red-50 text-red-300 cursor-help hover:bg-red-100" // Waitlist style
                                                             : selected
                                                                 ? "bg-black text-white shadow-md transform scale-95"
                                                                 : "hover:bg-green-50 text-gray-400 hover:text-green-700"
@@ -333,6 +344,15 @@ export function ChessboardStep() {
                     Далее <ArrowRight size={16} className="ml-2" />
                 </Button>
             </div>
-        </div>
+
+
+            <WaitlistModal
+                isOpen={isWaitlistOpen}
+                onClose={() => setIsWaitlistOpen(false)}
+                resourceId={waitlistData?.resourceId || ''}
+                startTime={waitlistData?.time || ''}
+                date={date}
+            />
+        </div >
     );
 }

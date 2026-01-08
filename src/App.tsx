@@ -19,6 +19,7 @@ import { AdminLayout } from './pages/admin/AdminLayout';
 import { AdminUsers } from './pages/admin/Users';
 import { AdminBookings } from './pages/admin/Bookings';
 import { AdminDashboard } from './pages/admin/Dashboard';
+import { AdminWaitlist } from './pages/admin/Waitlist';
 
 // Booking Flow Wrapper
 function BookingWizard() {
@@ -78,6 +79,7 @@ function App() {
         <Route index element={<AdminDashboard />} /> {/* Dashboard Home */}
         <Route path="users" element={<AdminUsers />} />
         <Route path="bookings" element={<AdminBookings />} />
+        <Route path="waitlist" element={<AdminWaitlist />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
