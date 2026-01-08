@@ -27,6 +27,7 @@ export interface User {
     // Admin Features
     personalDiscountPercent?: number; // Fixed discount % (e.g., 20)
     pricingSystem?: 'standard' | 'personal'; // Default 'standard'
+    isAdmin?: boolean;
 }
 
 export interface BookingHistoryItem extends BookingState {
@@ -64,6 +65,7 @@ interface UserStore {
     updateBooking: (booking: BookingHistoryItem) => void;
     listForReRent: (id: string) => void;
     updateUser: (updates: Partial<User>) => void;
+    updateUserById: (userId: string, updates: Partial<User>) => void;
 
     // Subscription Actions
     toggleSubscriptionFreeze: (userId: string) => void;
@@ -378,6 +380,18 @@ export const useUserStore = create<UserStore>()(
                     currentUser: updatedUser,
                     users: state.users.map(u => u.email === state.currentUser?.email ? updatedUser : u)
                 };
+            }),
+
+            updateUserById: (userId, updates) => set((state) => {
+                const updatedUsers = state.users.map(u =>
+                    u.email === userId ? { ...u, ...updates } : u
+                );
+                // Also update currentUser if it matches
+                const currentUser = state.currentUser?.email === userId
+                    ? { ...state.currentUser, ...updates }
+                    : state.currentUser;
+
+                return { users: updatedUsers, currentUser };
             }),
 
             toggleSubscriptionFreeze: (userId) => set((state) => {
