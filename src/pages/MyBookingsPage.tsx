@@ -10,6 +10,7 @@ import { ru } from 'date-fns/locale';
 import { Link, useNavigate } from 'react-router-dom';
 import { RESOURCES, EXTRAS } from '../utils/data';
 import { generateGoogleCalendarUrl } from '../utils/calendar';
+import { toast } from 'sonner';
 
 export function MyBookingsPage() {
     const navigate = useNavigate();
@@ -21,13 +22,24 @@ export function MyBookingsPage() {
         .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
 
     const handleEdit = (booking: any) => {
-        startEditing(booking);
+        // We use 'reschedule' mode to trigger the diff logic
+        startEditing(booking, 'reschedule');
         navigate('/');
     };
 
     const handleCancel = (id: string) => {
+        const booking = bookings.find(b => b.id === id);
+        if (!booking) return;
+
         if (window.confirm('Вы уверены, что хотите отменить бронирование?')) {
             cancelBooking(id);
+
+            // Notification logic
+            if (booking.paymentMethod === 'subscription') {
+                toast.success(`Бронирование отменено. ${booking.hoursDeducted || (booking.duration / 60)} ч. возвращено на абонемент.`);
+            } else {
+                toast.success(`Бронирование отменено. ${booking.finalPrice} ₾ возвращено на ваш депозит.`);
+            }
         }
     };
 
@@ -194,7 +206,7 @@ export function MyBookingsPage() {
                                                 if (!isNaN(newPrice)) {
                                                     // Call store action
                                                     useUserStore.getState().setManualPrice(booking.id, newPrice);
-                                                    alert(`Цена обновлена! Баланс пользователя скорректирован.`);
+                                                    toast.success(`Цена обновлена! Баланс пользователя скорректирован.`);
                                                 }
                                             }
                                         }}
@@ -207,7 +219,19 @@ export function MyBookingsPage() {
                             {/* Actions for active bookings */}
                             {booking.status === 'confirmed' && (
                                 <div className="mt-4 pt-4 border-t border-gray-100">
-                                    {new Date(booking.date).getTime() - new Date().getTime() > 24 * 60 * 60 * 1000 ? (
+                                    {(() => {
+                                        let bookingTime = new Date(booking.date).getTime();
+                                        if (booking.startTime) {
+                                            const [h, m] = booking.startTime.split(':').map(Number);
+                                            const d = new Date(booking.date);
+                                            d.setHours(h, m, 0, 0);
+                                            bookingTime = d.getTime();
+                                        }
+                                        const now = Date.now();
+                                        const diffHours = (bookingTime - now) / (1000 * 60 * 60);
+
+                                        return diffHours > 24;
+                                    })() ? (
                                         <div className="flex gap-2">
                                             <Button
                                                 variant="outline"

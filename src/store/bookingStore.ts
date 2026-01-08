@@ -21,7 +21,8 @@ export interface BookingStore extends BookingState {
 
     // Edit Mode
     editBookingId: string | null;
-    startEditing: (booking: BookingState & { id: string }) => void;
+    mode: 'create' | 'edit' | 'reschedule'; // Added mode
+    startEditing: (booking: BookingState & { id: string }, mode?: 'edit' | 'reschedule') => void; // Updated signature
     reset: () => void;
 
     // Computed
@@ -43,10 +44,13 @@ const INITIAL_STATE: BookingState = {
 
 export const useBookingStore = create<BookingStore>((set) => ({
     ...INITIAL_STATE,
+    editBookingId: null,
+    mode: 'create', // Default mode
+
     // ...
     // Actions
     // ...
-    startEditing: (booking: BookingState & { id: string }) => set({
+    startEditing: (booking: BookingState & { id: string }, mode = 'edit') => set({
         step: 1,
         locationId: booking.locationId,
         resourceId: booking.resourceId,
@@ -56,7 +60,8 @@ export const useBookingStore = create<BookingStore>((set) => ({
         duration: booking.duration,
         selectedSlots: [], // Reset slots on edit legacy single booking
         extras: booking.extras,
-        editBookingId: booking.id
+        editBookingId: booking.id,
+        mode: mode // Set mode
     }),
     // ...
 
@@ -117,7 +122,7 @@ export const useBookingStore = create<BookingStore>((set) => ({
 
     setPaymentMethod: (paymentMethod) => set({ paymentMethod }),
 
-    reset: () => set({ ...INITIAL_STATE, editBookingId: null }),
+    reset: () => set({ ...INITIAL_STATE, editBookingId: null, mode: 'create' }),
 }));
 
 // Subscribe to state changes to recalculate price

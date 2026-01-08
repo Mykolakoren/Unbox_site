@@ -12,7 +12,7 @@ export interface Subscription {
     expiryDate: string; // ISO string
     isFrozen: boolean;
     frozenUntil?: string; // ISO string
-    includedFormats?: Format[]; // Formats eligible for this subscription
+    includedFormats?: Format[];
 }
 
 export interface User {
@@ -20,24 +20,24 @@ export interface User {
     name: string;
     phone: string;
     level: 'none' | 'silver' | 'gold';
-    password?: string; // Mock password
+    password?: string;
     balance: number;
-    creditLimit: number; // Max negative balance allowed
+    creditLimit: number;
     subscription?: Subscription;
-    // Admin Features
-    personalDiscountPercent?: number; // Fixed discount % (e.g., 20)
-    pricingSystem?: 'standard' | 'personal'; // Default 'standard'
+    personalDiscountPercent?: number;
+    pricingSystem?: 'standard' | 'personal';
     isAdmin?: boolean;
 }
 
 export interface BookingHistoryItem extends BookingState {
     id: string;
-    userId: string; // Owner email
-    status: 'confirmed' | 'cancelled' | 'completed' | 're-rented';
-    dateCreated: string; // ISO string
+    userId: string;
+    status: 'confirmed' | 'cancelled' | 'completed' | 're-rented' | 'rescheduled';
+    dateCreated: string;
     finalPrice: number;
+    paymentSource?: 'subscription' | 'deposit' | 'credit';
+    hoursDeducted?: number;
     isReRentListed?: boolean;
-    hoursDeducted?: number; // Added
     price?: {
         basePrice: number;
         extrasTotal: number;
@@ -45,51 +45,48 @@ export interface BookingHistoryItem extends BookingState {
         discountRule?: string;
         finalPrice: number;
     };
-    paymentSource?: 'subscription' | 'deposit' | 'credit';
 }
 
-interface UserStore {
-    currentUser: User | null; // Logged in user
-    users: User[]; // All fully registered users (Mock DB)
-    bookings: BookingHistoryItem[]; // All bookings (Mock DB)
-
-    // Actions
+export interface UserStore {
+    currentUser: User | null;
+    users: User[];
+    bookings: BookingHistoryItem[];
+    // Auth Actions
     login: (email: string, name?: string) => void;
-    logout: () => void;
     register: (user: User) => void;
-
+    logout: () => void;
     // Booking Actions
     addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;
     addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => void;
-    cancelBooking: (id: string, isFreeReschedule?: boolean) => void; // Updated for subscription
+    cancelBooking: (id: string, isFreeReschedule?: boolean) => void;
+    rescheduleBooking: (oldId: string, newBooking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;
     updateBooking: (booking: BookingHistoryItem) => void;
     listForReRent: (id: string) => void;
+    // User Actions
     updateUser: (updates: Partial<User>) => void;
     updateUserById: (userId: string, updates: Partial<User>) => void;
-
-    // Subscription Actions
-    toggleSubscriptionFreeze: (userId: string) => void;
-    runWeeklyReconciliation: () => { amount: number; totalHours: number; discountPercent: number; } | null;
-    setManualPrice: (bookingId: string, newPrice: number) => void;
-
-    // Waitlist Actions
+    // Waitlist
     waitlist: WaitlistEntry[];
     addToWaitlist: (entry: Omit<WaitlistEntry, 'id' | 'dateCreated' | 'status'>) => void;
     removeFromWaitlist: (id: string) => void;
+    // Subscription
+    toggleSubscriptionFreeze: (userId: string) => void;
+    // Admin Tools
+    runWeeklyReconciliation: () => { amount: number, totalHours: number, discountPercent: number } | null;
+    setManualPrice: (bookingId: string, newPrice: number) => void;
 }
 
 export interface WaitlistEntry {
     id: string;
     userId: string;
     resourceId: string;
-    date: string; // ISO date YYYY-MM-DD
-    startTime: string; // HH:mm
-    endTime: string; // HH:mm
-    dateCreated: string; // ISO timestamp
+    date: string;
+    startTime: string;
+    endTime: string;
+    dateCreated: string;
     status: 'active' | 'fulfilled' | 'cancelled';
 }
 
-// Helper to check overlap
 const timeToMinutes = (t: string) => {
     const [h, m] = t.split(':').map(Number);
     return h * 60 + m;
@@ -98,7 +95,7 @@ const timeToMinutes = (t: string) => {
 const checkOverlap = (b1: BookingHistoryItem, b2: Omit<BookingHistoryItem, 'userId' | 'status'>) => {
     if (b1.resourceId !== b2.resourceId) return false;
     if (format(new Date(b1.date), 'yyyy-MM-dd') !== format(new Date(b2.date), 'yyyy-MM-dd')) return false;
-    if (!b1.startTime || !b2.startTime) return false; // Safety check
+    if (!b1.startTime || !b2.startTime) return false;
 
     const start1 = timeToMinutes(b1.startTime);
     const end1 = start1 + b1.duration;
@@ -106,7 +103,6 @@ const checkOverlap = (b1: BookingHistoryItem, b2: Omit<BookingHistoryItem, 'user
     const start2 = timeToMinutes(b2.startTime);
     const end2 = start2 + b2.duration;
 
-    // Check intersection: start1 < end2 && start2 < end1
     return start1 < end2 && start2 < end1;
 };
 
@@ -120,9 +116,7 @@ export const useUserStore = create<UserStore>()(
             login: (email, name) => {
                 const state = get();
                 const existingUser = state.users.find(u => u.email === email);
-
                 if (existingUser) {
-                    // Patch existing user if missing subscription (Migration)
                     if (!existingUser.subscription) {
                         const patchedUser = {
                             ...existingUser,
@@ -137,25 +131,19 @@ export const useUserStore = create<UserStore>()(
                                 includedFormats: ['individual'] as Format[]
                             }
                         };
-
                         const updatedUsers = state.users.map(u => u.email === email ? patchedUser : u);
-                        set({
-                            users: updatedUsers,
-                            currentUser: patchedUser
-                        });
+                        set({ users: updatedUsers, currentUser: patchedUser });
                     } else {
                         set({ currentUser: existingUser });
                     }
                 } else if (name) {
-                    // Auto-register mock
                     const newUser: User = {
                         email,
                         name,
                         phone: '',
                         level: 'none',
                         balance: 0,
-                        creditLimit: 0, // Default 0 to enforce deposit logic
-                        // Mock Subscription for demo if needed, or null
+                        creditLimit: 0,
                         subscription: {
                             id: 'sub-123',
                             name: 'Unbox Pro',
@@ -167,14 +155,12 @@ export const useUserStore = create<UserStore>()(
                             includedFormats: ['individual'] as Format[]
                         }
                     };
-                    set({
-                        users: [...state.users, newUser],
-                        currentUser: newUser
-                    });
+                    set({ users: [...state.users, newUser], currentUser: newUser });
                 }
             },
 
             logout: () => set({ currentUser: null }),
+
             register: (user) => set((state) => ({
                 users: [...state.users, user],
                 currentUser: user
@@ -185,7 +171,6 @@ export const useUserStore = create<UserStore>()(
                 const currentUser = state.currentUser;
                 if (!currentUser) return;
 
-                // Check overlap logic
                 const overlappingReRent = state.bookings.find(b =>
                     b.status === 'confirmed' &&
                     b.isReRentListed &&
@@ -212,14 +197,14 @@ export const useUserStore = create<UserStore>()(
                     ...bookingData,
                     userId: currentUser.email,
                     status: 'confirmed',
+                    dateCreated: new Date().toISOString(),
+                    finalPrice: bookingData.finalPrice
                 };
                 updatedBookings.push(newBooking);
 
-                // Handle Payment
                 let updatedUser = updatedUsers.find(u => u.email === currentUser.email);
                 if (updatedUser) {
                     if (bookingData.paymentMethod === 'subscription' && updatedUser.subscription) {
-                        // Deduct Hours
                         const hoursToDeduct = bookingData.hoursDeducted || (bookingData.duration / 60);
                         updatedUser = {
                             ...updatedUser,
@@ -229,13 +214,11 @@ export const useUserStore = create<UserStore>()(
                             }
                         };
                     } else {
-                        // Default: Deduct Balance
                         updatedUser = {
                             ...updatedUser,
                             balance: updatedUser.balance - bookingData.finalPrice
                         };
                     }
-                    // Update in array
                     updatedUsers = updatedUsers.map(u => u.email === currentUser.email ? updatedUser! : u);
                 }
 
@@ -256,9 +239,7 @@ export const useUserStore = create<UserStore>()(
                 let updatedUsers = [...state.users];
                 let updatedBookings = [...state.bookings];
 
-                // Process each booking
                 bookingsData.forEach(bookingData => {
-                    // Check overlap logic
                     const overlappingReRent = updatedBookings.find(b =>
                         b.status === 'confirmed' &&
                         b.isReRentListed &&
@@ -282,16 +263,12 @@ export const useUserStore = create<UserStore>()(
                         ...bookingData,
                         userId: currentUser.email,
                         status: 'confirmed',
+                        dateCreated: new Date().toISOString(),
+                        finalPrice: bookingData.finalPrice
                     };
                     updatedBookings.push(newBooking);
-
-                    // Handle Payment Accumulation
-                    // Note: We need to handle this carefully. Logic is per-user.
-                    // Since we are checking overlappingReRent for *other* users, we update them.
-                    // But for the *currentUser*, we need to accumulate deductions.
                 });
 
-                // Recalculate Current User Debits
                 let userToUpdate = updatedUsers.find(u => u.email === currentUser.email);
                 if (userToUpdate) {
                     bookingsData.forEach(bd => {
@@ -311,8 +288,6 @@ export const useUserStore = create<UserStore>()(
                             };
                         }
                     });
-
-                    // Apply back to users array
                     updatedUsers = updatedUsers.map(u => u.email === currentUser.email ? userToUpdate! : u);
                 }
 
@@ -325,13 +300,84 @@ export const useUserStore = create<UserStore>()(
                 });
             },
 
+            rescheduleBooking: (oldId, newBookingData) => set((state) => {
+                const currentUser = state.currentUser;
+                if (!currentUser) return state;
+
+                const newBooking: BookingHistoryItem = {
+                    ...newBookingData,
+                    userId: currentUser.email,
+                    status: 'confirmed',
+                    dateCreated: new Date().toISOString(),
+                    finalPrice: newBookingData.finalPrice || 0
+                };
+
+                const updatedBookings = state.bookings.map(b =>
+                    b.id === oldId ? { ...b, status: 'rescheduled' as const } : b
+                );
+
+                const oldBooking = state.bookings.find(b => b.id === oldId);
+                let updatedUser = state.users.find(u => u.email === currentUser.email);
+                let updatedUsers = [...state.users];
+
+                if (oldBooking && updatedUser) {
+                    // 1. Refund Old
+                    if (oldBooking.paymentMethod === 'subscription' && updatedUser.subscription) {
+                        const hoursToRefund = oldBooking.hoursDeducted || (oldBooking.duration / 60);
+                        updatedUser = {
+                            ...updatedUser,
+                            subscription: {
+                                ...updatedUser.subscription,
+                                remainingHours: updatedUser.subscription.remainingHours + hoursToRefund
+                            }
+                        };
+                    } else if (oldBooking.paymentSource === 'deposit' || oldBooking.paymentSource === 'credit') {
+                        updatedUser = {
+                            ...updatedUser,
+                            balance: updatedUser.balance + (oldBooking.finalPrice || 0)
+                        };
+                    }
+
+                    // 2. Deduct New
+                    if (newBooking.paymentMethod === 'subscription' && updatedUser.subscription) {
+                        const hoursToDeduct = newBooking.hoursDeducted || (newBooking.duration / 60);
+                        updatedUser = {
+                            ...updatedUser,
+                            subscription: {
+                                ...updatedUser.subscription,
+                                remainingHours: Math.max(0, updatedUser.subscription.remainingHours - hoursToDeduct)
+                            }
+                        };
+                    } else {
+                        updatedUser = {
+                            ...updatedUser,
+                            balance: updatedUser.balance - (newBooking.finalPrice || 0)
+                        };
+                    }
+
+                    updatedUsers = updatedUsers.map(u => u.email === currentUser.email ? updatedUser! : u);
+                }
+
+                return {
+                    bookings: [...updatedBookings, newBooking],
+                    users: updatedUsers,
+                    currentUser: state.currentUser?.email === currentUser.email ? updatedUser : state.currentUser
+                };
+            }),
+
             cancelBooking: (id) => {
                 const state = get();
                 const booking = state.bookings.find(b => b.id === id);
                 if (!booking) return;
 
-                // 24h Rule Check
-                const bookingTime = new Date(booking.date).getTime();
+                let bookingTime = new Date(booking.date).getTime();
+                if (booking.startTime) {
+                    const [h, m] = booking.startTime.split(':').map(Number);
+                    const d = new Date(booking.date);
+                    d.setHours(h, m, 0, 0);
+                    bookingTime = d.getTime();
+                }
+
                 const now = Date.now();
                 const hoursUntilStart = (bookingTime - now) / (1000 * 60 * 60);
 
@@ -340,14 +386,12 @@ export const useUserStore = create<UserStore>()(
                     return;
                 }
 
-                // Process Refund
                 const currentUser = state.currentUser;
                 let updatedUsers = [...state.users];
                 let updatedUser = updatedUsers.find(u => u.email === booking.userId);
 
                 if (updatedUser) {
                     if (booking.paymentMethod === 'subscription' && updatedUser.subscription) {
-                        // Refund Hours
                         const hoursToRefund = booking.hoursDeducted || (booking.duration / 60);
                         updatedUser = {
                             ...updatedUser,
@@ -357,7 +401,6 @@ export const useUserStore = create<UserStore>()(
                             }
                         };
                     } else {
-                        // Refund Money (Balance/Deposit/Credit)
                         updatedUser = {
                             ...updatedUser,
                             balance: updatedUser.balance + booking.finalPrice
@@ -402,11 +445,9 @@ export const useUserStore = create<UserStore>()(
                 const updatedUsers = state.users.map(u =>
                     u.email === userId ? { ...u, ...updates } : u
                 );
-                // Also update currentUser if it matches
                 const currentUser = state.currentUser?.email === userId
                     ? { ...state.currentUser, ...updates }
                     : state.currentUser;
-
                 return { users: updatedUsers, currentUser };
             }),
 
@@ -439,7 +480,7 @@ export const useUserStore = create<UserStore>()(
                     ...user.subscription,
                     isFrozen: !user.subscription.isFrozen,
                     frozenUntil: !user.subscription.isFrozen
-                        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // Default 7 days freeze
+                        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
                         : undefined
                 };
 
@@ -458,7 +499,6 @@ export const useUserStore = create<UserStore>()(
                 const currentUser = state.currentUser;
                 if (!currentUser) return null;
 
-                // Use CURRENT CALENDAR WEEK (Mon-Sun) to include future bookings for this week
                 const now = new Date();
                 const start = startOfWeek(now, { weekStartsOn: 1 });
                 const end = endOfWeek(now, { weekStartsOn: 1 });
@@ -466,7 +506,6 @@ export const useUserStore = create<UserStore>()(
                 const weekBookings = state.bookings.filter(b => {
                     if (b.userId !== currentUser.email || b.status !== 'confirmed') return false;
                     const bookingDate = new Date(b.date);
-                    // Check if booking falls within this week (inclusive)
                     return bookingDate >= start && bookingDate <= end;
                 });
 
@@ -487,7 +526,6 @@ export const useUserStore = create<UserStore>()(
 
                 const totalHours = totalMinutes / 60;
 
-                // Config: 0-5 (0%), 5-11 (10%), 11-16 (25%), 16+ (50%)
                 let discountPercent = 0;
                 if (totalHours >= 16) discountPercent = 50;
                 else if (totalHours >= 11) discountPercent = 25;
@@ -497,7 +535,6 @@ export const useUserStore = create<UserStore>()(
                 const delta = totalPaidPrice - idealPrice;
 
                 if (delta > 0.01) {
-                    // Credit Bonus
                     const bonus = parseFloat(delta.toFixed(2));
                     const updatedUser = {
                         ...currentUser,
@@ -522,9 +559,8 @@ export const useUserStore = create<UserStore>()(
 
                 const booking = state.bookings[bookingIndex];
                 const oldPrice = booking.finalPrice;
-                const diff = oldPrice - newPrice; // Positive = Refund, Negative = Charge
+                const diff = oldPrice - newPrice;
 
-                // Update User Balance
                 let updatedUsers = [...state.users];
                 let updatedUser = updatedUsers.find(u => u.email === booking.userId);
 
@@ -536,7 +572,6 @@ export const useUserStore = create<UserStore>()(
                     updatedUsers = updatedUsers.map(u => u.email === booking.userId ? updatedUser! : u);
                 }
 
-                // Update Booking
                 const updatedBooking: BookingHistoryItem = {
                     ...booking,
                     finalPrice: newPrice,

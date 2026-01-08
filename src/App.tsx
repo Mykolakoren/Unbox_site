@@ -59,31 +59,36 @@ function BookingWizard() {
   );
 }
 
+import { Toaster } from 'sonner';
+
 function App() {
   return (
-    <Routes>
-      {/* Main Booking Flow */}
-      <Route path="/" element={<BookingWizard />} />
+    <>
+      <Toaster position="top-center" richColors closeButton />
+      <Routes>
+        {/* Main Booking Flow */}
+        <Route path="/" element={<BookingWizard />} />
 
-      {/* Auth */}
-      <Route path="/login" element={<LoginPage />} />
+        {/* Auth */}
+        <Route path="/login" element={<LoginPage />} />
 
-      {/* Dashboard */}
-      <Route path="/dashboard" element={<DashboardLayout />}>
-        <Route index element={<DashboardOverview />} />
-        <Route path="bookings" element={<MyBookingsPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-      </Route>
+        {/* Dashboard */}
+        <Route path="/dashboard" element={<DashboardLayout />}>
+          <Route index element={<DashboardOverview />} />
+          <Route path="bookings" element={<MyBookingsPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+        </Route>
 
-      <Route path="/admin" element={<AdminLayout />}>
-        <Route index element={<AdminDashboard />} /> {/* Dashboard Home */}
-        <Route path="users" element={<AdminUsers />} />
-        <Route path="bookings" element={<AdminBookings />} />
-        <Route path="waitlist" element={<AdminWaitlist />} />
-      </Route>
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<AdminDashboard />} /> {/* Dashboard Home */}
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="bookings" element={<AdminBookings />} />
+          <Route path="waitlist" element={<AdminWaitlist />} />
+        </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 

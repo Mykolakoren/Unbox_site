@@ -1,13 +1,14 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
 import { Button } from '../ui/Button';
-import { CheckCircle, Download, Home, Calendar as CalendarIcon } from 'lucide-react';
+import { CheckCircle, Download, Home, Calendar as CalendarIcon, ArrowRight, RefreshCw, AlertTriangle } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import { useState, useMemo } from 'react';
 import { calculatePrice } from '../../utils/pricing';
-import { EXTRAS } from '../../utils/data';
+import { EXTRAS, RESOURCES } from '../../utils/data';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 
 // ...
@@ -15,17 +16,25 @@ import { useNavigate } from 'react-router-dom';
 // ... (Imports and setup)
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
 
-import { startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
+import { startOfWeek, endOfWeek, isWithinInterval, format } from 'date-fns';
+import { ru } from 'date-fns/locale';
 
 // ... (existing imports)
 
 export function ConfirmationStep() {
     const state = useBookingStore();
-    const { currentUser, addBookings, bookings } = useUserStore();
+    const { currentUser, addBookings, bookings, rescheduleBooking } = useUserStore();
     const [confirmed, setConfirmed] = useState(false);
     const navigate = useNavigate();
 
     const isEditing = !!state.editBookingId;
+    const isRescheduling = state.mode === 'reschedule';
+
+    // Fetch Old Booking for Comparison (if rescheduling)
+    const oldBooking = useMemo(() => {
+        if (!isRescheduling || !state.editBookingId) return null;
+        return bookings.find(b => b.id === state.editBookingId);
+    }, [isRescheduling, state.editBookingId, bookings]);
 
     // Calculate Accumulated Weekly Hours
     const accumulatedWeeklyHours = useMemo(() => {
@@ -126,7 +135,7 @@ export function ConfirmationStep() {
     const handleConfirm = async () => {
         try {
             if (cartDetails.length === 0) {
-                alert("Ошибка: Корзина пуста. Пожалуйста, выберите время.");
+                toast.error("Ошибка: Корзина пуста. Пожалуйста, выберите время.");
                 return;
             }
 
@@ -134,8 +143,18 @@ export function ConfirmationStep() {
 
             if (currentUser && finalMethod === 'balance') {
                 const potentialBalance = currentUser.balance - totalPrice;
-                if (potentialBalance < -currentUser.creditLimit) {
-                    alert(`Ошибка: Недостаточно средств! \nВаш баланс: ${currentUser.balance} ₾\nКредитный лимит: ${currentUser.creditLimit} ₾\nК оплате: ${totalPrice.toFixed(1)} ₾`);
+                // If Rescheduling, we consider the REFUND from old booking?
+                // Simplified: Check absolute balance. If negative, verify limit.
+                // Improve: Calculate Net Price (New - Old)
+
+                let netPrice = totalPrice;
+                if (isRescheduling && oldBooking) {
+                    netPrice = totalPrice - oldBooking.finalPrice;
+                }
+
+                const projectedBalance = currentUser.balance - netPrice;
+                if (projectedBalance < -currentUser.creditLimit) {
+                    toast.error(`Ошибка: Недостаточно средств! \nВаш баланс: ${currentUser.balance} ₾\nКредитный лимит: ${currentUser.creditLimit} ₾\nК оплате (net): ${netPrice.toFixed(1)} ₾`);
                     return;
                 }
             }
@@ -197,8 +216,32 @@ export function ConfirmationStep() {
 
             if (newBookings.length > 0) {
                 console.log(`Submitting ${newBookings.length} bookings...`);
-                addBookings(newBookings);
+
+                if (isRescheduling && oldBooking) {
+                    // Reschedule Action
+                    // Assuming 1:1 mapping for simplicity in this flow (User modifies 1 booking into 1 or more?)
+                    // If cart has multiple items, Reschedule assumes we are replacing ONE old booking with MANY?
+                    // Or usually 1 to 1.
+                    // Let's assume the first item in cart replaces the old booking.
+                    // Warn logic: "Reschedule" usually implies 1 slot -> 1 slot.
+                    // But our cart allows multiple.
+                    // We will mark old as Rescheduled and Add ALL new ones.
+                    rescheduleBooking(oldBooking.id, newBookings[0]);
+                    // Note: If multiple new bookings, we only pass first one to "reschedule" action linked?
+                    // The action expects `newBooking` object.
+                    // If user added 2 slots, we really are just cancelling old and adding 2 new.
+                    // But for status tracking, we link 1.
+
+                    if (newBookings.length > 1) {
+                        // Add others manually
+                        addBookings(newBookings.slice(1));
+                    }
+                } else {
+                    addBookings(newBookings);
+                }
+
                 setConfirmed(true);
+                toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
 
                 // Reset store and redirect AFTER delay, so user sees the success message
                 setTimeout(() => {
@@ -206,12 +249,12 @@ export function ConfirmationStep() {
                     navigate('/dashboard/bookings');
                 }, 2000);
             } else {
-                alert("Ошибка создания бронирования: не удалось сформировать данные.");
+                toast.error("Ошибка создания бронирования: не удалось сформировать данные.");
             }
 
         } catch (error) {
             console.error("Booking Confirmation Failed:", error);
-            alert("Произошла ошибка при подтверждении бронирования. Проверьте консоль.");
+            toast.error("Произошла ошибка при подтверждении бронирования.");
         }
     };
 
@@ -256,7 +299,7 @@ export function ConfirmationStep() {
                 <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
                     <CheckCircle size={40} />
                 </div>
-                <h2 className="text-3xl font-bold mb-4">{isEditing ? 'Бронирование обновлено!' : 'Бронирование подтверждено!'}</h2>
+                <h2 className="text-3xl font-bold mb-4">{isEditing ? (isRescheduling ? 'Бронирование перенесено!' : 'Бронирование обновлено!') : 'Бронирование подтверждено!'}</h2>
                 <p className="text-gray-500 max-w-md mx-auto mb-8">
                     {isEditing ? 'Изменения успешно сохранены.' : 'Мы отправили подтверждение на вашу почту. Ждем вас в Unbox!'}
                 </p>
@@ -376,12 +419,66 @@ export function ConfirmationStep() {
             )}
 
             <div className="pt-8 border-t border-gray-100">
+                {isRescheduling && oldBooking && (
+                    <div className="mb-6 bg-blue-50 p-4 rounded-xl border border-blue-100">
+                        <h4 className="font-bold flex items-center gap-2 text-blue-800 mb-3">
+                            <RefreshCw size={18} /> Перенос бронирования
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                            {/* Old */}
+                            <div className="opacity-70">
+                                <div className="text-xs uppercase font-bold text-gray-500 mb-1">Было</div>
+                                <div className="font-medium text-gray-800">
+                                    {format(new Date(oldBooking.date), 'd MMM', { locale: ru })}, {oldBooking.startTime}
+                                </div>
+                                <div className="text-sm text-gray-600">
+                                    {RESOURCES.find(r => r.id === oldBooking.resourceId)?.name}
+                                </div>
+                                <div className="text-sm font-bold mt-1 line-through text-gray-400">
+                                    {oldBooking.finalPrice} ₾
+                                </div>
+                            </div>
+
+                            {/* Arrow */}
+                            <div className="hidden md:flex justify-center text-blue-300">
+                                <ArrowRight size={24} />
+                            </div>
+
+                            {/* New */}
+                            <div>
+                                <div className="text-xs uppercase font-bold text-blue-600 mb-1">Станет</div>
+                                <div className="font-medium text-gray-900">
+                                    {format(new Date(state.date), 'd MMM', { locale: ru })}, {state.startTime || cartDetails[0]?.startTime}
+                                </div>
+                                <div className="text-sm text-gray-600">
+                                    {RESOURCES.find(r => r.id === (state.resourceId || cartDetails[0]?.resourceId))?.name}
+                                </div>
+                                <div className="text-sm font-bold mt-1 text-blue-700">
+                                    {totalPrice} ₾
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-blue-100 flex justify-between items-center text-sm">
+                            <span className="text-blue-800">Разница к оплате:</span>
+                            <span className="font-bold text-lg">
+                                {totalPrice - oldBooking.finalPrice > 0
+                                    ? `+${(totalPrice - oldBooking.finalPrice).toFixed(1)} ₾`
+                                    : `${(totalPrice - oldBooking.finalPrice).toFixed(1)} ₾ (Возврат)`
+                                }
+                            </span>
+                        </div>
+                    </div>
+                )}
+
                 <Button size="lg" className="w-full md:w-auto" onClick={handleConfirm}>
-                    {state.editBookingId
-                        ? 'Сохранить изменения'
-                        : state.paymentMethod === 'subscription'
-                            ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
-                            : `Оплатить ${totalPrice.toFixed(1)} ₾`
+                    {isRescheduling
+                        ? 'Подтвердить перенос'
+                        : isEditing
+                            ? 'Сохранить изменения'
+                            : state.paymentMethod === 'subscription'
+                                ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
+                                : `Оплатить ${totalPrice.toFixed(1)} ₾`
                     }
                 </Button>
             </div>
