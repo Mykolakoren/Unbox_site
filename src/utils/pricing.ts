@@ -95,7 +95,7 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
 
     // 3. Discounts (Priority Order: Subscription > Manual > Weekly > Hot)
     let discountAmount = 0;
-    let discountType: 'none' | 'duration' | 'hot' | 'loyalty' = 'none';
+    let discountType: 'none' | 'duration' | 'hot' | 'loyalty' | 'personal' = 'none';
 
     // Check Subscription (Payment Method)
     const isSubscription = params.paymentMethod === 'subscription';

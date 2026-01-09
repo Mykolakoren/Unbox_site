@@ -18,9 +18,9 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
     const percentRemaining = (sub.remainingHours / sub.totalHours) * 100;
 
     return (
-        <div className="bg-gradient-to-br from-gray-900 to-black text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+        <div className="bg-unbox-dark text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
             {/* Background Decor */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-2xl -mr-10 -mt-10" />
+            <div className="absolute top-0 right-0 w-32 h-32 bg-unbox-green/20 rounded-full blur-2xl -mr-10 -mt-10" />
 
             <div className="relative z-10">
                 <div className="flex justify-between items-start mb-6">
@@ -44,7 +44,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     </div>
                     <div className="h-2 bg-gray-700/50 rounded-full overflow-hidden">
                         <div
-                            className={`h-full rounded-full transition-all duration-500 ${sub.remainingHours < 5 ? 'bg-red-500' : 'bg-white'}`}
+                            className={`h-full rounded-full transition-all duration-500 ${sub.remainingHours < 5 ? 'bg-red-500' : 'bg-unbox-green'}`}
                             style={{ width: `${percentRemaining}%` }}
                         />
                     </div>
@@ -76,7 +76,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                 {/* Action */}
                 <Button
                     variant="outline"
-                    className={`w-full border-white/20 hover:bg-white/10 text-white ${sub.isFrozen ? 'bg-blue-500/20 border-blue-500/50 text-blue-200' : ''}`}
+                    className={`w-full border-white/20 hover:bg-white/10 text-white hover:text-white ${sub.isFrozen ? 'bg-blue-500/20 border-blue-500/50 text-blue-200' : ''}`}
                     onClick={() => toggleSubscriptionFreeze(user.email)}
                 >
                     <Snowflake size={16} className="mr-2" />

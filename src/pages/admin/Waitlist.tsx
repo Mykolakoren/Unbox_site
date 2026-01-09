@@ -27,9 +27,9 @@ export function AdminWaitlist() {
                 <p className="text-gray-500">Пользователи, ожидающие освобождения слотов</p>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
                 <table className="w-full text-left">
-                    <thead className="bg-gray-50 border-b border-gray-100 text-gray-500 font-medium text-sm">
+                    <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                         <tr>
                             <th className="p-4 pl-6">Дата запроса</th>
                             <th className="p-4">Клиент</th>
@@ -39,35 +39,35 @@ export function AdminWaitlist() {
                             <th className="p-4 text-right">Действия</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-unbox-light">
                         {waitlist.map(entry => {
                             const resourceName = RESOURCES.find(r => r.id === entry.resourceId)?.name || entry.resourceId;
 
                             return (
-                                <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
-                                    <td className="p-4 pl-6 text-gray-500 text-sm">
+                                <tr key={entry.id} className="hover:bg-unbox-light/30 transition-colors">
+                                    <td className="p-4 pl-6 text-unbox-grey text-sm">
                                         {format(new Date(entry.dateCreated), 'dd.MM HH:mm')}
                                     </td>
-                                    <td className="p-4 font-medium text-gray-900">
+                                    <td className="p-4 font-medium text-unbox-dark">
                                         {getUserName(entry.userId)}
-                                        <div className="text-xs text-gray-400 font-normal">{entry.userId}</div>
+                                        <div className="text-xs text-unbox-grey font-normal">{entry.userId}</div>
                                     </td>
                                     <td className="p-4">
-                                        <div className="font-bold flex items-center gap-2">
+                                        <div className="font-bold flex items-center gap-2 text-unbox-dark">
                                             {format(new Date(entry.date), 'dd MMMM', { locale: ru })}
                                         </div>
-                                        <div className="text-sm text-gray-500 flex items-center gap-1 mt-1">
+                                        <div className="text-sm text-unbox-grey flex items-center gap-1 mt-1">
                                             <Clock size={14} />
                                             {entry.startTime} - {entry.endTime}
                                         </div>
                                     </td>
-                                    <td className="p-4 text-sm text-gray-600">
+                                    <td className="p-4 text-sm text-unbox-dark">
                                         {resourceName}
                                     </td>
                                     <td className="p-4 text-center">
                                         <span className={clsx(
                                             "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                                            entry.status === 'active' ? "bg-yellow-100 text-yellow-800" : "bg-gray-100 text-gray-800"
+                                            entry.status === 'active' ? "bg-unbox-light text-unbox-dark border border-unbox-green/50" : "bg-gray-100 text-unbox-grey"
                                         )}>
                                             {entry.status === 'active' ? 'Ожидает' : entry.status}
                                         </span>
@@ -76,7 +76,7 @@ export function AdminWaitlist() {
                                         <div className="flex justify-end gap-2">
                                             <button
                                                 onClick={() => handleNotify(entry.id)}
-                                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                className="p-2 text-unbox-green hover:bg-unbox-light rounded-lg transition-colors"
                                                 title="Уведомить вручную"
                                             >
                                                 <Bell size={18} />
@@ -97,7 +97,7 @@ export function AdminWaitlist() {
                 </table>
 
                 {waitlist.length === 0 && (
-                    <div className="p-12 text-center text-gray-500">
+                    <div className="p-12 text-center text-unbox-grey">
                         Лист ожидания пуст
                     </div>
                 )}

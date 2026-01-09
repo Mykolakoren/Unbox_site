@@ -1,7 +1,17 @@
 @import "tailwindcss";
 
+@theme {
+  --color-unbox-green: #476D6B;
+  --color-unbox-dark: #2C3240;
+  --color-unbox-light: #D4E2E1;
+  --color-unbox-grey: #9299A3;
+
+  --font-sans: Akrobat, "BPG Arial", sans-serif;
+  --font-geo: "BPG Nino Mtavruli Bold", sans-serif;
+}
+
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-unbox-light text-unbox-dark antialiased;
   }
 }

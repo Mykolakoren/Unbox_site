@@ -196,19 +196,19 @@ export function TimelineStep() {
     // Check if slot is range start/end for styling
     const getSlotStyle = (slot: string) => {
         const isSelected = isSlotSelected(slot);
-        if (!isSelected) return 'bg-white border-gray-200 hover:border-gray-300';
+        if (!isSelected) return 'bg-white border-gray-200 hover:border-unbox-green hover:text-unbox-green';
 
         if (blockedSlots.includes(slot)) return 'bg-gray-100 cursor-not-allowed opacity-50 stripe-bg';
 
         // It is selected
-        return 'bg-blue-50 border-blue-500 text-blue-700 font-medium z-10';
+        return 'bg-unbox-light border-unbox-green text-unbox-dark font-medium z-10';
     };
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div>
                 <h2 className="text-2xl font-bold mb-2">Выберите время</h2>
-                <p className="text-gray-500">Минимальная длительность — 1 час. Рабочее время 09:00–21:00.</p>
+                <p className="text-unbox-grey">Минимальная длительность — 1 час. Рабочее время 09:00–21:00.</p>
             </div>
 
             <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
@@ -224,9 +224,9 @@ export function TimelineStep() {
                             className={clsx(
                                 "relative py-3 rounded-lg border text-sm transition-all focus:outline-none",
                                 isBusy
-                                    ? "bg-red-50 border-red-100 text-red-300 cursor-help hover:bg-red-100"
+                                    ? "bg-gray-100 border-gray-200 text-unbox-grey cursor-help hover:bg-gray-200"
                                     : getSlotStyle(slot),
-                                selected && !isBusy && "ring-1 ring-blue-500"
+                                selected && !isBusy && "ring-1 ring-unbox-green"
                             )}
                         >
                             {slot}
@@ -241,7 +241,7 @@ export function TimelineStep() {
             </div>
 
             {/* Legend */}
-            <div className="flex gap-6 text-sm text-gray-500 justify-center pt-4">
+            <div className="flex gap-6 text-sm text-unbox-grey justify-center pt-4">
                 <div className="flex items-center gap-2">
                     <div className="w-4 h-4 rounded border border-gray-200 bg-white"></div>
                     <span>Свободно</span>
@@ -251,7 +251,7 @@ export function TimelineStep() {
                     <span>Занято</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded bg-blue-50 border border-blue-500"></div>
+                    <div className="w-4 h-4 rounded bg-unbox-light border border-unbox-green"></div>
                     <span>Выбрано</span>
                 </div>
             </div>

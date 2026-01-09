@@ -51,8 +51,8 @@ export function DashboardLayout() {
                                     className={clsx(
                                         "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors",
                                         isActive
-                                            ? "bg-black text-white"
-                                            : "text-gray-600 hover:bg-gray-100"
+                                            ? "bg-unbox-green text-white shadow-sm"
+                                            : "text-unbox-grey hover:bg-unbox-light hover:text-unbox-dark"
                                     )}
                                 >
                                     <Icon size={18} />

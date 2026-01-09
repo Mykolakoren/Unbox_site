@@ -260,7 +260,7 @@ export function ChessboardStep() {
                                 className={clsx(
                                     "flex flex-col items-center justify-center py-2 rounded-lg transition-all text-sm relative overflow-hidden",
                                     isSelected
-                                        ? "bg-black text-white shadow-md font-medium"
+                                        ? "bg-unbox-green text-white shadow-md font-medium"
                                         : "hover:bg-white text-gray-600 hover:shadow-sm"
                                 )}
                             >
@@ -271,7 +271,7 @@ export function ChessboardStep() {
                                     {format(day, 'd')}
                                 </span>
                                 {isCurrent && !isSelected && (
-                                    <div className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-500" />
+                                    <div className="absolute bottom-1 w-1 h-1 rounded-full bg-unbox-green" />
                                 )}
                             </button>
                         );
@@ -320,10 +320,10 @@ export function ChessboardStep() {
                                                     className={clsx(
                                                         "w-full h-full rounded transition-all flex items-center justify-center text-xs relative",
                                                         isBlocked
-                                                            ? "bg-red-50 text-red-300 cursor-help hover:bg-red-100" // Waitlist style
+                                                            ? "bg-gray-100 text-unbox-grey cursor-help hover:bg-gray-200" // Waitlist style (modified to be less aggressive)
                                                             : selected
-                                                                ? "bg-black text-white shadow-md transform scale-95"
-                                                                : "hover:bg-green-50 text-gray-400 hover:text-green-700"
+                                                                ? "bg-unbox-green text-white shadow-md transform scale-95"
+                                                                : "hover:bg-unbox-light/50 text-gray-400 hover:text-unbox-dark"
                                                     )}
                                                 >
                                                     {selected && <CheckIcon className="w-4 h-4 absolute top-1 right-1" />}

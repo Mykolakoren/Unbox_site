@@ -11,18 +11,34 @@ import { Link, useNavigate } from 'react-router-dom';
 import { RESOURCES, EXTRAS } from '../utils/data';
 import { generateGoogleCalendarUrl } from '../utils/calendar';
 import { toast } from 'sonner';
+import { useState } from 'react';
+import { ConfirmationModal } from '../components/ui/ConfirmationModal';
 
 export function MyBookingsPage() {
     const navigate = useNavigate();
     const { currentUser, bookings, cancelBooking, listForReRent } = useUserStore();
     const startEditing = useBookingStore(s => s.startEditing);
 
+    // Modal State
+    const [modalConfig, setModalConfig] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: React.ReactNode;
+        onConfirm: () => void;
+        isDestructive?: boolean;
+        confirmLabel?: string;
+    }>({
+        isOpen: false,
+        title: '',
+        message: null,
+        onConfirm: () => { },
+    });
+
     const userBookings = bookings
         .filter(b => b.userId === currentUser?.email)
         .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
 
     const handleEdit = (booking: any) => {
-        // We use 'reschedule' mode to trigger the diff logic
         startEditing(booking, 'reschedule');
         navigate('/');
     };
@@ -31,22 +47,42 @@ export function MyBookingsPage() {
         const booking = bookings.find(b => b.id === id);
         if (!booking) return;
 
-        if (window.confirm('Вы уверены, что хотите отменить бронирование?')) {
-            cancelBooking(id);
-
-            // Notification logic
-            if (booking.paymentMethod === 'subscription') {
-                toast.success(`Бронирование отменено. ${booking.hoursDeducted || (booking.duration / 60)} ч. возвращено на абонемент.`);
-            } else {
-                toast.success(`Бронирование отменено. ${booking.finalPrice} ₾ возвращено на ваш депозит.`);
+        setModalConfig({
+            isOpen: true,
+            title: 'Отменить бронирование?',
+            message: 'Это действие нельзя отменить. Средства будут возвращены согласно правилам отмены.',
+            confirmLabel: 'Отменить бронь',
+            isDestructive: true,
+            onConfirm: () => {
+                cancelBooking(id);
+                // Notification logic
+                if (booking.paymentMethod === 'subscription') {
+                    toast.success(`Бронирование отменено. ${booking.hoursDeducted || (booking.duration / 60)} ч. возвращено на абонемент.`);
+                } else {
+                    toast.success(`Бронирование отменено. ${booking.finalPrice} ₾ возвращено на ваш депозит.`);
+                }
             }
-        }
+        });
     };
 
     const handleReRent = (id: string) => {
-        if (window.confirm('Выставить время на переоренду? Если его забронируют, вам вернется часть средств.')) {
-            listForReRent(id);
-        }
+        setModalConfig({
+            isOpen: true,
+            title: 'Выставить на переаренду?',
+            message: (
+                <span>
+                    Если другой пользователь забронирует это время,
+                    вам вернется <b>50%</b> от стоимости бронирования на баланс.
+                    Вы останетесь владельцем брони до момента её выкупа.
+                </span>
+            ),
+            confirmLabel: 'Выставить',
+            isDestructive: false,
+            onConfirm: () => {
+                listForReRent(id);
+                toast.success('Время выставлено на переаренду. Мы уведомим вас, если его забронируют.');
+            }
+        });
     };
 
 
@@ -87,7 +123,7 @@ export function MyBookingsPage() {
                                         {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'} · {booking.format === 'individual' ? 'Индивидуальный' : 'Групповой'}
                                     </div>
 
-                                    <div className="text-gray-900 mt-1 flex items-center gap-2 font-medium">
+                                    <div className="text-unbox-dark mt-1 flex items-center gap-2 font-medium">
                                         <Clock size={16} />
                                         {format(new Date(booking.date), 'd MMMM', { locale: ru })}, {booking.startTime} ({booking.duration / 60}ч)
                                     </div>
@@ -111,7 +147,7 @@ export function MyBookingsPage() {
                                                 };
                                                 window.open(generateGoogleCalendarUrl(event), '_blank');
                                             }}
-                                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
+                                            className="text-xs text-unbox-green hover:underline flex items-center gap-1 mt-1"
                                         >
                                             <CalendarIcon size={12} />
                                             Добавить в календарь
@@ -135,10 +171,11 @@ export function MyBookingsPage() {
                                 <div className={clsx(
                                     "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1",
                                     {
-                                        'bg-green-100 text-green-700': booking.status === 'confirmed',
-                                        'bg-red-100 text-red-700': booking.status === 'cancelled',
-                                        'bg-gray-100 text-gray-600': booking.status === 'completed',
-                                        'bg-blue-100 text-blue-700': booking.status === 're-rented',
+                                        'bg-unbox-light text-unbox-dark': booking.status === 'confirmed',
+                                        // 'bg-white border border-unbox-green text-unbox-green': booking.status === 'confirmed', // Alternative
+                                        'bg-gray-100 text-unbox-grey': booking.status === 'cancelled',
+                                        'bg-gray-100 text-gray-500': booking.status === 'completed',
+                                        'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
                                     }
                                 )}>
                                     {booking.status === 'confirmed' && <><BadgeCheck size={12} /> Подтверждено</>}
@@ -151,31 +188,31 @@ export function MyBookingsPage() {
                             <div className="flex flex-col gap-2 pt-4 border-t border-gray-100">
                                 <div>
                                     <div className="text-xs text-gray-400 mb-0.5 uppercase font-medium">Оплата</div>
-                                    <div className="font-medium text-gray-700 flex items-center gap-2">
+                                    <div className="font-medium text-unbox-dark flex items-center gap-2">
                                         {booking.paymentMethod === 'subscription' ? (
                                             <>
-                                                <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                                                <span className="w-2 h-2 rounded-full bg-unbox-dark"></span>
                                                 Абонемент
                                             </>
                                         ) : booking.paymentSource === 'credit' ? (
                                             <>
-                                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                                <span className="w-2 h-2 rounded-full bg-unbox-grey"></span>
                                                 Кредит
                                             </>
                                         ) : (
                                             <>
-                                                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                                <span className="w-2 h-2 rounded-full bg-unbox-green"></span>
                                                 Депозит
                                             </>
                                         )}
                                     </div>
                                     <div className="text-sm text-gray-500 mt-0.5">
                                         {booking.paymentMethod === 'subscription' ? (
-                                            <span>Списано: <span className="font-bold text-gray-900">{booking.hoursDeducted || (booking.duration / 60)} ч</span></span>
+                                            <span>Списано: <span className="font-bold text-unbox-dark">{booking.hoursDeducted || (booking.duration / 60)} ч</span></span>
                                         ) : (
                                             <span>
                                                 {booking.paymentSource === 'credit' ? 'Долг: ' : 'Оплачено: '}
-                                                <span className="font-bold text-gray-900">{booking.finalPrice} ₾</span>
+                                                <span className="font-bold text-unbox-dark">{booking.finalPrice} ₾</span>
                                             </span>
                                         )}
                                     </div>
@@ -198,7 +235,7 @@ export function MyBookingsPage() {
                                 {/* Mock Admin Edit Price Action */}
                                 <div className="flex justify-end pt-1">
                                     <button
-                                        className="text-[10px] text-gray-400 hover:text-blue-600 underline"
+                                        className="text-[10px] text-gray-400 hover:text-unbox-green underline"
                                         onClick={() => {
                                             const newPriceString = prompt('👨‍💻 Админ: Введите новую финальную цену (GEL):', booking.finalPrice.toString());
                                             if (newPriceString !== null) {
@@ -244,7 +281,7 @@ export function MyBookingsPage() {
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                className="flex-1 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                className="flex-1 text-unbox-grey hover:text-red-600 hover:bg-red-50"
                                                 onClick={() => handleCancel(booking.id)}
                                             >
                                                 Отменить
@@ -252,14 +289,14 @@ export function MyBookingsPage() {
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
-                                            <div className="text-xs text-center text-gray-500 italic bg-gray-50 p-2 rounded-lg">
+                                            <div className="text-xs text-center text-unbox-grey italic bg-gray-50 p-2 rounded-lg">
                                                 Менее 24ч до начала. Бесплатная отмена недоступна.
                                             </div>
 
                                             {booking.isReRentListed ? (
-                                                <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm text-center font-medium border border-blue-100">
+                                                <div className="bg-unbox-light text-unbox-dark border border-unbox-green/30 p-3 rounded-lg text-sm text-center font-medium">
                                                     ⏳ Выставлено на переаренду
-                                                    <div className="text-xs text-blue-500 font-normal mt-1">
+                                                    <div className="text-xs text-unbox-grey font-normal mt-1">
                                                         Если время забронируют, средства вернутся на счет.
                                                     </div>
                                                 </div>
@@ -268,7 +305,7 @@ export function MyBookingsPage() {
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
-                                                        className="w-full border-dashed"
+                                                        className="w-full border-dashed border-unbox-green text-unbox-green hover:bg-unbox-light"
                                                         onClick={() => handleReRent(booking.id)}
                                                     >
                                                         ♻️ Выставить на переаренду
@@ -276,7 +313,7 @@ export function MyBookingsPage() {
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        className="w-full text-gray-500 hover:text-black"
+                                                        className="w-full text-unbox-grey hover:text-unbox-dark"
                                                         onClick={() => window.open('https://t.me/UnboxCenter', '_blank')}
                                                     >
                                                         💬 Связаться с администратором
@@ -302,6 +339,16 @@ export function MyBookingsPage() {
                     ))}
                 </div>
             )}
+
+            <ConfirmationModal
+                isOpen={modalConfig.isOpen}
+                onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={modalConfig.onConfirm}
+                title={modalConfig.title}
+                message={modalConfig.message}
+                isDestructive={modalConfig.isDestructive}
+                confirmLabel={modalConfig.confirmLabel}
+            />
         </div>
     );
 }

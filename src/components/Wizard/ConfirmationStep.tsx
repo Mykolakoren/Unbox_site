@@ -1,7 +1,7 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
 import { Button } from '../ui/Button';
-import { CheckCircle, Download, Home, Calendar as CalendarIcon, ArrowRight, RefreshCw, AlertTriangle } from 'lucide-react';
+import { CheckCircle, Download, Home, Calendar as CalendarIcon, ArrowRight, RefreshCw } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import { useState, useMemo } from 'react';
@@ -142,13 +142,8 @@ export function ConfirmationStep() {
             const finalMethod: 'subscription' | 'balance' = (isSubscriptionEligible && state.paymentMethod === 'subscription') ? 'subscription' : 'balance';
 
             if (currentUser && finalMethod === 'balance') {
-                const potentialBalance = currentUser.balance - totalPrice;
-                // If Rescheduling, we consider the REFUND from old booking?
-                // Simplified: Check absolute balance. If negative, verify limit.
-                // Improve: Calculate Net Price (New - Old)
-
                 let netPrice = totalPrice;
-                if (isRescheduling && oldBooking) {
+                if (isRescheduling && oldBooking && currentUser) {
                     netPrice = totalPrice - oldBooking.finalPrice;
                 }
 
@@ -296,11 +291,11 @@ export function ConfirmationStep() {
     if (confirmed) {
         return (
             <div className="text-center py-12 animate-in fade-in zoom-in duration-500">
-                <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <div className="w-20 h-20 bg-unbox-light text-unbox-green rounded-full flex items-center justify-center mx-auto mb-6">
                     <CheckCircle size={40} />
                 </div>
-                <h2 className="text-3xl font-bold mb-4">{isEditing ? (isRescheduling ? 'Бронирование перенесено!' : 'Бронирование обновлено!') : 'Бронирование подтверждено!'}</h2>
-                <p className="text-gray-500 max-w-md mx-auto mb-8">
+                <h2 className="text-3xl font-bold mb-4 text-unbox-dark">{isEditing ? (isRescheduling ? 'Бронирование перенесено!' : 'Бронирование обновлено!') : 'Бронирование подтверждено!'}</h2>
+                <p className="text-unbox-grey max-w-md mx-auto mb-8">
                     {isEditing ? 'Изменения успешно сохранены.' : 'Мы отправили подтверждение на вашу почту. Ждем вас в Unbox!'}
                 </p>
 
@@ -331,26 +326,26 @@ export function ConfirmationStep() {
 
             <div className="space-y-4 max-w-md">
                 {currentUser ? (
-                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 dark:bg-gray-800 dark:border-gray-700">
-                        <div className="text-sm text-gray-500 mb-1">Бронирование на имя:</div>
-                        <div className="font-bold">{currentUser.name}</div>
-                        <div className="text-sm text-gray-500 mt-2">Контакты:</div>
-                        <div>{currentUser.phone}</div>
-                        <div>{currentUser.email}</div>
+                    <div className="bg-unbox-light p-4 rounded-xl border border-unbox-light/50">
+                        <div className="text-sm text-unbox-grey mb-1">Бронирование на имя:</div>
+                        <div className="font-bold text-unbox-dark">{currentUser.name}</div>
+                        <div className="text-sm text-unbox-grey mt-2">Контакты:</div>
+                        <div className="text-unbox-dark">{currentUser.phone}</div>
+                        <div className="text-unbox-dark">{currentUser.email}</div>
                     </div>
                 ) : (
                     <>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium">Имя</label>
-                            <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black" placeholder="Иван Иванов" />
+                            <label className="text-sm font-medium text-unbox-dark">Имя</label>
+                            <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="Иван Иванов" />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium">Телефон</label>
-                            <input type="tel" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black" placeholder="+995 555 00 00 00" />
+                            <label className="text-sm font-medium text-unbox-dark">Телефон</label>
+                            <input type="tel" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="+995 555 00 00 00" />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium">Email</label>
-                            <input type="email" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black" placeholder="ivan@example.com" />
+                            <label className="text-sm font-medium text-unbox-dark">Email</label>
+                            <input type="email" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="ivan@example.com" />
                         </div>
                     </>
                 )}
@@ -359,34 +354,34 @@ export function ConfirmationStep() {
             {/* Payment Method Selector */}
             {currentUser && (
                 <div className="space-y-3 pt-4 border-t border-gray-100">
-                    <h3 className="font-bold text-lg">Способ оплаты</h3>
+                    <h3 className="font-bold text-lg text-unbox-dark">Способ оплаты</h3>
                     <div className="grid gap-3">
                         {/* Option: Subscription */}
                         <div
                             className={`
-                                relative p-4 rounded-xl border-2 cursor-pointer transition-all
+                                relative p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                 ${state.paymentMethod === 'subscription'
-                                    ? 'border-black bg-gray-50'
-                                    : 'border-gray-200 hover:border-gray-300'}
+                                    ? 'border-unbox-green bg-unbox-light/50 ring-1 ring-unbox-green'
+                                    : 'border-gray-300 hover:border-gray-400 bg-white'}
                                 ${!isSubscriptionEligible ? 'opacity-50 pointer-events-none' : ''}
                             `}
                             onClick={() => isSubscriptionEligible && state.setPaymentMethod('subscription')}
                         >
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
-                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${state.paymentMethod === 'subscription' ? 'border-black' : 'border-gray-300'}`}>
-                                        {state.paymentMethod === 'subscription' && <div className="w-3 h-3 rounded-full bg-black" />}
+                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${state.paymentMethod === 'subscription' ? 'border-unbox-green' : 'border-gray-300'}`}>
+                                        {state.paymentMethod === 'subscription' && <div className="w-2.5 h-2.5 rounded-full bg-unbox-green" />}
                                     </div>
-                                    <span className="font-medium">Списать с абонемента</span>
+                                    <span className="font-bold text-unbox-dark">Списать с абонемента</span>
                                 </div>
-                                <span className="font-bold">
+                                <span className="font-bold text-unbox-dark">
                                     {cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч
                                 </span>
                             </div>
                             {currentUser.subscription && (
-                                <div className="ml-7 text-xs text-gray-500 mt-1">
+                                <div className="ml-7 text-xs text-unbox-grey mt-1 font-medium">
                                     Доступно: {currentUser.subscription.remainingHours} ч
-                                    {!isSubscriptionEligible && <span className="text-red-500 ml-1">({subscriptionReason})</span>}
+                                    {!isSubscriptionEligible && <span className="text-unbox-dark ml-1">({subscriptionReason})</span>}
                                 </div>
                             )}
                         </div>
@@ -394,23 +389,23 @@ export function ConfirmationStep() {
                         {/* Option: Balance/Deposit */}
                         <div
                             className={`
-                                relative p-4 rounded-xl border-2 cursor-pointer transition-all
+                                relative p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                 ${state.paymentMethod === 'balance'
-                                    ? 'border-black bg-gray-50'
-                                    : 'border-gray-200 hover:border-gray-300'}
+                                    ? 'border-unbox-green bg-unbox-light/50 ring-1 ring-unbox-green'
+                                    : 'border-gray-300 hover:border-gray-400 bg-white'}
                             `}
                             onClick={() => state.setPaymentMethod('balance')}
                         >
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
-                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${state.paymentMethod === 'balance' ? 'border-black' : 'border-gray-300'}`}>
-                                        {state.paymentMethod === 'balance' && <div className="w-3 h-3 rounded-full bg-black" />}
+                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${state.paymentMethod === 'balance' ? 'border-unbox-green' : 'border-gray-300'}`}>
+                                        {state.paymentMethod === 'balance' && <div className="w-2.5 h-2.5 rounded-full bg-unbox-green" />}
                                     </div>
-                                    <span className="font-medium">Списать с баланса</span>
+                                    <span className="font-bold text-unbox-dark">Списать с баланса</span>
                                 </div>
-                                <span className="font-bold">{totalPrice.toFixed(1)} ₾</span>
+                                <span className="font-bold text-unbox-dark">{totalPrice.toFixed(1)} ₾</span>
                             </div>
-                            <div className="ml-7 text-xs text-gray-500 mt-1">
+                            <div className="ml-7 text-xs text-unbox-grey mt-1 font-medium">
                                 Текущий баланс: {currentUser.balance} ₾
                             </div>
                         </div>
@@ -420,48 +415,47 @@ export function ConfirmationStep() {
 
             <div className="pt-8 border-t border-gray-100">
                 {isRescheduling && oldBooking && (
-                    <div className="mb-6 bg-blue-50 p-4 rounded-xl border border-blue-100">
-                        <h4 className="font-bold flex items-center gap-2 text-blue-800 mb-3">
+                    <div className="mb-6 bg-unbox-light p-4 rounded-xl border border-unbox-light/50">
+                        <h4 className="font-bold flex items-center gap-2 text-unbox-dark mb-3">
                             <RefreshCw size={18} /> Перенос бронирования
                         </h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                             {/* Old */}
-                            <div className="opacity-70">
-                                <div className="text-xs uppercase font-bold text-gray-500 mb-1">Было</div>
-                                <div className="font-medium text-gray-800">
+                            <div className="opacity-70 text-unbox-dark/80">
+                                <div className="text-xs uppercase font-bold text-unbox-grey mb-1">Было</div>
+                                <div className="font-medium text-unbox-dark">
                                     {format(new Date(oldBooking.date), 'd MMM', { locale: ru })}, {oldBooking.startTime}
                                 </div>
-                                <div className="text-sm text-gray-600">
+                                <div className="text-sm text-unbox-grey">
                                     {RESOURCES.find(r => r.id === oldBooking.resourceId)?.name}
                                 </div>
-                                <div className="text-sm font-bold mt-1 line-through text-gray-400">
+                                <div className="text-sm font-bold mt-1 line-through text-unbox-grey">
                                     {oldBooking.finalPrice} ₾
                                 </div>
                             </div>
-
                             {/* Arrow */}
-                            <div className="hidden md:flex justify-center text-blue-300">
+                            <div className="hidden md:flex justify-center text-unbox-grey">
                                 <ArrowRight size={24} />
                             </div>
 
                             {/* New */}
                             <div>
-                                <div className="text-xs uppercase font-bold text-blue-600 mb-1">Станет</div>
-                                <div className="font-medium text-gray-900">
+                                <div className="text-xs uppercase font-bold text-unbox-green mb-1">Станет</div>
+                                <div className="font-medium text-unbox-dark">
                                     {format(new Date(state.date), 'd MMM', { locale: ru })}, {state.startTime || cartDetails[0]?.startTime}
                                 </div>
-                                <div className="text-sm text-gray-600">
+                                <div className="text-sm text-unbox-grey">
                                     {RESOURCES.find(r => r.id === (state.resourceId || cartDetails[0]?.resourceId))?.name}
                                 </div>
-                                <div className="text-sm font-bold mt-1 text-blue-700">
+                                <div className="text-sm font-bold mt-1 text-unbox-green">
                                     {totalPrice} ₾
                                 </div>
                             </div>
                         </div>
 
-                        <div className="mt-4 pt-3 border-t border-blue-100 flex justify-between items-center text-sm">
-                            <span className="text-blue-800">Разница к оплате:</span>
-                            <span className="font-bold text-lg">
+                        <div className="mt-4 pt-3 border-t border-unbox-light flex justify-between items-center text-sm">
+                            <span className="text-unbox-dark">Разница к оплате:</span>
+                            <span className="font-bold text-lg text-unbox-dark">
                                 {totalPrice - oldBooking.finalPrice > 0
                                     ? `+${(totalPrice - oldBooking.finalPrice).toFixed(1)} ₾`
                                     : `${(totalPrice - oldBooking.finalPrice).toFixed(1)} ₾ (Возврат)`

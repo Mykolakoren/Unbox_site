@@ -73,10 +73,6 @@ export const useBookingStore = create<BookingStore>((set) => ({
         finalPrice: 0,
     },
 
-    editBookingId: null, // New field for edit mode
-
-    selectedSlots: [],
-
     setStep: (step) => set({ step }),
 
     setLocation: (locationId) => set({

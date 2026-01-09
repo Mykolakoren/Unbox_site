@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useUserStore, type User } from '../../store/userStore';
-import { Search, Edit, Shield } from 'lucide-react';
+import { Search, Edit, Shield, User as UserIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 
 export function AdminUsers() {
@@ -30,9 +31,9 @@ export function AdminUsers() {
                 </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
                 <table className="w-full text-left">
-                    <thead className="bg-gray-50 border-b border-gray-100 text-gray-500 font-medium text-sm">
+                    <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                         <tr>
                             <th className="p-4 pl-6">Клиент</th>
                             <th className="p-4">Баланс</th>
@@ -41,51 +42,64 @@ export function AdminUsers() {
                             <th className="p-4 text-right">Действия</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-unbox-light">
                         {filteredUsers.map(user => (
-                            <tr key={user.email} className="hover:bg-gray-50/50 transition-colors">
+                            <tr key={user.email} className="hover:bg-unbox-light/30 transition-colors">
                                 <td className="p-4 pl-6">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-600">
+                                    <Link
+                                        to={`/admin/users/${encodeURIComponent(user.email)}`}
+                                        className="flex items-center gap-3 group cursor-pointer"
+                                    >
+                                        <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center font-bold text-unbox-dark group-hover:bg-unbox-green group-hover:text-white transition-colors">
                                             {user.name.charAt(0)}
                                         </div>
                                         <div>
-                                            <div className="font-medium text-gray-900 flex items-center gap-2">
+                                            <div className="font-medium text-unbox-dark flex items-center gap-2 group-hover:text-unbox-green transition-colors">
                                                 {user.name}
-                                                {user.isAdmin && <Shield size={14} className="text-blue-500" />}
+                                                {user.isAdmin && <Shield size={14} className="text-unbox-green" />}
                                             </div>
-                                            <div className="text-xs text-gray-500">{user.email}</div>
-                                            {user.phone && <div className="text-xs text-gray-400">{user.phone}</div>}
+                                            <div className="text-xs text-unbox-grey">{user.email}</div>
+                                            {user.phone && <div className="text-xs text-unbox-grey">{user.phone}</div>}
                                         </div>
-                                    </div>
+                                    </Link>
                                 </td>
                                 <td className="p-4">
                                     <span className={clsx(
                                         "font-medium",
-                                        user.balance < 0 ? "text-red-500" : "text-green-600"
+                                        user.balance < 0 ? "text-red-500" : "text-unbox-green"
                                     )}>
                                         {user.balance.toFixed(2)} ₾
                                     </span>
                                 </td>
                                 <td className="p-4">
                                     {user.personalDiscountPercent ? (
-                                        <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">
+                                        <span className="bg-unbox-light text-unbox-green px-2 py-1 rounded text-xs font-bold">
                                             {user.personalDiscountPercent}%
                                         </span>
                                     ) : (
-                                        <span className="text-gray-400 text-sm">—</span>
+                                        <span className="text-unbox-grey text-sm">—</span>
                                     )}
                                 </td>
-                                <td className="p-4 text-sm text-gray-600">
+                                <td className="p-4 text-sm text-unbox-dark">
                                     {user.pricingSystem === 'personal' ? 'Персональный' : 'Стандарт'}
                                 </td>
                                 <td className="p-4 text-right">
-                                    <button
-                                        className="p-2 hover:bg-gray-100 rounded-lg text-gray-500"
-                                        onClick={() => setSelectedUser(user)}
-                                    >
-                                        <Edit size={16} />
-                                    </button>
+                                    <div className="flex justify-end gap-2">
+                                        <Link
+                                            to={`/admin/users/${encodeURIComponent(user.email)}`}
+                                            className="p-2 hover:bg-unbox-light rounded-lg text-unbox-green"
+                                            title="Карточка клиента"
+                                        >
+                                            <UserIcon size={16} />
+                                        </Link>
+                                        <button
+                                            className="p-2 hover:bg-unbox-light rounded-lg text-unbox-grey hover:text-unbox-dark"
+                                            onClick={() => setSelectedUser(user)}
+                                            title="Быстрые настройки"
+                                        >
+                                            <Edit size={16} />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -93,7 +107,7 @@ export function AdminUsers() {
                 </table>
 
                 {filteredUsers.length === 0 && (
-                    <div className="p-8 text-center text-gray-500">
+                    <div className="p-8 text-center text-unbox-grey">
                         Ничего не найдено
                     </div>
                 )}

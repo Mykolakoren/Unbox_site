@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, Users, Settings, LogOut, Clock } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, LogOut, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
 
@@ -20,12 +20,13 @@ export function AdminLayout() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex">
+        <div className="min-h-screen bg-unbox-light flex text-unbox-dark">
             {/* Sidebar */}
-            <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col fixed h-full z-10">
-                <div className="p-6 border-b border-gray-100 flex items-center gap-2">
-                    <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white font-bold">U</div>
-                    <span className="font-bold text-xl">Unbox Admin</span>
+            <aside className="w-64 bg-white border-r border-unbox-light hidden md:flex flex-col fixed h-full z-10">
+                <div className="p-6 border-b border-unbox-light flex items-center justify-center">
+                    <Link to="/">
+                        <img src="/src/assets/unbox-logo.png" alt="Unbox" className="h-12 object-contain cursor-pointer hover:opacity-80 transition-opacity" />
+                    </Link>
                 </div>
 
                 <nav className="flex-1 p-4 space-y-1">
@@ -36,8 +37,8 @@ export function AdminLayout() {
                             className={clsx(
                                 "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors font-medium",
                                 isActive(item.path, !!item.exact)
-                                    ? "bg-black text-white"
-                                    : "text-gray-600 hover:bg-gray-50 hover:text-black"
+                                    ? "bg-unbox-green text-white shadow-sm"
+                                    : "text-unbox-grey hover:bg-unbox-light hover:text-unbox-dark"
                             )}
                         >
                             <item.icon size={20} />

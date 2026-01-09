@@ -100,3 +100,9 @@ export const EXTRAS: ExtraOption[] = [
     { id: 'flipchart', name: 'Флипчарт', price: 10 },
     { id: 'projector', name: 'Проектор', price: 20 },
 ];
+
+export const SUBSCRIPTION_PLANS = [
+    { id: 'sub_10', name: 'Старт (10 ч)', hours: 10, price: 180 },
+    { id: 'sub_30', name: 'Стандарт (30 ч)', hours: 30, price: 500 },
+    { id: 'sub_50', name: 'Про (50 ч)', hours: 50, price: 800 },
+];

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
 import { format } from 'date-fns';
@@ -6,9 +7,11 @@ import { Search, Clock } from 'lucide-react';
 import clsx from 'clsx';
 
 export function AdminBookings() {
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const { bookings, users, cancelBooking, listForReRent, setManualPrice } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState(searchParams.get('search') || '');
 
     // helper to get user name by email
     const getUserName = (email: string) => {
@@ -20,11 +23,14 @@ export function AdminBookings() {
         .filter(b => {
             if (filterStatus !== 'all' && b.status !== filterStatus) return false;
             if (search) {
-                const userName = getUserName(b.userId).toLowerCase();
-                // search by user name, email, or booking ID (partially)
-                return userName.includes(search.toLowerCase()) ||
-                    b.userId.toLowerCase().includes(search.toLowerCase()) ||
-                    b.id.includes(search);
+                const term = search.toLowerCase();
+                const userName = (getUserName(b.userId) || '').toLowerCase();
+                const userId = (b.userId || '').toLowerCase();
+                const bookingId = (b.id || '').toLowerCase();
+
+                return userName.includes(term) ||
+                    userId.includes(term) ||
+                    bookingId.includes(term);
             }
             return true;
         })
@@ -82,9 +88,9 @@ export function AdminBookings() {
                 </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto">
+            <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm overflow-x-auto">
                 <table className="w-full text-left whitespace-nowrap">
-                    <thead className="bg-gray-50 border-b border-gray-100 text-gray-500 font-medium text-sm">
+                    <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                         <tr>
                             <th className="p-4 pl-6">Создано</th>
                             <th className="p-4">Клиент</th>
@@ -95,30 +101,35 @@ export function AdminBookings() {
                             <th className="p-4 text-right">Действия</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-unbox-light">
                         {filteredBookings.map(booking => {
                             const resourceName = RESOURCES.find(r => r.id === booking.resourceId)?.name || booking.resourceId;
 
                             return (
-                                <tr key={booking.id} className="hover:bg-gray-50/50 transition-colors text-sm">
-                                    <td className="p-4 pl-6 text-gray-500">
+                                <tr key={booking.id} className="hover:bg-unbox-light/30 transition-colors text-sm">
+                                    <td className="p-4 pl-6 text-unbox-grey">
                                         {format(new Date(booking.dateCreated), 'dd.MM HH:mm')}
                                     </td>
-                                    <td className="p-4 font-medium text-gray-900">
-                                        {getUserName(booking.userId)}
-                                        <div className="text-xs text-gray-400 font-normal">{booking.userId}</div>
+                                    <td className="p-4 font-medium text-unbox-dark">
+                                        <div
+                                            onClick={() => navigate(`/admin/users/${encodeURIComponent(booking.userId)}`)}
+                                            className="cursor-pointer hover:text-unbox-green transition-colors group"
+                                        >
+                                            <div className="group-hover:underline">{getUserName(booking.userId)}</div>
+                                            <div className="text-xs text-unbox-grey font-normal no-underline">{booking.userId}</div>
+                                        </div>
                                     </td>
-                                    <td className="p-4 text-gray-700">
+                                    <td className="p-4 text-unbox-dark">
                                         {resourceName}
-                                        <div className="text-xs text-gray-400">{booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'}</div>
+                                        <div className="text-xs text-unbox-grey">{booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'}</div>
                                     </td>
                                     <td className="p-4">
-                                        <div className="flex items-center gap-2">
-                                            <CalendarIcon size={14} className="text-gray-400" />
+                                        <div className="flex items-center gap-2 text-unbox-dark">
+                                            <CalendarIcon size={14} className="text-unbox-grey" />
                                             {format(new Date(booking.date), 'dd.MM.yyyy')}
                                         </div>
-                                        <div className="flex items-center gap-2 text-gray-500 mt-1">
-                                            <Clock size={14} className="text-gray-400" />
+                                        <div className="flex items-center gap-2 text-unbox-grey mt-1">
+                                            <Clock size={14} className="text-unbox-grey" />
                                             {booking.startTime} ({booking.duration / 60}ч)
                                         </div>
                                     </td>
@@ -126,9 +137,9 @@ export function AdminBookings() {
                                         <span className={clsx(
                                             "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
                                             {
-                                                'bg-green-100 text-green-800': booking.status === 'confirmed',
-                                                'bg-red-100 text-red-800': booking.status === 'cancelled',
-                                                'bg-blue-100 text-blue-800': booking.status === 're-rented',
+                                                'bg-unbox-light text-unbox-green': booking.status === 'confirmed',
+                                                'bg-gray-100 text-unbox-grey': booking.status === 'cancelled',
+                                                'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
                                             }
                                         )}>
                                             {booking.status === 'confirmed' && 'Active'}
@@ -136,16 +147,16 @@ export function AdminBookings() {
                                             {booking.status === 're-rented' && 'Re-rented'}
                                         </span>
                                         {booking.isReRentListed && booking.status === 'confirmed' && (
-                                            <div className="mt-1 text-[10px] text-blue-600 font-medium bg-blue-50 px-1 rounded border border-blue-100">
+                                            <div className="mt-1 text-[10px] text-unbox-green font-medium bg-unbox-light px-1 rounded border border-unbox-green/20">
                                                 Listed for Re-Rent
                                             </div>
                                         )}
                                     </td>
                                     <td className="p-4 text-right font-medium">
                                         {booking.paymentMethod === 'subscription' ? (
-                                            <span className="text-purple-600">Абонемент</span>
+                                            <span className="text-unbox-green">Абонемент</span>
                                         ) : (
-                                            <span>{booking.finalPrice} ₾</span>
+                                            <span className="text-unbox-dark">{booking.finalPrice} ₾</span>
                                         )}
                                     </td>
                                     <td className="p-4 text-right">
@@ -154,21 +165,21 @@ export function AdminBookings() {
                                                 <>
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        className="text-gray-500 hover:text-blue-600 text-xs underline"
+                                                        className="text-unbox-grey hover:text-unbox-green text-xs underline"
                                                     >
                                                         Цена
                                                     </button>
                                                     {!booking.isReRentListed && (
                                                         <button
                                                             onClick={() => handleReRent(booking.id)}
-                                                            className="text-gray-500 hover:text-blue-600 text-xs underline"
+                                                            className="text-unbox-grey hover:text-unbox-green text-xs underline"
                                                         >
                                                             Пересдать
                                                         </button>
                                                     )}
                                                     <button
                                                         onClick={() => handleCancel(booking.id)}
-                                                        className="text-gray-500 hover:text-red-600 text-xs underline"
+                                                        className="text-unbox-grey hover:text-red-600 text-xs underline"
                                                     >
                                                         Отмена
                                                     </button>
@@ -183,7 +194,7 @@ export function AdminBookings() {
                 </table>
 
                 {filteredBookings.length === 0 && (
-                    <div className="p-12 text-center text-gray-500">
+                    <div className="p-12 text-center text-unbox-grey">
                         Бронирований не найдено
                     </div>
                 )}
