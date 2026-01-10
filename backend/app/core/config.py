@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER: str = "admin@unbox.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin123"
     
+    # Database
+    DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env
+    
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
