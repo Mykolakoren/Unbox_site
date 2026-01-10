@@ -2,12 +2,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .db.session import init_db
+from .db.init_data import init_data
 from .core.config import settings
 from .api.v1 import api_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    init_data()
     yield
 
 app = FastAPI(
