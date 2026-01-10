@@ -146,6 +146,25 @@ export function AdminUsers() {
 function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () => void, onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
     const currentUser = useUserStore(s => s.currentUser);
     const isOwner = currentUser?.role === 'owner';
+    const isSeniorAdmin = currentUser?.role === 'senior_admin';
+
+    // Determine if the current user can edit the target user's role
+    const canEditRole = (() => {
+        if (isOwner) return true;
+        if (isSeniorAdmin) {
+            // Senior Admin cannot edit Owners or other Senior Admins
+            if (user.role === 'owner' || user.role === 'senior_admin') return false;
+            return true;
+        }
+        return false;
+    })();
+
+    // Determine available role options
+    const availableRoles = (() => {
+        if (isOwner) return ['user', 'admin', 'senior_admin', 'owner'];
+        if (isSeniorAdmin) return ['user', 'admin'];
+        return [];
+    })();
 
     // Local state for all editable fields
     const [localRole, setLocalRole] = useState(user.role || 'user');
@@ -180,8 +199,8 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                         {user.name} ({user.email})
                     </div>
 
-                    {/* Role Management - ONLY FOR OWNER */}
-                    {isOwner && (
+                    {/* Role Management - Hierarchical Access */}
+                    {canEditRole && (
                         <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
                             <label className="block text-sm font-medium text-gray-700">Роль в системе</label>
                             <select
@@ -189,10 +208,13 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                                 value={localRole}
                                 onChange={(e) => setLocalRole(e.target.value as any)}
                             >
-                                <option value="user">Пользователь</option>
-                                <option value="admin">Администратор</option>
-                                <option value="senior_admin">Старший Админ</option>
-                                <option value="owner">Владелец</option>
+                                {availableRoles.map(role => (
+                                    <option key={role} value={role}>
+                                        {role === 'user' ? 'Пользователь' :
+                                            role === 'admin' ? 'Администратор' :
+                                                role === 'senior_admin' ? 'Старший Админ' : 'Владелец'}
+                                    </option>
+                                ))}
                             </select>
                             {localRole !== user.role && (
                                 <div className="text-xs text-amber-600 font-medium">
@@ -200,7 +222,10 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                                 </div>
                             )}
                             <div className="text-xs text-gray-500">
-                                Внимание: изменение роли влияет на доступ к функционалу.
+                                {isSeniorAdmin
+                                    ? "Вы можете назначать только Пользователей и Администраторов."
+                                    : "Внимание: изменение роли влияет на доступ к функционалу."
+                                }
                             </div>
                         </div>
                     )}
