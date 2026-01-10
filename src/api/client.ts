@@ -1,6 +1,10 @@
 import axios from 'axios';
 
-export const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api/v1' : 'http://127.0.0.1:8000/api/v1');
+// In production (Vercel), always use relative path to route via vercel.json rewrites
+// In development, use VITE_API_URL or fallback to localhost
+export const API_URL = import.meta.env.PROD
+    ? '/api/v1'
+    : (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1');
 
 export const api = axios.create({
     baseURL: API_URL,
