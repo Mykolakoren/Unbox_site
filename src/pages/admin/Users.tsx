@@ -3,6 +3,7 @@ import { useUserStore, type User } from '../../store/userStore';
 import { Search, Edit, Shield, User as UserIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
+import { TimelineList } from '../../components/Timeline/TimelineList';
 
 export function AdminUsers() {
     const { users, updateUserById, fetchUsers } = useUserStore();
@@ -206,7 +207,7 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                             <select
                                 className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
                                 value={localRole}
-                                onChange={(e) => setLocalRole(e.target.value as any)}
+                                onChange={(e) => setLocalRole(e.target.value as "user" | "admin" | "senior_admin" | "owner")}
                             >
                                 {availableRoles.map(role => (
                                     <option key={role} value={role}>
@@ -282,6 +283,12 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                         >
                             Сохранить
                         </button>
+                    </div>
+
+                    {/* Timeline Section */}
+                    <div className="pt-4 border-t border-gray-100">
+                        <h3 className="text-sm font-bold text-gray-900 mb-3">История изменений</h3>
+                        <TimelineList targetId={user.id} limit={5} className="max-h-48 overflow-y-auto" />
                     </div>
                 </div>
             </div>

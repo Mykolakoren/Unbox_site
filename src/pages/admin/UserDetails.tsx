@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
+import { useBookingStore } from '../../store/bookingStore';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown } from 'lucide-react';
@@ -567,7 +568,11 @@ export function AdminUserDetails() {
                         <div className="space-y-6 animate-in fade-in duration-300">
                             <div className="flex items-center justify-between">
                                 <h2 className="text-xl font-bold">История бронирований</h2>
-                                <Button size="sm" onClick={() => navigate('/admin/calendar')}>
+                                <Button size="sm" onClick={() => {
+                                    useBookingStore.getState().reset();
+                                    useBookingStore.getState().setBookingForUser(user.email); // Setting target user
+                                    navigate('/');
+                                }}>
                                     <Plus size={16} className="mr-2" />
                                     Создать бронь
                                 </Button>

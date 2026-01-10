@@ -37,6 +37,7 @@ export interface BookingState {
     extras: string[]; // ids of selected extras
     paymentMethod?: 'balance' | 'subscription';
     hoursDeducted?: number;
+    bookingForUser?: string | null;
 }
 
 export interface ExtraOption {

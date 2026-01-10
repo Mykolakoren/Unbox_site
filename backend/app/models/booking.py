@@ -43,6 +43,7 @@ class Booking(BookingBase, table=True):
 
 class BookingCreate(BookingBase):
     user_email: Optional[str] = None # Optional, derived from auth
+    target_user_id: Optional[str] = None # Admin can specify target user (UUID or Email)
 
 class BookingRead(BookingBase):
     id: UUID

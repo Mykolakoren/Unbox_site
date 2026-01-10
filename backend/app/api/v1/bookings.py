@@ -60,32 +60,45 @@ def create_booking(
     
     if not is_available:
         raise HTTPException(status_code=400, detail="Time slot is already booked")
+
+    # Determine Booking Owner
+    booking_owner = current_user
+    if current_user.is_admin and booking_in.target_user_id:
+        # Try to find target user
+        from uuid import UUID
+        target = None
+        try:
+             target = session.get(User, UUID(booking_in.target_user_id))
+        except ValueError:
+             pass
+        
+        if not target:
+             target = session.exec(select(User).where(User.email == booking_in.target_user_id)).first()
+             
+        if target:
+             booking_owner = target
     
-    # Payment Processing
+    # Payment Processing (Charge booking_owner)
     if booking_in.payment_method == 'subscription':
         # Check subscription
-        if not current_user.subscription or current_user.subscription.get('remainingHours', 0) < (booking_in.duration / 60):
+        if not booking_owner.subscription or booking_owner.subscription.get('remainingHours', 0) < (booking_in.duration / 60):
              raise HTTPException(status_code=400, detail="Insufficient subscription hours")
         
         # Deduct hours
-        new_sub = current_user.subscription.copy()
+        new_sub = booking_owner.subscription.copy()
         deduction = booking_in.duration / 60
         new_sub['remainingHours'] -= deduction
-        current_user.subscription = new_sub
-        
-        # We need to set hours_deducted on the booking object
-        # but booking_in is a Pydantic model. 
-        # We'll set it on the ORM object below.
+        booking_owner.subscription = new_sub
         
     else:
         # Balance deduction (allow negative for credit)
-        current_user.balance -= booking_in.final_price
+        booking_owner.balance -= booking_in.final_price
 
-    session.add(current_user)
+    session.add(booking_owner)
     
     booking = Booking.from_orm(booking_in)
-    booking.user_uuid = current_user.id
-    booking.user_id = current_user.email # Legacy support
+    booking.user_uuid = booking_owner.id
+    booking.user_id = booking_owner.email 
     
     if booking.payment_method == 'subscription':
          booking.hours_deducted = booking.duration / 60
@@ -147,10 +160,37 @@ def cancel_booking(
         session.add(current_user)
 
     booking.status = "cancelled"
-    booking.cancellation_reason = "User cancelled"
+    booking.cancellation_reason = "User cancelled" # TODO: Allow passing reason
     booking.cancelled_by = current_user.email
     
     session.add(booking)
     session.commit()
     session.refresh(booking)
+    
+    # --- AUDIT LOGGING ---
+    from app.services.timeline import timeline_service
+    from datetime import datetime, timedelta
+    
+    # Calculate time to booking
+    booking_start = datetime.fromisoformat(booking.date + "T" + booking.start_time)
+    hours_until_start = (booking_start - datetime.utcnow()).total_seconds() / 3600
+    is_late_cancellation = hours_until_start < 24
+    
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(booking.id),
+        target_type="booking",
+        event_type="booking_cancelled",
+        description=f"Booking cancelled by {current_user.name} ({current_user.role}). Time to start: {hours_until_start:.1f}h",
+        metadata={
+            "is_late_cancellation": is_late_cancellation,
+            "hours_until_start": hours_until_start,
+            "refunded_amount": booking.final_price if booking.payment_method != 'subscription' else 0,
+            "refunded_hours": booking.hours_deducted if booking.payment_method == 'subscription' else 0
+        }
+    )
+    # ---------------------
+    
     return booking

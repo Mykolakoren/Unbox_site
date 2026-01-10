@@ -114,6 +114,26 @@ def update_user(
     session.add(user)
     session.commit()
     session.refresh(user)
+    
+    # --- AUDIT LOGGING ---
+    from app.services.timeline import timeline_service
+    
+    # Log Role Change
+    if user_in.role is not None and user_in.role != current_role_db:
+        timeline_service.log_event(
+            session=session,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            target_id=str(user.id),
+            target_type="user",
+            event_type="role_change",
+            description=f"Changed role from {current_role_db} to {user_in.role}",
+            metadata={"old_role": current_role_db, "new_role": user_in.role}
+        )
+        
+    # Log other critical updates could go here
+    # ---------------------
+    
     return user
 
 @router.post("/{user_id}/subscription/freeze", response_model=UserRead)
@@ -160,6 +180,22 @@ def toggle_subscription_freeze(
     session.add(user)
     session.commit()
     session.refresh(user)
+    
+    # --- AUDIT LOGGING ---
+    from app.services.timeline import timeline_service
+    action = "Freezing" if not is_frozen else "Unfreezing"
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(user.id),
+        target_type="user",
+        event_type="subscription_freeze",
+        description=f"{action} subscription",
+        metadata={"action": action, "previous_state_frozen": is_frozen}
+    )
+    # ---------------------
+    
     return user
 
 @router.post("/{user_id}/discount", response_model=UserRead)
@@ -223,15 +259,34 @@ def update_personal_discount(
     # Short circuit for now during this file edit, assuming field exists or I add it.
     # I will add `discount_history` to User model in the corresponding tool call.
     
+    # Update user history (Legacy JSON field - keep for now if needed, or rely on Timeline)
+    # For now we keep the JSON history in frontend/backend model alignment, 
+    # BUT we also add the official Timeline Entry
+    
     current_history = user.discount_history or []
     current_history.insert(0, log_entry) # Prepend
     
     user.personal_discount_percent = percent
-    user.discount_history = current_history # Reassign to trigger update
+    user.discount_history = current_history 
     
     session.add(user)
     session.commit()
     session.refresh(user)
+    
+    # --- AUDIT LOGGING ---
+    from app.services.timeline import timeline_service
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(user.id),
+        target_type="user",
+        event_type="discount_change",
+        description=f"Changed discount from {old_percent}% to {percent}%. Reason: {reason}",
+        metadata={"old_percent": old_percent, "new_percent": percent, "reason": reason}
+    )
+    # ---------------------
+    
     return user
 
 @router.get("/", response_model=List[UserRead])

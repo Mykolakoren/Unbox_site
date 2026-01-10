@@ -44,7 +44,7 @@ export interface User {
     discountHistory?: DiscountLogEntry[]; // New history
     pricingSystem?: 'standard' | 'personal';
     isAdmin?: boolean; // Legacy, keep for backward compat
-    role?: 'owner' | 'senior_admin' | 'admin'; // Specific access role
+    role?: 'owner' | 'senior_admin' | 'admin' | 'user'; // Specific access role
     notes?: string; // Legacy simple note
     commentHistory?: UserNote[]; // New structured comments
     registrationDate?: string; // ISO string

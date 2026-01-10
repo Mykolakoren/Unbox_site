@@ -136,7 +136,13 @@ export function ConfirmationStep() {
 
             const finalMethod: 'subscription' | 'balance' = (isSubscriptionEligible && state.paymentMethod === 'subscription') ? 'subscription' : 'balance';
 
-            if (currentUser && finalMethod === 'balance') {
+            // Check Balance (skip check if Admin is booking for another user - let Backend handle it or we need to fetch target user balance?
+            // Ideally we check target user balance. But we might not have it loaded in 'currentUser'.
+            // If bookingForUser is set, 'currentUser' is the Admin.
+            // We should trust Backend check or relax this check for Admin.
+            const isBookingForOther = !!state.bookingForUser && state.bookingForUser !== currentUser?.email;
+
+            if (currentUser && finalMethod === 'balance' && !isBookingForOther) {
                 let netPrice = totalPrice;
                 if (isRescheduling && oldBooking && currentUser) {
                     netPrice = totalPrice - oldBooking.finalPrice;
@@ -148,6 +154,8 @@ export function ConfirmationStep() {
                     return;
                 }
             }
+            // For Admin booking for other: we assume Admin knows what they are doing or Backend will reject.
+            // Ideally prompt Admin "User has balance X, proceed?" but for now just bypass frontend block.
 
             // Create bookings array
             const newBookings: any[] = [];
@@ -189,7 +197,8 @@ export function ConfirmationStep() {
                     price: item.price,
                     paymentMethod: finalMethod,
                     paymentSource: currentPaymentSource, // Add source
-                    hoursDeducted: finalMethod === 'subscription' ? (item.duration / 60) : 0
+                    hoursDeducted: finalMethod === 'subscription' ? (item.duration / 60) : 0,
+                    targetUserId: state.bookingForUser || undefined // Add target user
                 };
                 newBookings.push(bookingData);
 

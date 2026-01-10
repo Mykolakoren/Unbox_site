@@ -30,7 +30,7 @@ const mapToBackend = (b: Partial<BookingHistoryItem>): any => ({
     payment_source: b.paymentSource,
     format: b.format || 'individual',
     date: b.date, // frontend sends ISO string or Date
-    // user_email is optional
+    target_user_id: (b as any).targetUserId // Mapped from ad-hoc property added in ConfirmationStep
 });
 
 export const bookingsApi = {
