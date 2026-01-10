@@ -12,7 +12,7 @@ interface UserLoyaltyCardProps {
 }
 
 export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
-    const { users, bookings, currentUser, updatePersonalDiscount } = useUserStore();
+    const { users, bookings, updatePersonalDiscount } = useUserStore();
     const user = users.find(u => u.email === email);
     const [isEditDiscount, setIsEditDiscount] = useState(false);
     const [newDiscount, setNewDiscount] = useState(0);
@@ -48,7 +48,7 @@ export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
     const LevelIcon = LEVEL_CONFIG[level].icon;
 
     const handleUpdateDiscount = () => {
-        updatePersonalDiscount(user.email, newDiscount, discountReason, currentUser?.name || 'Admin');
+        updatePersonalDiscount(user.email, newDiscount, discountReason);
         setIsEditDiscount(false);
     };
 
