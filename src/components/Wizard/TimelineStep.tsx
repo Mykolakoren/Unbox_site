@@ -63,7 +63,7 @@ export function TimelineStep() {
             b.status === 'confirmed'
         ) : [];
 
-        console.log('[Timeline Debug] Relevant Bookings for', format(date, 'yyyy-MM-dd'), relevantBookings);
+
 
         relevantBookings.forEach(booking => {
             // If it's the booking we are currently editing, ignore it (don't block)
@@ -72,14 +72,14 @@ export function TimelineStep() {
             // If it is listed for Re-Rent, ignore it (don't block)
             // Note: We explicitly check for true to specificy intent
             if (booking.isReRentListed) {
-                console.log('[Timeline Debug] Skipping Re-Rented Booking:', booking.id, booking.startTime);
+
                 return;
             }
 
             if (booking.startTime) {
                 const startMins = timeToMinutes(booking.startTime);
                 const endMins = startMins + booking.duration;
-                console.log('[Timeline Debug] Blocking Internal:', booking.startTime, 'to', minutesToTime(endMins));
+
                 for (let m = startMins; m < endMins; m += 30) {
                     busySlots.push(minutesToTime(m));
                 }
@@ -104,7 +104,7 @@ export function TimelineStep() {
                 );
 
                 if (!overlapsReRent) {
-                    console.log('[Timeline Debug] Blocking External:', minutesToTime(startMins), 'to', minutesToTime(endMins));
+
                     for (let m = startMins; m < endMins; m += 30) {
                         const timeStr = minutesToTime(m);
                         if (!busySlots.includes(timeStr)) {
@@ -112,7 +112,7 @@ export function TimelineStep() {
                         }
                     }
                 } else {
-                    console.log('[Timeline Debug] Skipping External Event due to Re-Rent overlap');
+
                 }
             }
         });

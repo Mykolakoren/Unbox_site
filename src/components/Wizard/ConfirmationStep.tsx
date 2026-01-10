@@ -60,10 +60,6 @@ export function ConfirmationStep() {
         const bookingsList = groupSlotsIntoBookings(state.selectedSlots, state.date);
 
         let total = 0;
-        console.log('--- Confirmation Debug ---');
-        console.log('Slots:', state.selectedSlots);
-        console.log('Bookings:', bookingsList);
-        console.log('Accumulated Hours:', accumulatedWeeklyHours);
         const details = bookingsList.map(b => {
             const selectedExtras = EXTRAS.filter(e => state.extras.includes(e.id));
             const start = new Date(state.date);
@@ -83,11 +79,10 @@ export function ConfirmationStep() {
                 personalDiscountPercent: currentUser?.personalDiscountPercent,
                 pricingSystem: currentUser?.pricingSystem
             });
-            console.log('Price for', b.startTime, p);
+
             total += p.finalPrice;
             return { ...b, price: p, startDateTime: start, endDateTime: end, resourceId: b.resourceId };
         });
-        console.log('Total Price:', total);
 
         return { cartDetails: details, totalPrice: total };
     }, [state.selectedSlots, state.date, state.format, state.extras, state.paymentMethod, state.resourceId, accumulatedWeeklyHours]);

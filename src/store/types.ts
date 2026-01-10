@@ -30,6 +30,7 @@ export interface UserNote {
 }
 
 export interface User {
+    id: string; // UUID from backend
     email: string;
     name: string;
     phone: string;
@@ -102,15 +103,27 @@ export interface WaitlistEntry {
 
 export interface AuthSlice {
     currentUser: User | null;
-    login: (email: string, name?: string) => void;
+    login: (email: string, password?: string) => Promise<void>; // Make password optional for legacy compatibility, but async
     logout: () => void;
-    register: (user: User) => void;
+    register: (user: Partial<User> & { password?: string }) => Promise<void>;
+
+    // New OAuth methods
+    googleLogin: (token: string) => Promise<void>;
+    telegramLogin: (data: any) => Promise<void>;
+    fetchCurrentUser: () => Promise<void>;
+}
+
+export interface Credentials {
+    email: string;
+    password?: string;
 }
 
 export interface BookingSlice {
     bookings: BookingHistoryItem[];
-    addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;
-    addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => void;
+    fetchBookings: () => Promise<void>;
+    fetchAllBookings: () => Promise<void>; // Admin only
+    addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<void>;
+    addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<void>;
     cancelBooking: (id: string, isFreeReschedule?: boolean, reason?: string, adminUser?: User) => void;
     rescheduleBooking: (oldId: string, newBooking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;
     updateBooking: (booking: BookingHistoryItem) => void;
@@ -120,10 +133,11 @@ export interface BookingSlice {
 
 export interface UserSlice {
     users: User[];
-    updateUser: (updates: Partial<User>) => void;
-    updateUserById: (userId: string, updates: Partial<User>) => void;
-    toggleSubscriptionFreeze: (userId: string) => void;
-    updatePersonalDiscount: (userId: string, percent: number, reason: string, adminName: string) => void; // New action
+    fetchUsers: () => Promise<void>;
+    updateUser: (updates: Partial<User>) => Promise<void>;
+    updateUserById: (userId: string, updates: Partial<User>) => Promise<void>;
+    toggleSubscriptionFreeze: (userId: string) => Promise<void>;
+    updatePersonalDiscount: (userId: string, percent: number, reason: string) => Promise<void>; // New action
     runWeeklyReconciliation: () => { amount: number, totalHours: number, discountPercent: number } | null;
 
     // CRM Actions
@@ -137,8 +151,9 @@ export interface UserSlice {
 
 export interface WaitlistSlice {
     waitlist: WaitlistEntry[];
-    addToWaitlist: (entry: Omit<WaitlistEntry, 'id' | 'dateCreated' | 'status'>) => void;
-    removeFromWaitlist: (id: string) => void;
+    fetchWaitlist: () => Promise<void>;
+    addToWaitlist: (entry: Omit<WaitlistEntry, 'id' | 'dateCreated' | 'status'>) => Promise<void>;
+    removeFromWaitlist: (id: string) => Promise<void>;
 }
 
 // Finance & Audit

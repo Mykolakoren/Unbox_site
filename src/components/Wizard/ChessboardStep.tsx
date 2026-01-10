@@ -209,8 +209,7 @@ export function ChessboardStep() {
         return `${slotPrice} ₾`;
     };
 
-    console.log('Current Location:', locationId);
-    console.log('Filtered Resources:', resources);
+
 
     const handleNext = () => {
         setStep(3);

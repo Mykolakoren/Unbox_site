@@ -1,83 +1,77 @@
 import type { StateCreator } from 'zustand';
 import type { UserStore, UserSlice } from '../types';
+import { usersApi } from '../../api/users';
 import { startOfWeek, endOfWeek } from 'date-fns';
 
 export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set, get) => ({
     users: [],
 
-    updateUser: (updates) => set((state) => {
-        if (!state.currentUser) return state;
-        const updatedUser = { ...state.currentUser, ...updates };
-        return {
-            currentUser: updatedUser,
-            users: state.users.map(u => u.email === state.currentUser?.email ? updatedUser : u)
-        };
-    }),
+    fetchUsers: async () => {
+        try {
+            const users = await usersApi.getUsers();
+            set({ users });
+        } catch (error) {
+            console.error("Failed to fetch users", error);
+        }
+    },
 
-    updateUserById: (userId, updates) => set((state) => {
-        const updatedUsers = state.users.map(u =>
-            u.email === userId ? { ...u, ...updates } : u
-        );
-        const currentUser = state.currentUser?.email === userId
-            ? { ...state.currentUser, ...updates }
-            : state.currentUser;
-        return { users: updatedUsers, currentUser };
-    }),
+    updateUser: async (updates) => {
+        try {
+            // Assume this updates "currentUser". Backend has updateMe.
+            const updatedUser = await usersApi.updateMe(updates);
+            set((state) => ({
+                currentUser: updatedUser,
+                users: state.users.map(u => u.email === updatedUser.email ? updatedUser : u)
+            }));
+        } catch (error) {
+            console.error("Failed to update profile", error);
+        }
+    },
 
-    toggleSubscriptionFreeze: (userId) => set((state) => {
-        const userIndex = state.users.findIndex(u => u.email === userId);
-        if (userIndex === -1) return state;
+    updateUserById: async (userId, updates) => {
+        try {
+            const updatedUser = await usersApi.updateUser(userId, updates);
+            set((state) => ({
+                users: state.users.map(u => u.email === updatedUser.email ? updatedUser : u),
+                currentUser: state.currentUser?.email === updatedUser.email ? updatedUser : state.currentUser
+            }));
+        } catch (error) {
+            console.error("Failed to update user", error);
+        }
+    },
 
-        const user = state.users[userIndex];
-        if (!user.subscription) return state;
+    toggleSubscriptionFreeze: async (userId) => {
+        try {
+            const updatedUser = await usersApi.toggleSubscriptionFreeze(userId);
+            set((state) => ({
+                users: state.users.map(u => u.email === updatedUser.email ? updatedUser : u),
+                currentUser: state.currentUser?.email === updatedUser.email ? updatedUser : state.currentUser
+            }));
+        } catch (error) {
+            console.error("Failed to toggle freeze", error);
+        }
+    },
 
-        const newSubscription = {
-            ...user.subscription,
-            isFrozen: !user.subscription.isFrozen,
-            frozenUntil: !user.subscription.isFrozen
-                ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-                : undefined
-        };
-
-        const updatedUser = { ...user, subscription: newSubscription };
-        const updatedUsers = [...state.users];
-        updatedUsers[userIndex] = updatedUser;
-
-        return {
-            users: updatedUsers,
-            currentUser: state.currentUser?.email === userId ? updatedUser : state.currentUser
-        };
-    }),
-
-    updatePersonalDiscount: (userId, percent, reason, adminName) => set((state) => {
-        const user = state.users.find(u => u.email === userId);
-        if (!user) return state;
-
-        const oldPercent = user.personalDiscountPercent || 0;
-        if (oldPercent === percent) return state;
-
-        const logEntry = {
-            id: `log-${Date.now()}`,
-            date: new Date().toISOString(),
-            oldValue: oldPercent,
-            newValue: percent,
-            reason,
-            adminName
-        };
-
-        const updatedUser = {
-            ...user,
-            personalDiscountPercent: percent,
-            discountHistory: [logEntry, ...(user.discountHistory || [])]
-        };
-
-        return {
-            users: state.users.map(u => u.email === userId ? updatedUser : u),
-            currentUser: state.currentUser?.email === userId ? updatedUser : state.currentUser
-        };
-    }),
+    updatePersonalDiscount: async (userId, percent, reason) => {
+        try {
+            const updatedUser = await usersApi.updatePersonalDiscount(userId, percent, reason);
+            set((state) => ({
+                users: state.users.map(u => u.email === updatedUser.email ? updatedUser : u),
+                currentUser: state.currentUser?.email === updatedUser.email ? updatedUser : state.currentUser
+            }));
+        } catch (error) {
+            console.error("Failed to update discount", error);
+        }
+    },
 
     runWeeklyReconciliation: () => {
+        // ... (Keep existing client-side logic or migrate? This logic calculates bonuses based on bookings)
+        // Since we don't have a backend endpoint for this specific logic yet, I'll keep it as "client side calculation"
+        // but it modifies balance!
+        // To persist, I must call API.
+        // It updates currentUser balance.
+        // I should call `updateMe` or `updateUser` with new balance.
+
         const state = get();
         const currentUser = state.currentUser;
         if (!currentUser) return null;
@@ -119,15 +113,11 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
 
         if (delta > 0.01) {
             const bonus = parseFloat(delta.toFixed(2));
-            const updatedUser = {
-                ...currentUser,
-                balance: currentUser.balance + bonus
-            };
+            const newBalance = currentUser.balance + bonus;
 
-            set({
-                currentUser: updatedUser,
-                users: state.users.map(u => u.email === currentUser.email ? updatedUser : u)
-            });
+            // Call API to persist
+            // This is "bonus", maybe just update balance.
+            get().updateUser({ balance: newBalance }); // using our new async action
 
             return { amount: bonus, totalHours, discountPercent };
         }
@@ -136,91 +126,66 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
     },
 
     // CRM Actions Implementation
-    addUserTag: (email, tag) => set((state) => {
+    addUserTag: async (email, tag) => {
+        // Fetch fresh user or use state?
+        const state = get();
         const user = state.users.find(u => u.email === email);
-        if (!user) return state;
+        if (!user) return; // Or fetch
 
         const tags = user.tags || [];
-        if (tags.includes(tag)) return state;
+        if (tags.includes(tag)) return;
 
-        const updatedUser = { ...user, tags: [...tags, tag] };
+        const newTags = [...tags, tag];
+        await get().updateUserById(email, { tags: newTags });
+    },
 
-        return {
-            users: state.users.map(u => u.email === email ? updatedUser : u),
-            currentUser: state.currentUser?.email === email ? updatedUser : state.currentUser
-        };
-    }),
-
-    removeUserTag: (email, tag) => set((state) => {
+    removeUserTag: async (email, tag) => {
+        const state = get();
         const user = state.users.find(u => u.email === email);
-        if (!user || !user.tags) return state;
+        if (!user || !user.tags) return;
 
-        const updatedUser = {
-            ...user,
-            tags: user.tags.filter(t => t !== tag)
-        };
+        const newTags = user.tags.filter(t => t !== tag);
+        await get().updateUserById(email, { tags: newTags });
+    },
 
-        return {
-            users: state.users.map(u => u.email === email ? updatedUser : u),
-            currentUser: state.currentUser?.email === email ? updatedUser : state.currentUser
-        };
-    }),
-
-    addUserTask: (email, taskData) => set((state) => {
+    addUserTask: async (email, taskData) => {
+        const state = get();
         const user = state.users.find(u => u.email === email);
-        if (!user) return state;
+        if (!user) return;
 
         const newTask = {
             id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             ...taskData,
             createdAt: new Date().toISOString()
         };
+        const newTasks = [...(user.adminTasks || []), newTask];
+        await get().updateUserById(email, { adminTasks: newTasks } as any); // adminTasks field match
+    },
 
-        const updatedUser = {
-            ...user,
-            adminTasks: [...(user.adminTasks || []), newTask]
-        };
-
-        return {
-            users: state.users.map(u => u.email === email ? updatedUser : u),
-            currentUser: state.currentUser?.email === email ? updatedUser : state.currentUser
-        };
-    }),
-
-    toggleUserTask: (email, taskId) => set((state) => {
+    toggleUserTask: async (email, taskId) => {
+        const state = get();
         const user = state.users.find(u => u.email === email);
-        if (!user || !user.adminTasks) return state;
+        if (!user || !user.adminTasks) return;
 
         const updatedTasks = user.adminTasks.map(t =>
             t.id === taskId ? { ...t, isCompleted: !t.isCompleted } : t
         );
+        await get().updateUserById(email, { adminTasks: updatedTasks } as any);
+    },
 
-        const updatedUser = { ...user, adminTasks: updatedTasks };
-
-        return {
-            users: state.users.map(u => u.email === email ? updatedUser : u),
-            currentUser: state.currentUser?.email === email ? updatedUser : state.currentUser
-        };
-    }),
-
-    removeUserTask: (email, taskId) => set((state) => {
+    removeUserTask: async (email, taskId) => {
+        const state = get();
         const user = state.users.find(u => u.email === email);
-        if (!user || !user.adminTasks) return state;
+        if (!user || !user.adminTasks) return;
 
-        const updatedUser = {
-            ...user,
-            adminTasks: user.adminTasks.filter(t => t.id !== taskId)
-        };
+        const updatedTasks = user.adminTasks.filter(t => t.id !== taskId);
+        await get().updateUserById(email, { adminTasks: updatedTasks } as any);
+    },
 
-        return {
-            users: state.users.map(u => u.email === email ? updatedUser : u),
-            currentUser: state.currentUser?.email === email ? updatedUser : state.currentUser
-        };
-    }),
-
-    addUserComment: (email, text, adminName) => set((state) => {
+    addUserComment: async (email, text, adminName) => {
+        const state = get();
         const user = state.users.find(u => u.email === email);
-        if (!user) return state;
+        if (!user) return;
 
         const newNote = {
             id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -228,15 +193,7 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
             date: new Date().toISOString(),
             adminName
         };
-
-        const updatedUser = {
-            ...user,
-            commentHistory: [newNote, ...(user.commentHistory || [])]
-        };
-
-        return {
-            users: state.users.map(u => u.email === email ? updatedUser : u),
-            currentUser: state.currentUser?.email === email ? updatedUser : state.currentUser
-        };
-    })
+        const newHistory = [newNote, ...(user.commentHistory || [])];
+        await get().updateUserById(email, { commentHistory: newHistory } as any);
+    }
 });

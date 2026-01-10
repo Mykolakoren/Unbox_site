@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { startOfToday, startOfMonth, isAfter, isSameDay } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
@@ -5,7 +6,12 @@ import clsx from 'clsx';
 import { format } from 'date-fns';
 
 export function AdminDashboard() {
-    const { bookings, users } = useUserStore();
+    const { bookings, users, fetchUsers, fetchAllBookings } = useUserStore();
+
+    useEffect(() => {
+        fetchUsers();
+        fetchAllBookings();
+    }, [fetchUsers, fetchAllBookings]);
 
     // 1. Calculate Stats
     const now = new Date();

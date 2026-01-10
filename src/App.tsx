@@ -60,9 +60,24 @@ function BookingWizard() {
   );
 }
 
+import { useEffect } from 'react';
+import { useUserStore } from './store/userStore';
 import { Toaster } from 'sonner';
 
 function App() {
+  const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
+
+  useEffect(() => {
+    // Determine if we should fetch. 
+    // If token exists in localStorage, we should try.
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchCurrentUser();
+      fetchBookings();
+      fetchWaitlist();
+    }
+  }, [fetchBookings, fetchCurrentUser, fetchWaitlist]);
+
   return (
     <>
       <Toaster position="top-center" richColors closeButton />

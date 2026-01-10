@@ -1,72 +1,89 @@
 import type { StateCreator } from 'zustand';
-import type { UserStore, AuthSlice, User, Format } from '../types';
+import type { UserStore, AuthSlice } from '../types';
+import { authApi } from '../../api/auth';
 
-export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set, get) => ({
+export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set) => ({
     currentUser: null,
 
-    login: (email, name) => {
-        const state = get();
-        const existingUser = state.users.find(u => u.email === email);
-        if (existingUser) {
-            if (!existingUser.subscription) {
-                const patchedUser: User = {
-                    ...existingUser,
-                    subscription: {
-                        id: 'sub-existing',
-                        name: 'Unbox Pro (Promo)',
-                        totalHours: 20,
-                        remainingHours: 12.5,
-                        freeReschedules: 2,
-                        expiryDate: '2026-01-30T00:00:00.000Z',
-                        isFrozen: false,
-                        includedFormats: ['individual'] as Format[]
-                    }
-                };
-                const updatedUsers = state.users.map(u => u.email === email ? patchedUser : u);
-                set({ users: updatedUsers, currentUser: patchedUser });
-            } else {
-                set({ currentUser: existingUser });
+    login: async (email, password) => {
+        try {
+            if (!password) {
+                console.warn("Legacy login without password used. Cannot authenticate against backend.");
+                return;
             }
-        } else if (name) {
-            const newUser: User = {
-                email,
-                name,
-                phone: '',
-                level: 'basic',
-                balance: 0,
-                creditLimit: 0,
-                subscription: {
-                    id: 'sub-123',
-                    name: 'Unbox Pro',
-                    totalHours: 20,
-                    remainingHours: 12.5,
-                    freeReschedules: 2,
-                    expiryDate: '2026-01-30T00:00:00.000Z',
-                    isFrozen: false,
-                    includedFormats: ['individual'] as Format[]
-                },
-                registrationDate: new Date().toISOString(),
-                tags: [],
-                adminTasks: []
-            };
-            set({ users: [...state.users, newUser], currentUser: newUser });
+            const { access_token } = await authApi.login({ email, password });
+            localStorage.setItem('token', access_token);
+
+            // Fetch full user profile
+            const user = await authApi.getMe();
+            set({ currentUser: user });
+        } catch (error) {
+            console.error("Login failed:", error);
+            throw error; // Re-throw for UI to handle
         }
     },
 
-    logout: () => set({ currentUser: null }),
-
-    register: (user) => set((state) => ({
-        users: [...state.users, {
-            ...user,
-            registrationDate: user.registrationDate || new Date().toISOString(),
-            tags: user.tags || [],
-            adminTasks: user.adminTasks || []
-        }],
-        currentUser: {
-            ...user,
-            registrationDate: user.registrationDate || new Date().toISOString(),
-            tags: user.tags || [],
-            adminTasks: user.adminTasks || []
+    googleLogin: async (token) => {
+        try {
+            const { access_token } = await authApi.googleLogin(token);
+            localStorage.setItem('token', access_token);
+            const user = await authApi.getMe();
+            set({ currentUser: user });
+        } catch (error) {
+            console.error("Google Login failed:", error);
+            throw error;
         }
-    })),
+    },
+
+    telegramLogin: async (data) => {
+        try {
+            const { access_token } = await authApi.telegramLogin(data);
+            localStorage.setItem('token', access_token);
+            const user = await authApi.getMe();
+            set({ currentUser: user });
+        } catch (error) {
+            console.error("Telegram Login failed:", error);
+            throw error;
+        }
+    },
+
+    fetchCurrentUser: async () => {
+        try {
+            const user = await authApi.getMe();
+            set({ currentUser: user });
+        } catch (error) {
+            console.error("Failed to fetch current user", error);
+            // Optionally logout if token is invalid
+            // localStorage.removeItem('token');
+            // set({ currentUser: null });
+        }
+    },
+
+    logout: () => {
+        localStorage.removeItem('token');
+        set({ currentUser: null });
+    },
+
+    register: async (userData) => {
+        try {
+            if (!userData.password) {
+                throw new Error("Password required for registration");
+            }
+            // Register returns the created user, but we usually want to login immediately or wait for email
+            await authApi.register({ ...userData, password: userData.password });
+
+            // Auto-login after register
+            const { access_token } = await authApi.login({
+                email: userData.email!,
+                password: userData.password
+            });
+            localStorage.setItem('token', access_token);
+            const user = await authApi.getMe();
+            set({ currentUser: user });
+
+        } catch (error) {
+            console.error("Registration failed:", error);
+            throw error;
+        }
+    },
 });

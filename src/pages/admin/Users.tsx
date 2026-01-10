@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useUserStore, type User } from '../../store/userStore';
 import { Search, Edit, Shield, User as UserIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 
 export function AdminUsers() {
-    const { users, updateUserById } = useUserStore();
+    const { users, updateUserById, fetchUsers } = useUserStore();
     const [search, setSearch] = useState('');
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
+
+    useEffect(() => {
+        fetchUsers();
+    }, [fetchUsers]);
 
     const filteredUsers = users.filter(u =>
         u.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -36,6 +40,7 @@ export function AdminUsers() {
                     <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                         <tr>
                             <th className="p-4 pl-6">Клиент</th>
+                            <th className="p-4">Роль</th>
                             <th className="p-4">Баланс</th>
                             <th className="p-4">Скидка</th>
                             <th className="p-4">Тип цен</th>
@@ -62,6 +67,19 @@ export function AdminUsers() {
                                             {user.phone && <div className="text-xs text-unbox-grey">{user.phone}</div>}
                                         </div>
                                     </Link>
+                                </td>
+                                <td className="p-4">
+                                    <span className={clsx(
+                                        "px-2 py-1 rounded text-xs font-medium border",
+                                        user.role === 'owner' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                            user.role === 'senior_admin' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                                user.role === 'admin' ? "bg-green-50 text-green-700 border-green-200" :
+                                                    "bg-gray-50 text-gray-600 border-gray-200"
+                                    )}>
+                                        {user.role === 'owner' ? 'Владелец' :
+                                            user.role === 'senior_admin' ? 'Ст. Админ' :
+                                                user.role === 'admin' ? 'Админ' : 'Пользователь'}
+                                    </span>
                                 </td>
                                 <td className="p-4">
                                     <span className={clsx(
@@ -115,82 +133,134 @@ export function AdminUsers() {
 
             {/* Edit User Modal */}
             {selectedUser && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-6 animate-in zoom-in-95">
-                        <div className="flex justify-between items-start">
-                            <h2 className="text-xl font-bold">Настройки клиента</h2>
-                            <button onClick={() => setSelectedUser(null)} className="text-gray-400 hover:text-black">
-                                <span className="text-2xl">×</span>
-                            </button>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div className="text-sm text-gray-500 pb-2 border-b border-gray-100">
-                                {selectedUser.name} ({selectedUser.email})
-                            </div>
-
-                            {/* Pricing System Toggle */}
-                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                <div>
-                                    <div className="font-medium text-sm text-gray-900">Персональное ценообразование</div>
-                                    <div className="text-xs text-gray-500">Отключает стандартные скидки</div>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        className="sr-only peer"
-                                        checked={selectedUser.pricingSystem === 'personal'}
-                                        onChange={() => {
-                                            if (selectedUser) {
-                                                const newSystem = selectedUser.pricingSystem === 'personal' ? 'standard' : 'personal';
-                                                updateUserById(selectedUser.email, { pricingSystem: newSystem });
-                                                // Update local state to reflect change immediately in modal
-                                                setSelectedUser({ ...selectedUser, pricingSystem: newSystem });
-                                            }
-                                        }}
-                                    />
-                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                </label>
-                            </div>
-
-                            {/* Personal Discount Input */}
-                            {selectedUser.pricingSystem === 'personal' && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Размер персональной скидки (%)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        value={selectedUser.personalDiscountPercent || ''}
-                                        onChange={(e) => {
-                                            const val = parseInt(e.target.value);
-                                            if (!isNaN(val)) {
-                                                updateUserById(selectedUser.email, { personalDiscountPercent: val });
-                                                setSelectedUser({ ...selectedUser, personalDiscountPercent: val });
-                                            }
-                                        }}
-                                        className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
-                                    />
-                                </div>
-                            )}
-
-                            {/* Status (Level) Selection - Optional / Legacy support if needed */}
-                            {/* We removed 'status' UI per user request, but can re-add here if needed. Focusing on pricing. */}
-
-                            <div className="pt-4 border-t border-gray-100 flex justify-end">
-                                <button
-                                    onClick={() => setSelectedUser(null)}
-                                    className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
-                                >
-                                    Готово
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <UserEditModal
+                    user={selectedUser}
+                    onClose={() => setSelectedUser(null)}
+                    onUpdate={updateUserById}
+                />
             )}
         </div>
     );
 }
+
+function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () => void, onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
+    const currentUser = useUserStore(s => s.currentUser);
+    const isOwner = currentUser?.role === 'owner';
+
+    // Local state for all editable fields
+    const [localRole, setLocalRole] = useState(user.role || 'user');
+    const [localPricingSystem, setLocalPricingSystem] = useState(user.pricingSystem);
+    const [localDiscount, setLocalDiscount] = useState(user.personalDiscountPercent || 0);
+
+    const handleSave = async () => {
+        const updates: Partial<User> = {};
+
+        if (localRole !== user.role) updates.role = localRole;
+        if (localPricingSystem !== user.pricingSystem) updates.pricingSystem = localPricingSystem;
+        if (localDiscount !== user.personalDiscountPercent) updates.personalDiscountPercent = localDiscount;
+
+        if (Object.keys(updates).length > 0) {
+            await onUpdate(user.id, updates);
+        }
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-6 animate-in zoom-in-95">
+                <div className="flex justify-between items-start">
+                    <h2 className="text-xl font-bold">Настройки клиента</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-black">
+                        <span className="text-2xl">×</span>
+                    </button>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="text-sm text-gray-500 pb-2 border-b border-gray-100">
+                        {user.name} ({user.email})
+                    </div>
+
+                    {/* Role Management - ONLY FOR OWNER */}
+                    {isOwner && (
+                        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                            <label className="block text-sm font-medium text-gray-700">Роль в системе</label>
+                            <select
+                                className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
+                                value={localRole}
+                                onChange={(e) => setLocalRole(e.target.value as any)}
+                            >
+                                <option value="user">Пользователь</option>
+                                <option value="admin">Администратор</option>
+                                <option value="senior_admin">Старший Админ</option>
+                                <option value="owner">Владелец</option>
+                            </select>
+                            {localRole !== user.role && (
+                                <div className="text-xs text-amber-600 font-medium">
+                                    Роль будет изменена после нажатия "Сохранить"
+                                </div>
+                            )}
+                            <div className="text-xs text-gray-500">
+                                Внимание: изменение роли влияет на доступ к функционалу.
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Pricing System Toggle */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div>
+                            <div className="font-medium text-sm text-gray-900">Персональное ценообразование</div>
+                            <div className="text-xs text-gray-500">Отключает стандартные скидки</div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={localPricingSystem === 'personal'}
+                                onChange={() => {
+                                    setLocalPricingSystem(localPricingSystem === 'personal' ? 'standard' : 'personal');
+                                }}
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
+                    {/* Personal Discount Input */}
+                    {localPricingSystem === 'personal' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Размер персональной скидки (%)
+                            </label>
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={localDiscount}
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    if (!isNaN(val)) setLocalDiscount(val);
+                                }}
+                                className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
+                            />
+                        </div>
+                    )}
+
+                    <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                        >
+                            Отмена
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+                        >
+                            Сохранить
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
