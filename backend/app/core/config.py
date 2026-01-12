@@ -20,10 +20,8 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env
     
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
-        "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175"
-    ]
+    # Allow all origins for Vercel Preview deployments
+    BACKEND_CORS_ORIGINS: List[str] = ["*"]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
