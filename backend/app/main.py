@@ -29,6 +29,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    print(f"DEBUG REQUEST: {request.method} {request.url.path}")
+    response = await call_next(request)
+    print(f"DEBUG RESPONSE: {response.status_code}")
+    return response
+
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
