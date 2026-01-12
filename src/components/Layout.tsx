@@ -17,7 +17,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         className="flex items-center gap-2 group"
                         onClick={() => useBookingStore.getState().reset()}
                     >
-                        <img src="/src/assets/unbox-logo.png" alt="Unbox" className="h-12 object-contain cursor-pointer group-hover:opacity-80 transition-opacity" />
+                        <img src="/unbox-logo.png" alt="Unbox" className="h-12 object-contain cursor-pointer group-hover:opacity-80 transition-opacity" />
                     </Link>
 
                     <div className="flex items-center gap-4">
