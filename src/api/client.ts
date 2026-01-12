@@ -1,9 +1,12 @@
 import axios from 'axios';
 
-// In production (Vercel), always use relative path to route via vercel.json rewrites
+// Backend on Render.com
+const PROD_API_URL = 'https://unbox-site.onrender.com/api/v1';
+
+// In production (Vercel), point to Render backend
 // In development, use VITE_API_URL or fallback to localhost
 export const API_URL = import.meta.env.PROD
-    ? '/api/v1'
+    ? PROD_API_URL
     : (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1');
 
 export const api = axios.create({
