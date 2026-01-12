@@ -5,9 +5,13 @@ from app.core.config import settings
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 
-# Use DATABASE_URL if set (Production), otherwise SQLite (Local)
-# Vercel Postgres usually sets POSTGRES_URL or DATABASE_URL
-connection_url = settings.DATABASE_URL or sqlite_url
+import os
+
+# Use DATABASE_URL or POSTGRES_URL if set (Production), otherwise SQLite (Local)
+# Vercel Postgres usually sets POSTGRES_URL
+connection_url = settings.DATABASE_URL or os.environ.get("POSTGRES_URL") or sqlite_url
+
+print(f"DEBUG: Connecting to DB type: {'POSTGRES' if 'postgres' in str(connection_url) else 'SQLITE'}")
 
 # Fix for Vercel/Neon: "postgres://" -> "postgresql://"
 if connection_url and connection_url.startswith("postgres://"):
