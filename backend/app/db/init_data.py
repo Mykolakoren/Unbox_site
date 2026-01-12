@@ -22,8 +22,20 @@ def init_data():
                 role="owner" # Using 'owner' based on recent RBAC changes
             )
             
-            # Manual creation to set hashed password
-            db_obj = User.model_validate(user_in, update={"password": get_password_hash(user_in.password)})
+            # Manual creation to correctly set hashed_password
+            db_obj = User.model_validate(
+                user_in, 
+                update={
+                    "hashed_password": get_password_hash(user_in.password),
+                    "password": None # Exclude password if it's not in the model but in user_in
+                }
+            )
+            # Actually, model_validate with update might still validates input against User model fields first.
+            # Safer way:
+            user_data = user_in.model_dump()
+            del user_data["password"] # Remove plaintext
+            user_data["hashed_password"] = get_password_hash(user_in.password)
+            db_obj = User(**user_data)
             session.add(db_obj)
             session.commit()
             logger.info("First superuser created")
