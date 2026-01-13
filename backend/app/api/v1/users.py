@@ -49,14 +49,22 @@ def update_user_me(
     """
     Update own profile.
     """
-    user_data = user_in.dict(exclude_unset=True)
-    for key, value in user_data.items():
-        setattr(current_user, key, value)
-    
-    session.add(current_user)
-    session.commit()
-    session.refresh(current_user)
-    return current_user
+    """
+    Update own profile.
+    """
+    try:
+        user_data = user_in.dict(exclude_unset=True)
+        for key, value in user_data.items():
+            setattr(current_user, key, value)
+        
+        session.add(current_user)
+        session.commit()
+        session.refresh(current_user)
+        return current_user
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=400, detail=f"DEBUG USERS: {str(e)}")
 
 @router.patch("/{user_id}", response_model=UserRead)
 def update_user(
