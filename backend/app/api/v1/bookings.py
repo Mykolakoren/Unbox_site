@@ -17,13 +17,16 @@ def read_my_bookings(
     """
     Retrieve current user's bookings.
     """
-    statement = select(Booking).where(Booking.user_uuid == current_user.id).offset(skip).limit(limit)
+    statement = select(Booking).where(
+        (Booking.user_uuid == current_user.id) | 
+        (Booking.user_id == current_user.email)
+    ).offset(skip).limit(limit)
     bookings = session.exec(statement).all()
     return bookings
 
 from app.services.booking import check_availability
 
-@router.get("/", response_model=List[BookingRead])
+@router.get("", response_model=List[BookingRead])
 def read_bookings(
     session: Session = Depends(deps.get_session),
     skip: int = 0,
@@ -39,7 +42,22 @@ def read_bookings(
     bookings = session.exec(select(Booking).offset(skip).limit(limit)).all()
     return bookings
 
-@router.post("/", response_model=BookingRead)
+@router.get("/public", response_model=List[BookingRead])
+def read_public_bookings(
+    session: Session = Depends(deps.get_session),
+    start_date: str = None, 
+    end_date: str = None
+) -> Any:
+    """
+    Retrieve ALL confirmed bookings for availability display (Public).
+    Hides user details automatically via response_model selection or we can use a slimmer model.
+    """
+    # TODO: Filter by date range for optimization
+    query = select(Booking).where(Booking.status == "confirmed")
+    bookings = session.exec(query).all()
+    return bookings
+
+@router.post("", response_model=BookingRead)
 def create_booking(
     *,
     session: Session = Depends(deps.get_session),

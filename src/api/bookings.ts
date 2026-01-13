@@ -42,15 +42,20 @@ export const bookingsApi = {
     },
 
     getAllBookings: async (skip = 0, limit = 1000) => {
-        const response = await api.get<any[]>('/bookings/', {
+        const response = await api.get<any[]>('/bookings', { // Removed slash
             params: { skip, limit }
         });
         return response.data.map(mapToFrontend);
     },
 
+    getPublicBookings: async () => {
+        const response = await api.get<any[]>('/bookings/public');
+        return response.data.map(mapToFrontend);
+    },
+
     createBooking: async (booking: Partial<BookingHistoryItem>) => {
         const payload = mapToBackend(booking);
-        const response = await api.post<any>('/bookings/', payload);
+        const response = await api.post<any>('/bookings', payload); // Removed slash
         return mapToFrontend(response.data);
     },
 

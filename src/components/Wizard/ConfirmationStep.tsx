@@ -233,10 +233,10 @@ export function ConfirmationStep() {
 
                     if (newBookings.length > 1) {
                         // Add others manually
-                        addBookings(newBookings.slice(1));
+                        await addBookings(newBookings.slice(1));
                     }
                 } else {
-                    addBookings(newBookings);
+                    await addBookings(newBookings);
                 }
 
                 setConfirmed(true);

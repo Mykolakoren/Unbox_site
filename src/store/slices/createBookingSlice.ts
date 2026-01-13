@@ -7,8 +7,17 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
     fetchBookings: async () => {
         try {
-            const bookings = await bookingsApi.getMyBookings();
-            set({ bookings });
+            // 1. Fetch own bookings (detailed)
+            const myBookings = await bookingsApi.getMyBookings();
+
+            // 2. Fetch public bookings (availability)
+            const publicBookings = await bookingsApi.getPublicBookings();
+
+            // 3. Merge: prefer 'myBookings' (more details) over 'publicBookings'
+            const myIds = new Set(myBookings.map(b => b.id));
+            const uniquePublic = publicBookings.filter(b => !myIds.has(b.id));
+
+            set({ bookings: [...myBookings, ...uniquePublic] });
         } catch (error) {
             console.error("Failed to fetch bookings", error);
         }
