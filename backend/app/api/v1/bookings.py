@@ -140,9 +140,9 @@ def create_booking(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=400, detail=f"DEBUG ERROR: {str(e)}")
+        # Log to server console but return clean error to user
+        print(f"Booking Creation Error: {e}") 
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/{booking_id}", response_model=BookingRead)
 def read_booking(
