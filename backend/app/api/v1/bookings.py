@@ -138,7 +138,12 @@ def read_booking(
     """
     Get booking by ID.
     """
-    booking = session.get(Booking, booking_id)
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        
+    booking = session.get(Booking, b_uuid)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
@@ -157,7 +162,12 @@ def cancel_booking(
     """
     Cancel a booking (Soft delete or Status change).
     """
-    booking = session.get(Booking, booking_id)
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        
+    booking = session.get(Booking, b_uuid)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
         

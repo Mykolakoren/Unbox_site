@@ -19,6 +19,26 @@ def read_user_me(
     """
     return current_user
 
+@router.post("/debug/promote-me", response_model=UserRead)
+def debug_promote_me(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Emergency Owner Promotion (Temporary).
+    Only allows specific email to become Owner.
+    """
+    allowed_emails = ["koren.nikolas@gmail.com", "mykola@example.com"]
+    if current_user.email not in allowed_emails:
+        raise HTTPException(status_code=403, detail="Not in allowed list for promotion")
+        
+    current_user.role = "owner"
+    current_user.is_admin = True
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
 @router.patch("/me", response_model=UserRead)
 def update_user_me(
     *,
