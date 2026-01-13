@@ -70,64 +70,72 @@ def create_booking(
     """
     Create new booking.
     """
-    # Check availability
-    is_available = check_availability(
-        session=session,
-        resource_id=booking_in.resource_id,
-        date=booking_in.date,
-        start_time=booking_in.start_time,
-        duration=booking_in.duration
-    )
+    try:
+        # Check availability
+        is_available = check_availability(
+            session=session,
+            resource_id=booking_in.resource_id,
+            date=booking_in.date,
+            start_time=booking_in.start_time,
+            duration=booking_in.duration
+        )
+        
+        if not is_available:
+            raise HTTPException(status_code=400, detail="Time slot is already booked")
     
-    if not is_available:
-        raise HTTPException(status_code=400, detail="Time slot is already booked")
+        # Determine Booking Owner
+        booking_owner = current_user
+        if current_user.is_admin and booking_in.target_user_id:
+            # Try to find target user
+            from uuid import UUID
+            target = None
+            try:
+                 target = session.get(User, UUID(booking_in.target_user_id))
+            except ValueError:
+                 pass
+            
+            if not target:
+                 target = session.exec(select(User).where(User.email == booking_in.target_user_id)).first()
+                 
+            if target:
+                 booking_owner = target
+        
+        # Payment Processing (Charge booking_owner)
+        if booking_in.payment_method == 'subscription':
+            # Check subscription
+            if not booking_owner.subscription or booking_owner.subscription.get('remainingHours', 0) < (booking_in.duration / 60):
+                 raise HTTPException(status_code=400, detail="Insufficient subscription hours")
+            
+            # Deduct hours
+            new_sub = booking_owner.subscription.copy()
+            deduction = booking_in.duration / 60
+            new_sub['remainingHours'] -= deduction
+            booking_owner.subscription = new_sub
+            
+        else:
+            # Balance deduction (allow negative for credit)
+            booking_owner.balance -= booking_in.final_price
+    
+        session.add(booking_owner)
+        
+        booking = Booking.from_orm(booking_in)
+        booking.user_uuid = booking_owner.id
+        booking.user_id = booking_owner.email 
+        
+        if booking.payment_method == 'subscription':
+             booking.hours_deducted = booking.duration / 60
+        
+        session.add(booking)
+        session.commit()
+        session.refresh(booking)
+        return booking
 
-    # Determine Booking Owner
-    booking_owner = current_user
-    if current_user.is_admin and booking_in.target_user_id:
-        # Try to find target user
-        from uuid import UUID
-        target = None
-        try:
-             target = session.get(User, UUID(booking_in.target_user_id))
-        except ValueError:
-             pass
-        
-        if not target:
-             target = session.exec(select(User).where(User.email == booking_in.target_user_id)).first()
-             
-        if target:
-             booking_owner = target
-    
-    # Payment Processing (Charge booking_owner)
-    if booking_in.payment_method == 'subscription':
-        # Check subscription
-        if not booking_owner.subscription or booking_owner.subscription.get('remainingHours', 0) < (booking_in.duration / 60):
-             raise HTTPException(status_code=400, detail="Insufficient subscription hours")
-        
-        # Deduct hours
-        new_sub = booking_owner.subscription.copy()
-        deduction = booking_in.duration / 60
-        new_sub['remainingHours'] -= deduction
-        booking_owner.subscription = new_sub
-        
-    else:
-        # Balance deduction (allow negative for credit)
-        booking_owner.balance -= booking_in.final_price
-
-    session.add(booking_owner)
-    
-    booking = Booking.from_orm(booking_in)
-    booking.user_uuid = booking_owner.id
-    booking.user_id = booking_owner.email 
-    
-    if booking.payment_method == 'subscription':
-         booking.hours_deducted = booking.duration / 60
-    
-    session.add(booking)
-    session.commit()
-    session.refresh(booking)
-    return booking
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=400, detail=f"DEBUG ERROR: {str(e)}")
 
 @router.get("/{booking_id}", response_model=BookingRead)
 def read_booking(
