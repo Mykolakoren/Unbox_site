@@ -118,9 +118,16 @@ def create_booking(
     
         session.add(booking_owner)
         
-        booking = Booking.from_orm(booking_in)
-        booking.user_uuid = booking_owner.id
-        booking.user_id = booking_owner.email 
+        # FIX: Create dict first, add required fields, then instantiate
+        booking_data = booking_in.dict()
+        booking_data['user_uuid'] = booking_owner.id
+        booking_data['user_id'] = booking_owner.email
+        
+        # Remove fields not in Booking model (like target_user_id)
+        if 'target_user_id' in booking_data:
+            del booking_data['target_user_id']
+            
+        booking = Booking(**booking_data)
         
         if booking.payment_method == 'subscription':
              booking.hours_deducted = booking.duration / 60
