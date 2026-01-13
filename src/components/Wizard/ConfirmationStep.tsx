@@ -251,9 +251,10 @@ export function ConfirmationStep() {
                 toast.error("Ошибка создания бронирования: не удалось сформировать данные.");
             }
 
-        } catch (error) {
+        } catch (error: any) {
             console.error("Booking Confirmation Failed:", error);
-            toast.error("Произошла ошибка при подтверждении бронирования.");
+            const message = error.response?.data?.detail || "Произошла ошибка при подтверждении бронирования.";
+            toast.error(message);
         }
     };
 
