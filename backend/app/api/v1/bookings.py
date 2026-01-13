@@ -27,6 +27,7 @@ def read_my_bookings(
 from app.services.booking import check_availability
 
 @router.get("", response_model=List[BookingRead])
+@router.get("/", response_model=List[BookingRead], include_in_schema=False)
 def read_bookings(
     session: Session = Depends(deps.get_session),
     skip: int = 0,
@@ -43,6 +44,7 @@ def read_bookings(
     return bookings
 
 @router.get("/public", response_model=List[BookingRead])
+@router.get("/public/", response_model=List[BookingRead], include_in_schema=False)
 def read_public_bookings(
     session: Session = Depends(deps.get_session),
     start_date: str = None, 
@@ -58,6 +60,7 @@ def read_public_bookings(
     return bookings
 
 @router.post("", response_model=BookingRead)
+@router.post("/", response_model=BookingRead, include_in_schema=False)
 def create_booking(
     *,
     session: Session = Depends(deps.get_session),
