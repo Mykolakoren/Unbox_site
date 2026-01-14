@@ -92,6 +92,30 @@ export const RESOURCES: Resource[] = [
         formats: ['individual'],
         description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.'
     },
+    {
+        id: 'unbox_uni_capsule_2',
+        name: 'Капсула 2',
+        type: 'capsule',
+        hourlyRate: 10,
+        capacity: 1,
+        locationId: 'unbox_uni',
+        area: 2,
+        minBookingHours: 1,
+        formats: ['individual'],
+        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.'
+    },
+    {
+        id: 'unbox_uni_room_9',
+        name: 'Кабинет 9',
+        type: 'cabinet',
+        hourlyRate: 20,
+        capacity: 10,
+        locationId: 'unbox_uni',
+        area: 16,
+        minBookingHours: 1,
+        formats: ['individual', 'group'],
+        description: 'Уютный кабинет для индивидуальной и групповой работы.'
+    },
 ];
 
 export const EXTRAS: ExtraOption[] = [

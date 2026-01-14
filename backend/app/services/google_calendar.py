@@ -49,12 +49,37 @@ class GoogleCalendarService:
     def get_calendar_id(self, resource_id: str) -> Optional[str]:
         """
         Map internal resource_id to Google Calendar ID.
-        Expected ENVs: CALENDAR_ID_CABINET_5, CALENDAR_ID_CAPSULE
         """
-        if resource_id == 'cabinet-5':
-            return os.environ.get("CALENDAR_ID_CABINET_5")
-        elif resource_id == 'unbox_one' or 'capsule' in resource_id: # Assuming capsule is unbox_one or similar
-            return os.environ.get("CALENDAR_ID_CAPSULE")
+        mapping = {
+            # Unbox One
+            "unbox_one_room_1": "CALENDAR_ID_CABINET_1",
+            "unbox_one_room_2": "CALENDAR_ID_CABINET_2",
+            
+            # Unbox Uni
+            "unbox_uni_room_5": "CALENDAR_ID_CABINET_5",
+            "unbox_uni_room_6": "CALENDAR_ID_CABINET_6",
+            "unbox_uni_room_7": "CALENDAR_ID_CABINET_7",
+            "unbox_uni_room_8": "CALENDAR_ID_CABINET_8",
+            "unbox_uni_room_9": "CALENDAR_ID_CABINET_9",
+            
+            # Capsules
+            "unbox_uni_capsule_1": "CALENDAR_ID_CAPSULE_1",
+            "unbox_uni_capsule_2": "CALENDAR_ID_CAPSULE_2",
+        }
+        
+        env_var = mapping.get(resource_id)
+        
+        # Legacy fallback / Aliases
+        if not env_var:
+             if "capsule" in resource_id and "1" in resource_id: env_var = "CALENDAR_ID_CAPSULE_1"
+             if "capsule" in resource_id and "2" in resource_id: env_var = "CALENDAR_ID_CAPSULE_2"
+             # Fallback for old "capsule" var if user hasn't updated to _1 yet
+             if resource_id == "unbox_uni_capsule_1" and not os.environ.get("CALENDAR_ID_CAPSULE_1"):
+                  return os.environ.get("CALENDAR_ID_CAPSULE") 
+
+        if env_var:
+            return os.environ.get(env_var)
+            
         return None
 
     def create_event(self, booking: Booking) -> Optional[str]:
