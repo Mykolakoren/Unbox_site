@@ -129,5 +129,11 @@ class GoogleCalendarService:
         except Exception as e:
             logger.error(f"Failed to delete GCal event {event_id}: {e}")
 
+    def is_connected(self) -> bool:
+        """
+        Check if the service is authenticated and ready.
+        """
+        return self.service is not None
+
 # Global instance
 gcal_service = GoogleCalendarService()

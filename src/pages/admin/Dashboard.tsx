@@ -4,6 +4,7 @@ import { startOfToday, startOfMonth, isAfter, isSameDay } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
+import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 
 export function AdminDashboard() {
     const { bookings, users, fetchUsers, fetchAllBookings } = useUserStore();
@@ -70,9 +71,12 @@ export function AdminDashboard() {
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
-            <div>
-                <h1 className="text-2xl font-bold mb-2">Обзор</h1>
-                <p className="text-unbox-grey">Статистика и сводка по сервису</p>
+            <div className="flex justify-between items-start">
+                <div>
+                    <h1 className="text-2xl font-bold mb-2">Обзор</h1>
+                    <p className="text-unbox-grey">Статистика и сводка по сервису</p>
+                </div>
+                <IntegrationStatus />
             </div>
 
             {/* Stats Grid */}
