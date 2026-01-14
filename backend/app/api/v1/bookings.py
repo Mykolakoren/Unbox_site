@@ -118,24 +118,49 @@ def create_booking(
     
         session.add(booking_owner)
         
-        # FIX: Create dict first, add required fields, then instantiate
-        booking_data = booking_in.dict()
-        booking_data['user_uuid'] = booking_owner.id
-        booking_data['user_id'] = booking_owner.email
+    # ... (existing imports)
+from app.services.google_calendar import gcal_service
+
+@router.post("", response_model=BookingRead)
+@router.post("/", response_model=BookingRead, include_in_schema=False)
+def create_booking(
+    *,
+    session: Session = Depends(deps.get_session),
+    booking_in: BookingCreate,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    # ... (Create logic up to commit) ...
+    # FIX: Create dict first, add required fields, then instantiate
+    booking_data = booking_in.dict()
+    booking_data['user_uuid'] = booking_owner.id
+    booking_data['user_id'] = booking_owner.email
+    
+    # Remove fields not in Booking model (like target_user_id)
+    if 'target_user_id' in booking_data:
+        del booking_data['target_user_id']
         
-        # Remove fields not in Booking model (like target_user_id)
-        if 'target_user_id' in booking_data:
-            del booking_data['target_user_id']
-            
-        booking = Booking(**booking_data)
-        
-        if booking.payment_method == 'subscription':
-             booking.hours_deducted = booking.duration / 60
-        
-        session.add(booking)
-        session.commit()
-        session.refresh(booking)
-        return booking
+    booking = Booking(**booking_data)
+    
+    if booking.payment_method == 'subscription':
+            booking.hours_deducted = booking.duration / 60
+    
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+    
+    # --- GOOGLE CALENDAR SYNC ---
+    try:
+        event_id = gcal_service.create_event(booking)
+        if event_id:
+            booking.gcal_event_id = event_id
+            session.add(booking)
+            session.commit()
+            session.refresh(booking)
+    except Exception as e:
+        print(f"GCal Sync Failed (Non-blocking): {e}")
+    # ----------------------------
+
+    return booking
 
     except HTTPException:
         raise
@@ -144,39 +169,13 @@ def create_booking(
         print(f"Booking Creation Error: {e}") 
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/{booking_id}", response_model=BookingRead)
-def read_booking(
-    booking_id: str,
-    session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    """
-    Get booking by ID.
-    """
-    try:
-        b_uuid = UUID(booking_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
-        
-    booking = session.get(Booking, b_uuid)
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    
-    # Access control: Owner or Admin
-    if booking.user_uuid != current_user.id and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized")
-        
-    return booking
-
 @router.delete("/{booking_id}", response_model=BookingRead)
 def cancel_booking(
     booking_id: str,
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """
-    Cancel a booking (Soft delete or Status change).
-    """
+    # ... (Fetch booking logic) ...
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
@@ -192,6 +191,15 @@ def cancel_booking(
         
     if booking.status == "cancelled":
         return booking
+
+    # --- GOOGLE CALENDAR SYNC (DELETE) ---
+    if booking.gcal_event_id:
+        gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
+        booking.gcal_event_id = None # Clear references
+    # -------------------------------------
+
+    # Refund Logic ...
+    # ... (Rest of function) ...
 
     # Refund Logic
     if booking.payment_method == 'subscription':

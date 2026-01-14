@@ -28,6 +28,10 @@ class BookingBase(SQLModel):
     
     # Re-Rent Logic
     is_re_rent_listed: bool = Field(default=False)
+    
+    # Google Calendar Sync
+    gcal_event_id: Optional[str] = None
+    gcal_calendar_id: Optional[str] = None
 
 class Booking(BookingBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
