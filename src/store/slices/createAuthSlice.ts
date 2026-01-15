@@ -11,8 +11,8 @@ export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set)
                 console.warn("Legacy login without password used. Cannot authenticate against backend.");
                 return;
             }
-            const { access_token } = await authApi.login({ email, password });
-            localStorage.setItem('token', access_token);
+            const { accessToken } = await authApi.login({ email, password });
+            localStorage.setItem('token', accessToken);
 
             // Fetch full user profile
             const user = await authApi.getMe();
@@ -25,8 +25,8 @@ export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set)
 
     googleLogin: async (token) => {
         try {
-            const { access_token } = await authApi.googleLogin(token);
-            localStorage.setItem('token', access_token);
+            const { accessToken } = await authApi.googleLogin(token);
+            localStorage.setItem('token', accessToken);
             const user = await authApi.getMe();
             set({ currentUser: user });
         } catch (error) {
@@ -37,8 +37,8 @@ export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set)
 
     telegramLogin: async (data) => {
         try {
-            const { access_token } = await authApi.telegramLogin(data);
-            localStorage.setItem('token', access_token);
+            const { accessToken } = await authApi.telegramLogin(data);
+            localStorage.setItem('token', accessToken);
             const user = await authApi.getMe();
             set({ currentUser: user });
         } catch (error) {
@@ -73,11 +73,11 @@ export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set)
             await authApi.register({ ...userData, password: userData.password });
 
             // Auto-login after register
-            const { access_token } = await authApi.login({
+            const { accessToken } = await authApi.login({
                 email: userData.email!,
                 password: userData.password
             });
-            localStorage.setItem('token', access_token);
+            localStorage.setItem('token', accessToken);
             const user = await authApi.getMe();
             set({ currentUser: user });
 

@@ -81,7 +81,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
 
         // 2. Bookings
         bookings.forEach(b => {
-            const createdDate = getSafeDate(b.dateCreated);
+            const createdDate = getSafeDate(b.createdAt);
 
             // Event: Created
             list.push({

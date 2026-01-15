@@ -46,7 +46,7 @@ export function AdminWaitlist() {
                             return (
                                 <tr key={entry.id} className="hover:bg-unbox-light/30 transition-colors">
                                     <td className="p-4 pl-6 text-unbox-grey text-sm">
-                                        {format(new Date(entry.dateCreated), 'dd.MM HH:mm')}
+                                        {format(new Date(entry.createdAt), 'dd.MM HH:mm')}
                                     </td>
                                     <td className="p-4 font-medium text-unbox-dark">
                                         {getUserName(entry.userId)}

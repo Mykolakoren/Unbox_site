@@ -7,11 +7,26 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
     fetchBookings: async () => {
         try {
-            // 1. Fetch own bookings (detailed)
-            const myBookings = await bookingsApi.getMyBookings();
+            // Use Promise.allSettled to fetch both in parallel and survive individual failures
+            const [myResult, publicResult] = await Promise.allSettled([
+                bookingsApi.getMyBookings(),
+                bookingsApi.getPublicBookings()
+            ]);
 
-            // 2. Fetch public bookings (availability)
-            const publicBookings = await bookingsApi.getPublicBookings();
+            let myBookings: BookingHistoryItem[] = [];
+            let publicBookings: BookingHistoryItem[] = [];
+
+            if (myResult.status === 'fulfilled') {
+                myBookings = myResult.value;
+            } else {
+                console.error("Failed to fetch my bookings", myResult.reason);
+            }
+
+            if (publicResult.status === 'fulfilled') {
+                publicBookings = publicResult.value;
+            } else {
+                console.error("Failed to fetch public bookings", publicResult.reason);
+            }
 
             // 3. Merge: prefer 'myBookings' (more details) over 'publicBookings'
             const myIds = new Set(myBookings.map(b => b.id));
@@ -19,7 +34,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             set({ bookings: [...myBookings, ...uniquePublic] });
         } catch (error) {
-            console.error("Failed to fetch bookings", error);
+            console.error("Failed to fetch bookings (Critical)", error);
         }
     },
 
@@ -71,7 +86,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             ...newBookingData,
             userId: currentUser.email,
             status: 'confirmed',
-            dateCreated: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
             finalPrice: newBookingData.finalPrice || 0
         };
 

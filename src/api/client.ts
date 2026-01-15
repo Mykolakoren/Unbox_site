@@ -16,23 +16,36 @@ export const api = axios.create({
     },
 });
 
-// Request interceptor to add Auth Token
+import { toCamelCase, toSnakeCase } from '../utils/transformers';
+
+// Request interceptor to add Auth Token & Transform Request
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Transform request data to snake_case for backend
+    if (config.data && !(config.data instanceof FormData)) {
+        config.data = toSnakeCase(config.data);
+    }
+
     return config;
 });
 
-// Response interceptor to handle 401 (Auth Error)
+// Response interceptor: Transform Response & Handle 401
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        // Transform response data to camelCase for frontend
+        if (response.data) {
+            response.data = toCamelCase(response.data);
+        }
+        return response;
+    },
     (error) => {
         if (error.response?.status === 401) {
             localStorage.removeItem('token');
-            // Optionally redirect to login or clear store
-            // window.location.href = '/login'; 
+            // Optionally redirect
         }
         return Promise.reject(error);
     }

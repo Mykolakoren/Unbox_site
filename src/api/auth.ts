@@ -5,8 +5,8 @@ import type { User, Credentials } from '../store/types';
 // For now assuming we mirror the backend responses
 
 interface AuthResponse {
-    access_token: string;
-    token_type: string;
+    accessToken: string;
+    tokenType: string;
 }
 
 export const authApi = {

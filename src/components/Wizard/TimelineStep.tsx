@@ -104,11 +104,16 @@ export function TimelineStep() {
                 );
 
                 if (!overlapsReRent) {
+                    // Check intersection with all 30m slots using strict overlap
+                    for (let m = 0; m < 24 * 60; m += 30) {
+                        const slotStart = m;
+                        const slotEnd = m + 30;
 
-                    for (let m = startMins; m < endMins; m += 30) {
-                        const timeStr = minutesToTime(m);
-                        if (!busySlots.includes(timeStr)) {
-                            busySlots.push(timeStr);
+                        if (slotStart < endMins && slotEnd > startMins) {
+                            const timeStr = minutesToTime(m);
+                            if (!busySlots.includes(timeStr)) {
+                                busySlots.push(timeStr);
+                            }
                         }
                     }
                 } else {

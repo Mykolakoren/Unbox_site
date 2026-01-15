@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { healthApi } from '../../api/health';
-import { CheckCircle2, AlertTriangle, Loader2, Calendar } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 
 export function IntegrationStatus() {

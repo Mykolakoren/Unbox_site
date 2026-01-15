@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, Users, LogOut, Clock, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, LogOut, Clock, Menu, X, Box } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
+import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 
 export function AdminLayout() {
     const location = useLocation();
@@ -11,6 +12,7 @@ export function AdminLayout() {
 
     const navItems = [
         { path: '/admin', icon: LayoutDashboard, label: 'Обзор', exact: true },
+        { path: '/admin/cabinets', icon: Box, label: 'Кабинеты' },
         { path: '/admin/bookings', icon: Calendar, label: 'Бронирования' },
         { path: '/admin/users', icon: Users, label: 'Клиенты' },
         { path: '/admin/waitlist', icon: Clock, label: 'Лист ожидания' },
@@ -50,6 +52,9 @@ export function AdminLayout() {
                 </nav>
 
                 <div className="p-4 border-t border-gray-100">
+                    <div className="mb-4">
+                        <IntegrationStatus />
+                    </div>
                     <button
                         onClick={() => {
                             logout();
@@ -115,6 +120,9 @@ export function AdminLayout() {
                 </nav>
 
                 <div className="p-4 border-t border-gray-100">
+                    <div className="mb-4">
+                        <IntegrationStatus />
+                    </div>
                     <button
                         onClick={() => {
                             logout();

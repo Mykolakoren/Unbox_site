@@ -1,13 +1,21 @@
 import { create } from 'zustand';
-import type { BookingState, Format, PricingResult } from '../types';
-
+import type { BookingState, Format, PricingResult } from '../types'; // Keep original imports
+import { resourcesApi } from '../api/resources';
+import { RESOURCES } from '../utils/data';
+import type { Resource } from '../types/index'; // Ensure Resource is imported
 
 export interface BookingStore extends BookingState {
+
+    // Data
+    resources: Resource[];
+    fetchResources: () => Promise<void>;
+
     // Actions
     setStep: (step: number) => void;
+    // ... rest of actions
     setLocation: (locationId: string) => void;
     setResource: (resourceId: string) => void;
-    setResourceId: (resourceId: string) => void;
+    setResourceId: (resourceId: string) => void; // Alias
     setFormat: (format: Format) => void;
     setDate: (date: Date) => void;
     setTimeRange: (startTime: string, duration: number) => void;
@@ -48,6 +56,16 @@ const INITIAL_STATE: BookingState = {
 
 export const useBookingStore = create<BookingStore>((set) => ({
     ...INITIAL_STATE,
+    resources: RESOURCES, // Initial static data
+    fetchResources: async () => {
+        try {
+            const data = await resourcesApi.getAll();
+            set({ resources: data });
+        } catch (error) {
+            console.error("Failed to fetch resources:", error);
+            // Fallback is already set
+        }
+    },
     editBookingId: null,
     mode: 'create',
     bookingForUser: null,

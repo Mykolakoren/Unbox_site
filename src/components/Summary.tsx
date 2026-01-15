@@ -6,15 +6,39 @@ import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
 import { EXTRAS } from '../utils/data';
 import { groupSlotsIntoBookings } from '../utils/cartHelpers';
+import { startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 
 export function Summary() {
     const state = useBookingStore();
+    const { currentUser, bookings, users } = useUserStore();
+
+    // Determine effective user for pricing
+    const effectiveUser = state.bookingForUser
+        ? users.find(u => u.email === state.bookingForUser) || currentUser
+        : currentUser;
+
+    // Calculate Accumulated Weekly Hours (Same logic as ConfirmationStep)
+    const accumulatedWeeklyHours = useMemo(() => {
+        if (!effectiveUser) return 0;
+        const now = state.date;
+        const start = startOfWeek(now, { weekStartsOn: 1 });
+        const end = endOfWeek(now, { weekStartsOn: 1 });
+
+        // Filter confirmed bookings for this week
+        const weeklyBookings = bookings.filter(b =>
+            b.userId === effectiveUser.email &&
+            b.status === 'confirmed' &&
+            isWithinInterval(new Date(b.date), { start, end })
+        );
+
+        return weeklyBookings.reduce((sum, b) => sum + (b.duration / 60), 0);
+    }, [effectiveUser, bookings, state.date]);
 
     const { cartBookings, total } = useMemo(() => {
         // 1. Group slots
-        const bookings = groupSlotsIntoBookings(state.selectedSlots, state.date);
+        const bookingsList = groupSlotsIntoBookings(state.selectedSlots, state.date);
 
-        if (bookings.length === 0) {
+        if (bookingsList.length === 0) {
             return {
                 cartBookings: [],
                 total: { basePrice: 0, extrasPrice: 0, discountAmount: 0, finalPrice: 0 }
@@ -29,7 +53,7 @@ export function Summary() {
         let totalDiscount = 0;
         let totalFinal = 0;
 
-        const details = bookings.map(b => {
+        const details = bookingsList.map(b => {
             const selectedExtras = EXTRAS.filter(e => state.extras.includes(e.id));
 
             // Create date objects
@@ -45,9 +69,10 @@ export function Summary() {
                 extras: selectedExtras,
                 paymentMethod: state.paymentMethod,
                 resourceId: b.resourceId,
+                accumulatedWeeklyHours: accumulatedWeeklyHours,
                 // Pass User Settings
-                personalDiscountPercent: useUserStore.getState().currentUser?.personalDiscountPercent,
-                pricingSystem: useUserStore.getState().currentUser?.pricingSystem
+                personalDiscountPercent: effectiveUser?.personalDiscountPercent,
+                pricingSystem: effectiveUser?.pricingSystem
             });
 
             totalBase += p.basePrice;
@@ -68,7 +93,7 @@ export function Summary() {
             }
         };
 
-    }, [state.selectedSlots, state.date, state.format, state.extras]);
+    }, [state.selectedSlots, state.date, state.format, state.extras, state.paymentMethod, currentUser, bookings, accumulatedWeeklyHours]);
 
     const handleBack = () => {
         state.setStep(state.step - 1);

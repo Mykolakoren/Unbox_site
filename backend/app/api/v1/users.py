@@ -266,11 +266,22 @@ def update_personal_discount(
     # For now we keep the JSON history in frontend/backend model alignment, 
     # BUT we also add the official Timeline Entry
     
-    current_history = user.discount_history or []
+    # Create a new list to ensure SQLAlchemy detects the change (JSON mutation)
+    current_history = list(user.discount_history) if user.discount_history else []
     current_history.insert(0, log_entry) # Prepend
     
     user.personal_discount_percent = percent
     user.discount_history = current_history 
+    
+    # Auto-switch pricing system
+    if percent > 0:
+        user.pricing_system = "personal"
+    else:
+        user.pricing_system = "standard"
+
+    # Force mark as modified just in case (though reassignment usually works)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "discount_history") 
     
     session.add(user)
     session.commit()

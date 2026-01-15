@@ -4,7 +4,7 @@ import { startOfToday, startOfMonth, isAfter, isSameDay } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
+
 
 export function AdminDashboard() {
     const { bookings, users, fetchUsers, fetchAllBookings } = useUserStore();
@@ -66,7 +66,7 @@ export function AdminDashboard() {
 
     // Recent Bookings (Last 5 created)
     const recentBookings = [...bookings]
-        .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime())
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5);
 
     return (
@@ -76,7 +76,6 @@ export function AdminDashboard() {
                     <h1 className="text-2xl font-bold mb-2">Обзор</h1>
                     <p className="text-unbox-grey">Статистика и сводка по сервису</p>
                 </div>
-                <IntegrationStatus />
             </div>
 
             {/* Stats Grid */}

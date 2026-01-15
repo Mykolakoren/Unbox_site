@@ -30,7 +30,8 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
             resourceId,
             date: format(date, 'yyyy-MM-dd'),
             startTime,
-            endTime
+            endTime,
+            createdAt: new Date().toISOString()
         });
 
         alert('Вы добавлены в лист ожидания! Мы сообщим, если слот освободится.');

@@ -36,7 +36,7 @@ export function MyBookingsPage() {
 
     const userBookings = bookings
         .filter(b => b.userId === currentUser?.email)
-        .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     const handleEdit = (booking: any) => {
         startEditing(booking, 'reschedule');
@@ -114,7 +114,7 @@ export function MyBookingsPage() {
                             <div className="flex justify-between items-start mb-4">
                                 <div>
                                     <div className="text-xs text-gray-500 mb-1">
-                                        Забронировано: {format(new Date(booking.dateCreated), 'd MMMM yyyy, HH:mm', { locale: ru })}
+                                        Забронировано: {format(new Date(booking.createdAt), 'd MMMM yyyy, HH:mm', { locale: ru })}
                                     </div>
                                     <h3 className="font-bold text-lg mb-1">
                                         {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}

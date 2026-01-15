@@ -10,8 +10,9 @@ export function DashboardOverview() {
     if (!currentUser) return null;
 
     const isNegative = currentUser.balance < 0;
-    const availableCredit = currentUser.creditLimit + currentUser.balance;
-    const usagePercent = Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / currentUser.creditLimit) * 100));
+    const creditLimit = currentUser.creditLimit || 0;
+    const availableCredit = creditLimit + currentUser.balance;
+    const usagePercent = Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / creditLimit) * 100));
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">

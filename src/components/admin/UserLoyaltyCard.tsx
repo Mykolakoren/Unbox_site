@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Crown, Percent, History, TrendingUp, Info } from 'lucide-react';
+import { Crown, Percent, History, TrendingUp, Info, Pencil } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -48,7 +48,7 @@ export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
     const LevelIcon = LEVEL_CONFIG[level].icon;
 
     const handleUpdateDiscount = () => {
-        updatePersonalDiscount(user.email, newDiscount, discountReason);
+        updatePersonalDiscount(user.id, newDiscount, discountReason);
         setIsEditDiscount(false);
     };
 
@@ -116,35 +116,47 @@ export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            {isEditDiscount ? (
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="number"
-                                        value={newDiscount}
-                                        onChange={(e) => setNewDiscount(Number(e.target.value))}
-                                        className="w-16 px-2 py-1 text-sm border rounded"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={discountReason}
-                                        onChange={(e) => setDiscountReason(e.target.value)}
-                                        placeholder="Reason"
-                                        className="w-24 px-2 py-1 text-sm border rounded"
-                                    />
-                                    <button onClick={handleUpdateDiscount} className="text-xs bg-black text-white px-2 py-1 rounded">Ok</button>
-                                    <button onClick={() => setIsEditDiscount(false)} className="text-xs bg-gray-100 px-2 py-1 rounded">X</button>
-                                </div>
-                            ) : (
-                                <button
-                                    onClick={() => {
-                                        setNewDiscount(user.personalDiscountPercent || 0);
-                                        setIsEditDiscount(true);
-                                    }}
-                                    className="font-bold text-lg text-blue-600 hover:underline"
-                                >
-                                    {user.personalDiscountPercent || 0}%
-                                </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {isEditDiscount ? (
+                                    <div className="flex items-center gap-2 animate-in fade-in zoom-in duration-200">
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                value={newDiscount}
+                                                onChange={(e) => setNewDiscount(Number(e.target.value))}
+                                                className="w-16 px-2 py-1 text-sm border border-unbox-green rounded focus:outline-none focus:ring-1 focus:ring-unbox-green"
+                                                autoFocus
+                                            />
+                                            <span className="absolute right-1 top-1 text-xs text-gray-400 font-bold">%</span>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={discountReason}
+                                            onChange={(e) => setDiscountReason(e.target.value)}
+                                            placeholder="Причина"
+                                            className="w-32 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-unbox-green"
+                                        />
+                                        <button onClick={handleUpdateDiscount} className="text-xs bg-black text-white px-2 py-1 rounded hover:bg-gray-800 transition-colors">Ok</button>
+                                        <button onClick={() => setIsEditDiscount(false)} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 transition-colors">X</button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3">
+                                        <span className={clsx("font-bold text-lg", user.personalDiscountPercent ? "text-unbox-green" : "text-gray-400")}>
+                                            {user.personalDiscountPercent || 0}%
+                                        </span>
+                                        <button
+                                            onClick={() => {
+                                                setNewDiscount(user.personalDiscountPercent || 0);
+                                                setIsEditDiscount(true);
+                                            }}
+                                            className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-unbox-dark transition-colors"
+                                            title="Изменить скидку"
+                                        >
+                                            <Pencil size={14} />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 

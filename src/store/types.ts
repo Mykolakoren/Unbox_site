@@ -38,11 +38,11 @@ export interface User {
     avatarUrl?: string;
     password?: string;
     balance: number;
-    creditLimit: number;
     subscription?: Subscription;
-    personalDiscountPercent?: number;
+    creditLimit?: number;
     discountHistory?: DiscountLogEntry[]; // New history
     pricingSystem?: 'standard' | 'personal';
+    personalDiscountPercent?: number; // Added field
     isAdmin?: boolean; // Legacy, keep for backward compat
     role?: 'owner' | 'senior_admin' | 'admin' | 'user'; // Specific access role
     notes?: string; // Legacy simple note
@@ -69,7 +69,7 @@ export interface BookingHistoryItem extends BookingState {
     id: string;
     userId: string;
     status: 'confirmed' | 'cancelled' | 'completed' | 're-rented' | 'rescheduled' | 'no_show';
-    dateCreated: string;
+    createdAt: string;
     finalPrice: number;
     paymentSource?: 'subscription' | 'deposit' | 'credit';
     hoursDeducted?: number;
@@ -97,7 +97,7 @@ export interface WaitlistEntry {
     date: string;
     startTime: string;
     endTime: string;
-    dateCreated: string;
+    createdAt: string;
     status: 'active' | 'fulfilled' | 'cancelled';
 }
 

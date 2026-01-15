@@ -19,10 +19,22 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env
     
+    # Google Calendar
+    GOOGLE_SERVICE_ACCOUNT_FILE: Optional[str] = None
+    CALENDAR_ID_CABINET_1: Optional[str] = None
+    CALENDAR_ID_CABINET_2: Optional[str] = None
+    CALENDAR_ID_CABINET_5: Optional[str] = None
+    CALENDAR_ID_CABINET_6: Optional[str] = None
+    CALENDAR_ID_CABINET_7: Optional[str] = None
+    CALENDAR_ID_CABINET_8: Optional[str] = None
+    CALENDAR_ID_CABINET_9: Optional[str] = None
+    CALENDAR_ID_CAPSULE_1: Optional[str] = None
+    CALENDAR_ID_CAPSULE_2: Optional[str] = None
+
     # CORS
     # Allow all origins for Vercel Preview deployments
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra='ignore')
 
 settings = Settings()

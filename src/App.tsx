@@ -21,6 +21,7 @@ import { AdminBookings } from './pages/admin/Bookings';
 import { AdminDashboard } from './pages/admin/Dashboard';
 import { AdminWaitlist } from './pages/admin/Waitlist';
 import { AdminUserDetails } from './pages/admin/UserDetails';
+import { AdminCabinets } from './pages/admin/Cabinets';
 
 // Booking Flow Wrapper
 function BookingWizard() {
@@ -42,16 +43,20 @@ function BookingWizard() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto">
-        <div className="lg:col-span-8">
+      <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-7xl mx-auto px-4 transition-all duration-300`}>
+        <div className={`
+          transition-all duration-300
+          ${step === 2 ? 'lg:col-span-12' : 'lg:col-span-8'}
+        `}>
           {step === 1 && <ContextStep onNext={() => useBookingStore.getState().setStep(2)} />}
           {step === 2 && <ChessboardStep />}
           {step === 3 && <OptionsStep />}
           {step === 4 && <ConfirmationStep />}
         </div>
 
-        {step < 5 && (
-          <div className="lg:col-span-4 hidden lg:block">
+        {/* Sidebar Summary - Hidden on Step 2 (Chessboard) to give full width */}
+        {step !== 2 && step < 5 && (
+          <div className="lg:col-span-4 hidden lg:block sticky top-8 h-fit">
             <Summary />
           </div>
         )}
@@ -99,6 +104,7 @@ function App() {
           <Route index element={<AdminDashboard />} /> {/* Dashboard Home */}
           <Route path="users" element={<AdminUsers />} />
           <Route path="users/:email" element={<AdminUserDetails />} />
+          <Route path="cabinets" element={<AdminCabinets />} />
           <Route path="bookings" element={<AdminBookings />} />
           <Route path="waitlist" element={<AdminWaitlist />} />
         </Route>

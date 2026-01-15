@@ -1,4 +1,4 @@
-import { User as UserIcon } from 'lucide-react';
+import { User as UserIcon, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { useBookingStore } from '../store/bookingStore';
@@ -21,6 +21,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     </Link>
 
                     <div className="flex items-center gap-4">
+                        {user && (user.role === 'admin' || user.role === 'owner') && (
+                            <Link to="/admin">
+                                <Button variant="ghost" size="sm" className="font-medium text-unbox-dark hover:text-unbox-green">
+                                    <ShieldCheck size={18} className="mr-2" />
+                                    Админ-панель
+                                </Button>
+                            </Link>
+                        )}
+
                         {user ? (
                             <Link to="/dashboard" className="flex items-center gap-2 hover:bg-gray-100 p-1.5 rounded-lg transition-colors">
                                 <div className="hidden sm:block text-right">

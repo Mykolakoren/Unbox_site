@@ -18,6 +18,9 @@ export interface Resource {
     area?: number;
     minBookingHours?: number;
     formats?: Format[];
+    photos?: string[];
+    videoUrl?: string; // Mapped from video_url
+    isActive?: boolean;
 }
 
 export interface TimeSlot {

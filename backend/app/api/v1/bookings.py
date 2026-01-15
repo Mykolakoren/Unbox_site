@@ -18,7 +18,7 @@ def read_my_bookings(
     Retrieve current user's bookings.
     """
     statement = select(Booking).where(
-        (Booking.user_uuid == current_user.id) | 
+        # (Booking.user_uuid == current_user.id) | # Disable until DB migration
         (Booking.user_id == current_user.email)
     ).offset(skip).limit(limit)
     bookings = session.exec(statement).all()
@@ -70,9 +70,13 @@ def create_booking(
     """
     Create new booking.
     """
+    # Import service here or at top (using local for safety in this edit)
+    from app.services.google_calendar import gcal_service
+
     try:
         # Check availability
-        is_available = check_availability(
+        # Check availability
+        is_available, reason = check_availability(
             session=session,
             resource_id=booking_in.resource_id,
             date=booking_in.date,
@@ -81,7 +85,7 @@ def create_booking(
         )
         
         if not is_available:
-            raise HTTPException(status_code=400, detail="Time slot is already booked")
+            raise HTTPException(status_code=400, detail=f"Time slot is already booked: {reason}")
     
         # Determine Booking Owner
         booking_owner = current_user
@@ -113,54 +117,53 @@ def create_booking(
             booking_owner.subscription = new_sub
             
         else:
-            # Balance deduction (allow negative for credit)
+            # Balance deduction (allow negative for credit if within limit)
+            # Credit logic: balance can go negative down to -credit_limit.
+            # Available funds = balance + credit_limit
+            # If available_funds < price, raise Error.
+            
+            # Note: credit_limit is positive number (e.g. 100)
+            # If balance is -50, limit 100 => 50 available.
+            
+            available_funds = booking_owner.balance + booking_owner.credit_limit
+            if available_funds < booking_in.final_price:
+                 raise HTTPException(status_code=400, detail="Insufficient funds (exceeds credit limit)")
+
             booking_owner.balance -= booking_in.final_price
     
         session.add(booking_owner)
         
-    # ... (existing imports)
-from app.services.google_calendar import gcal_service
-
-@router.post("", response_model=BookingRead)
-@router.post("/", response_model=BookingRead, include_in_schema=False)
-def create_booking(
-    *,
-    session: Session = Depends(deps.get_session),
-    booking_in: BookingCreate,
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    # ... (Create logic up to commit) ...
-    # FIX: Create dict first, add required fields, then instantiate
-    booking_data = booking_in.dict()
-    booking_data['user_uuid'] = booking_owner.id
-    booking_data['user_id'] = booking_owner.email
-    
-    # Remove fields not in Booking model (like target_user_id)
-    if 'target_user_id' in booking_data:
-        del booking_data['target_user_id']
+        # FIX: Create dict first, add required fields, then instantiate
+        booking_data = booking_in.dict()
+        booking_data['user_uuid'] = booking_owner.id
+        booking_data['user_id'] = booking_owner.email
         
-    booking = Booking(**booking_data)
+        # Remove fields not in Booking model (like target_user_id)
+        if 'target_user_id' in booking_data:
+            del booking_data['target_user_id']
+            
+        booking = Booking(**booking_data)
+        
+        if booking.payment_method == 'subscription':
+                booking.hours_deducted = booking.duration / 60
+        
+        session.add(booking)
+        session.commit()
+        session.refresh(booking)
+        
+        # --- GOOGLE CALENDAR SYNC ---
+        try:
+            event_id = gcal_service.create_event(booking)
+            if event_id:
+                booking.gcal_event_id = event_id
+                session.add(booking)
+                session.commit()
+                session.refresh(booking)
+        except Exception as e:
+            print(f"GCal Sync Failed (Non-blocking): {e}")
+        # ----------------------------
     
-    if booking.payment_method == 'subscription':
-            booking.hours_deducted = booking.duration / 60
-    
-    session.add(booking)
-    session.commit()
-    session.refresh(booking)
-    
-    # --- GOOGLE CALENDAR SYNC ---
-    try:
-        event_id = gcal_service.create_event(booking)
-        if event_id:
-            booking.gcal_event_id = event_id
-            session.add(booking)
-            session.commit()
-            session.refresh(booking)
-    except Exception as e:
-        print(f"GCal Sync Failed (Non-blocking): {e}")
-    # ----------------------------
-
-    return booking
+        return booking
 
     except HTTPException:
         raise

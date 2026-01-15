@@ -4,6 +4,7 @@ from typing import Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from app.models.booking import Booking
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class GoogleCalendarService:
             # OR we use a custom var GOOGLE_SERVICE_ACCOUNT_FILE.
             
             # Using specific logic for Unbox:
-            json_path = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "credentials.json")
+            json_path = settings.GOOGLE_SERVICE_ACCOUNT_FILE or "credentials.json"
             
             if os.path.exists(json_path):
                 self.creds = service_account.Credentials.from_service_account_file(
@@ -78,7 +79,8 @@ class GoogleCalendarService:
                   return os.environ.get("CALENDAR_ID_CAPSULE") 
 
         if env_var:
-            return os.environ.get(env_var)
+            # Use settings object instead of os.environ
+            return getattr(settings, env_var, None)
             
         return None
 

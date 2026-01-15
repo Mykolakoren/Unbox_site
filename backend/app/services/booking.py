@@ -13,7 +13,7 @@ def check_availability(
     start_time: str, 
     duration: int,
     exclude_booking_id: str = None
-) -> bool:
+) -> tuple[bool, str | None]:
     """
     Check if a slot is available.
     Returns True if available, False if overlapping.
@@ -29,9 +29,12 @@ def check_availability(
     # Let's assume date is passed as datetime object representing the day.
     
     # Filter by resource and status
+    # Handling NULLs for boolean field (SQLite/Postgres compatibility)
+    from sqlmodel import or_
     statement = select(Booking).where(
         Booking.resource_id == resource_id,
-        Booking.status == "confirmed"
+        Booking.status == "confirmed",
+        or_(Booking.is_re_rent_listed == False, Booking.is_re_rent_listed == None)
     )
     
     # Exclude specific booking (for updates)
@@ -58,6 +61,7 @@ def check_availability(
         # Check overlap
         # (StartA < EndB) and (EndA > StartB)
         if new_start < existing_end and new_end > existing_start:
-            return False # Overlap found
+            # print(f"DEBUG: Conflict found! New: {new_start}-{new_end} vs Existing: {existing_start}-{existing_end} (ID: {b.id}, Date: {b.date})")
+            return False, f"Conflict with booking {b.id} ({b.start_time}-{existing_end // 60}:{existing_end % 60:02d})"
             
-    return True
+    return True, None

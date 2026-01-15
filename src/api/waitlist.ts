@@ -2,21 +2,19 @@ import { api } from './client';
 import type { WaitlistEntry } from '../store/types';
 
 // Map Backend -> Frontend
+// Input 'w' is already camelCase from client interceptor.
 const mapToFrontend = (w: any): WaitlistEntry => ({
     ...w,
-    resourceId: w.resource_id,
-    startTime: w.start_time,
-    endTime: w.end_time,
-    userId: w.user_id,
-    dateCreated: w.created_at,
+    // Interface matches transformed keys (resourceId, startTime, userId, createdAt)
+    // No special mapping needed if names align.
+    // Just ensure types.
 });
 
 // Map Frontend -> Backend
+// Output camelCase, client interceptor converts to snake_case.
 const mapToBackend = (w: Partial<WaitlistEntry>): any => ({
     ...w,
-    resource_id: w.resourceId,
-    start_time: w.startTime,
-    end_time: w.endTime,
+    // No special mapping needed if Interface matches Backend logic names.
 });
 
 export const waitlistApi = {

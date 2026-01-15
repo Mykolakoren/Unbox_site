@@ -18,8 +18,13 @@ export function ChessboardStep() {
         setStep
     } = useBookingStore();
 
-    const { bookings } = useUserStore();
+    const { bookings, fetchBookings } = useUserStore();
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
+
+    // Refresh bookings on mount to ensure availability is up to date
+    useEffect(() => {
+        fetchBookings();
+    }, [fetchBookings]);
 
     // Week View State
     const [weekStart, setWeekStart] = useState(() => startOfWeek(date, { weekStartsOn: 1 }));
@@ -43,10 +48,14 @@ export function ChessboardStep() {
     const handlePrevWeek = () => setWeekStart(d => subWeeks(d, 1));
     const handleNextWeek = () => setWeekStart(d => addWeeks(d, 1));
 
-    // 1. Get Resources for current location
-    const resources = useMemo(() =>
-        RESOURCES.filter(r => r.locationId === locationId),
-        [locationId]);
+    // Toggle for View Mode (Specific Location vs All)
+    const [showAllLocations, setShowAllLocations] = useState(false);
+
+    // 1. Get Resources
+    const resources = useMemo(() => {
+        if (showAllLocations) return RESOURCES;
+        return RESOURCES.filter(r => r.locationId === locationId);
+    }, [locationId, showAllLocations]);
 
     // 2. Fetch External Events (Mock)
     useEffect(() => {
@@ -85,37 +94,44 @@ export function ChessboardStep() {
         }
 
         // Check Internal Bookings
-        // Check Internal Bookings
-        // Filter out cancelled ones first
-        // We find if there is a blocking booking
         const internalBooking = bookings.find(b =>
             b.resourceId === resId &&
-            b.status === 'confirmed' && // Only confirmed blocks
-            !b.isReRentListed && // Re-rent listed does NOT block
+            b.status === 'confirmed' &&
+            !b.isReRentListed &&
             isSameDay(new Date(b.date), new Date(date)) &&
             b.startTime &&
             (() => {
-                const startMins = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
-                const endMins = startMins + b.duration;
-                const slotMins = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
-                return slotMins >= startMins && slotMins < endMins;
+                const bookingStart = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
+                const bookingEnd = bookingStart + b.duration;
+                const slotStart = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
+                const slotEnd = slotStart + 30; // Assuming 0.5h granularity for the check
+
+                // Strictly overlap: (StartA < EndB) and (EndA > StartB)
+                return slotStart < bookingEnd && slotEnd > bookingStart;
             })()
         );
 
         if (internalBooking) return true;
 
         // Check External Events
-        const externalEvent = externalEvents.find(e =>
-            e.resourceId === resId &&
-            isSameDay(new Date(e.start), new Date(date)) &&
-            // Simple overlap check
-            format(new Date(e.start), 'HH:mm') <= timeStr &&
-            format(new Date(e.end), 'HH:mm') > timeStr
-        );
+        const externalEvent = externalEvents.find(e => {
+            if (e.resourceId !== resId) return false;
+            const eventStart = new Date(e.start);
+            const eventEnd = new Date(e.end);
+
+            if (!isSameDay(eventStart, new Date(date))) return false;
+
+            const eventStartMins = eventStart.getHours() * 60 + eventStart.getMinutes();
+            const eventEndMins = eventEnd.getHours() * 60 + eventEnd.getMinutes();
+
+            const slotStart = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
+            const slotEnd = slotStart + 30;
+
+            return slotStart < eventEndMins && slotEnd > eventStartMins;
+        });
 
         if (externalEvent) {
-            // Check if this external event should be IGNORED because it overlaps with a valid Re-Rent booking
-            // We search for ANY booking that is confirmed, Re-Rent Listed, and covers this slot
+            // Check re-rent override logic...
             const isCoveredByReRent = bookings.some(b =>
                 b.resourceId === resId &&
                 b.status === 'confirmed' &&
@@ -123,17 +139,17 @@ export function ChessboardStep() {
                 isSameDay(new Date(b.date), new Date(date)) &&
                 b.startTime &&
                 (() => {
-                    const startMins = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
-                    const endMins = startMins + b.duration;
-                    const slotMins = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
-                    return slotMins >= startMins && slotMins < endMins;
+                    const bookingStart = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
+                    const bookingEnd = bookingStart + b.duration;
+                    const slotStart = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
+                    return slotStart >= bookingStart && slotStart < bookingEnd;
                 })()
             );
 
             if (isCoveredByReRent) {
-                return false; // Ignored, so it's free
+                return false;
             }
-            return true; // Blocked
+            return true;
         }
 
         return false;
@@ -176,7 +192,6 @@ export function ChessboardStep() {
 
                 // Only select if valid and inside operating hours (09:00 - 21:00)
                 // Timetable generation ends at 20:30 (so 21:00 is not in list usually? wait, list goes to 20:30 start)
-                // If nextSlot is 21:00, is it valid? "timeSlots" generation loop: while isBefore(time, 21:00). Last slot 20:30.
                 // 20:30 + 30 = 21:00. 21:00 is NOT in timeSlots. 
                 // So check if nextSlotTime is in timeSlots? Or just rely on availability?
                 // Actually if it's not in timeSlots, it won't be displayed/selectable usually?
@@ -224,14 +239,21 @@ export function ChessboardStep() {
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-2xl font-bold">Выберите время</h2>
                     <p className="text-gray-500">
                         {format(date, 'd MMMM yyyy', { locale: ru })} • {bookingFormat === 'individual' ? 'Индивидуально' : 'Группа'}
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        variant={showAllLocations ? 'primary' : 'outline'}
+                        size="sm"
+                        onClick={() => setShowAllLocations(!showAllLocations)}
+                    >
+                        {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => setStep(1)}>
                         <ArrowLeft size={16} className="mr-2" /> Назад
                     </Button>

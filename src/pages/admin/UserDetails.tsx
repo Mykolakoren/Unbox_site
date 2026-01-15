@@ -23,6 +23,7 @@ import { ClientTimeline } from '../../components/admin/ClientTimeline';
 
 import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
+import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLimitModal';
 
 export function AdminUserDetails() {
     const { email } = useParams<{ email: string }>();
@@ -34,8 +35,9 @@ export function AdminUserDetails() {
 
     const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
     const [isAssignSubOpen, setIsAssignSubOpen] = useState(false);
+    const [isEditLimitOpen, setIsEditLimitOpen] = useState(false);
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'finance' | 'timeline'>('timeline'); // Defaulting to timeline for demo, or keep overview? Let's Default to timeline as user requested "Timeline" right now. Actually better keep overview default usually, but user asked for it now.
+    const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'finance' | 'timeline'>('overview');
     // Let's keep 'overview' default but I will change it in the replacement to 'timeline' to show it off immediately, or maybe 'overview' is safer. Let's use 'overview' but add 'timeline' to type.
 
     if (!user) {
@@ -45,7 +47,7 @@ export function AdminUserDetails() {
     // derived data
     const sortedBookings = bookings
         .filter(b => b.userId === user.email)
-        .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
 
 
@@ -64,6 +66,11 @@ export function AdminUserDetails() {
 
         toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
     };
+
+    const handleUpdateCreditLimit = (limit: number) => {
+        updateUserById(user.email, { creditLimit: limit });
+        toast.success(`Кредитный лимит установлен: ${limit} ₾`);
+    }
 
 
 
@@ -172,6 +179,12 @@ export function AdminUserDetails() {
                 onClose={() => setIsAssignSubOpen(false)}
                 onConfirm={handleAssignSubscription}
                 currentSubscriptionName={user.subscription?.name}
+            />
+            <EditCreditLimitModal
+                isOpen={isEditLimitOpen}
+                onClose={() => setIsEditLimitOpen(false)}
+                currentLimit={user.creditLimit || 0}
+                onConfirm={handleUpdateCreditLimit}
             />
 
             {/* Header */}
@@ -450,6 +463,19 @@ export function AdminUserDetails() {
                                             })()} ₾
                                         </div>
                                         <div className="text-xs text-gray-400 mt-1">Баланс: {user.balance} ₾</div>
+                                        {/* Credit Limit UI */}
+                                        <div
+                                            className="text-xs text-gray-400 mt-1 flex items-center gap-1 group/limit cursor-pointer"
+                                            onClick={() => setIsEditLimitOpen(true)}
+                                        >
+                                            Кредитный лимит:
+                                            <span className="font-semibold text-gray-600 border-b border-dashed border-gray-300 group-hover/limit:border-blue-400 group-hover/limit:text-blue-600 transition-colors">
+                                                {user.creditLimit || 0} ₾
+                                            </span>
+                                            <div className="bg-gray-100 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     {/* 2. Всего забронировано часов */}
@@ -585,11 +611,89 @@ export function AdminUserDetails() {
                         </div>
                     )}
 
-                    {/* Finance Tab Content */}
+                    {/* Finance Tab Content (Extended) */}
                     {activeTab === 'finance' && (
                         <div className="space-y-6 animate-in fade-in duration-300">
-                            <h2 className="text-xl font-bold">История транзакций</h2>
-                            <UserTransactions email={user.email} />
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-bold">Финансы и Статистика</h2>
+                                <div className="flex gap-2">
+                                    <Button size="sm" variant="outline" onClick={() => setIsAddFundsOpen(true)}>
+                                        <Plus size={16} className="mr-2" />
+                                        Пополнить
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => setIsAssignSubOpen(true)}>
+                                        <RotateCcw size={16} className="mr-2" />
+                                        Абонемент
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {/* 1. Общая сумма оплат (Real Money In) */}
+                                <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+                                    <div className="text-sm text-gray-500 mb-1">Общая сумма оплат</div>
+                                    <div className="text-2xl font-bold">
+                                        {(() => {
+                                            const userTransactions = useUserStore.getState().getTransactionsByUser(user.email);
+                                            const realMoneyTransactions = userTransactions
+                                                .filter(t => ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod))
+                                                .reduce((sum, t) => sum + t.amount, 0);
+                                            return realMoneyTransactions;
+                                        })()} ₾
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1">Баланс: {user.balance} ₾</div>
+                                    {/* Credit Limit UI */}
+                                    <div
+                                        className="text-xs text-gray-400 mt-1 flex items-center gap-1 group/limit cursor-pointer"
+                                        onClick={() => setIsEditLimitOpen(true)}
+                                    >
+                                        Кредитный лимит:
+                                        <span className="font-semibold text-gray-600 border-b border-dashed border-gray-300 group-hover/limit:border-blue-400 group-hover/limit:text-blue-600 transition-colors">
+                                            {user.creditLimit || 0} ₾
+                                        </span>
+                                        <div className="bg-gray-100 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 2. Всего забронировано часов */}
+                                <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+                                    <div className="text-sm text-gray-500 mb-1">Всего часов</div>
+                                    <div className="text-2xl font-bold">
+                                        {bookings
+                                            .filter(b => b.userId === user.email && (b.status === 'completed' || b.status === 'confirmed'))
+                                            .reduce((sum, b) => sum + (b.duration / 60), 0)
+                                            .toFixed(1)} ч
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1">
+                                        {sortedBookings.length} бронирований
+                                    </div>
+                                </div>
+
+                                {/* 3. Средний чек */}
+                                <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+                                    <div className="text-sm text-gray-500 mb-1">Средний чек</div>
+                                    <div className="text-2xl font-bold">
+                                        {(() => {
+                                            const completed = bookings.filter(b => b.userId === user.email && b.status === 'completed');
+                                            if (completed.length === 0) return '0';
+                                            const totalValue = completed.reduce((sum, b) => sum + b.finalPrice, 0);
+                                            return (totalValue / completed.length).toFixed(0);
+                                        })()} ₾
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1">за посещение</div>
+                                </div>
+                            </div>
+
+                            <Card className="overflow-hidden">
+                                <div className="p-4 border-b border-gray-100 bg-gray-50 font-medium">
+                                    История транзакций
+                                </div>
+                                <div className="p-4">
+                                    <UserTransactions email={user.email} />
+                                </div>
+                            </Card>
                         </div>
                     )}
 

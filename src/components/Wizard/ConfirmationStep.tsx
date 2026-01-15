@@ -23,9 +23,14 @@ import { ru } from 'date-fns/locale';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
-    const { currentUser, addBookings, bookings, rescheduleBooking } = useUserStore();
+    const { currentUser, addBookings, bookings, rescheduleBooking, users } = useUserStore();
     const [confirmed, setConfirmed] = useState(false);
     const navigate = useNavigate();
+
+    // Determine effective user for pricing and logic
+    const effectiveUser = state.bookingForUser
+        ? users?.find(u => u.email === state.bookingForUser) || currentUser
+        : currentUser;
 
     const isEditing = !!state.editBookingId;
     const isRescheduling = state.mode === 'reschedule';
@@ -38,20 +43,20 @@ export function ConfirmationStep() {
 
     // Calculate Accumulated Weekly Hours
     const accumulatedWeeklyHours = useMemo(() => {
-        if (!currentUser) return 0;
+        if (!effectiveUser) return 0;
         const now = state.date;
         const start = startOfWeek(now, { weekStartsOn: 1 });
         const end = endOfWeek(now, { weekStartsOn: 1 });
 
         // Filter confirmed bookings for this week
         const weeklyBookings = bookings.filter(b =>
-            b.userId === currentUser.email &&
+            b.userId === effectiveUser.email &&
             b.status === 'confirmed' &&
             isWithinInterval(new Date(b.date), { start, end })
         );
 
         return weeklyBookings.reduce((sum, b) => sum + (b.duration / 60), 0);
-    }, [currentUser, bookings, state.date]);
+    }, [effectiveUser, bookings, state.date]);
 
     // Calculate Price for ALL items in Cart
     const { cartDetails, totalPrice } = useMemo(() => {
@@ -76,8 +81,8 @@ export function ConfirmationStep() {
                 resourceId: b.resourceId, // Use item's resourceId
                 accumulatedWeeklyHours: accumulatedWeeklyHours,
                 // User Settings
-                personalDiscountPercent: currentUser?.personalDiscountPercent,
-                pricingSystem: currentUser?.pricingSystem
+                personalDiscountPercent: effectiveUser?.personalDiscountPercent,
+                pricingSystem: effectiveUser?.pricingSystem
             });
 
             total += p.finalPrice;
@@ -91,26 +96,26 @@ export function ConfirmationStep() {
 
     // Determine if subscription is valid for this booking
     const { isSubscriptionEligible, subscriptionReason } = useMemo(() => {
-        if (!currentUser?.subscription) return { isSubscriptionEligible: false, subscriptionReason: 'Нет абонемента' };
-        if (currentUser.subscription.isFrozen) return { isSubscriptionEligible: false, subscriptionReason: 'Абонемент заморожен' };
+        if (!effectiveUser?.subscription) return { isSubscriptionEligible: false, subscriptionReason: 'Нет абонемента' };
+        if (effectiveUser.subscription.isFrozen) return { isSubscriptionEligible: false, subscriptionReason: 'Абонемент заморожен' };
 
         // Check hours
         const totalDurationHours = cartDetails.reduce((sum, item) => sum + (item.duration / 60), 0);
-        if (currentUser.subscription.remainingHours < totalDurationHours - 0.1) { // -0.1 for float safety
-            return { isSubscriptionEligible: false, subscriptionReason: `Недостаточно часов (${currentUser.subscription.remainingHours.toFixed(1)} доступно)` };
+        if (effectiveUser.subscription.remainingHours < totalDurationHours - 0.1) { // -0.1 for float safety
+            return { isSubscriptionEligible: false, subscriptionReason: `Недостаточно часов (${effectiveUser.subscription.remainingHours.toFixed(1)} доступно)` };
         }
 
         // Check format
         // Assumption: If includedFormats is missing, assume it covers everything (legacy) OR check prompt. 
         // Prompt said: "depending on ... individual or group". 
         // We added includedFormats to store. 
-        const formats = currentUser.subscription.includedFormats || ['individual']; // Default to individual if missing
+        const formats = effectiveUser.subscription.includedFormats || ['individual']; // Default to individual if missing
         if (!formats.includes(state.format)) {
             return { isSubscriptionEligible: false, subscriptionReason: `Абонемент только для ${formats.includes('individual') ? 'индивидуальной' : 'групповой'} работы` };
         }
 
         return { isSubscriptionEligible: true, subscriptionReason: '' };
-    }, [currentUser, cartDetails, state.format]);
+    }, [effectiveUser, cartDetails, state.format]);
 
     // Auto-select subscription if eligible and balance logic prefers it? 
     // Or just default to balance. Let's default to balance but maybe switch to sub if balance is low? 
@@ -142,15 +147,64 @@ export function ConfirmationStep() {
             // We should trust Backend check or relax this check for Admin.
             const isBookingForOther = !!state.bookingForUser && state.bookingForUser !== currentUser?.email;
 
-            if (currentUser && finalMethod === 'balance' && !isBookingForOther) {
+            if (effectiveUser && finalMethod === 'balance' && !isBookingForOther) {
                 let netPrice = totalPrice;
-                if (isRescheduling && oldBooking && currentUser) {
+                if (isRescheduling && oldBooking && effectiveUser) {
                     netPrice = totalPrice - oldBooking.finalPrice;
                 }
 
-                const projectedBalance = currentUser.balance - netPrice;
-                if (projectedBalance < -currentUser.creditLimit) {
-                    toast.error(`Ошибка: Недостаточно средств! \nВаш баланс: ${currentUser.balance} ₾\nКредитный лимит: ${currentUser.creditLimit} ₾\nК оплате (net): ${netPrice.toFixed(1)} ₾`);
+                const projectedBalance = effectiveUser.balance - netPrice;
+                if (projectedBalance < -(effectiveUser.creditLimit || 0)) {
+                    toast.custom((t) => (
+                        <div className="w-full bg-white rounded-2xl shadow-xl border-l-4 border-red-500 overflow-hidden relative">
+                            <div className="p-4">
+                                <div className="flex items-start gap-4">
+                                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="text-sm font-bold text-gray-900 mb-1">
+                                            Недостаточно средств
+                                        </h3>
+                                        <p className="text-sm text-gray-500 leading-relaxed mb-3">
+                                            Сумма бронирования превышает доступный лимит.
+                                        </p>
+
+                                        <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-xs">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-500">Ваш баланс:</span>
+                                                <span className={effectiveUser.balance < 0 ? "text-red-600 font-medium" : "text-gray-900 font-medium"}>
+                                                    {effectiveUser.balance.toFixed(1)} ₾
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-500">Кредитный лимит:</span>
+                                                <span className="text-gray-900 font-medium">
+                                                    {effectiveUser.creditLimit || 0} ₾
+                                                </span>
+                                            </div>
+                                            <div className="h-px bg-gray-200 my-1"></div>
+                                            <div className="flex justify-between font-bold">
+                                                <span className="text-gray-700">К оплате:</span>
+                                                <span className="text-unbox-dark">
+                                                    {netPrice.toFixed(1)} ₾
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => toast.dismiss(t)}
+                                        className="text-gray-400 hover:text-gray-600 transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="bg-red-50 px-4 py-2 border-t border-red-100 flex justify-between items-center">
+                                <span className="text-xs text-red-600 font-medium">Не хватает: {Math.abs(projectedBalance + (effectiveUser.creditLimit || 0)).toFixed(1)} ₾</span>
+                            </div>
+                        </div>
+                    ), { duration: 5000 });
                     return;
                 }
             }
@@ -164,9 +218,9 @@ export function ConfirmationStep() {
             let currentPaymentSource: 'subscription' | 'deposit' | 'credit' = 'deposit';
             if (finalMethod === 'subscription') {
                 currentPaymentSource = 'subscription';
-            } else if (currentUser) {
+            } else if (effectiveUser) {
                 // Check if we are dipping into credit
-                if (currentUser.balance < totalPrice) {
+                if (effectiveUser.balance < totalPrice) {
                     currentPaymentSource = 'credit';
                 } else {
                     currentPaymentSource = 'deposit';
@@ -191,7 +245,7 @@ export function ConfirmationStep() {
                     duration: item.duration,
                     extras: state.extras,
                     status: 'confirmed' as const,
-                    dateCreated: new Date().toISOString(),
+                    createdAt: new Date().toISOString(),
                     finalPrice: item.price.finalPrice,
                     selectedSlots: [],
                     price: item.price,
@@ -202,13 +256,13 @@ export function ConfirmationStep() {
                 };
                 newBookings.push(bookingData);
 
-                if (currentUser) {
+                if (effectiveUser) {
                     // Sync to Google Calendar (Mock)
                     await googleCalendarService.addEvent({
                         resourceId: item.resourceId,
                         start: item.startDateTime.toISOString(),
                         end: item.endDateTime.toISOString(),
-                        title: `Бронь: ${currentUser.name} (${state.format})`
+                        title: `Бронь: ${effectiveUser.name} (${state.format})`
                     });
                 }
             }
@@ -254,7 +308,39 @@ export function ConfirmationStep() {
         } catch (error: any) {
             console.error("Booking Confirmation Failed:", error);
             const message = error.response?.data?.detail || "Произошла ошибка при подтверждении бронирования.";
-            toast.error(message);
+
+            if (message.includes("Time slot is already booked") || message.includes("Conflict")) {
+                toast.custom((t) => (
+                    <div className="w-full bg-white rounded-2xl shadow-xl border-l-4 border-red-500 overflow-hidden relative">
+                        <div className="p-4">
+                            <div className="flex items-start gap-4">
+                                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+                                    <CalendarIcon size={20} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <h3 className="text-sm font-bold text-gray-900 mb-1">
+                                        Время уже занято
+                                    </h3>
+                                    <p className="text-sm text-gray-500 leading-relaxed mb-2">
+                                        К сожалению, выбранный слот был забронирован другим пользователем.
+                                    </p>
+                                    <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-xs font-medium border border-red-100">
+                                        {message.replace("Time slot is already booked: ", "")}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => toast.dismiss(t)}
+                                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                    <ArrowRight size={16} className="rotate-45" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ), { duration: 5000 });
+            } else {
+                toast.error(message);
+            }
         }
     };
 
@@ -326,17 +412,17 @@ export function ConfirmationStep() {
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div>
                 <h2 className="text-2xl font-bold mb-2">Подтверждение</h2>
-                <p className="text-gray-500">{currentUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
+                <p className="text-gray-500">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
             </div>
 
             <div className="space-y-4 max-w-md">
-                {currentUser ? (
+                {effectiveUser ? (
                     <div className="bg-unbox-light p-4 rounded-xl border border-unbox-light/50">
                         <div className="text-sm text-unbox-grey mb-1">Бронирование на имя:</div>
-                        <div className="font-bold text-unbox-dark">{currentUser.name}</div>
+                        <div className="font-bold text-unbox-dark">{effectiveUser.name}</div>
                         <div className="text-sm text-unbox-grey mt-2">Контакты:</div>
-                        <div className="text-unbox-dark">{currentUser.phone}</div>
-                        <div className="text-unbox-dark">{currentUser.email}</div>
+                        <div className="text-unbox-dark">{effectiveUser.phone}</div>
+                        <div className="text-unbox-dark">{effectiveUser.email}</div>
                     </div>
                 ) : (
                     <>
@@ -357,7 +443,7 @@ export function ConfirmationStep() {
             </div>
 
             {/* Payment Method Selector */}
-            {currentUser && (
+            {effectiveUser && (
                 <div className="space-y-3 pt-4 border-t border-gray-100">
                     <h3 className="font-bold text-lg text-unbox-dark">Способ оплаты</h3>
                     <div className="grid gap-3">
@@ -383,9 +469,9 @@ export function ConfirmationStep() {
                                     {cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч
                                 </span>
                             </div>
-                            {currentUser.subscription && (
+                            {effectiveUser.subscription && (
                                 <div className="ml-7 text-xs text-unbox-grey mt-1 font-medium">
-                                    Доступно: {currentUser.subscription.remainingHours} ч
+                                    Доступно: {effectiveUser.subscription.remainingHours} ч
                                     {!isSubscriptionEligible && <span className="text-unbox-dark ml-1">({subscriptionReason})</span>}
                                 </div>
                             )}
@@ -411,7 +497,7 @@ export function ConfirmationStep() {
                                 <span className="font-bold text-unbox-dark">{totalPrice.toFixed(1)} ₾</span>
                             </div>
                             <div className="ml-7 text-xs text-unbox-grey mt-1 font-medium">
-                                Текущий баланс: {currentUser.balance} ₾
+                                Текущий баланс: {effectiveUser.balance} ₾
                             </div>
                         </div>
                     </div>

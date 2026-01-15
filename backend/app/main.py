@@ -8,7 +8,7 @@ from .api.v1 import api_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    # init_db() # Skipped to avoid hanging on locks
     init_data()
     yield
 
@@ -19,6 +19,16 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Ensure uploads directory exists
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Mount static files
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # CORS Middleware (Allow Frontend to connect)
 app.add_middleware(

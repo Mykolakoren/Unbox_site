@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
@@ -9,9 +9,13 @@ import clsx from 'clsx';
 export function AdminBookings() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { bookings, users, cancelBooking, listForReRent, setManualPrice } = useUserStore();
+    const { bookings, users, fetchUsers, cancelBooking, listForReRent, setManualPrice } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
+
+    useEffect(() => {
+        fetchUsers();
+    }, [fetchUsers]);
 
     // helper to get user name by email
     const getUserName = (email: string) => {
@@ -34,7 +38,7 @@ export function AdminBookings() {
             }
             return true;
         })
-        .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     const handleEditPrice = (bookingId: string, currentPrice: number) => {
         const newPriceString = prompt('Введите новую цену (GEL):', currentPrice.toString());
@@ -108,7 +112,7 @@ export function AdminBookings() {
                             return (
                                 <tr key={booking.id} className="hover:bg-unbox-light/30 transition-colors text-sm">
                                     <td className="p-4 pl-6 text-unbox-grey">
-                                        {format(new Date(booking.dateCreated), 'dd.MM HH:mm')}
+                                        {format(new Date(booking.createdAt), 'dd.MM HH:mm')}
                                     </td>
                                     <td className="p-4 font-medium text-unbox-dark">
                                         <div

@@ -23,6 +23,8 @@ class UserBase(SQLModel):
     # Settings
     pricing_system: str = Field(default="standard") # standard, personal
     personal_discount_percent: int = Field(default=0)
+    credit_limit: float = Field(default=0.0)
+    
     
     is_admin: bool = Field(default=False) # Legacy flag, check usage
 
@@ -59,6 +61,7 @@ class UserUpdateAdmin(UserUpdate):
     subscription: Optional[dict] = None
     pricing_system: Optional[str] = None
     personal_discount_percent: Optional[int] = None
+    credit_limit: Optional[float] = None
     tags: Optional[List[str]] = None
     crm_data: Optional[dict] = None
     admin_tasks: Optional[List[dict]] = None
