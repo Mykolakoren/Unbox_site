@@ -152,11 +152,16 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
                 )
             }));
 
+            // Force refresh from server to ensure consistency
+            // Removing this to prevent race condition where stale GET overwrites the updated status
+            // await get().fetchBookings();
+
             // Sync user balance/subscription
             await get().fetchCurrentUser();
 
         } catch (error) {
             console.error("Failed to cancel booking", error);
+            throw error; // Propagate error so UI knows it failed
         }
     },
 

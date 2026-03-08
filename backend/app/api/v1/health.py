@@ -8,7 +8,7 @@ router = APIRouter()
 
 @router.get("/integrations")
 def check_integrations(
-    current_user: User = Depends(deps.get_current_user),
+    # Unauthenticated info for status page
 ) -> Any:
     """
     Check status of system integrations.

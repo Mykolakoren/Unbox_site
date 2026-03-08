@@ -28,28 +28,29 @@ def check_availability(
     # But SQLModel should handle it if passed correctly.
     # Let's assume date is passed as datetime object representing the day.
     
-    # Filter by resource and status
-    # Handling NULLs for boolean field (SQLite/Postgres compatibility)
+    # Filter by resource, status, and DATE match
+    # SQLite/Postgres date string comparison
+    # We assume 'date' column stores datetime. 
+    # To compare efficiently, we can compare exact date if stored as YYYY-MM-DD 00:00:00
+    # Or range: date >= start_of_day AND date < end_of_day
+    
+    day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+    
     from sqlmodel import or_
     statement = select(Booking).where(
         Booking.resource_id == resource_id,
         Booking.status == "confirmed",
-        or_(Booking.is_re_rent_listed == False, Booking.is_re_rent_listed == None)
+        or_(Booking.is_re_rent_listed == False, Booking.is_re_rent_listed == None),
+        Booking.date >= day_start,
+        Booking.date < day_end
     )
     
     # Exclude specific booking (for updates)
     if exclude_booking_id:
         statement = statement.where(Booking.id != exclude_booking_id)
         
-    all_bookings = session.exec(statement).all()
-    
-    # Filter by date in python to be safe with time components (or enforce midnight in DB)
-    target_date_str = date.strftime("%Y-%m-%d")
-    
-    day_bookings = [
-        b for b in all_bookings 
-        if b.date.strftime("%Y-%m-%d") == target_date_str
-    ]
+    day_bookings = session.exec(statement).all()
     
     new_start = time_to_minutes(start_time)
     new_end = new_start + duration

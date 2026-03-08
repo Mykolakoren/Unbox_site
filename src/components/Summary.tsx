@@ -4,7 +4,7 @@ import { useUserStore } from '../store/userStore';
 import { Users, Clock, Tag, ShoppingCart } from 'lucide-react';
 import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
-import { EXTRAS } from '../utils/data';
+import { EXTRAS, RESOURCES } from '../utils/data';
 import { groupSlotsIntoBookings } from '../utils/cartHelpers';
 import { startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 
@@ -114,7 +114,7 @@ export function Summary() {
                     cartBookings.map((b, idx) => (
                         <div key={idx} className="bg-gray-50 rounded-lg p-3 text-sm relative group">
                             <div className="flex justify-between font-medium">
-                                <span>{b.resourceId}</span>
+                                <span>{RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}</span>
                                 <span>{b.price.finalPrice} ₾</span>
                             </div>
                             <div className="text-gray-500 flex gap-1 items-center">

@@ -9,7 +9,7 @@ import { TelegramLoginButton } from '../components/TelegramLoginButton';
 
 export function LoginPage() {
     const navigate = useNavigate();
-    const { login, register, googleLogin, telegramLogin } = useUserStore();
+    const { login, register, googleLogin } = useUserStore();
     const [isRegistering, setIsRegistering] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -171,18 +171,7 @@ export function LoginPage() {
 
                             <div className="flex justify-center h-[40px]">
                                 <TelegramLoginButton
-                                    botName="UnboxBookingBot"
-                                    buttonSize="medium"
-                                    cornerRadius={8}
-                                    onAuth={async (user) => {
-                                        try {
-                                            await telegramLogin(user);
-                                            navigate('/dashboard');
-                                        } catch (error) {
-                                            console.error("Telegram Login Error", error);
-                                            setError("Ошибка входа через Telegram");
-                                        }
-                                    }}
+                                    botName="8209648149"
                                 />
                             </div>
                         </div>

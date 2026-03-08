@@ -10,16 +10,20 @@ export function Card({ className, selected, children, ...props }: CardProps) {
         <div
             className={twMerge(
                 clsx(
-                    "relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer",
-                    "hover:shadow-lg hover:-translate-y-1",
+                    "relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer premium-transition",
+                    "hover:shadow-xl hover:-translate-y-1",
                     selected
-                        ? "border-black bg-gray-50 shadow-md ring-1 ring-black"
-                        : "border-gray-200 bg-white shadow-sm"
+                        ? "border-unbox-green bg-white shadow-lg ring-1 ring-unbox-green"
+                        : "border-gray-200 bg-white/80 backdrop-blur-sm shadow-sm hover:bg-white"
                 ),
                 className
             )}
             {...props}
         >
+            {/* Subtle Gradient Overlay for premium feel */}
+            {selected && (
+                <div className="absolute inset-0 bg-gradient-to-br from-unbox-green/5 to-transparent pointer-events-none" />
+            )}
             {children}
         </div>
     );

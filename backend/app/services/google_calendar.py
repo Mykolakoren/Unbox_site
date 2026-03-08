@@ -37,8 +37,8 @@ class GoogleCalendarService:
                     json_path, scopes=SCOPES
                 )
             else:
-                # Try parsing content directly? (Maybe later if needed)
-                logger.warning(f"Google Service Account file not found at {json_path}. GCal Sync disabled.")
+                logger.error(f"GOOGLE_SERVICE_ACCOUNT_FILE not found: {json_path}. Please check your environment variables and file presence.")
+                # We do NOT return here, so that 'service' remains None and is_connected() returns False.
                 return
 
             self.service = build('calendar', 'v3', credentials=self.creds)
@@ -160,6 +160,8 @@ class GoogleCalendarService:
         """
         Check if the service is authenticated and ready.
         """
+        if self.service is None:
+            self._authenticate()
         return self.service is not None
 
 # Global instance

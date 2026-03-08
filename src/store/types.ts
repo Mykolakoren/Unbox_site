@@ -1,15 +1,32 @@
 import type { BookingState, Format } from '../types';
 export type { Format };
 
+export interface PriceBreakdown {
+    basePrice: number;
+    hourlyRate: number;
+    bookedHours: number;
+    appliedRule: string;
+    discountPercent: number;
+    discountAmount: number;
+    subscriptionPlan?: string;
+    hoursDeducted: number;
+    finalPrice: number;
+    isNonRefundable: boolean;
+    isNonReschedulable: boolean;
+}
+
 export interface Subscription {
     id: string;
+    planId: string;
     name: string;
     totalHours: number;
+    bonusHours?: number;
     remainingHours: number;
     freeReschedules: number;
     expiryDate: string; // ISO string
     isFrozen: boolean;
     frozenUntil?: string; // ISO string
+    freezeCount: number;
     includedFormats?: Format[];
 }
 

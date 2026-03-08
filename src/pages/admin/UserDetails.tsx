@@ -94,14 +94,21 @@ export function AdminUserDetails() {
             updateUserById(user.email, { balance: user.balance - plan.price });
         }
 
+        const totalWithBonus = plan.hours + (plan.bonusHours || 0);
+
         const newSubscription = {
             id: crypto.randomUUID(),
+            planId: plan.id,
             name: plan.name,
             totalHours: plan.hours,
-            remainingHours: plan.hours,
-            freeReschedules: 2, // default
-            expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // +30 days
-            isFrozen: false
+            bonusHours: plan.bonusHours || 0,
+            remainingHours: totalWithBonus,
+            freeReschedules: plan.perks?.includes('1 бесплатный перенос') ? 1 : 0,
+            expiryDate: new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000).toISOString(),
+            isFrozen: false,
+            freezeCount: 0,
+            discountPercent: plan.discountPercent,
+            includedFormats: plan.formats as any
         };
 
         updateUserById(user.email, { subscription: newSubscription });
@@ -515,7 +522,7 @@ export function AdminUserDetails() {
                                                     <>
                                                         <div className="text-xl font-bold text-purple-900 mb-1">{user.subscription.name}</div>
                                                         <div className="text-sm text-purple-700 font-mono">
-                                                            Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours} ч
+                                                            Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч
                                                         </div>
                                                     </>
                                                 ) : (

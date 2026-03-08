@@ -31,5 +31,18 @@ export const usersApi = {
     updatePersonalDiscount: async (id: string, percent: number, reason: string) => {
         const response = await api.post<User>(`/users/${id}/discount`, { percent, reason });
         return response.data;
+    },
+
+    getDiscountProgress: async () => {
+        const response = await api.get<{
+            accumulatedHours: number;
+            totalSaved: number;
+            currentDiscount: number;
+            nextTierHours: number;
+            nextTierDiscount: number;
+            progressPercent: number;
+            tiers: any[];
+        }>('/users/me/discount-progress');
+        return response.data;
     }
 };

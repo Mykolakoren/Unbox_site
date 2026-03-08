@@ -1,9 +1,15 @@
 export type Format = 'individual' | 'group';
+export type GroupSize = '4-8' | '8-14' | '14-20' | '20-30' | '30+';
 
 export interface Location {
     id: string;
     name: string;
     address: string;
+    image?: string;
+    features?: string[];
+    lat?: number;
+    lng?: number;
+    isActive?: boolean;
 }
 
 export interface Resource {
@@ -41,6 +47,7 @@ export interface BookingState {
     paymentMethod?: 'balance' | 'subscription';
     hoursDeducted?: number;
     bookingForUser?: string | null;
+    groupSize?: GroupSize | null;
 }
 
 export interface ExtraOption {

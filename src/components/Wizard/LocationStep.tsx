@@ -3,6 +3,7 @@ import { LOCATIONS, RESOURCES } from '../../utils/data';
 import { Card } from '../ui/Card';
 import { MapPin, Box } from 'lucide-react';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 
 export function LocationStep() {
     const { locationId, resourceId, setLocation, setResource } = useBookingStore();
@@ -10,7 +11,13 @@ export function LocationStep() {
     const activeResources = RESOURCES.filter(r => r.locationId === locationId);
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.5 }}
+            className="space-y-8"
+        >
             <div>
                 <h2 className="text-2xl font-bold mb-2">Выберите локацию</h2>
                 <p className="text-unbox-grey">Где вы хотите работать?</p>
@@ -77,6 +84,6 @@ export function LocationStep() {
                     </div>
                 </div>
             )}
-        </div>
+        </motion.div>
     );
 }

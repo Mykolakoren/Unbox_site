@@ -1,8 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Layout } from './components/Layout';
+import { MinimalLayout } from './components/MinimalLayout';
 import { Summary } from './components/Summary';
 // Wizard Steps
-import { ContextStep } from './components/Wizard/ContextStep';
 import { ChessboardStep } from './components/Wizard/ChessboardStep';
 import { OptionsStep } from './components/Wizard/OptionsStep';
 import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
@@ -10,6 +9,10 @@ import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 import { useBookingStore } from './store/bookingStore';
 
 // New Pages
+import { ExplorePage } from './pages/ExplorePage';
+import { SpecialistsPage } from './pages/SpecialistsPage';
+import { SpecialistProfilePage } from './pages/SpecialistProfilePage';
+import { LocationDetailsPage } from './pages/LocationDetailsPage';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardLayout } from './components/DashboardLayout';
 import { MyBookingsPage } from './pages/MyBookingsPage';
@@ -22,13 +25,15 @@ import { AdminDashboard } from './pages/admin/Dashboard';
 import { AdminWaitlist } from './pages/admin/Waitlist';
 import { AdminUserDetails } from './pages/admin/UserDetails';
 import { AdminCabinets } from './pages/admin/Cabinets';
+import { AdminKnowledgeBase } from './pages/admin/KnowledgeBase';
+import { AdminTasksBoard } from './pages/admin/TasksBoard';
 
 // Booking Flow Wrapper
 function BookingWizard() {
   const { step, editBookingId, reset } = useBookingStore();
 
   return (
-    <Layout>
+    <MinimalLayout>
       <div className="max-w-6xl mx-auto mb-8">
         {editBookingId && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-top-4">
@@ -48,7 +53,7 @@ function BookingWizard() {
           transition-all duration-300
           ${step === 2 ? 'lg:col-span-12' : 'lg:col-span-8'}
         `}>
-          {step === 1 && <ContextStep onNext={() => useBookingStore.getState().setStep(2)} />}
+          {step === 1 && <Navigate to="/" replace />}
           {step === 2 && <ChessboardStep />}
           {step === 3 && <OptionsStep />}
           {step === 4 && <ConfirmationStep />}
@@ -61,7 +66,7 @@ function BookingWizard() {
           </div>
         )}
       </div>
-    </Layout>
+    </MinimalLayout>
   );
 }
 
@@ -73,8 +78,16 @@ function App() {
   const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
 
   useEffect(() => {
-    // Determine if we should fetch. 
-    // If token exists in localStorage, we should try.
+    // 1. Check for token in URL (from Telegram Redirect Auth)
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      localStorage.setItem('token', urlToken);
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // 2. Fetch user data if token exists
     const token = localStorage.getItem('token');
     if (token) {
       fetchCurrentUser();
@@ -87,8 +100,17 @@ function App() {
     <>
       <Toaster position="top-center" richColors closeButton />
       <Routes>
-        {/* Main Booking Flow */}
-        <Route path="/" element={<BookingWizard />} />
+        {/* Public Booking Flow */}
+        <Route path="/" element={<ExplorePage />} />
+        <Route path="/explore" element={<Navigate to="/" replace />} />
+        <Route path="/location/:locationId" element={<LocationDetailsPage />} />
+
+        {/* Specialists Marketplace */}
+        <Route path="/specialists" element={<SpecialistsPage />} />
+        <Route path="/specialists/:id" element={<SpecialistProfilePage />} />
+
+        {/* Legacy Checkout Wizard Route (for backward compat / direct checkout) */}
+        <Route path="/checkout" element={<BookingWizard />} />
 
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
@@ -107,6 +129,8 @@ function App() {
           <Route path="cabinets" element={<AdminCabinets />} />
           <Route path="bookings" element={<AdminBookings />} />
           <Route path="waitlist" element={<AdminWaitlist />} />
+          <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
+          <Route path="tasks" element={<AdminTasksBoard />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

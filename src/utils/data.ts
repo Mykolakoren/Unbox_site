@@ -3,6 +3,7 @@ import type { Location, Resource, ExtraOption } from '../types';
 export const LOCATIONS: Location[] = [
     { id: 'unbox_one', name: 'Unbox One', address: 'Палиашвили, 4' },
     { id: 'unbox_uni', name: 'Unbox Uni', address: 'Тбел Абусеридзе, 38' },
+    { id: 'neo_school', name: 'Neo School', address: 'Алесандра Сулаберидзе, 80' },
 ];
 
 export const RESOURCES: Resource[] = [
@@ -81,6 +82,18 @@ export const RESOURCES: Resource[] = [
         description: 'Просторный кабинет для групповой и индивидуальной работы.'
     },
     {
+        id: 'unbox_uni_room_9',
+        name: 'Кабинет 9',
+        type: 'cabinet',
+        hourlyRate: 20,
+        capacity: 10,
+        locationId: 'unbox_uni',
+        area: 16,
+        minBookingHours: 1,
+        formats: ['individual', 'group'],
+        description: 'Уютный кабинет для индивидуальной и групповой работы.'
+    },
+    {
         id: 'unbox_uni_capsule_1',
         name: 'Капсула 1',
         type: 'capsule',
@@ -104,18 +117,6 @@ export const RESOURCES: Resource[] = [
         formats: ['individual'],
         description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.'
     },
-    {
-        id: 'unbox_uni_room_9',
-        name: 'Кабинет 9',
-        type: 'cabinet',
-        hourlyRate: 20,
-        capacity: 10,
-        locationId: 'unbox_uni',
-        area: 16,
-        minBookingHours: 1,
-        formats: ['individual', 'group'],
-        description: 'Уютный кабинет для индивидуальной и групповой работы.'
-    },
 ];
 
 export const EXTRAS: ExtraOption[] = [
@@ -126,7 +127,44 @@ export const EXTRAS: ExtraOption[] = [
 ];
 
 export const SUBSCRIPTION_PLANS = [
-    { id: 'sub_10', name: 'Старт (10 ч)', hours: 10, price: 180 },
-    { id: 'sub_30', name: 'Стандарт (30 ч)', hours: 30, price: 500 },
-    { id: 'sub_50', name: 'Про (50 ч)', hours: 50, price: 800 },
+    {
+        id: 'WARM_START',
+        name: 'Тёплый старт',
+        hours: 10,
+        price: 180,
+        durationDays: 30,
+        discountPercent: 10,
+        formats: ['individual']
+    },
+    {
+        id: 'REGULAR_PRACTITIONER',
+        name: 'Регулярный практик',
+        hours: 20,
+        price: 340,
+        durationDays: 30,
+        discountPercent: 15,
+        formats: ['individual'],
+        perks: ['1 бесплатный перенос']
+    },
+    {
+        id: 'PRO_PLUS',
+        name: 'Профи+',
+        hours: 40,
+        bonusHours: 2,
+        price: 640,
+        durationDays: 45,
+        discountPercent: 20,
+        formats: ['individual', 'group'],
+        perks: ['Приоритет', 'Внеурочный доступ', 'Рекомендация']
+    },
+    {
+        id: 'GROUP_MASTER',
+        name: 'Групповой мастер',
+        hours: 16,
+        price: 420,
+        durationDays: 30,
+        discountPercent: 25,
+        formats: ['group'],
+        perks: ['Анонс по базе']
+    },
 ];

@@ -47,7 +47,7 @@ def get_current_user(
         
     user = session.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
     return user
 
 def get_current_active_user(
@@ -64,3 +64,14 @@ def get_current_superuser(
             status_code=400, detail="The user doesn't have enough privileges"
         )
     return current_user
+
+def get_optional_current_user(
+    session: Annotated[Session, Depends(get_session)],
+    token: Annotated[str | None, Depends(reusable_oauth2)] = None
+) -> User | None:
+    if not token:
+        return None
+    try:
+        return get_current_user(session, token)
+    except HTTPException:
+        return None

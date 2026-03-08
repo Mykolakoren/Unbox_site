@@ -5,6 +5,7 @@ from app.models.resource import Resource # Ensure Resource is registered
 # Import other models if needed, e.g. Booking, Waitlist...
 from app.models.booking import Booking
 from app.models.waitlist import Waitlist
+from app.models.specialist import Specialist
 
 def create_tables():
     print("Creating tables...")

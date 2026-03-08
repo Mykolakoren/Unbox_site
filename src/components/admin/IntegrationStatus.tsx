@@ -10,7 +10,8 @@ export function IntegrationStatus() {
     useEffect(() => {
         healthApi.checkIntegrations()
             .then(data => {
-                setConnected(data.google_calendar.connected);
+                // Read from camelCased payload mapped by api client interceptor
+                setConnected(data.googleCalendar?.connected ?? false);
                 setLoading(false);
             })
             .catch(() => {

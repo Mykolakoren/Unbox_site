@@ -18,7 +18,13 @@ if connection_url and connection_url.startswith("postgres://"):
     connection_url = connection_url.replace("postgres://", "postgresql://", 1)
 
 connect_args = {"check_same_thread": False} if "sqlite" in connection_url else {}
-engine = create_engine(connection_url, echo=True, connect_args=connect_args)
+engine = create_engine(
+    connection_url, 
+    echo=True, 
+    connect_args=connect_args,
+    pool_pre_ping=True,
+    pool_recycle=300
+)
 
 def init_db():
     SQLModel.metadata.create_all(engine)

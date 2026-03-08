@@ -1,9 +1,12 @@
 from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, select
+from datetime import datetime, timedelta, timezone
+from sqlmodel import Session, select, func
 from app.api import deps
 from app.db.session import get_session
 from app.models.user import User, UserRead
+from app.models.booking import Booking
+from app.services.pricing import PricingService
 
 router = APIRouter()
 
@@ -18,6 +21,69 @@ def read_user_me(
     Get current user.
     """
     return current_user
+
+@router.get("/me/discount-progress")
+def get_discount_progress(
+    *,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Get weekly discount progress and total savings.
+    """
+    # 1. Total Saved (All Time)
+    stmt_saved = select(func.sum(Booking.discount_amount)).where(
+        (Booking.user_uuid == current_user.id) | (Booking.user_id == current_user.email),
+        Booking.status == 'confirmed'
+    )
+    total_saved = session.exec(stmt_saved).one() or 0.0
+
+    # 2. Weekly Accumulated Hours
+    # Reusing logic from PricingService for consistency
+    pricing = PricingService(session)
+    now = datetime.now(timezone.utc)
+    accumulated_hours = pricing._get_weekly_accumulated_hours(current_user, now)
+
+    # 3. Determine Tiers
+    config = PricingService.PRICING_CONFIG["weekly_progressive"]
+    current_discount = 0
+    next_tier_hours = 5.0
+    next_tier_discount = 10
+
+    for tier in config:
+        if tier["min"] <= accumulated_hours < tier["max"]:
+            current_discount = tier["percent"]
+            # Find next tier
+            idx = config.index(tier)
+            if idx + 1 < len(config):
+                next_tier = config[idx+1]
+                next_tier_hours = next_tier["min"]
+                next_tier_discount = next_tier["percent"]
+            else:
+                next_tier_hours = accumulated_hours # Max reached
+                next_tier_discount = current_discount
+            break
+    
+    if accumulated_hours >= 16.0: # Hardcoded max check
+        progress_percent = 100
+        next_tier_hours = 16.0
+        next_tier_discount = 50
+    else:
+        # Calculate progress towards next tier
+        # If we are in 0-5 tier, progress is accumulated / 5
+        # If we are in 5-11, progress is (accumulated-5) / (11-5)
+        # For simplicity in UI, we can just return the raw values and let UI handle markers
+        progress_percent = (accumulated_hours / 16.0) * 100 # Overall weekly progress
+
+    return {
+        "accumulated_hours": round(accumulated_hours, 1),
+        "total_saved": round(total_saved, 2),
+        "current_discount": current_discount,
+        "next_tier_hours": next_tier_hours,
+        "next_tier_discount": next_tier_discount,
+        "progress_percent": min(100, progress_percent),
+        "tiers": config
+    }
 
 @router.patch("/me", response_model=UserRead)
 def update_user_me(
@@ -67,8 +133,7 @@ def update_user(
     if not user:
         user = session.exec(select(User).where(User.email == user_id)).first()
         
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
 
     # Role Update Protection
     if user_in.role is not None:
@@ -160,8 +225,7 @@ def toggle_subscription_freeze(
         pass
     if not user:
         user = session.exec(select(User).where(User.email == user_id)).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
         
     if not user.subscription:
         raise HTTPException(status_code=400, detail="User has no subscription")
@@ -169,15 +233,21 @@ def toggle_subscription_freeze(
     from datetime import datetime, timedelta
     
     new_sub = user.subscription.copy()
-    is_frozen = new_sub.get('isFrozen', False)
+    is_frozen = new_sub.get('is_frozen', False)
+    freeze_count = new_sub.get('freeze_count', 0)
     
-    new_sub['isFrozen'] = not is_frozen
     if not is_frozen:
         # Freezing now
-        new_sub['frozenUntil'] = (datetime.utcnow() + timedelta(days=14)).isoformat()
+        if freeze_count >= 1:
+            raise HTTPException(status_code=400, detail="Subscription has already been frozen once")
+            
+        new_sub['is_frozen'] = True
+        new_sub['freeze_count'] = freeze_count + 1
+        new_sub['frozen_until'] = (datetime.utcnow() + timedelta(days=7)).isoformat()
     else:
         # Unfreezing
-        new_sub['frozenUntil'] = None
+        new_sub['is_frozen'] = False
+        new_sub['frozen_until'] = None
         
     user.subscription = new_sub
     session.add(user)
@@ -223,8 +293,7 @@ def update_personal_discount(
         pass
     if not user:
         user = session.exec(select(User).where(User.email == user_id)).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
         
     percent = payload.get('percent')
     reason = payload.get('reason', 'Manual Admin Update')

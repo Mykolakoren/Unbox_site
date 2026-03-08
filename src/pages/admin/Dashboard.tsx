@@ -4,6 +4,7 @@ import { startOfToday, startOfMonth, isAfter, isSameDay } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
+import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
 
 
 export function AdminDashboard() {
@@ -92,6 +93,9 @@ export function AdminDashboard() {
                     </div>
                 ))}
             </div>
+
+            {/* Analytics */}
+            <AnalyticsCharts bookings={bookings} />
 
             {/* Recent Activity */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

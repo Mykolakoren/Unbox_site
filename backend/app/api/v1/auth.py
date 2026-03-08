@@ -213,3 +213,91 @@ def telegram_login(
         "access_token": access_token,
         "token_type": "bearer"
     }
+
+from fastapi.responses import RedirectResponse
+from fastapi import Request
+
+@router.get("/telegram/callback")
+def telegram_login_callback(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+) -> Any:
+    """
+    Handle redirect from Telegram Login Widget (data-auth-url)
+    """
+    if not settings.TELEGRAM_BOT_TOKEN:
+         raise HTTPException(status_code=500, detail="Telegram Bot Token not configured")
+
+    # Get all query params
+    params = dict(request.query_params)
+    hash_val = params.pop("hash", None)
+    
+    if not hash_val:
+        raise HTTPException(status_code=400, detail="Missing hash parameter")
+    
+    # Sort keys alphabetically and prepare string
+    data_check_arr = []
+    for key, value in params.items():
+        if value:
+             data_check_arr.append(f"{key}={value}")
+    
+    data_check_arr.sort()
+    data_check_string = "\n".join(data_check_arr)
+    
+    secret_key = hashlib.sha256(settings.TELEGRAM_BOT_TOKEN.encode()).digest()
+    hash_calc = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    
+    if hash_calc != hash_val:
+        raise HTTPException(status_code=400, detail="Invalid Telegram Hash.")
+        
+    telegram_id = str(params.get("id"))
+    
+    # Check user by Telegram ID
+    user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
+    
+    if not user:
+        placeholder_email = f"{telegram_id}@telegram.unbox"
+        first_name = params.get("first_name", "")
+        last_name = params.get("last_name", "")
+        
+        user = User(
+            email=placeholder_email,
+            name=f"{first_name} {last_name}".strip(),
+            telegram_id=telegram_id,
+            avatar_url=params.get("photo_url"),
+            hashed_password="",
+            is_admin=False
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+    user_id = user.id
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = security.create_access_token(
+        user_id, expires_delta=access_token_expires
+    )
+    
+    # Instead of redirecting (which happens inside the popup),
+    # return a small HTML page that saves the token to localStorage 
+    # and closes the popup. The parent window polls for the token.
+    from fastapi.responses import HTMLResponse
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Authorizing...</title></head>
+    <body>
+        <p>Авторизация успешна! Это окно закроется автоматически...</p>
+        <script>
+            try {{
+                window.localStorage.setItem('token', '{access_token}');
+                window.close();
+            }} catch(e) {{
+                // If window.close() is blocked, redirect instead
+                window.location.href = '/dashboard?token={access_token}&source=telegram';
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)

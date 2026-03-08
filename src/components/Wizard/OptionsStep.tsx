@@ -4,12 +4,19 @@ import { Card } from '../ui/Card';
 import { Check, ArrowRight, ArrowLeft } from 'lucide-react';
 import { Button } from '../ui/Button';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 
 export function OptionsStep() {
     const { extras, toggleExtra, setStep } = useBookingStore();
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.5 }}
+            className="space-y-8"
+        >
             <div>
                 <h2 className="text-2xl font-bold mb-2">Дополнительные опции</h2>
                 <p className="text-gray-500">Что вам понадобится для работы?</p>
@@ -49,6 +56,6 @@ export function OptionsStep() {
                     Продолжить <ArrowRight size={16} className="ml-2" />
                 </Button>
             </div>
-        </div>
+        </motion.div>
     );
 }

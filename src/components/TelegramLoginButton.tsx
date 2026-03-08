@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { Send } from 'lucide-react';
 
 interface TelegramLoginButtonProps {
     botName: string;
-    onAuth: (user: any) => void;
+    onAuth?: (user: any) => void;
     buttonSize?: 'large' | 'medium' | 'small';
     cornerRadius?: number;
     requestAccess?: boolean;
@@ -11,48 +11,60 @@ interface TelegramLoginButtonProps {
 
 export const TelegramLoginButton = ({
     botName,
-    onAuth,
-    buttonSize = 'large',
-    cornerRadius = 12,
-    requestAccess = true,
-    usePic = true
 }: TelegramLoginButtonProps) => {
-    const containerRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        if (!containerRef.current) return;
+    const handleClick = () => {
+        // Build the callback URL dynamically based on current origin
+        const origin = window.location.origin;
+        const callbackUrl = `${origin}/api/v1/auth/telegram/callback`;
 
-        // Prevent duplicate buttons
-        if (containerRef.current.innerHTML !== '') return;
+        // Listen for the popup closing or receiving a message
+        const checkPopup = setInterval(() => {
+            // Check if token appeared in localStorage (set by the redirected page)
+            const token = localStorage.getItem('token');
+            if (token) {
+                clearInterval(checkPopup);
+                window.location.href = '/dashboard';
+            }
+        }, 500);
 
-        const script = document.createElement('script');
-        script.src = 'https://telegram.org/js/telegram-widget.js?22';
-        script.setAttribute('data-telegram-login', botName);
-        script.setAttribute('data-size', buttonSize);
-        script.setAttribute('data-radius', cornerRadius.toString());
-        if (requestAccess) script.setAttribute('data-request-access', 'write');
-        script.setAttribute('data-userpic', usePic.toString().toLowerCase());
-        script.setAttribute('data-onauth', 'onTelegramAuth(user)');
-        script.async = true;
+        // Open Telegram OAuth in a popup window
+        const width = 550;
+        const height = 470;
+        const left = Math.round((window.screen.width / 2) - (width / 2));
+        const top = Math.round((window.screen.height / 2) - (height / 2));
 
-        // Define global callback
-        (window as any).onTelegramAuth = (user: any) => {
-            onAuth(user);
-        };
+        const authUrl = `https://oauth.telegram.org/auth?bot_id=${botName}&origin=${encodeURIComponent(origin)}&embed=0&request_access=write&return_to=${encodeURIComponent(callbackUrl)}`;
 
-        containerRef.current.appendChild(script);
+        const popup = window.open(
+            authUrl,
+            'telegram_auth',
+            `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=no,resizable=no`
+        );
 
-        return () => {
-            // cleanup if needed (though global callback might persist)
-        };
-    }, [botName, buttonSize, cornerRadius, requestAccess, usePic, onAuth]);
+        // Also check if popup was closed
+        const checkClosed = setInterval(() => {
+            if (popup && popup.closed) {
+                clearInterval(checkClosed);
+                clearInterval(checkPopup);
+            }
+        }, 1000);
+
+        // Auto-cleanup after 5 minutes
+        setTimeout(() => {
+            clearInterval(checkPopup);
+            clearInterval(checkClosed);
+        }, 300000);
+    };
 
     return (
-        <div
-            ref={containerRef}
-            className="flex justify-center min-h-[40px] w-full items-center"
+        <button
+            type="button"
+            onClick={handleClick}
+            className="flex items-center gap-2 px-6 py-2.5 bg-[#54A9EB] hover:bg-[#4A96D2] text-white font-medium rounded-lg transition-all duration-200 hover:shadow-md active:scale-[0.98]"
         >
-            {/* Script will inject button here */}
-        </div>
+            <Send size={18} />
+            <span>Войти через Telegram</span>
+        </button>
     );
 };

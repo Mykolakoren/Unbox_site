@@ -4,6 +4,10 @@ from sqlmodel import select, Session
 from app.api import deps
 from app.models.booking import Booking, BookingCreate, BookingRead
 from app.models.user import User
+from datetime import datetime
+from uuid import UUID
+from app.services.google_calendar import gcal_service
+from app.services.timeline import timeline_service
 
 router = APIRouter()
 
@@ -54,8 +58,25 @@ def read_public_bookings(
     Retrieve ALL confirmed bookings for availability display (Public).
     Hides user details automatically via response_model selection or we can use a slimmer model.
     """
-    # TODO: Filter by date range for optimization
     query = select(Booking).where(Booking.status == "confirmed")
+    
+    if start_date:
+        try:
+             # Assuming YYYY-MM-DD
+             s_date = datetime.strptime(start_date, "%Y-%m-%d")
+             query = query.where(Booking.date >= s_date)
+        except ValueError:
+             pass # Ignore invalid date
+             
+    if end_date:
+        try:
+             e_date = datetime.strptime(end_date, "%Y-%m-%d")
+             # Include the end date fully (up to 23:59:59)
+             e_date = e_date.replace(hour=23, minute=59, second=59)
+             query = query.where(Booking.date <= e_date)
+        except ValueError:
+             pass
+
     bookings = session.exec(query).all()
     return bookings
 
@@ -71,7 +92,7 @@ def create_booking(
     Create new booking.
     """
     # Import service here or at top (using local for safety in this edit)
-    from app.services.google_calendar import gcal_service
+    # from app.services.google_calendar import gcal_service (Moved to top)
 
     try:
         # Check availability
@@ -104,32 +125,72 @@ def create_booking(
             if target:
                  booking_owner = target
         
-        # Payment Processing (Charge booking_owner)
-        if booking_in.payment_method == 'subscription':
-            # Check subscription
-            if not booking_owner.subscription or booking_owner.subscription.get('remainingHours', 0) < (booking_in.duration / 60):
-                 raise HTTPException(status_code=400, detail="Insufficient subscription hours")
+        # ---------------------------------------------------------
+        # Pricing & Payment Logic (Using PricingService)
+        # ---------------------------------------------------------
+        from app.services.pricing import PricingService
+        from datetime import datetime, time
+        
+        # Combine date and time
+        # booking_in.date is datetime, booking_in.start_time is "HH:MM"
+        # We need a full datetime for PricingService to check Hot Booking etc.
+        try:
+            h, m = map(int, booking_in.start_time.split(':'))
+            # Combine booking_in.date (which might be just date part effectively) with time
+            start_dt = booking_in.date.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            # Fallback if parsing fails (shouldn't happen with valid input)
+            start_dt = booking_in.date
             
-            # Deduct hours
-            new_sub = booking_owner.subscription.copy()
-            deduction = booking_in.duration / 60
-            new_sub['remainingHours'] -= deduction
-            booking_owner.subscription = new_sub
+        pricing_service = PricingService(session)
+        quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=booking_in.resource_id,
+            start_time=start_dt,
+            duration_minutes=booking_in.duration,
+            format_type=booking_in.format
+        )
+        
+        # Validate Payment Method compatibility
+        if booking_in.payment_method == 'subscription':
+            if quote.applied_rule != 'SUBSCRIPTION':
+                # User wanted subscription, but PricingService says not applicable
+                # (Likely insufficient hours or format mismatch)
+                raise HTTPException(status_code=400, detail="Insufficient subscription hours or invalid format for plan")
+            
+            # Deduct Hours
+            if booking_owner.subscription:
+                new_sub = booking_owner.subscription.copy()
+                rem = new_sub.get('remaining_hours', new_sub.get('remainingHours', 0))
+                used = new_sub.get('used_hours', new_sub.get('usedHours', 0))
+                
+                new_sub['remaining_hours'] = max(0, float(rem) - quote.hours_deducted)
+                new_sub['used_hours'] = float(used) + quote.hours_deducted
+                
+                # Cleanup old camelCase if present to keep DB clean
+                if 'remainingHours' in new_sub: del new_sub['remainingHours']
+                if 'usedHours' in new_sub: del new_sub['usedHours']
+                
+                booking_owner.subscription = new_sub
             
         else:
-            # Balance deduction (allow negative for credit if within limit)
-            # Credit logic: balance can go negative down to -credit_limit.
-            # Available funds = balance + credit_limit
-            # If available_funds < price, raise Error.
-            
-            # Note: credit_limit is positive number (e.g. 100)
-            # If balance is -50, limit 100 => 50 available.
-            
+            # Payment Method: Balance (or others)
+            # Check if user has enough funds (balance + credit limit)
             available_funds = booking_owner.balance + booking_owner.credit_limit
-            if available_funds < booking_in.final_price:
-                 raise HTTPException(status_code=400, detail="Insufficient funds (exceeds credit limit)")
-
-            booking_owner.balance -= booking_in.final_price
+            if available_funds < quote.final_price:
+                 raise HTTPException(status_code=400, detail=f"Insufficient funds. Required: {quote.final_price}, Available: {available_funds}")
+            
+            # Deduct Money
+            booking_owner.balance -= quote.final_price
+            
+        # Update Booking Object with Pricing Details
+        booking_in.final_price = quote.final_price
+        booking_in.base_price = quote.base_price
+        booking_in.applied_rule = quote.applied_rule
+        booking_in.discount_amount = quote.discount_amount
+        booking_in.discount_percent = quote.discount_percent
+        booking_in.hours_deducted = quote.hours_deducted
+        # ---------------------------------------------------------
     
         session.add(booking_owner)
         
@@ -179,6 +240,7 @@ def cancel_booking(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     # ... (Fetch booking logic) ...
+    # ... (Fetch booking logic) ...
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
@@ -189,7 +251,11 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
         
     # Access control
-    if booking.user_uuid != current_user.id and not current_user.is_admin:
+    # Check UUID first, then fallback to email (legacy support)
+    is_owner = (booking.user_uuid and booking.user_uuid == current_user.id) or \
+               (booking.user_id == current_user.email)
+               
+    if not is_owner and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     if booking.status == "cancelled":
@@ -197,23 +263,33 @@ def cancel_booking(
 
     # --- GOOGLE CALENDAR SYNC (DELETE) ---
     if booking.gcal_event_id:
-        gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
+        try:
+            gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
+        except Exception:
+            pass # Non-critical
         booking.gcal_event_id = None # Clear references
     # -------------------------------------
-
-    # Refund Logic ...
-    # ... (Rest of function) ...
 
     # Refund Logic
     if booking.payment_method == 'subscription':
         if current_user.subscription:
             new_sub = current_user.subscription.copy()
-            refund = booking.hours_deducted or (booking.duration / 60)
-            new_sub['remainingHours'] += refund
+            # Handle legacy data where hours_deducted might be None
+            refund_hours = booking.hours_deducted if booking.hours_deducted is not None else (booking.duration / 60)
+            
+            rem = new_sub.get('remaining_hours', new_sub.get('remainingHours', 0))
+            new_sub['remaining_hours'] = float(rem) + refund_hours
+            
+            # Cleanup old camelCase
+            if 'remainingHours' in new_sub: del new_sub['remainingHours']
+            
             current_user.subscription = new_sub
             session.add(current_user)
     else:
-        current_user.balance += booking.final_price
+        # Refund Balance
+        # Handle legacy data where final_price might be None
+        refund_amount = booking.final_price if booking.final_price is not None else 0.0
+        current_user.balance += refund_amount
         session.add(current_user)
 
     booking.status = "cancelled"
@@ -225,13 +301,27 @@ def cancel_booking(
     session.refresh(booking)
     
     # --- AUDIT LOGGING ---
-    from app.services.timeline import timeline_service
+    # from app.services.timeline import timeline_service (Moved to top)
     from datetime import datetime, timedelta
     
     # Calculate time to booking
-    booking_start = datetime.fromisoformat(booking.date + "T" + booking.start_time)
+    # booking.date is datetime object. booking.start_time is "HH:MM".
+    try:
+        h, m = map(int, booking.start_time.split(':'))
+        booking_start = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
+    except Exception:
+        # Fallback if parsing fails
+        booking_start = booking.date
+
     hours_until_start = (booking_start - datetime.utcnow()).total_seconds() / 3600
     is_late_cancellation = hours_until_start < 24
+    
+    # Enforce Cancellation Policy (No cancellation < 24h)
+    if is_late_cancellation and not current_user.is_admin:
+         raise HTTPException(
+             status_code=400, 
+             detail=f"Cancellation is not allowed less than 24 hours before start. Time remaining: {hours_until_start:.1f}h"
+         )
     
     timeline_service.log_event(
         session=session,

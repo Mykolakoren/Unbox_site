@@ -3,7 +3,7 @@ import { useBookingStore } from '../store/bookingStore';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { BadgeCheck, XCircle, Clock, Calendar as CalendarIcon } from 'lucide-react';
+import { BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -47,19 +47,37 @@ export function MyBookingsPage() {
         const booking = bookings.find(b => b.id === id);
         if (!booking) return;
 
+        // Calculate refund text
+        let refundText = '';
+        if (booking.paymentMethod === 'subscription') {
+            const hours = booking.hoursDeducted || (booking.duration / 60);
+            refundText = `${hours} ч. будут возвращены на ваш абонемент.`;
+        } else {
+            // For balance, it's finalPrice
+            refundText = `${booking.finalPrice} ₾ будут возвращены на ваш баланс.`;
+        }
+
         setModalConfig({
             isOpen: true,
             title: 'Отменить бронирование?',
-            message: 'Это действие нельзя отменить. Средства будут возвращены согласно правилам отмены.',
+            message: (
+                <div className="space-y-2 text-sm text-gray-600">
+                    <p>Это действие необратимо.</p>
+                    <p className="font-medium text-unbox-dark bg-gray-50 p-2 rounded-lg border border-gray-100">
+                        {refundText}
+                    </p>
+                </div>
+            ),
             confirmLabel: 'Отменить бронь',
             isDestructive: true,
-            onConfirm: () => {
-                cancelBooking(id);
-                // Notification logic
-                if (booking.paymentMethod === 'subscription') {
-                    toast.success(`Бронирование отменено. ${booking.hoursDeducted || (booking.duration / 60)} ч. возвращено на абонемент.`);
-                } else {
-                    toast.success(`Бронирование отменено. ${booking.finalPrice} ₾ возвращено на ваш депозит.`);
+            onConfirm: async () => {
+                try {
+                    await cancelBooking(id);
+                    toast.success('Бронирование отменено');
+                } catch (error: any) {
+                    const msg = error.response?.data?.detail || 'Не удалось отменить бронирование';
+                    toast.error(msg);
+                    console.error(error);
                 }
             }
         });
@@ -85,6 +103,15 @@ export function MyBookingsPage() {
         });
     };
 
+
+    const handleBookAgain = (booking: any) => {
+        const store = useBookingStore.getState();
+        store.reset();
+        store.setLocation(booking.locationId);
+        store.setFormat(booking.format);
+        store.setStep(2);
+        navigate('/');
+    };
 
     return (
         <div className="space-y-6 pb-20">
@@ -257,15 +284,17 @@ export function MyBookingsPage() {
                             {booking.status === 'confirmed' && (
                                 <div className="mt-4 pt-4 border-t border-gray-100">
                                     {(() => {
-                                        let bookingTime = new Date(booking.date).getTime();
-                                        if (booking.startTime) {
-                                            const [h, m] = booking.startTime.split(':').map(Number);
-                                            const d = new Date(booking.date);
-                                            d.setHours(h, m, 0, 0);
-                                            bookingTime = d.getTime();
-                                        }
-                                        const now = Date.now();
-                                        const diffHours = (bookingTime - now) / (1000 * 60 * 60);
+                                        // Robust check using date-fns
+                                        if (!booking.startTime) return false;
+                                        const [h, m] = booking.startTime.split(':').map(Number);
+                                        const startDateTime = new Date(booking.date);
+                                        startDateTime.setHours(h, m, 0, 0);
+
+                                        // Fallback if Date is invalid (though unlikely with type checks)
+                                        if (isNaN(startDateTime.getTime())) return false;
+
+                                        const now = new Date();
+                                        const diffHours = (startDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 
                                         return diffHours > 24;
                                     })() ? (
@@ -289,6 +318,27 @@ export function MyBookingsPage() {
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
+                                            {/* Access Details Block (Shown less than 24h before or always for confirmed) */}
+                                            <div className="bg-teal-50 border border-teal-100 rounded-xl p-4 mb-2">
+                                                <h4 className="text-sm font-bold text-teal-900 mb-3">Ваши доступы</h4>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="flex items-start gap-2">
+                                                        <Key className="w-4 h-4 text-teal-600 mt-0.5" />
+                                                        <div>
+                                                            <div className="text-[10px] uppercase font-bold text-teal-600 tracking-wider">Код от двери</div>
+                                                            <div className="text-sm font-mono font-bold text-teal-900 bg-teal-100 px-1.5 py-0.5 rounded inline-block mt-0.5">#{booking.id.slice(-4).toUpperCase()}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-2">
+                                                        <Wifi className="w-4 h-4 text-teal-600 mt-0.5" />
+                                                        <div>
+                                                            <div className="text-[10px] uppercase font-bold text-teal-600 tracking-wider">Wi-Fi (Unbox_Guest)</div>
+                                                            <div className="text-sm font-mono font-bold text-teal-900 bg-teal-100 px-1.5 py-0.5 rounded inline-block mt-0.5">unbox2024</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <div className="text-xs text-center text-unbox-grey italic bg-gray-50 p-2 rounded-lg">
                                                 Менее 24ч до начала. Бесплатная отмена недоступна.
                                             </div>
@@ -333,6 +383,19 @@ export function MyBookingsPage() {
                                             +{(booking.finalPrice * 0.5).toFixed(1)} ₾
                                         </span>
                                     </div>
+                                </div>
+                            )}
+
+                            {booking.status === 'completed' && (
+                                <div className="mt-4 pt-4 border-t border-gray-100">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full text-teal-700 border-teal-200 hover:bg-teal-50 gap-2"
+                                        onClick={() => handleBookAgain(booking)}
+                                    >
+                                        <Repeat size={16} /> Повторить бронирование
+                                    </Button>
                                 </div>
                             )}
                         </Card>

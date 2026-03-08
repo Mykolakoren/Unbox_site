@@ -14,6 +14,11 @@ class BookingBase(SQLModel):
     
     # Pricing & Payment
     final_price: float
+    base_price: Optional[float] = None
+    applied_rule: Optional[str] = None # SUBSCRIPTION, HOT_BOOKING, etc.
+    discount_amount: float = 0.0
+    discount_percent: int = 0
+    
     payment_method: str # balance, subscription
     payment_source: Optional[str] = None # deposit, credit, subscription
     hours_deducted: Optional[float] = None # For subscription payments

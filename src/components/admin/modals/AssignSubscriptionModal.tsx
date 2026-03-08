@@ -75,7 +75,7 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
                                     {plan.name}
                                 </div>
                                 <div className="text-sm text-gray-500">
-                                    {plan.hours} часов
+                                    {plan.hours}{plan.bonusHours ? ` + ${plan.bonusHours}` : ''} часов · {plan.durationDays} дней
                                 </div>
                             </div>
                             <div className="text-right">

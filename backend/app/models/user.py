@@ -1,8 +1,12 @@
 from typing import Optional, List
 from uuid import UUID, uuid4
-from sqlmodel import Field, SQLModel, JSON
+from sqlmodel import Field, SQLModel, JSON, Relationship
 from sqlalchemy import Column
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .specialist import Specialist
 
 class UserBase(SQLModel):
     email: str = Field(unique=True, index=True)
@@ -34,10 +38,14 @@ class UserBase(SQLModel):
     avatar_url: Optional[str] = None
 
 class User(UserBase, table=True):
+    __tablename__ = "user" # type: ignore
+    
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     hashed_password: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    specialist_profile: Optional["Specialist"] = Relationship(back_populates="user")
 
 class UserCreate(UserBase):
     password: str

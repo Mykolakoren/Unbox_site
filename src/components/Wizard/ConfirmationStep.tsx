@@ -1,30 +1,32 @@
 import { useBookingStore } from '../../store/bookingStore';
+import { calculatePrice } from '../../utils/pricing';
 import { useUserStore } from '../../store/userStore';
 import { Button } from '../ui/Button';
-import { CheckCircle, Download, Home, Calendar as CalendarIcon, ArrowRight, RefreshCw } from 'lucide-react';
+import {
+    CheckCircle,
+    Download,
+    Calendar as CalendarIcon,
+    ArrowRight,
+    RefreshCw,
+    Home,
+    Loader2
+} from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import { useState, useMemo } from 'react';
-import { calculatePrice } from '../../utils/pricing';
 import { EXTRAS, RESOURCES } from '../../utils/data';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-
-
-// ...
-
-// ... (Imports and setup)
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
-
-import { startOfWeek, endOfWeek, isWithinInterval, format } from 'date-fns';
+import { format, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
-
-// ... (existing imports)
+import { motion } from 'framer-motion';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
     const { currentUser, addBookings, bookings, rescheduleBooking, users } = useUserStore();
     const [confirmed, setConfirmed] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const navigate = useNavigate();
 
     // Determine effective user for pricing and logic
@@ -41,14 +43,21 @@ export function ConfirmationStep() {
         return bookings.find(b => b.id === state.editBookingId);
     }, [isRescheduling, state.editBookingId, bookings]);
 
-    // Calculate Accumulated Weekly Hours
+
+
+    // Calculate Cart Items (Basic grouping)
+    const rawCartDetails = useMemo(() => {
+        if (state.selectedSlots.length === 0) return [];
+        return groupSlotsIntoBookings(state.selectedSlots, state.date);
+    }, [state.selectedSlots, state.date]);
+
+    // Calculate Accumulated Weekly Hours for progressive discount
     const accumulatedWeeklyHours = useMemo(() => {
         if (!effectiveUser) return 0;
         const now = state.date;
         const start = startOfWeek(now, { weekStartsOn: 1 });
         const end = endOfWeek(now, { weekStartsOn: 1 });
 
-        // Filter confirmed bookings for this week
         const weeklyBookings = bookings.filter(b =>
             b.userId === effectiveUser.email &&
             b.status === 'confirmed' &&
@@ -58,39 +67,46 @@ export function ConfirmationStep() {
         return weeklyBookings.reduce((sum, b) => sum + (b.duration / 60), 0);
     }, [effectiveUser, bookings, state.date]);
 
-    // Calculate Price for ALL items in Cart
+    // Synchronous Pricing State
     const { cartDetails, totalPrice } = useMemo(() => {
-        if (state.selectedSlots.length === 0) return { cartDetails: [], totalPrice: 0 };
-
-        const bookingsList = groupSlotsIntoBookings(state.selectedSlots, state.date);
+        if (rawCartDetails.length === 0) return { cartDetails: [], totalPrice: 0 };
 
         let total = 0;
-        const details = bookingsList.map(b => {
+        const details = rawCartDetails.map(b => {
             const selectedExtras = EXTRAS.filter(e => state.extras.includes(e.id));
-            const start = new Date(state.date);
+            const startOriginal = new Date(state.date);
             const [h, m] = b.startTime.split(':').map(Number);
-            start.setHours(h, m, 0, 0);
-            const end = new Date(start.getTime() + b.duration * 60000);
+            startOriginal.setHours(h, m, 0, 0);
+            const endDateTime = new Date(startOriginal.getTime() + b.duration * 60000);
 
             const p = calculatePrice({
                 format: state.format,
-                startTime: start,
-                endTime: end,
+                startTime: startOriginal,
+                endTime: endDateTime,
                 extras: selectedExtras,
                 paymentMethod: state.paymentMethod,
-                resourceId: b.resourceId, // Use item's resourceId
+                resourceId: b.resourceId,
                 accumulatedWeeklyHours: accumulatedWeeklyHours,
-                // User Settings
                 personalDiscountPercent: effectiveUser?.personalDiscountPercent,
                 pricingSystem: effectiveUser?.pricingSystem
             });
 
             total += p.finalPrice;
-            return { ...b, price: p, startDateTime: start, endDateTime: end, resourceId: b.resourceId };
+
+            return {
+                ...b,
+                startDateTime: startOriginal,
+                endDateTime: endDateTime,
+                price: p,
+                resourceId: b.resourceId
+            };
         });
 
         return { cartDetails: details, totalPrice: total };
-    }, [state.selectedSlots, state.date, state.format, state.extras, state.paymentMethod, state.resourceId, accumulatedWeeklyHours]);
+    }, [rawCartDetails, state.extras, state.format, state.date, state.paymentMethod, effectiveUser, accumulatedWeeklyHours]);
+
+    const isLoadingPricing = false;
+
 
     // Payment method is now controlled by store (state.paymentMethod)
 
@@ -133,6 +149,7 @@ export function ConfirmationStep() {
 
 
     const handleConfirm = async () => {
+        setIsSubmitting(true);
         try {
             if (cartDetails.length === 0) {
                 toast.error("Ошибка: Корзина пуста. Пожалуйста, выберите время.");
@@ -341,6 +358,8 @@ export function ConfirmationStep() {
             } else {
                 toast.error(message);
             }
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -409,7 +428,13 @@ export function ConfirmationStep() {
     }
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.5 }}
+            className="space-y-8"
+        >
             <div>
                 <h2 className="text-2xl font-bold mb-2">Подтверждение</h2>
                 <p className="text-gray-500">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
@@ -556,17 +581,19 @@ export function ConfirmationStep() {
                     </div>
                 )}
 
-                <Button size="lg" className="w-full md:w-auto" onClick={handleConfirm}>
-                    {isRescheduling
-                        ? 'Подтвердить перенос'
-                        : isEditing
-                            ? 'Сохранить изменения'
-                            : state.paymentMethod === 'subscription'
-                                ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
-                                : `Оплатить ${totalPrice.toFixed(1)} ₾`
+                <Button size="lg" className="w-full md:w-auto" onClick={handleConfirm} disabled={isLoadingPricing || isSubmitting}>
+                    {isLoadingPricing || isSubmitting
+                        ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {isLoadingPricing ? 'Расчет цены...' : 'Оформление...'}</>
+                        : isRescheduling
+                            ? 'Подтвердить перенос'
+                            : isEditing
+                                ? 'Сохранить изменения'
+                                : state.paymentMethod === 'subscription'
+                                    ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
+                                    : `Оплатить ${totalPrice.toFixed(1)} ₾`
                     }
                 </Button>
             </div>
-        </div>
+        </motion.div>
     );
 }

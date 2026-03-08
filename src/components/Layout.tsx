@@ -12,16 +12,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
             {/* Header */}
             <header className="sticky top-0 z-50 w-full border-b border-unbox-light bg-white/80 backdrop-blur-md text-unbox-dark">
                 <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-                    <Link
-                        to="/"
-                        className="flex items-center gap-2 group"
-                        onClick={() => useBookingStore.getState().reset()}
-                    >
-                        <img src="/unbox-logo.png" alt="Unbox" className="h-12 object-contain cursor-pointer group-hover:opacity-80 transition-opacity" />
-                    </Link>
+                    <div className="flex items-center gap-6">
+                        <Link
+                            to="/"
+                            className="flex items-center group"
+                            onClick={() => useBookingStore.getState().reset()}
+                        >
+                            <img src="/unbox-logo.png" alt="Unbox" className="h-12 object-contain cursor-pointer group-hover:opacity-80 transition-opacity" />
+                        </Link>
+
+                        <nav className="hidden md:flex items-center gap-1">
+                            <Link to="/" className="px-3 py-2 rounded-lg font-medium text-sm text-gray-600 hover:text-unbox-dark hover:bg-gray-100/50 transition-colors">
+                                Забронировать
+                            </Link>
+                            <Link to="/specialists" className="px-3 py-2 rounded-lg font-medium text-sm text-gray-600 hover:text-unbox-dark hover:bg-gray-100/50 transition-colors">
+                                Специалисты
+                            </Link>
+                        </nav>
+                    </div>
 
                     <div className="flex items-center gap-4">
-                        {user && (user.role === 'admin' || user.role === 'owner') && (
+                        {user && (user.role === 'admin' || user.role === 'senior_admin' || user.role === 'owner') && (
                             <Link to="/admin">
                                 <Button variant="ghost" size="sm" className="font-medium text-unbox-dark hover:text-unbox-green">
                                     <ShieldCheck size={18} className="mr-2" />

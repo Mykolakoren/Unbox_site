@@ -17,14 +17,16 @@ export function ProfilePage() {
     const handleGrantSubscription = () => {
         updateUser({
             subscription: {
-                id: `sub-test-${Date.now()}`,
-                name: 'Unbox Pro (Test)',
-                totalHours: 50,
-                remainingHours: 50,
-                freeReschedules: 5,
-                expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                id: 'sub_123',
+                planId: 'pro',
+                name: 'Pro',
+                totalHours: 20,
+                remainingHours: 6,
+                freeReschedules: 0,
+                expiryDate: '2026-04-01T00:00:00.000Z',
                 isFrozen: false,
-                includedFormats: ['individual', 'group'] as Format[]
+                freezeCount: 0,
+                includedFormats: ['individual', 'group'] as Format[],
             }
         });
     };
