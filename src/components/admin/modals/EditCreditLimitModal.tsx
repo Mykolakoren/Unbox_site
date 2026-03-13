@@ -68,7 +68,7 @@ export function EditCreditLimitModal({ isOpen, onClose, currentLimit, onConfirm 
                             value={limit}
                             onChange={(e) => setLimit(e.target.value)}
                             placeholder="0.00"
-                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black transition-shadow text-lg font-medium"
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green transition-shadow text-lg font-medium"
                             autoFocus
                         />
                         <p className="text-xs text-gray-400 mt-2">

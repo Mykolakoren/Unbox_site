@@ -53,14 +53,14 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                 <div className="flex-1 space-y-2">
                     <input
                         type="text"
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
                         placeholder="Новая задача..."
                         value={newTaskText}
                         onChange={(e) => setNewTaskText(e.target.value)}
                     />
                     <input
                         type="date"
-                        className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-500 focus:outline-none focus:ring-2 focus:ring-black"
+                        className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-500 focus:outline-none focus:ring-2 focus:ring-unbox-green"
                         value={dueDate}
                         onChange={(e) => setDueDate(e.target.value)}
                     />
@@ -94,7 +94,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                                 type="checkbox"
                                 checked={task.isCompleted}
                                 onChange={() => toggleUserTask(email, task.id)}
-                                className="mt-1 w-4 h-4 rounded border-gray-300 text-black focus:ring-black cursor-pointer"
+                                className="mt-1 w-4 h-4 rounded border-gray-300 text-unbox-green focus:ring-unbox-green cursor-pointer"
                             />
 
                             <div className="flex-1 min-w-0">

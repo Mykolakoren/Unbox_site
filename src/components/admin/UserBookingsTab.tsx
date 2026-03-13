@@ -234,7 +234,7 @@ export function UserBookingsTab({ bookings, onCancel: propOnCancel, onReschedule
                                     href={getGoogleCalendarLink(booking)}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors flex items-center gap-1.5"
+                                    className="px-3 py-1.5 bg-unbox-light text-unbox-green rounded-lg text-xs font-medium hover:bg-unbox-light/80 transition-colors flex items-center gap-1.5"
                                 >
                                     <CalendarIcon size={14} />
                                     G-Cal

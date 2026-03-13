@@ -33,7 +33,10 @@ class BookingBase(SQLModel):
     
     # Re-Rent Logic
     is_re_rent_listed: bool = Field(default=False)
-    
+
+    # CRM Client Link (for specialists)
+    crm_client_id: Optional[str] = None
+
     # Google Calendar Sync
     gcal_event_id: Optional[str] = None
     gcal_calendar_id: Optional[str] = None
@@ -51,6 +54,9 @@ class Booking(BookingBase, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 class BookingCreate(BookingBase):
+    # Override required fields from BookingBase — backend computes pricing server-side
+    final_price: float = 0.0
+    payment_method: str = "balance"
     user_email: Optional[str] = None # Optional, derived from auth
     target_user_id: Optional[str] = None # Admin can specify target user (UUID or Email)
 

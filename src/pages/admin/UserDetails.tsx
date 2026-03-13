@@ -3,7 +3,7 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useState } from 'react';
@@ -37,7 +37,14 @@ export function AdminUserDetails() {
     const [isAssignSubOpen, setIsAssignSubOpen] = useState(false);
     const [isEditLimitOpen, setIsEditLimitOpen] = useState(false);
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+    const [adminPickerType, setAdminPickerType] = useState<'responsible' | 'attracted' | null>(null);
     const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'finance' | 'timeline'>('overview');
+
+    const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
+    const adminUsers = users.filter(u => u.role && ADMIN_ROLES.includes(u.role));
+    const adminMap = new Map(adminUsers.map(a => [a.id, a]));
+    const responsibleAdmin = user.responsibleAdminId ? adminMap.get(user.responsibleAdminId) : null;
+    const attractedAdmin   = user.attractedByAdminId  ? adminMap.get(user.attractedByAdminId)  : null;
     // Let's keep 'overview' default but I will change it in the replacement to 'timeline' to show it off immediately, or maybe 'overview' is safer. Let's use 'overview' but add 'timeline' to type.
 
     if (!user) {
@@ -165,10 +172,10 @@ export function AdminUserDetails() {
     const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
         new: { label: 'Новый', color: 'text-unbox-green', bg: 'bg-unbox-light' },
         active: { label: 'Активный', color: 'text-unbox-green', bg: 'bg-white border border-unbox-green' },
-        sleeping: { label: 'Спящий', color: 'text-unbox-grey', bg: 'bg-gray-50' },
+        sleeping: { label: 'Спящий', color: 'text-unbox-grey', bg: 'bg-unbox-light/30' },
         vip: { label: 'VIP', color: 'text-white', bg: 'bg-unbox-dark' }, // Special status
         partner: { label: 'Партнёр', color: 'text-unbox-dark', bg: 'bg-unbox-light' },
-        bad_client: { label: 'Проблемный', color: 'text-unbox-dark', bg: 'bg-gray-200' },
+        bad_client: { label: 'Проблемный', color: 'text-unbox-dark', bg: 'bg-unbox-light' },
     };
 
     const currentStatusConfig = STATUS_CONFIG[clientStatus] || STATUS_CONFIG.new;
@@ -198,7 +205,7 @@ export function AdminUserDetails() {
             <div className="flex items-center gap-4">
                 <button
                     onClick={() => navigate('/admin/users')}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
                 >
                     <ArrowLeft size={20} />
                 </button>
@@ -212,7 +219,7 @@ export function AdminUserDetails() {
                                 <div
                                     className={clsx(
                                         "flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold uppercase cursor-pointer transition-colors",
-                                        (user.role === 'owner' || user.isAdmin) ? "bg-blue-100 text-blue-700 hover:bg-blue-200" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                        (user.role === 'owner' || user.isAdmin) ? "bg-unbox-light text-unbox-dark hover:bg-blue-200" : "bg-unbox-light/50 text-unbox-grey hover:bg-unbox-light"
                                     )}
                                     title="Нажмите чтобы изменить роль"
                                     onClick={(e) => {
@@ -255,19 +262,19 @@ export function AdminUserDetails() {
                             {isStatusDropdownOpen && (
                                 <>
                                     <div className="fixed inset-0 z-10" onClick={() => setIsStatusDropdownOpen(false)} />
-                                    <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
-                                        <div className="p-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Изменить статус</div>
+                                    <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-unbox-light overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="p-2 text-xs font-bold text-unbox-grey uppercase tracking-wider">Изменить статус</div>
                                         <button
                                             onClick={() => {
                                                 updateUserById(user.email, { manualStatus: undefined });
                                                 setIsStatusDropdownOpen(false);
                                             }}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 flex items-center justify-between group/item"
+                                            className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/30 flex items-center justify-between group/item"
                                         >
                                             <span>Автоматически</span>
                                             {!user.manualStatus && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
                                         </button>
-                                        <div className="h-px bg-gray-100 my-1" />
+                                        <div className="h-px bg-unbox-light/50 my-1" />
                                         {['vip', 'partner', 'bad_client'].map(status => (
                                             <button
                                                 key={status}
@@ -275,7 +282,7 @@ export function AdminUserDetails() {
                                                     updateUserById(user.email, { manualStatus: status as any });
                                                     setIsStatusDropdownOpen(false);
                                                 }}
-                                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 flex items-center justify-between"
+                                                className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/30 flex items-center justify-between"
                                             >
                                                 <span className={STATUS_CONFIG[status].color}>{STATUS_CONFIG[status].label}</span>
                                                 {user.manualStatus === status && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
@@ -286,35 +293,35 @@ export function AdminUserDetails() {
                             )}
                         </div>
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-unbox-grey">
                         Участник с {user.registrationDate ? format(new Date(user.registrationDate), 'd MMMM yyyy', { locale: ru }) : 'неизвестной даты'}
                     </div>
                 </div>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 border-b border-gray-200">
+            <div className="flex gap-1 border-b border-unbox-light">
                 <button
                     onClick={() => setActiveTab('overview')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'overview' ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black")}
+                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'overview' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
                 >
                     Обзор
                 </button>
                 <button
                     onClick={() => setActiveTab('bookings')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'bookings' ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black")}
+                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'bookings' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
                 >
                     Бронирования
                 </button>
                 <button
                     onClick={() => setActiveTab('finance')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'finance' ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black")}
+                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'finance' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
                 >
                     Финансы
                 </button>
                 <button
                     onClick={() => setActiveTab('timeline')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'timeline' ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black")}
+                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'timeline' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
                 >
                     История событий
                 </button>
@@ -327,7 +334,7 @@ export function AdminUserDetails() {
                     <Card className="p-6">
                         <div className="flex flex-col items-center text-center mb-6">
                             <div className="relative group">
-                                <div className="w-24 h-24 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center text-3xl font-bold text-gray-600 mb-4 border-2 border-transparent group-hover:border-gray-200 transition-all">
+                                <div className="w-24 h-24 rounded-full overflow-hidden bg-unbox-light/50 flex items-center justify-center text-3xl font-bold text-unbox-grey mb-4 border-2 border-transparent group-hover:border-unbox-light transition-all">
                                     {user.avatarUrl ? (
                                         <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
                                     ) : (
@@ -357,8 +364,8 @@ export function AdminUserDetails() {
                             <div className="font-bold text-lg">{user.name}</div>
                             <div className={clsx("text-sm px-2 py-0.5 rounded-full mt-1",
                                 user.level === 'vip' ? 'bg-purple-100 text-purple-700' :
-                                    user.level === 'loyal' ? 'bg-blue-100 text-blue-700' :
-                                        'bg-gray-100 text-gray-600'
+                                    user.level === 'loyal' ? 'bg-unbox-light text-unbox-dark' :
+                                        'bg-unbox-light/50 text-unbox-grey'
                             )}>
                                 {user.level === 'vip' ? 'VIP Client' : user.level === 'loyal' ? 'Loyal Client' : 'Basic Client'}
                             </div>
@@ -379,8 +386,8 @@ export function AdminUserDetails() {
                                 const tgId = prompt('Введите Telegram ID:', user.telegramId || '');
                                 if (tgId !== null) updateUserById(user.email, { telegramId: tgId });
                             }}>
-                                <div className="text-gray-400"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-send"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></div>
-                                <span className={user.telegramId ? 'text-gray-900' : 'text-gray-400 dashed underline'}>
+                                <div className="text-unbox-grey"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-send"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></div>
+                                <span className={user.telegramId ? 'text-unbox-dark' : 'text-unbox-grey dashed underline'}>
                                     {user.telegramId || 'Telegram ID не указан'}
                                 </span>
                                 <span className="opacity-0 group-hover/tg:opacity-100 text-xs text-blue-500">Изменить</span>
@@ -388,7 +395,7 @@ export function AdminUserDetails() {
 
                             {/* Profession Field */}
                             <div className="pt-2 border-t border-gray-50">
-                                <div className="text-xs text-gray-400 mb-1">Профессия</div>
+                                <div className="text-xs text-unbox-grey mb-1">Профессия</div>
                                 <ProfessionEditor
                                     value={user.profession}
                                     onChange={(val) => updateUserById(user.email, { profession: val })}
@@ -397,7 +404,7 @@ export function AdminUserDetails() {
 
                             {/* Target Audience Field */}
                             <div className="pt-2 border-t border-gray-50">
-                                <div className="text-xs text-gray-400 mb-1">Работает с</div>
+                                <div className="text-xs text-unbox-grey mb-1">Работает с</div>
                                 <TargetAudienceEditor
                                     value={user.targetAudience}
                                     onChange={(val) => updateUserById(user.email, { targetAudience: val })}
@@ -405,21 +412,153 @@ export function AdminUserDetails() {
                             </div>
                         </div>
 
-                        <div className="border-t border-gray-100 my-4 pt-4 space-y-3">
+                        <div className="border-t border-unbox-light my-4 pt-4 space-y-3">
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-gray-500">Первый визит</span>
-                                <span className="font-medium text-gray-900">
+                                <span className="text-unbox-grey">Первый визит</span>
+                                <span className="font-medium text-unbox-dark">
                                     {firstBookingDate ? format(new Date(firstBookingDate), 'd MMM yyyy', { locale: ru }) : '—'}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-gray-500">Последний визит</span>
-                                <span className="font-medium text-gray-900">
+                                <span className="text-unbox-grey">Последний визит</span>
+                                <span className="font-medium text-unbox-dark">
                                     {lastVisitDate ? format(new Date(lastVisitDate), 'd MMM yyyy', { locale: ru }) : '—'}
                                 </span>
                             </div>
                         </div>
+
+                        {/* ── Admin Assignment ── */}
+                        <div className="border-t border-unbox-light pt-4 space-y-1">
+                            <div className="text-xs font-semibold text-unbox-grey uppercase tracking-wider mb-3">Назначения</div>
+
+                            {/* Responsible row */}
+                            <button
+                                onClick={() => setAdminPickerType('responsible')}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-unbox-light/50 transition-colors text-left"
+                            >
+                                <div className={clsx(
+                                    'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
+                                    responsibleAdmin ? 'bg-unbox-green text-white' : 'bg-unbox-light text-unbox-grey'
+                                )}>
+                                    {responsibleAdmin ? responsibleAdmin.name[0].toUpperCase() : <UserCircle size={14} />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] text-unbox-grey">Ответственный</div>
+                                    <div className={clsx('text-sm font-medium truncate', responsibleAdmin ? 'text-unbox-dark' : 'text-gray-400 italic')}>
+                                        {responsibleAdmin ? responsibleAdmin.name : 'не назначен'}
+                                    </div>
+                                </div>
+                                <span className="text-xs text-unbox-grey shrink-0">✎</span>
+                            </button>
+
+                            {/* Attracted row */}
+                            <button
+                                onClick={() => setAdminPickerType('attracted')}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-unbox-light/50 transition-colors text-left"
+                            >
+                                <div className={clsx(
+                                    'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
+                                    attractedAdmin ? 'bg-amber-400 text-white' : 'bg-unbox-light text-unbox-grey'
+                                )}>
+                                    {attractedAdmin ? attractedAdmin.name[0].toUpperCase() : <UserCircle size={14} />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] text-unbox-grey">Привлёк клиента</div>
+                                    <div className={clsx('text-sm font-medium truncate', attractedAdmin ? 'text-unbox-dark' : 'text-gray-400 italic')}>
+                                        {attractedAdmin ? attractedAdmin.name : 'не указан'}
+                                    </div>
+                                </div>
+                                <span className="text-xs text-unbox-grey shrink-0">✎</span>
+                            </button>
+                        </div>
                     </Card>
+
+                    {/* ── Admin Picker Modal (fixed, escapes overflow:hidden) ── */}
+                    {adminPickerType && (
+                        <div
+                            className="fixed inset-0 z-50 flex items-center justify-center"
+                            onClick={() => setAdminPickerType(null)}
+                        >
+                            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+                            <div
+                                className="relative bg-white rounded-2xl shadow-2xl w-72 p-5 animate-in zoom-in-95 duration-200"
+                                onClick={e => e.stopPropagation()}
+                            >
+                                {/* Modal header */}
+                                <div className="flex items-center justify-between mb-4">
+                                    <div>
+                                        <h3 className="font-bold text-unbox-dark">
+                                            {adminPickerType === 'responsible' ? 'Ответственный менеджер' : 'Кто привлёк клиента'}
+                                        </h3>
+                                        <p className="text-xs text-unbox-grey mt-0.5">{user.name}</p>
+                                    </div>
+                                    <button onClick={() => setAdminPickerType(null)} className="p-1 rounded-lg hover:bg-unbox-light text-unbox-grey">
+                                        <X size={16} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-1">
+                                    {/* Clear option */}
+                                    <button
+                                        onClick={() => {
+                                            const field = adminPickerType === 'responsible' ? { responsibleAdminId: null } : { attractedByAdminId: null };
+                                            updateUserById(user.email, field as any);
+                                            setAdminPickerType(null);
+                                        }}
+                                        className={clsx(
+                                            'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors text-left',
+                                            (adminPickerType === 'responsible' ? !user.responsibleAdminId : !user.attractedByAdminId)
+                                                ? 'bg-unbox-light text-unbox-dark font-medium'
+                                                : 'text-unbox-grey hover:bg-unbox-light/50'
+                                        )}
+                                    >
+                                        <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+                                            <UserCircle size={16} className="text-gray-400" />
+                                        </div>
+                                        {adminPickerType === 'responsible' ? 'Не назначен' : 'Не указан'}
+                                    </button>
+
+                                    {/* Admin list */}
+                                    {adminUsers.map(admin => {
+                                        const currentId = adminPickerType === 'responsible' ? user.responsibleAdminId : user.attractedByAdminId;
+                                        const isSelected = currentId === admin.id;
+                                        const avatarBg = adminPickerType === 'responsible' ? 'bg-unbox-green' : 'bg-amber-400';
+                                        return (
+                                            <button
+                                                key={admin.id}
+                                                onClick={() => {
+                                                    const field = adminPickerType === 'responsible'
+                                                        ? { responsibleAdminId: admin.id }
+                                                        : { attractedByAdminId: admin.id };
+                                                    updateUserById(user.email, field as any);
+                                                    toast.success(adminPickerType === 'responsible' ? `Ответственный: ${admin.name}` : `Привлёк: ${admin.name}`);
+                                                    setAdminPickerType(null);
+                                                }}
+                                                className={clsx(
+                                                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors text-left',
+                                                    isSelected ? 'bg-unbox-green text-white font-medium' : 'text-unbox-dark hover:bg-unbox-light/50'
+                                                )}
+                                            >
+                                                <div className={clsx(
+                                                    'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
+                                                    isSelected ? 'bg-white/20 text-white' : `${avatarBg} text-white`
+                                                )}>
+                                                    {admin.name[0].toUpperCase()}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="truncate">{admin.name}</div>
+                                                    <div className={clsx('text-[10px] truncate', isSelected ? 'text-white/70' : 'text-unbox-grey')}>
+                                                        {admin.role === 'owner' ? 'Владелец' : admin.role === 'senior_admin' ? 'Ст. Администратор' : 'Администратор'}
+                                                    </div>
+                                                </div>
+                                                {isSelected && <UserCheck size={14} className="ml-auto shrink-0" />}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Contacts */}
                     <UserContacts email={user.email} contacts={user.additionalContacts || []} />
@@ -441,7 +580,7 @@ export function AdminUserDetails() {
                             <Card className="p-6">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="font-bold text-lg flex items-center gap-2">
-                                        <CreditCard size={20} className="text-gray-400" />
+                                        <CreditCard size={20} className="text-unbox-grey" />
                                         Финансы и Статистика
                                     </h3>
                                     <div className="flex gap-2">
@@ -458,8 +597,8 @@ export function AdminUserDetails() {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {/* 1. Общая сумма оплат (Real Money In) */}
-                                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Общая сумма оплат</div>
+                                    <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
+                                        <div className="text-sm text-unbox-grey mb-1">Общая сумма оплат</div>
                                         <div className="text-2xl font-bold">
                                             {(() => {
                                                 const userTransactions = useUserStore.getState().getTransactionsByUser(user.email);
@@ -469,39 +608,39 @@ export function AdminUserDetails() {
                                                 return realMoneyTransactions;
                                             })()} ₾
                                         </div>
-                                        <div className="text-xs text-gray-400 mt-1">Баланс: {user.balance} ₾</div>
+                                        <div className="text-xs text-unbox-grey mt-1">Баланс: {user.balance} ₾</div>
                                         {/* Credit Limit UI */}
                                         <div
-                                            className="text-xs text-gray-400 mt-1 flex items-center gap-1 group/limit cursor-pointer"
+                                            className="text-xs text-unbox-grey mt-1 flex items-center gap-1 group/limit cursor-pointer"
                                             onClick={() => setIsEditLimitOpen(true)}
                                         >
                                             Кредитный лимит:
-                                            <span className="font-semibold text-gray-600 border-b border-dashed border-gray-300 group-hover/limit:border-blue-400 group-hover/limit:text-blue-600 transition-colors">
+                                            <span className="font-semibold text-unbox-grey border-b border-dashed border-unbox-light group-hover/limit:border-blue-400 group-hover/limit:text-unbox-green transition-colors">
                                                 {user.creditLimit || 0} ₾
                                             </span>
-                                            <div className="bg-gray-100 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
+                                            <div className="bg-unbox-light/50 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
                                             </div>
                                         </div>
                                     </div>
 
                                     {/* 2. Всего забронировано часов */}
-                                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Всего часов</div>
+                                    <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
+                                        <div className="text-sm text-unbox-grey mb-1">Всего часов</div>
                                         <div className="text-2xl font-bold">
                                             {bookings
                                                 .filter(b => b.userId === user.email && (b.status === 'completed' || b.status === 'confirmed'))
                                                 .reduce((sum, b) => sum + (b.duration / 60), 0)
                                                 .toFixed(1)} ч
                                         </div>
-                                        <div className="text-xs text-gray-400 mt-1">
+                                        <div className="text-xs text-unbox-grey mt-1">
                                             {sortedBookings.length} бронирований
                                         </div>
                                     </div>
 
                                     {/* 3. Средний чек */}
-                                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                                        <div className="text-sm text-gray-500 mb-1">Средний чек</div>
+                                    <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
+                                        <div className="text-sm text-unbox-grey mb-1">Средний чек</div>
                                         <div className="text-2xl font-bold">
                                             {(() => {
                                                 const completed = bookings.filter(b => b.userId === user.email && b.status === 'completed');
@@ -510,14 +649,14 @@ export function AdminUserDetails() {
                                                 return (totalValue / completed.length).toFixed(0);
                                             })()} ₾
                                         </div>
-                                        <div className="text-xs text-gray-400 mt-1">за посещение</div>
+                                        <div className="text-xs text-unbox-grey mt-1">за посещение</div>
                                     </div>
 
                                     {/* 5. Активный абонемент */}
-                                    <div className={clsx("rounded-xl p-4 border relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-3", user.subscription ? "bg-purple-50 border-purple-100" : "bg-gray-50 border-gray-100")}>
+                                    <div className={clsx("rounded-xl p-4 border relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-3", user.subscription ? "bg-purple-50 border-purple-100" : "bg-unbox-light/30 border-unbox-light")}>
                                         <div className="relative z-10 flex justify-between items-start">
                                             <div>
-                                                <div className="text-sm text-gray-500 mb-1">Активный абонемент</div>
+                                                <div className="text-sm text-unbox-grey mb-1">Активный абонемент</div>
                                                 {user.subscription ? (
                                                     <>
                                                         <div className="text-xl font-bold text-purple-900 mb-1">{user.subscription.name}</div>
@@ -526,7 +665,7 @@ export function AdminUserDetails() {
                                                         </div>
                                                     </>
                                                 ) : (
-                                                    <div className="text-gray-400 italic">Отсутствует</div>
+                                                    <div className="text-unbox-grey italic">Отсутствует</div>
                                                 )}
                                             </div>
                                             {user.subscription && (
@@ -560,33 +699,33 @@ export function AdminUserDetails() {
                                 </div>
 
                                 <Card className="overflow-hidden h-full flex flex-col">
-                                    <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2 font-medium">
+                                    <div className="p-4 border-b border-unbox-light bg-unbox-light/30 flex items-center gap-2 font-medium">
                                         <History size={16} />
                                         История операций
                                     </div>
                                     <div className="flex-1 overflow-y-auto max-h-[400px]">
                                         {sortedBookings.length === 0 && (
-                                            <div className="p-8 text-center text-gray-400 text-sm">История пуста</div>
+                                            <div className="p-8 text-center text-unbox-grey text-sm">История пуста</div>
                                         )}
                                         {sortedBookings.map(item => (
                                             <div
                                                 key={item.id}
                                                 onClick={() => navigate(`/admin/bookings?search=${item.id}`)}
-                                                className="p-4 border-b border-gray-50 hover:bg-gray-50/50 flex items-center justify-between cursor-pointer group"
+                                                className="p-4 border-b border-gray-50 hover:bg-unbox-light/30/50 flex items-center justify-between cursor-pointer group"
                                             >
                                                 <div>
-                                                    <div className="font-medium text-sm group-hover:text-blue-600 transition-colors">
+                                                    <div className="font-medium text-sm group-hover:text-unbox-green transition-colors">
                                                         {RESOURCES.find(r => r.id === item.resourceId)?.name || 'Кабинет'}
                                                     </div>
-                                                    <div className="text-xs text-gray-500">
+                                                    <div className="text-xs text-unbox-grey">
                                                         {format(new Date(item.date), 'd MMM yyyy', { locale: ru })} · {item.startTime}
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className={clsx("font-bold text-sm", item.status === 'cancelled' ? 'text-gray-400 line-through' : '')}>
+                                                    <div className={clsx("font-bold text-sm", item.status === 'cancelled' ? 'text-unbox-grey line-through' : '')}>
                                                         -{item.finalPrice} ₾
                                                     </div>
-                                                    <div className="text-[10px] text-gray-400 uppercase">{item.status}</div>
+                                                    <div className="text-[10px] text-unbox-grey uppercase">{item.status}</div>
                                                 </div>
                                             </div>
                                         ))}
@@ -637,8 +776,8 @@ export function AdminUserDetails() {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {/* 1. Общая сумма оплат (Real Money In) */}
-                                <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
-                                    <div className="text-sm text-gray-500 mb-1">Общая сумма оплат</div>
+                                <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
+                                    <div className="text-sm text-unbox-grey mb-1">Общая сумма оплат</div>
                                     <div className="text-2xl font-bold">
                                         {(() => {
                                             const userTransactions = useUserStore.getState().getTransactionsByUser(user.email);
@@ -648,39 +787,39 @@ export function AdminUserDetails() {
                                             return realMoneyTransactions;
                                         })()} ₾
                                     </div>
-                                    <div className="text-xs text-gray-400 mt-1">Баланс: {user.balance} ₾</div>
+                                    <div className="text-xs text-unbox-grey mt-1">Баланс: {user.balance} ₾</div>
                                     {/* Credit Limit UI */}
                                     <div
-                                        className="text-xs text-gray-400 mt-1 flex items-center gap-1 group/limit cursor-pointer"
+                                        className="text-xs text-unbox-grey mt-1 flex items-center gap-1 group/limit cursor-pointer"
                                         onClick={() => setIsEditLimitOpen(true)}
                                     >
                                         Кредитный лимит:
-                                        <span className="font-semibold text-gray-600 border-b border-dashed border-gray-300 group-hover/limit:border-blue-400 group-hover/limit:text-blue-600 transition-colors">
+                                        <span className="font-semibold text-unbox-grey border-b border-dashed border-unbox-light group-hover/limit:border-blue-400 group-hover/limit:text-unbox-green transition-colors">
                                             {user.creditLimit || 0} ₾
                                         </span>
-                                        <div className="bg-gray-100 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
+                                        <div className="bg-unbox-light/50 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
                                         </div>
                                     </div>
                                 </div>
 
                                 {/* 2. Всего забронировано часов */}
-                                <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
-                                    <div className="text-sm text-gray-500 mb-1">Всего часов</div>
+                                <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
+                                    <div className="text-sm text-unbox-grey mb-1">Всего часов</div>
                                     <div className="text-2xl font-bold">
                                         {bookings
                                             .filter(b => b.userId === user.email && (b.status === 'completed' || b.status === 'confirmed'))
                                             .reduce((sum, b) => sum + (b.duration / 60), 0)
                                             .toFixed(1)} ч
                                     </div>
-                                    <div className="text-xs text-gray-400 mt-1">
+                                    <div className="text-xs text-unbox-grey mt-1">
                                         {sortedBookings.length} бронирований
                                     </div>
                                 </div>
 
                                 {/* 3. Средний чек */}
-                                <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
-                                    <div className="text-sm text-gray-500 mb-1">Средний чек</div>
+                                <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
+                                    <div className="text-sm text-unbox-grey mb-1">Средний чек</div>
                                     <div className="text-2xl font-bold">
                                         {(() => {
                                             const completed = bookings.filter(b => b.userId === user.email && b.status === 'completed');
@@ -689,12 +828,12 @@ export function AdminUserDetails() {
                                             return (totalValue / completed.length).toFixed(0);
                                         })()} ₾
                                     </div>
-                                    <div className="text-xs text-gray-400 mt-1">за посещение</div>
+                                    <div className="text-xs text-unbox-grey mt-1">за посещение</div>
                                 </div>
                             </div>
 
                             <Card className="overflow-hidden">
-                                <div className="p-4 border-b border-gray-100 bg-gray-50 font-medium">
+                                <div className="p-4 border-b border-unbox-light bg-unbox-light/30 font-medium">
                                     История транзакций
                                 </div>
                                 <div className="p-4">

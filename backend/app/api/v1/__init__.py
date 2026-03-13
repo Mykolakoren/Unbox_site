@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import bookings, users, auth, waitlist, health, timeline, resources, upload, pricing, locations, specialists
+from app.api.v1 import bookings, users, auth, waitlist, health, timeline, resources, upload, pricing, locations, specialists, crm
 
 api_router = APIRouter()
 api_router.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
@@ -13,3 +13,4 @@ api_router.include_router(locations.router, prefix="/locations", tags=["location
 api_router.include_router(upload.router, prefix="/upload", tags=["upload"])
 api_router.include_router(pricing.router, prefix="/pricing", tags=["pricing"])
 api_router.include_router(specialists.router, prefix="/specialists", tags=["specialists"])
+api_router.include_router(crm.router, prefix="/crm", tags=["crm"])

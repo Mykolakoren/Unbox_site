@@ -118,9 +118,10 @@ def update_user(
     """
     Update a user by ID or Email (Admin only).
     """
-    if not current_user.is_admin:
+    allowed_roles = ["owner", "senior_admin", "admin"]
+    if current_user.role not in allowed_roles and not current_user.is_admin:
          raise HTTPException(status_code=403, detail="Not authorized")
-    
+
     user = None
     # Try as UUID
     try:
@@ -128,11 +129,12 @@ def update_user(
         user = session.get(User, uuid_obj)
     except ValueError:
         pass
-        
+
     # Try as Email
     if not user:
         user = session.exec(select(User).where(User.email == user_id)).first()
-        
+
+    if not user:
         raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
 
     # Role Update Protection

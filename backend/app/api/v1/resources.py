@@ -1,12 +1,16 @@
-from typing import List
+from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
+from sqlalchemy.orm.attributes import flag_modified
 from app.db.session import get_session
 from app.models.resource import Resource, ResourceCreate, ResourceRead, ResourceUpdate
 from app.models.user import User
-from app.api.deps import get_current_user, get_current_active_user, get_current_superuser
+from app.api.deps import get_current_user, get_current_superuser
 
 router = APIRouter()
+
+ALLOWED_ROLES = ["owner", "senior_admin", "admin"]
+
 
 @router.get("/", response_model=List[ResourceRead])
 def read_resources(
@@ -16,6 +20,7 @@ def read_resources(
 ):
     resources = session.exec(select(Resource).offset(skip).limit(limit)).all()
     return resources
+
 
 @router.get("/{resource_id}", response_model=ResourceRead)
 def read_resource(
@@ -27,22 +32,27 @@ def read_resource(
         raise HTTPException(status_code=404, detail="Resource not found")
     return resource
 
+
 @router.post("/", response_model=ResourceRead)
 def create_resource(
     *,
     session: Session = Depends(get_session),
     resource: ResourceCreate,
-    current_user: User = Depends(get_current_superuser)
-):
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    if current_user.role not in ALLOWED_ROLES and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     db_resource = session.get(Resource, resource.id)
     if db_resource:
         raise HTTPException(status_code=400, detail="Resource with this ID already exists")
-    
+
     db_obj = Resource.model_validate(resource)
     session.add(db_obj)
     session.commit()
     session.refresh(db_obj)
     return db_obj
+
 
 @router.put("/{resource_id}", response_model=ResourceRead)
 def update_resource(
@@ -50,15 +60,27 @@ def update_resource(
     session: Session = Depends(get_session),
     resource_id: str,
     resource_in: ResourceUpdate,
-    current_user: User = Depends(get_current_superuser)
-):
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    if current_user.role not in ALLOWED_ROLES and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     db_resource = session.get(Resource, resource_id)
     if not db_resource:
         raise HTTPException(status_code=404, detail="Resource not found")
-    
+
     resource_data = resource_in.model_dump(exclude_unset=True)
-    db_resource.sqlmodel_update(resource_data)
-    
+    for key, value in resource_data.items():
+        setattr(db_resource, key, value)
+
+    # Force SQLAlchemy to detect JSON field changes
+    if "photos" in resource_data:
+        flag_modified(db_resource, "photos")
+    if "services" in resource_data:
+        flag_modified(db_resource, "services")
+    if "formats" in resource_data:
+        flag_modified(db_resource, "formats")
+
     session.add(db_resource)
     session.commit()
     session.refresh(db_resource)

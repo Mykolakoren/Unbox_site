@@ -19,6 +19,13 @@ const minutesToTime = (total: number) => {
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 import { useState, useEffect } from 'react';
+import { Clock } from 'lucide-react';
+
+// Parse backend date string as UTC (backend returns UTC without 'Z' suffix)
+const parseUTC = (d: string | Date) => {
+    const s = String(d);
+    return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
+};
 
 // ...
 
@@ -59,7 +66,7 @@ export function TimelineStep() {
         // 1. Internal Bookings
         const relevantBookings = bookings ? bookings.filter(b =>
             b.resourceId === resourceId &&
-            format(new Date(b.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') &&
+            format(parseUTC(b.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') &&
             b.status === 'confirmed'
         ) : [];
 
@@ -201,9 +208,9 @@ export function TimelineStep() {
     // Check if slot is range start/end for styling
     const getSlotStyle = (slot: string) => {
         const isSelected = isSlotSelected(slot);
-        if (!isSelected) return 'bg-white border-gray-200 hover:border-unbox-green hover:text-unbox-green';
+        if (!isSelected) return 'bg-white border-unbox-light hover:border-unbox-green hover:text-unbox-green';
 
-        if (blockedSlots.includes(slot)) return 'bg-gray-100 cursor-not-allowed opacity-50 stripe-bg';
+        if (blockedSlots.includes(slot)) return 'bg-unbox-light/50 cursor-not-allowed opacity-50 stripe-bg';
 
         // It is selected
         return 'bg-unbox-light border-unbox-green text-unbox-dark font-medium z-10';
@@ -224,36 +231,43 @@ export function TimelineStep() {
                     return (
                         <button
                             key={slot}
-                            // disabled={isBusy} // Allow for waitlist
                             onClick={() => handleSlotClick(slot)}
+                            title={isBusy ? 'Занято — нажмите, чтобы встать в лист ожидания' : undefined}
                             className={clsx(
-                                "relative py-3 rounded-lg border text-sm transition-all focus:outline-none",
+                                "relative py-3 rounded-lg border text-sm transition-all focus:outline-none group/slot overflow-hidden",
                                 isBusy
-                                    ? "bg-gray-100 border-gray-200 text-unbox-grey cursor-help hover:bg-gray-200"
+                                    ? "bg-unbox-light/40 border-unbox-light/60 text-unbox-grey/50 cursor-pointer hover:border-amber-400 hover:bg-amber-50"
                                     : getSlotStyle(slot),
                                 selected && !isBusy && "ring-1 ring-unbox-green"
                             )}
                         >
-                            {slot}
-                            {isBusy && (
-                                <span className="absolute inset-0 flex items-center justify-center opacity-30">
-                                    {/* Busy indicator */}
-                                </span>
-                            )}
+                            {isBusy ? (
+                                <>
+                                    {/* Default: striped time label */}
+                                    <span className="block group-hover/slot:hidden">{slot}</span>
+                                    {/* Hover: waitlist hint */}
+                                    <span className="hidden group-hover/slot:flex flex-col items-center gap-0.5">
+                                        <Clock size={12} className="text-amber-500" />
+                                        <span className="text-[10px] font-semibold text-amber-600 leading-none">Ожидание</span>
+                                    </span>
+                                </>
+                            ) : slot}
                         </button>
                     );
                 })}
             </div>
 
             {/* Legend */}
-            <div className="flex gap-6 text-sm text-unbox-grey justify-center pt-4">
+            <div className="flex flex-wrap gap-4 text-sm text-unbox-grey justify-center pt-4">
                 <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border border-gray-200 bg-white"></div>
+                    <div className="w-4 h-4 rounded border border-unbox-light bg-white"></div>
                     <span>Свободно</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border border-gray-200 bg-gray-100"></div>
-                    <span>Занято</span>
+                    <div className="w-4 h-4 rounded border border-unbox-light/60 bg-unbox-light/40 flex items-center justify-center">
+                        <Clock size={9} className="text-amber-500" />
+                    </div>
+                    <span>Занято — нажмите для листа ожидания</span>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="w-4 h-4 rounded bg-unbox-light border border-unbox-green"></div>

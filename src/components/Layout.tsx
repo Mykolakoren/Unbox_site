@@ -11,21 +11,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="min-h-screen bg-unbox-light text-unbox-dark font-sans selection:bg-unbox-green selection:text-white">
             {/* Header */}
             <header className="sticky top-0 z-50 w-full border-b border-unbox-light bg-white/80 backdrop-blur-md text-unbox-dark">
-                <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+                <div className="container mx-auto px-4 h-24 flex items-center justify-between">
                     <div className="flex items-center gap-6">
                         <Link
                             to="/"
                             className="flex items-center group"
                             onClick={() => useBookingStore.getState().reset()}
                         >
-                            <img src="/unbox-logo.png" alt="Unbox" className="h-12 object-contain cursor-pointer group-hover:opacity-80 transition-opacity" />
+                            <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200" />
                         </Link>
 
                         <nav className="hidden md:flex items-center gap-1">
-                            <Link to="/" className="px-3 py-2 rounded-lg font-medium text-sm text-gray-600 hover:text-unbox-dark hover:bg-gray-100/50 transition-colors">
+                            <Link to="/" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
                                 Забронировать
                             </Link>
-                            <Link to="/specialists" className="px-3 py-2 rounded-lg font-medium text-sm text-gray-600 hover:text-unbox-dark hover:bg-gray-100/50 transition-colors">
+                            <Link to="/specialists" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
                                 Специалисты
                             </Link>
                         </nav>
@@ -42,12 +42,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         )}
 
                         {user ? (
-                            <Link to="/dashboard" className="flex items-center gap-2 hover:bg-gray-100 p-1.5 rounded-lg transition-colors">
+                            <Link to="/dashboard" className="flex items-center gap-2 hover:bg-unbox-light/50 p-1.5 rounded-lg transition-colors">
                                 <div className="hidden sm:block text-right">
                                     <div className="text-sm font-bold leading-none">{user.name}</div>
-                                    <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">{user.level}</div>
+                                    <div className="text-[10px] text-unbox-grey font-medium uppercase tracking-wider">{user.level}</div>
                                 </div>
-                                <div className="w-8 h-8 bg-black text-white rounded-full flex items-center justify-center font-bold text-xs">
+                                <div className="w-8 h-8 bg-unbox-dark text-white rounded-full flex items-center justify-center font-bold text-xs">
                                     {user.name[0]?.toUpperCase()}
                                 </div>
                             </Link>
@@ -69,8 +69,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </main>
 
             {/* Footer */}
-            <footer className="border-t border-gray-200 bg-white py-8 mt-auto">
-                <div className="container mx-auto px-4 text-center text-gray-400 text-sm">
+            <footer className="border-t border-unbox-light bg-white py-8 mt-auto">
+                <div className="container mx-auto px-4 text-center text-unbox-grey text-sm">
                     &copy; {new Date().getFullYear()} Unbox. All rights reserved.
                 </div>
             </footer>

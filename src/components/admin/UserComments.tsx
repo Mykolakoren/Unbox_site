@@ -77,7 +77,7 @@ export function UserComments({ email }: UserCommentsProps) {
             {/* Input Area */}
             <div className="relative">
                 <textarea
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-3 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-none"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-3 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green focus:bg-white transition-all resize-none"
                     placeholder="Написать комментарий..."
                     rows={2}
                     value={newComment}
@@ -90,7 +90,7 @@ export function UserComments({ email }: UserCommentsProps) {
                     className={clsx(
                         "absolute right-2 bottom-2 p-1.5 rounded-lg transition-colors",
                         newComment.trim()
-                            ? "bg-blue-600 text-white hover:bg-blue-700"
+                            ? "bg-unbox-green text-white hover:bg-unbox-dark"
                             : "bg-gray-200 text-gray-400 cursor-not-allowed"
                     )}
                 >

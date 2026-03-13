@@ -135,7 +135,68 @@ def init_resources(session: Session):
     else:
         logger.info("Resources already exist.")
 
+def migrate_add_columns():
+    """Add new columns to existing tables (safe to run multiple times)."""
+    from sqlalchemy import text
+
+    dialect = engine.dialect.name
+    # Postgres requires quoted "user" (reserved keyword); SQLite does not
+    user_table = '"user"' if dialect == 'postgresql' else 'user'
+
+    # user table migrations
+    user_columns = [
+        ("manual_status",         "VARCHAR"),
+        ("responsible_admin_id",  "VARCHAR"),
+        ("attracted_by_admin_id", "VARCHAR"),
+    ]
+
+    for col_name, col_type in user_columns:
+        # Each column gets its own connection so a failure doesn't poison the session
+        with engine.connect() as conn:
+            try:
+                if dialect == 'postgresql':
+                    # IF NOT EXISTS avoids aborting the transaction in Postgres
+                    stmt = f'ALTER TABLE {user_table} ADD COLUMN IF NOT EXISTS {col_name} {col_type}'
+                else:
+                    stmt = f'ALTER TABLE {user_table} ADD COLUMN {col_name} {col_type}'
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                conn.rollback()  # reset transaction state before next iteration
+
+    # resource table: services column (JSONB in Postgres, TEXT in SQLite)
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                # Add as JSONB if not exists
+                conn.execute(text("ALTER TABLE resource ADD COLUMN IF NOT EXISTS services JSONB DEFAULT '[]'::jsonb"))
+                conn.commit()
+            else:
+                conn.execute(text("ALTER TABLE resource ADD COLUMN services TEXT DEFAULT '[]'"))
+                conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # resource table: convert services from TEXT to JSONB if needed (Postgres only)
+    if dialect == 'postgresql':
+        with engine.connect() as conn:
+            try:
+                result = conn.execute(text(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_name = 'resource' AND column_name = 'services'"
+                ))
+                row = result.fetchone()
+                if row and row[0] == 'text':
+                    conn.execute(text("ALTER TABLE resource ALTER COLUMN services DROP DEFAULT"))
+                    conn.execute(text("ALTER TABLE resource ALTER COLUMN services TYPE JSONB USING services::jsonb"))
+                    conn.execute(text("ALTER TABLE resource ALTER COLUMN services SET DEFAULT '[]'::jsonb"))
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+
+
 def init_data():
+    migrate_add_columns()
     print("DEBUG: Entering init_data()")
     with Session(engine) as session:
         print("DEBUG: Session executed")

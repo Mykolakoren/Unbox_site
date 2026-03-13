@@ -62,5 +62,36 @@ export const bookingsApi = {
     cancelBooking: async (id: string) => {
         const response = await api.delete<any>(`/bookings/${id}`);
         return mapToFrontend(response.data);
-    }
+    },
+
+    checkAvailability: async (slots: Array<{
+        resourceId: string;
+        date: string;       // "YYYY-MM-DD"
+        startTime: string;  // "HH:MM"
+        duration: number;   // minutes
+    }>): Promise<Array<{ available: boolean; conflict: string | null }>> => {
+        const response = await api.post<any[]>('/bookings/check-availability', slots);
+        return response.data;
+    },
+
+    rescheduleBooking: async (id: string, data: {
+        newDate: string;        // "YYYY-MM-DD"
+        newStartTime: string;   // "HH:MM"
+        newResourceId?: string;
+    }) => {
+        const response = await api.patch<any>(`/bookings/${id}/reschedule`, data);
+        return mapToFrontend(response.data);
+    },
+
+    linkCrmClient: async (bookingId: string, crmClientId: string | null) => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/link-client`, {
+            crmClientId,
+        });
+        return mapToFrontend(response.data);
+    },
+
+    toggleReRent: async (bookingId: string) => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/re-rent`);
+        return mapToFrontend(response.data);
+    },
 };

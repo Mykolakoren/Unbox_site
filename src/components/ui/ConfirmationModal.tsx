@@ -39,21 +39,21 @@ export function ConfirmationModal({
                 {/* Close Button */}
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                    className="absolute top-4 right-4 text-unbox-grey hover:text-unbox-dark transition-colors"
                 >
                     <X size={20} />
                 </button>
 
                 <div className="flex flex-col items-center text-center">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isDestructive ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isDestructive ? 'bg-red-100 text-red-600' : 'bg-unbox-light text-unbox-green'}`}>
                         <AlertTriangle size={24} />
                     </div>
 
-                    <h3 className="text-xl font-bold text-gray-900 mb-2">
+                    <h3 className="text-xl font-bold text-unbox-dark mb-2">
                         {title}
                     </h3>
 
-                    <div className="text-gray-500 mb-6 text-sm leading-relaxed">
+                    <div className="text-unbox-grey mb-6 text-sm leading-relaxed">
                         {message}
                     </div>
 

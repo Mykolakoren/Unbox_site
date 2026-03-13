@@ -25,11 +25,11 @@ export function AdminUsers() {
             <div className="flex justify-between items-center">
                 <h1 className="text-2xl font-bold">Клиенты</h1>
                 <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
                     <input
                         type="text"
                         placeholder="Поиск клиента..."
-                        className="pl-10 pr-4 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black w-64"
+                        className="pl-10 pr-4 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green w-64"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
@@ -73,9 +73,9 @@ export function AdminUsers() {
                                     <span className={clsx(
                                         "px-2 py-1 rounded text-xs font-medium border",
                                         user.role === 'owner' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                            user.role === 'senior_admin' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                            user.role === 'senior_admin' ? "bg-unbox-light text-unbox-dark border-blue-200" :
                                                 user.role === 'admin' ? "bg-green-50 text-green-700 border-green-200" :
-                                                    "bg-gray-50 text-gray-600 border-gray-200"
+                                                    "bg-unbox-light/30 text-unbox-grey border-unbox-light"
                                     )}>
                                         {user.role === 'owner' ? 'Владелец' :
                                             user.role === 'senior_admin' ? 'Ст. Админ' :
@@ -190,22 +190,22 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
             <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-6 animate-in zoom-in-95">
                 <div className="flex justify-between items-start">
                     <h2 className="text-xl font-bold">Настройки клиента</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-black">
+                    <button onClick={onClose} className="text-unbox-grey hover:text-black">
                         <span className="text-2xl">×</span>
                     </button>
                 </div>
 
                 <div className="space-y-4">
-                    <div className="text-sm text-gray-500 pb-2 border-b border-gray-100">
+                    <div className="text-sm text-unbox-grey pb-2 border-b border-unbox-light">
                         {user.name} ({user.email})
                     </div>
 
                     {/* Role Management - Hierarchical Access */}
                     {canEditRole && (
-                        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
-                            <label className="block text-sm font-medium text-gray-700">Роль в системе</label>
+                        <div className="p-3 bg-unbox-light/30 rounded-lg border border-unbox-light space-y-2">
+                            <label className="block text-sm font-medium text-unbox-dark">Роль в системе</label>
                             <select
-                                className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
+                                className="w-full p-2 border border-unbox-light rounded-lg focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                 value={localRole}
                                 onChange={(e) => setLocalRole(e.target.value as "user" | "admin" | "senior_admin" | "owner")}
                             >
@@ -222,7 +222,7 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                                     Роль будет изменена после нажатия "Сохранить"
                                 </div>
                             )}
-                            <div className="text-xs text-gray-500">
+                            <div className="text-xs text-unbox-grey">
                                 {isSeniorAdmin
                                     ? "Вы можете назначать только Пользователей и Администраторов."
                                     : "Внимание: изменение роли влияет на доступ к функционалу."
@@ -232,10 +232,10 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                     )}
 
                     {/* Pricing System Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center justify-between p-3 bg-unbox-light/30 rounded-lg border border-unbox-light">
                         <div>
-                            <div className="font-medium text-sm text-gray-900">Персональное ценообразование</div>
-                            <div className="text-xs text-gray-500">Отключает стандартные скидки</div>
+                            <div className="font-medium text-sm text-unbox-dark">Персональное ценообразование</div>
+                            <div className="text-xs text-unbox-grey">Отключает стандартные скидки</div>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">
                             <input
@@ -246,14 +246,14 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                                     setLocalPricingSystem(localPricingSystem === 'personal' ? 'standard' : 'personal');
                                 }}
                             />
-                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <div className="w-11 h-6 bg-unbox-light peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-unbox-light after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
 
                     {/* Personal Discount Input */}
                     {localPricingSystem === 'personal' && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">
                                 Размер персональной скидки (%)
                             </label>
                             <input
@@ -265,29 +265,29 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                                     const val = parseInt(e.target.value);
                                     if (!isNaN(val)) setLocalDiscount(val);
                                 }}
-                                className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
+                                className="w-full p-2 border border-unbox-light rounded-lg focus:outline-none focus:ring-2 focus:ring-unbox-green"
                             />
                         </div>
                     )}
 
-                    <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                    <div className="pt-4 border-t border-unbox-light flex justify-end gap-3">
                         <button
                             onClick={onClose}
-                            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                            className="px-4 py-2 text-unbox-grey hover:bg-unbox-light/50 rounded-lg"
                         >
                             Отмена
                         </button>
                         <button
                             onClick={handleSave}
-                            className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+                            className="px-4 py-2 bg-unbox-green text-white rounded-lg hover:bg-unbox-dark"
                         >
                             Сохранить
                         </button>
                     </div>
 
                     {/* Timeline Section */}
-                    <div className="pt-4 border-t border-gray-100">
-                        <h3 className="text-sm font-bold text-gray-900 mb-3">История изменений</h3>
+                    <div className="pt-4 border-t border-unbox-light">
+                        <h3 className="text-sm font-bold text-unbox-dark mb-3">История изменений</h3>
                         <TimelineList targetId={user.id} limit={5} className="max-h-48 overflow-y-auto" />
                     </div>
                 </div>

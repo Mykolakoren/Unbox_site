@@ -42,10 +42,10 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4 animate-in zoom-in-95">
                 <div className="flex justify-between items-start">
-                    <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                    <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center text-unbox-green">
                         <Bell size={20} />
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-black">
+                    <button onClick={onClose} className="text-gray-400 hover:text-unbox-dark">
                         <X size={20} />
                     </button>
                 </div>
@@ -54,21 +54,21 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
                     <h3 className="font-bold text-lg text-gray-900">Слот занят</h3>
                     <p className="text-gray-500 mt-1 text-sm">
                         Хотите получить уведомление, если время
-                        <span className="font-bold text-black mx-1">{startTime}</span>
-                        на <span className="font-bold text-black">{format(date, 'd MMMM', { locale: ru })}</span> освободится?
+                        <span className="font-bold text-unbox-dark mx-1">{startTime}</span>
+                        на <span className="font-bold text-unbox-dark">{format(date, 'd MMMM', { locale: ru })}</span> освободится?
                     </p>
                 </div>
 
                 <div className="pt-2">
                     <button
                         onClick={handleConfirm}
-                        className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-colors"
+                        className="w-full bg-unbox-green text-white font-bold py-3 rounded-xl hover:bg-unbox-dark transition-colors"
                     >
                         Сообщить мне
                     </button>
                     <button
                         onClick={onClose}
-                        className="w-full mt-2 text-gray-500 font-medium py-2 hover:text-black"
+                        className="w-full mt-2 text-gray-500 font-medium py-2 hover:text-unbox-dark"
                     >
                         Отмена
                     </button>

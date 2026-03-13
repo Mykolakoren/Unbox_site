@@ -1,6 +1,7 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { calculatePrice } from '../../utils/pricing';
 import { useUserStore } from '../../store/userStore';
+import { bookingsApi } from '../../api/bookings';
 import { Button } from '../ui/Button';
 import {
     CheckCircle,
@@ -9,11 +10,12 @@ import {
     ArrowRight,
     RefreshCw,
     Home,
-    Loader2
+    Loader2,
+    AlertCircle,
 } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { googleCalendarService } from '../../services/googleCalendarMock';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { EXTRAS, RESOURCES } from '../../utils/data';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -21,13 +23,63 @@ import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
 import { format, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { motion } from 'framer-motion';
+import { useCrmStore } from '../../store/crmStore';
+import { User as UserIcon } from 'lucide-react';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
     const { currentUser, addBookings, bookings, rescheduleBooking, users } = useUserStore();
     const [confirmed, setConfirmed] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+    const [isCheckingAvailability, setIsCheckingAvailability] = useState(true);
+    const [selectedCrmClientId, setSelectedCrmClientId] = useState<string>('');
+    const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
     const navigate = useNavigate();
+    const shouldResetOnUnmount = useRef(false);
+
+    // Fetch CRM clients for specialist users
+    useEffect(() => {
+        if (currentUser) fetchCrmClients(true).catch(() => {});
+    }, [currentUser, fetchCrmClients]);
+
+    // Reset booking state only after unmount (route change) to avoid race with <Navigate to="/" />
+    useEffect(() => {
+        return () => {
+            if (shouldResetOnUnmount.current) {
+                state.reset();
+            }
+        };
+    }, []);
+
+    // Pre-check availability on mount — before showing payment form.
+    // cartDetails is computed synchronously via useMemo, so it's ready at first render.
+    useEffect(() => {
+        if (cartDetails.length === 0) {
+            setIsCheckingAvailability(false);
+            return;
+        }
+
+        const slots = cartDetails.map(item => ({
+            resourceId: item.resourceId,
+            date: format(state.date, 'yyyy-MM-dd'),
+            startTime: item.startTime,
+            duration: item.duration,
+        }));
+
+        bookingsApi.checkAvailability(slots)
+            .then(results => {
+                const conflict = results.find(r => !r.available);
+                if (conflict?.conflict) {
+                    setAvailabilityError(conflict.conflict);
+                }
+            })
+            .catch(err => {
+                // Network error — non-blocking, let user attempt booking normally
+                console.warn('Availability pre-check failed (non-blocking):', err);
+            })
+            .finally(() => setIsCheckingAvailability(false));
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps — run once on mount
 
     // Determine effective user for pricing and logic
     const effectiveUser = state.bookingForUser
@@ -180,29 +232,29 @@ export function ConfirmationStep() {
                                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <h3 className="text-sm font-bold text-gray-900 mb-1">
+                                        <h3 className="text-sm font-bold text-unbox-dark mb-1">
                                             Недостаточно средств
                                         </h3>
-                                        <p className="text-sm text-gray-500 leading-relaxed mb-3">
+                                        <p className="text-sm text-unbox-grey leading-relaxed mb-3">
                                             Сумма бронирования превышает доступный лимит.
                                         </p>
 
-                                        <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-xs">
+                                        <div className="bg-unbox-light/30 rounded-lg p-3 space-y-2 text-xs">
                                             <div className="flex justify-between">
-                                                <span className="text-gray-500">Ваш баланс:</span>
-                                                <span className={effectiveUser.balance < 0 ? "text-red-600 font-medium" : "text-gray-900 font-medium"}>
+                                                <span className="text-unbox-grey">Ваш баланс:</span>
+                                                <span className={effectiveUser.balance < 0 ? "text-red-600 font-medium" : "text-unbox-dark font-medium"}>
                                                     {effectiveUser.balance.toFixed(1)} ₾
                                                 </span>
                                             </div>
                                             <div className="flex justify-between">
-                                                <span className="text-gray-500">Кредитный лимит:</span>
-                                                <span className="text-gray-900 font-medium">
+                                                <span className="text-unbox-grey">Кредитный лимит:</span>
+                                                <span className="text-unbox-dark font-medium">
                                                     {effectiveUser.creditLimit || 0} ₾
                                                 </span>
                                             </div>
                                             <div className="h-px bg-gray-200 my-1"></div>
                                             <div className="flex justify-between font-bold">
-                                                <span className="text-gray-700">К оплате:</span>
+                                                <span className="text-unbox-dark">К оплате:</span>
                                                 <span className="text-unbox-dark">
                                                     {netPrice.toFixed(1)} ₾
                                                 </span>
@@ -211,7 +263,7 @@ export function ConfirmationStep() {
                                     </div>
                                     <button
                                         onClick={() => toast.dismiss(t)}
-                                        className="text-gray-400 hover:text-gray-600 transition-colors"
+                                        className="text-unbox-grey hover:text-unbox-grey transition-colors"
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                                     </button>
@@ -269,7 +321,8 @@ export function ConfirmationStep() {
                     paymentMethod: finalMethod,
                     paymentSource: currentPaymentSource, // Add source
                     hoursDeducted: finalMethod === 'subscription' ? (item.duration / 60) : 0,
-                    targetUserId: state.bookingForUser || undefined // Add target user
+                    targetUserId: state.bookingForUser || undefined, // Add target user
+                    crmClientId: selectedCrmClientId || undefined, // CRM client link
                 };
                 newBookings.push(bookingData);
 
@@ -311,11 +364,11 @@ export function ConfirmationStep() {
                 }
 
                 setConfirmed(true);
+                shouldResetOnUnmount.current = true;
                 toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
 
-                // Reset store and redirect AFTER delay, so user sees the success message
+                // Navigate after showing success screen; reset happens in useEffect cleanup on unmount
                 setTimeout(() => {
-                    state.reset();
                     navigate('/dashboard/bookings');
                 }, 2000);
             } else {
@@ -335,10 +388,10 @@ export function ConfirmationStep() {
                                     <CalendarIcon size={20} />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <h3 className="text-sm font-bold text-gray-900 mb-1">
+                                    <h3 className="text-sm font-bold text-unbox-dark mb-1">
                                         Время уже занято
                                     </h3>
-                                    <p className="text-sm text-gray-500 leading-relaxed mb-2">
+                                    <p className="text-sm text-unbox-grey leading-relaxed mb-2">
                                         К сожалению, выбранный слот был забронирован другим пользователем.
                                     </p>
                                     <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-xs font-medium border border-red-100">
@@ -347,7 +400,7 @@ export function ConfirmationStep() {
                                 </div>
                                 <button
                                     onClick={() => toast.dismiss(t)}
-                                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                                    className="text-unbox-grey hover:text-unbox-grey transition-colors"
                                 >
                                     <ArrowRight size={16} className="rotate-45" />
                                 </button>
@@ -398,6 +451,58 @@ export function ConfirmationStep() {
         downloadIcsFile(event);
     };
 
+    // --- Loading state while checking availability ---
+    if (isCheckingAvailability) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <Loader2 className="h-8 w-8 animate-spin text-unbox-green" />
+                <p className="text-unbox-grey text-sm">Проверяем доступность слота...</p>
+            </div>
+        );
+    }
+
+    // --- Conflict detected: show inline error with Back button ---
+    if (availabilityError) {
+        // Extract time range from backend message: "Conflict with booking UUID (HH:MM-HH:MM)"
+        const timeMatch = availabilityError.match(/\((\d{1,2}:\d{2})[–\-](\d{1,2}:\d{2})\)/);
+        const timeRange = timeMatch ? `${timeMatch[1]}–${timeMatch[2]}` : null;
+
+        return (
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.4 }}
+                className="flex flex-col items-center text-center py-16 space-y-6"
+            >
+                <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+                    <AlertCircle size={40} />
+                </div>
+
+                <div className="space-y-2 max-w-sm">
+                    <h2 className="text-2xl font-bold text-unbox-dark">Время уже занято</h2>
+                    <p className="text-unbox-grey leading-relaxed">
+                        К сожалению, выбранный слот был забронирован другим пользователем.
+                        {timeRange && (
+                            <> Конфликт: <span className="font-semibold text-unbox-dark">{timeRange}</span>.</>
+                        )}
+                    </p>
+                    <p className="text-unbox-grey text-sm">Пожалуйста, выберите другое время.</p>
+                </div>
+
+                <Button
+                    variant="outline"
+                    size="lg"
+                    onClick={() => navigate(-1)}
+                    className="gap-2"
+                >
+                    <ArrowRight size={18} className="rotate-180" />
+                    Вернуться к расписанию
+                </Button>
+            </motion.div>
+        );
+    }
+
     if (confirmed) {
         return (
             <div className="text-center py-12 animate-in fade-in zoom-in duration-500">
@@ -437,12 +542,19 @@ export function ConfirmationStep() {
         >
             <div>
                 <h2 className="text-2xl font-bold mb-2">Подтверждение</h2>
-                <p className="text-gray-500">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
+                <p className="text-unbox-grey">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
             </div>
 
             <div className="space-y-4 max-w-md">
                 {effectiveUser ? (
-                    <div className="bg-unbox-light p-4 rounded-xl border border-unbox-light/50">
+                    <div className="p-4 rounded-xl"
+                        style={{
+                            background: 'rgba(255,255,255,0.35)',
+                            backdropFilter: 'blur(24px) saturate(150%)',
+                            WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+                            border: '1px solid rgba(255,255,255,0.55)',
+                            boxShadow: '0 4px 16px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.70)',
+                        }}>
                         <div className="text-sm text-unbox-grey mb-1">Бронирование на имя:</div>
                         <div className="font-bold text-unbox-dark">{effectiveUser.name}</div>
                         <div className="text-sm text-unbox-grey mt-2">Контакты:</div>
@@ -453,23 +565,45 @@ export function ConfirmationStep() {
                     <>
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-unbox-dark">Имя</label>
-                            <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="Иван Иванов" />
+                            <input type="text" className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="Иван Иванов" />
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-unbox-dark">Телефон</label>
-                            <input type="tel" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="+995 555 00 00 00" />
+                            <input type="tel" className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="+995 555 00 00 00" />
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-unbox-dark">Email</label>
-                            <input type="email" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="ivan@example.com" />
+                            <input type="email" className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="ivan@example.com" />
                         </div>
                     </>
                 )}
             </div>
 
+            {/* CRM Client Selector (for specialists) */}
+            {crmClients.length > 0 && (
+                <div className="space-y-3 pt-4 border-t border-unbox-light">
+                    <h3 className="font-bold text-lg text-unbox-dark flex items-center gap-2">
+                        <UserIcon size={18} /> Привязать клиента
+                    </h3>
+                    <select
+                        value={selectedCrmClientId}
+                        onChange={(e) => setSelectedCrmClientId(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-unbox-dark bg-white"
+                    >
+                        <option value="">— Без привязки к клиенту —</option>
+                        {crmClients.map(c => (
+                            <option key={c.id} value={c.id}>
+                                {c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
+                            </option>
+                        ))}
+                    </select>
+                    <p className="text-xs text-unbox-grey">Выберите клиента из CRM для привязки к бронированию</p>
+                </div>
+            )}
+
             {/* Payment Method Selector */}
             {effectiveUser && (
-                <div className="space-y-3 pt-4 border-t border-gray-100">
+                <div className="space-y-3 pt-4 border-t border-unbox-light">
                     <h3 className="font-bold text-lg text-unbox-dark">Способ оплаты</h3>
                     <div className="grid gap-3">
                         {/* Option: Subscription */}
@@ -529,9 +663,16 @@ export function ConfirmationStep() {
                 </div>
             )}
 
-            <div className="pt-8 border-t border-gray-100">
+            <div className="pt-8 border-t border-unbox-light">
                 {isRescheduling && oldBooking && (
-                    <div className="mb-6 bg-unbox-light p-4 rounded-xl border border-unbox-light/50">
+                    <div className="mb-6 p-4 rounded-xl"
+                        style={{
+                            background: 'rgba(255,255,255,0.35)',
+                            backdropFilter: 'blur(24px) saturate(150%)',
+                            WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+                            border: '1px solid rgba(255,255,255,0.55)',
+                            boxShadow: '0 4px 16px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.70)',
+                        }}>
                         <h4 className="font-bold flex items-center gap-2 text-unbox-dark mb-3">
                             <RefreshCw size={18} /> Перенос бронирования
                         </h4>

@@ -48,7 +48,7 @@ export function LocationStep() {
             {/* Resources Selection - Only show if location selected */}
             {locationId && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                    <div className="border-t border-gray-100 pt-8">
+                    <div className="border-t border-unbox-light pt-8">
                         <h2 className="text-xl font-bold mb-2">Выберите пространство</h2>
                         <p className="text-unbox-grey">Кабинет или капсула?</p>
                     </div>

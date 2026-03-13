@@ -39,12 +39,13 @@
   }
 
   .bg-striped {
+    background-color: rgba(212, 226, 225, 0.55);
     background-image: repeating-linear-gradient(
       -45deg,
-      rgba(0, 0, 0, 0.02),
-      rgba(0, 0, 0, 0.02) 6px,
-      rgba(0, 0, 0, 0.04) 6px,
-      rgba(0, 0, 0, 0.04) 12px
+      rgba(71, 109, 107, 0.18),
+      rgba(71, 109, 107, 0.18) 5px,
+      transparent 5px,
+      transparent 12px
     );
   }
 
@@ -52,6 +53,27 @@
     transform: translateY(-1px) scale(1.02);
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     z-index: 10;
+  }
+
+  /* Brand decorative patterns (from brandbook dot-grid motif) */
+  .dot-pattern {
+    background-image: radial-gradient(circle, #476D6B 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .dot-pattern-light {
+    background-image: radial-gradient(circle, #9299A3 0.8px, transparent 0.8px);
+    background-size: 16px 16px;
+    opacity: 0.3;
+  }
+
+  /* Brand gradients */
+  .brand-gradient {
+    background: linear-gradient(135deg, #476D6B 0%, #2C3240 100%);
+  }
+
+  .brand-gradient-light {
+    background: linear-gradient(135deg, #D4E2E1 0%, #ffffff 100%);
   }
 }
 

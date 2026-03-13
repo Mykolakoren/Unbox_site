@@ -136,7 +136,7 @@ export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
                                             placeholder="Причина"
                                             className="w-32 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-unbox-green"
                                         />
-                                        <button onClick={handleUpdateDiscount} className="text-xs bg-black text-white px-2 py-1 rounded hover:bg-gray-800 transition-colors">Ok</button>
+                                        <button onClick={handleUpdateDiscount} className="text-xs bg-unbox-green text-white px-2 py-1 rounded hover:bg-unbox-dark transition-colors">Ok</button>
                                         <button onClick={() => setIsEditDiscount(false)} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 transition-colors">X</button>
                                     </div>
                                 ) : (

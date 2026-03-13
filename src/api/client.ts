@@ -33,7 +33,7 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-// Response interceptor: Transform Response & Handle 401
+// Response interceptor: Transform Response & Handle 401/403
 api.interceptors.response.use(
     (response) => {
         // Transform response data to camelCase for frontend
@@ -43,9 +43,12 @@ api.interceptors.response.use(
         return response;
     },
     (error) => {
-        if (error.response?.status === 401) {
+        const status = error.response?.status;
+        const detail = error.response?.data?.detail;
+        // Clear invalid/expired token and redirect to login
+        if (status === 401 || (status === 403 && detail === 'Could not validate credentials')) {
             localStorage.removeItem('token');
-            // Optionally redirect
+            window.location.href = '/login';
         }
         return Promise.reject(error);
     }

@@ -7,7 +7,7 @@ import { ru } from 'date-fns/locale';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import { Button } from '../ui/Button';
-import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock } from 'lucide-react';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 
@@ -45,8 +45,16 @@ export function ChessboardStep() {
         });
     }, [weekStart]);
 
-    const handlePrevWeek = () => setWeekStart(d => subWeeks(d, 1));
-    const handleNextWeek = () => setWeekStart(d => addWeeks(d, 1));
+    const handlePrevWeek = () => {
+        const newStart = subWeeks(weekStart, 1);
+        setWeekStart(newStart);
+        setDate(newStart); // auto-select Monday of new week
+    };
+    const handleNextWeek = () => {
+        const newStart = addWeeks(weekStart, 1);
+        setWeekStart(newStart);
+        setDate(newStart); // auto-select Monday of new week
+    };
 
     // Toggle for View Mode (Specific Location vs All)
     const [showAllLocations, setShowAllLocations] = useState(false);
@@ -99,15 +107,20 @@ export function ChessboardStep() {
         return slots;
     }, []);
 
+    // Helper: parse backend date string as UTC (backend stores UTC without 'Z')
+    const parseUTC = (d: string | Date) => {
+        const s = String(d);
+        return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
+    };
+
     // 4. Helper: Is slot blocked?
     const isSlotBlocked = (resId: string, timeStr: string) => {
         const slotDate = new Date(date);
         const [h, m] = timeStr.split(':').map(Number);
         slotDate.setHours(h, m, 0, 0);
 
-        // CHECK: 3 Hour Buffer Rule (New)
-        // Can't book earlier than 3 hours from now
-        if (isBefore(slotDate, addMinutes(new Date(), 180))) { // 3 * 60 = 180
+        // CHECK: Booking buffer — can't book slots starting in the past or within 30 min
+        if (isBefore(slotDate, addMinutes(new Date(), 30))) {
             return true;
         }
 
@@ -116,7 +129,7 @@ export function ChessboardStep() {
             b.resourceId === resId &&
             b.status === 'confirmed' &&
             !b.isReRentListed &&
-            isSameDay(new Date(b.date), new Date(date)) &&
+            isSameDay(parseUTC(b.date), new Date(date)) &&
             b.startTime &&
             (() => {
                 const bookingStart = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
@@ -154,7 +167,7 @@ export function ChessboardStep() {
                 b.resourceId === resId &&
                 b.status === 'confirmed' &&
                 b.isReRentListed &&
-                isSameDay(new Date(b.date), new Date(date)) &&
+                isSameDay(parseUTC(b.date), new Date(date)) &&
                 b.startTime &&
                 (() => {
                     const bookingStart = Number(b.startTime.split(':')[0]) * 60 + Number(b.startTime.split(':')[1]);
@@ -391,7 +404,7 @@ export function ChessboardStep() {
         if (!resource) return '';
         const isCapsule = resource.type === 'capsule';
         const rate = isCapsule ? 10 : (bookingFormat === 'group' ? 35 : 20);
-        return `${rate / 2} ₾`;
+        return `${rate} ₾`;
     };
 
     const handleNext = () => {
@@ -403,11 +416,11 @@ export function ChessboardStep() {
     };
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-2xl font-bold">Выберите время</h2>
-                    <p className="text-gray-500">
+                    <p className="text-unbox-grey">
                         {format(date, 'd MMMM yyyy', { locale: ru })} • {bookingFormat === 'individual' ? 'Индивидуально' : 'Группа'}
                     </p>
                 </div>
@@ -426,11 +439,12 @@ export function ChessboardStep() {
             </div>
 
             {/* Week Picker */}
-            <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-xl">
-                <button onClick={handlePrevWeek} className="p-2 hover:bg-white rounded-lg transition-colors text-gray-500 hover:text-black">
-                    <ChevronLeft size={20} />
+            <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-unbox-light/60"
+                style={{ background: 'rgba(212,226,225,0.35)' }}>
+                <button onClick={handlePrevWeek} className="p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light">
+                    <ChevronLeft size={18} />
                 </button>
-                <div className="flex-1 grid grid-cols-7 gap-1">
+                <div className="flex-1 grid grid-cols-7 gap-1.5">
                     {weekDays.map(day => {
                         const isSelectedDate = isSameDay(day, date);
                         return (
@@ -438,44 +452,53 @@ export function ChessboardStep() {
                                 key={day.toISOString()}
                                 onClick={() => setDate(day)}
                                 className={clsx(
-                                    "flex flex-col items-center justify-center py-2 rounded-lg transition-all text-sm",
-                                    isSelectedDate ? "bg-unbox-green text-white shadow-md font-medium" : "hover:bg-white text-gray-600"
+                                    "flex flex-col items-center justify-center py-2.5 rounded-xl transition-all duration-200 text-sm",
+                                    isSelectedDate
+                                        ? "bg-unbox-green text-white shadow-lg shadow-unbox-green/30 scale-[1.04] border border-unbox-green/20"
+                                        : "bg-white text-unbox-grey border border-unbox-light hover:border-unbox-green/40 hover:text-unbox-dark hover:shadow-sm"
                                 )}
                             >
-                                <span className="text-xs uppercase mb-0.5 opacity-70">{format(day, 'EEE', { locale: ru })}</span>
-                                <span className="text-lg leading-none">{format(day, 'd')}</span>
+                                <span className={clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelectedDate ? "opacity-80" : "opacity-50")}>
+                                    {format(day, 'EEE', { locale: ru })}
+                                </span>
+                                <span className="text-base font-bold leading-none">{format(day, 'd')}</span>
                             </button>
                         );
                     })}
                 </div>
-                <button onClick={handleNextWeek} className="p-2 hover:bg-white rounded-lg transition-colors text-gray-500 hover:text-black">
-                    <ChevronRight size={20} />
+                <button onClick={handleNextWeek} className="p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light">
+                    <ChevronRight size={18} />
                 </button>
             </div>
 
 
 
             {/* The Grid - Refactored to Horizontal Layout */}
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
+            <div className="border border-white/30 rounded-2xl overflow-x-auto bg-white/40 backdrop-blur-sm shadow-sm isolate">
                 <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
-                    <thead className="bg-gray-50 text-gray-700 font-medium border-b border-gray-200">
+                    <thead className="text-unbox-dark font-medium border-b border-unbox-light/60"
+                        style={{ background: 'rgba(212,226,225,0.45)' }}>
                         <tr>
-                            <th className="sticky left-0 bg-gray-50 p-4 border-r border-gray-200 z-20 w-40">
+                            <th className="sticky left-0 backdrop-blur-sm p-4 border-r border-unbox-light/50 z-20 w-40 font-bold text-unbox-dark"
+                                style={{ background: 'rgba(212,226,225,0.60)' }}>
                                 Кабинет
                             </th>
                             {timeSlots.map(time => (
-                                <th key={time} className="p-2 text-center min-w-[60px] border-r border-gray-100 last:border-0 text-[10px] uppercase font-bold text-gray-400">
+                                <th key={time} className="p-2 text-center min-w-[60px] border-r border-unbox-light/40 text-[10px] uppercase font-bold text-unbox-dark/60">
                                     {time}
                                 </th>
                             ))}
+                            <th className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/50 z-20 w-40 p-2"
+                                style={{ background: 'rgba(212,226,225,0.60)' }} />
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody>
                         {resources.map(r => (
-                            <tr key={r.id} className="hover:bg-gray-50/50 group">
-                                <td className="sticky left-0 bg-white p-4 border-r border-gray-200 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                            <tr key={r.id} className="hover:bg-unbox-light/10 group">
+                                <td className="sticky left-0 backdrop-blur-sm p-4 border-r border-unbox-light/40 z-10 shadow-[2px_0_5px_rgba(71,109,107,0.04)]"
+                                    style={{ background: 'rgba(212,226,225,0.50)' }}>
                                     <div className="font-bold text-unbox-dark">{r.name}</div>
-                                    <div className="text-[10px] text-unbox-grey">{r.capacity} чел. • {getPrice(r.id)}/30м</div>
+                                    <div className="text-[10px] text-unbox-grey">{r.capacity} чел. • {getPrice(r.id)}/час</div>
                                 </td>
                                 {timeSlots.map(time => {
                                     const isBlocked = isSlotBlocked(r.id, time);
@@ -500,7 +523,7 @@ export function ChessboardStep() {
                                     );
 
                                     return (
-                                        <td key={`${r.id}-${time}`} className="p-0 border-r border-gray-100 last:border-0 h-14 relative group/slot">
+                                        <td key={`${r.id}-${time}`} className="p-0 border-r border-unbox-light/30 h-14 relative group/slot">
                                             <div
                                                 data-resid={r.id}
                                                 data-time={time}
@@ -522,12 +545,12 @@ export function ChessboardStep() {
                                                 className={clsx(
                                                     "w-full h-full transition-colors flex flex-col items-center justify-center text-[9px] relative select-none touch-none",
                                                     isBlocked
-                                                        ? "bg-striped text-unbox-grey/30 cursor-not-allowed border-none"
+                                                        ? "bg-striped text-unbox-grey/50 cursor-pointer border-none hover:bg-amber-50/60"
                                                         : selected
                                                             ? dragModeRef.current === 'move' ? "bg-unbox-green text-white z-10 cursor-grabbing shadow-md" : "bg-unbox-green text-white z-10 cursor-grab shadow-sm"
                                                             : isHovered
-                                                                ? "bg-teal-50 text-teal-800 cursor-pointer slot-hover-lift font-bold"
-                                                                : "hover:bg-teal-50/50 text-unbox-grey/40 hover:text-teal-700 cursor-pointer transition-all",
+                                                                ? "bg-unbox-green/10 text-unbox-dark cursor-pointer slot-hover-lift font-bold"
+                                                                : "hover:bg-unbox-green/5 text-unbox-dark/50 hover:text-unbox-green cursor-pointer transition-all",
                                                     selected && !isSingleBlock && !isBlockStart && "border-l border-white/20",
                                                     isBlockStart && "rounded-l-lg",
                                                     isBlockEnd && "rounded-r-lg"
@@ -564,14 +587,28 @@ export function ChessboardStep() {
                                                     !isBlocked && <span>{time}</span>
                                                 )}
                                                 {isBlocked && (
-                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/slot:opacity-100 transition-opacity duration-300">
-                                                        <span className="bg-white/80 p-0.5 rounded shadow-sm text-red-500">✕</span>
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 group-hover/slot:opacity-100 transition-opacity duration-300 gap-0.5">
+                                                        <Clock size={10} className="text-amber-500" />
+                                                        <span className="text-[8px] font-semibold text-amber-600 leading-none">Ожидание</span>
                                                     </div>
                                                 )}
                                             </div>
                                         </td>
                                     );
                                 })}
+                                {/* Sticky right action cell */}
+                                <td className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/40 z-10 h-14 p-2 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]"
+                                    style={{ background: 'rgba(212,226,225,0.50)' }}>
+                                    {getBlockForResource(r.id) ? (
+                                        <button
+                                            onClick={handleNext}
+                                            className="flex items-center gap-1.5 bg-unbox-green text-white text-xs font-bold px-3 py-2 rounded-xl shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap animate-in fade-in zoom-in-90 duration-200 h-full"
+                                        >
+                                            <ArrowRight size={14} className="shrink-0" />
+                                            <span>Продолжить</span>
+                                        </button>
+                                    ) : null}
+                                </td>
                             </tr>
                         ))}
                     </tbody>
@@ -586,17 +623,28 @@ export function ChessboardStep() {
                 </div>
             )}
 
-            <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 p-4 flex justify-center z-50">
-                <div className="max-w-7xl mx-auto w-full flex justify-between items-center px-4">
-                    <div className="text-sm">
+            <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4">
+            <div className="max-w-[1920px] mx-auto">
+            <div
+                className="rounded-2xl p-4 flex justify-center"
+                style={{
+                    background: 'rgba(255,255,255,0.18)',
+                    backdropFilter: 'blur(24px) saturate(150%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+                    border: '1px solid rgba(255,255,255,0.30)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+                }}
+            >
+                <div className="w-full flex justify-between items-center">
+                    <div className="text-sm font-medium text-unbox-dark">
                         Выбрано: <span className="font-bold text-unbox-green">{selectedSlots.length}</span> слотов
-                        {selectedBlocks.length > 1 && <span className="ml-2 text-gray-400">({selectedBlocks.length} кабинета)</span>}
+                        {selectedBlocks.length > 1 && <span className="ml-2 text-unbox-grey">({selectedBlocks.length} кабинета)</span>}
                     </div>
                     <Button disabled={selectedSlots.length === 0} onClick={handleNext} className="shadow-lg px-8">
                         Далее <ArrowRight size={16} className="ml-2" />
                     </Button>
                 </div>
-            </div>
+            </div></div></div>
 
             {/* Overlap confirmation dialog */}
             {showOverlapWarning && (
@@ -607,11 +655,11 @@ export function ChessboardStep() {
                                 <AlertTriangle size={24} className="text-amber-500" />
                             </div>
                             <div>
-                                <h3 className="text-lg font-bold text-gray-900 mb-1">Наложение времени</h3>
-                                <p className="text-gray-600 text-sm">
+                                <h3 className="text-lg font-bold text-unbox-dark mb-1">Наложение времени</h3>
+                                <p className="text-unbox-grey text-sm">
                                     Вы выбрали несколько кабинетов, которые <strong>пересекаются по времени</strong>. Это значит, вы планируете одновременно использовать несколько помещений.
                                 </p>
-                                <p className="text-gray-500 text-sm mt-2">
+                                <p className="text-unbox-grey text-sm mt-2">
                                     Вы уверены, что хотите продолжить?
                                 </p>
                             </div>
@@ -619,7 +667,7 @@ export function ChessboardStep() {
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setShowOverlapWarning(false)}
-                                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+                                className="flex-1 px-4 py-2.5 rounded-xl border border-unbox-light text-unbox-dark font-medium hover:bg-unbox-light/30 transition-colors"
                             >
                                 Изменить выбор
                             </button>

@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
+import { useUserStore } from '../store/userStore';
 import { useLocations } from '../hooks/useLocations';
-import { MinimalLayout } from '../components/MinimalLayout';
 import { JoinWaitlistModal } from '../components/JoinWaitlistModal';
-import { Card } from '../components/ui/Card';
-import { MapPin, ArrowRight, User, Users, Filter } from 'lucide-react';
+import { MapPin, ArrowRight, User, Users, Filter, LogIn, LayoutDashboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -13,17 +12,10 @@ import L from 'leaflet';
 import clsx from 'clsx';
 import type { Format, GroupSize } from '../types';
 
-// Fix for default Leaflet marker icons in Vite
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
-let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
-});
-
+let DefaultIcon = L.icon({ iconUrl: icon, shadowUrl: iconShadow, iconSize: [25, 41], iconAnchor: [12, 41] });
 L.Marker.prototype.options.icon = DefaultIcon;
 
 function MapBounds({ locations, selectedLocId }: { locations: any[], selectedLocId: string | null }) {
@@ -31,14 +23,11 @@ function MapBounds({ locations, selectedLocId }: { locations: any[], selectedLoc
     useEffect(() => {
         if (selectedLocId) {
             const loc = locations.find((l: any) => l.id === selectedLocId);
-            if (loc && loc.lat && loc.lng) {
-                map.flyTo([loc.lat, loc.lng], 15, { duration: 1.5 });
-            }
+            if (loc && loc.lat && loc.lng) map.flyTo([loc.lat, loc.lng], 15, { duration: 1.5 });
         } else {
             const validLocs = locations.filter((l: any) => l.lat && l.lng);
             if (validLocs.length > 0) {
                 const bounds = L.latLngBounds(validLocs.map((l: any) => [l.lat, l.lng]));
-                // Add padding to ensure points aren't exactly on the edge
                 map.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
             }
         }
@@ -54,8 +43,43 @@ const GROUP_SIZES: { value: GroupSize; label: string }[] = [
     { value: '30+', label: '30+ человек' },
 ];
 
+// ─── iOS 26 Liquid Glass styles ────────────────────────────────────────────
+const glassPanel: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.14)',
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    border: '1px solid rgba(255,255,255,0.28)',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.45)',
+};
+
+const glassHeader: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.10)',
+    backdropFilter: 'blur(24px) saturate(150%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+    border: '1px solid rgba(255,255,255,0.22)',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.40)',
+};
+
+const glassCard: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.22)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    border: '1px solid rgba(255,255,255,0.35)',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+};
+
+const glassMapFrame: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.10)',
+    backdropFilter: 'blur(20px) saturate(140%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+    border: '1.5px solid rgba(255,255,255,0.28)',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.40)',
+};
+// ────────────────────────────────────────────────────────────────────────────
+
 export function ExplorePage() {
-    const { setLocation, setFormat, setGroupSize, setStep } = useBookingStore();
+    const { setLocation, setFormat, setGroupSize, setStep, reset: resetBooking } = useBookingStore();
+    const { currentUser } = useUserStore();
     const { data: locations = [], isLoading } = useLocations();
     const navigate = useNavigate();
 
@@ -64,318 +88,378 @@ export function ExplorePage() {
     const [selectedSize, setSelectedSize] = useState<GroupSize | null>(null);
     const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
 
-    // Validation
     const canProceed = selectedLocId && selectedFormat && (selectedFormat === 'individual' || selectedSize);
 
     const handleProceed = () => {
         if (!canProceed) return;
-
         setLocation(selectedLocId);
         setFormat(selectedFormat);
         setGroupSize(selectedFormat === 'group' ? selectedSize : null);
-        setStep(2); // Go straight to chessboard
-
+        setStep(2);
         navigate('/checkout');
     };
 
     return (
-        <MinimalLayout showBackButton={false} fullWidth noPadding>
-            {isLoading ? (
-                <div className="flex flex-col items-center justify-center h-[70vh] space-y-4">
-                    <div className="w-12 h-12 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin"></div>
-                    <p className="text-gray-500 font-medium">Загружаем пространства...</p>
+        <div className="min-h-screen font-sans text-unbox-dark selection:bg-unbox-green selection:text-white overflow-hidden">
+
+            {/* ══════════════════════════════════════════════
+                FULL-PAGE BACKGROUND PHOTO
+            ══════════════════════════════════════════════ */}
+            <div className="fixed inset-0 z-0">
+                <img
+                    src="/hero-bg.jpg"
+                    alt=""
+                    className="w-full h-full object-cover object-[center_45%]"
+                />
+                {/* Light white wash — photo stays visible but softened */}
+                <div
+                    className="absolute inset-0"
+                    style={{ background: 'rgba(255,255,255,0.52)' }}
+                />
+            </div>
+
+            {/* ══════════════════════════════════════════════
+                GLASS HEADER — floating pill
+            ══════════════════════════════════════════════ */}
+            <header className="fixed top-0 left-0 right-0 z-50 px-4 md:px-8 pt-4">
+                <div
+                    className="flex items-center justify-between px-5 py-3 rounded-[22px] max-w-[1920px] mx-auto"
+                    style={glassHeader}
+                >
+                    {/* Left spacer */}
+                    <div className="flex-1" />
+
+                    {/* Center: Logo */}
+                    <Link to="/" onClick={resetBooking} className="flex items-center group">
+                        <img
+                            src="/unbox-logo.png"
+                            alt="Unbox"
+                            className="h-[81px] object-contain drop-shadow-md group-hover:scale-[1.15] transition-transform duration-200"
+                        />
+                    </Link>
+
+                    {/* Right: Auth */}
+                    <div className="flex-1 flex justify-end">
+                        {!currentUser ? (
+                            <Link
+                                to="/login"
+                                className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all brand-gradient"
+                            >
+                                <LogIn size={15} />
+                                Войти
+                            </Link>
+                        ) : (
+                            <button
+                                onClick={() => navigate('/dashboard')}
+                                className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/70 backdrop-blur-md border border-white/60 text-unbox-dark hover:bg-white transition-all text-sm font-medium shadow-md"
+                            >
+                                <div
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 brand-gradient"
+                                >
+                                    {currentUser.name?.charAt(0).toUpperCase() ?? <LayoutDashboard size={12} />}
+                                </div>
+                                <span className="max-w-[120px] truncate">{currentUser.name}</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
-            ) : (
-                <div className="flex flex-col lg:flex-row min-h-[calc(100vh-80px)] w-full">
-                    {/* ЛЕВАЯ КОЛОНКА: Настройки и список (Сценарий) */}
-                    <div className="w-full lg:w-2/3 shrink-0 bg-white border-r border-gray-100 flex flex-col relative z-10 shadow-xl overflow-y-auto" style={{ maxHeight: 'calc(100vh - 80px)' }}>
-                        <div className="p-6 md:p-10 space-y-10 w-full max-w-4xl mx-auto">
-                            {/* Заголовок */}
-                            <div>
-                                <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-br from-teal-700 to-indigo-800 mb-3 tracking-tight">
-                                    Где вы хотите работать?
+            </header>
+
+            {/* ══════════════════════════════════════════════
+                MAIN CONTENT
+            ══════════════════════════════════════════════ */}
+            <main className="relative z-10 min-h-screen pt-[132px] pb-10 px-6 md:px-12 flex flex-col lg:flex-row gap-8 items-start">
+
+                {isLoading ? (
+                    <div className="flex-1 flex items-center justify-center min-h-[70vh]">
+                        <div className="w-12 h-12 border-4 border-white/40 border-t-white rounded-full animate-spin drop-shadow" />
+                    </div>
+                ) : (
+                    <>
+                        {/* ── LEFT GLASS PANEL ────────────────────────── */}
+                        <div
+                            className="w-full lg:w-[56%] shrink-0 rounded-[28px] overflow-hidden flex flex-col"
+                            style={{ ...glassPanel, maxHeight: 'calc(100vh - 172px)' }}
+                        >
+                            {/* Panel title bar */}
+                            <div
+                                className="px-8 pt-7 pb-6 shrink-0"
+                                style={{ borderBottom: '1px solid rgba(255,255,255,0.45)' }}
+                            >
+                                <h1 className="text-xl font-black text-unbox-dark tracking-tight">
+                                    Найди своё пространство
                                 </h1>
-                                <p className="text-gray-500 text-lg">
-                                    Выберите формат и локацию на карте.
+                                <p className="text-unbox-grey text-sm mt-0.5 font-medium">
+                                    Кабинеты для работы в Батуми
                                 </p>
                             </div>
 
-                        {/* Формат Работы */}
-                        <section>
-                            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-5 flex items-center justify-center gap-2">
-                                <Users className="w-5 h-5" />
-                                1. Выберите формат
-                            </h2>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
-                                <button
-                                    onClick={() => {
-                                        setSelectedFormat('individual');
-                                        setSelectedSize(null);
-                                    }}
-                                    className={clsx(
-                                        "flex items-center gap-3 sm:gap-5 p-4 sm:p-6 rounded-2xl border-2 transition-all duration-300 text-left w-full overflow-hidden",
-                                        selectedFormat === 'individual'
-                                            ? "border-teal-500 bg-teal-50/50 shadow-lg shadow-teal-500/20 scale-[1.02]"
-                                            : "border-gray-100 bg-white hover:border-gray-200 hover:shadow-md"
-                                    )}
-                                >
-                                    <div className={clsx("p-3 sm:p-4 rounded-full transition-colors shrink-0", selectedFormat === 'individual' ? "bg-teal-600 text-white shadow-md shadow-teal-600/30" : "bg-gray-100 text-gray-500")}>
-                                        <User className="w-6 h-6 sm:w-7 sm:h-7" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <h3 className={clsx("font-bold text-lg sm:text-xl break-words leading-tight", selectedFormat === 'individual' ? "text-teal-900" : "text-gray-900")}>
-                                            Индивидуально
-                                        </h3>
-                                        <p className="text-gray-500 mt-1 text-xs sm:text-sm break-words leading-snug">Для одного человека</p>
-                                    </div>
-                                </button>
+                            {/* Scrollable content */}
+                            <div className="overflow-y-auto flex-1 px-8 py-8 space-y-10">
 
-                                <button
-                                    onClick={() => setSelectedFormat('group')}
-                                    className={clsx(
-                                        "flex items-center gap-3 sm:gap-5 p-4 sm:p-6 rounded-2xl border-2 transition-all duration-300 text-left w-full overflow-hidden",
-                                        selectedFormat === 'group'
-                                            ? "border-teal-500 bg-teal-50/50 shadow-lg shadow-teal-500/20 scale-[1.02]"
-                                            : "border-gray-100 bg-white hover:border-gray-200 hover:shadow-md"
-                                    )}
-                                >
-                                    <div className={clsx("p-3 sm:p-4 rounded-full transition-colors shrink-0", selectedFormat === 'group' ? "bg-teal-600 text-white shadow-md shadow-teal-600/30" : "bg-gray-100 text-gray-500")}>
-                                        <Users className="w-6 h-6 sm:w-7 sm:h-7" />
+                                {/* ── Формат ── */}
+                                <section>
+                                    <h2 className="text-xs font-bold text-unbox-grey uppercase tracking-wider mb-5 flex items-center gap-2">
+                                        <Users className="w-4 h-4 text-unbox-green" />
+                                        1. Выберите формат
+                                    </h2>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {[
+                                            { id: 'individual' as Format, label: 'Индивидуально', sub: 'Для одного человека', icon: User },
+                                            { id: 'group' as Format, label: 'Группа', sub: 'Для команд и мероприятий', icon: Users },
+                                        ].map(({ id, label, sub, icon: Icon }) => (
+                                            <button
+                                                key={id}
+                                                onClick={() => { setSelectedFormat(id); if (id === 'individual') setSelectedSize(null); }}
+                                                className={clsx(
+                                                    "flex items-center gap-4 p-4 rounded-2xl border-2 transition-all duration-200 text-left w-full",
+                                                    selectedFormat === id
+                                                        ? "border-unbox-green shadow-lg shadow-unbox-green/20 scale-[1.02]"
+                                                        : "border-white/60 hover:border-unbox-green/40 hover:shadow-md"
+                                                )}
+                                                style={selectedFormat === id
+                                                    ? { background: 'rgba(71,109,107,0.12)' }
+                                                    : glassCard
+                                                }
+                                            >
+                                                <div className={clsx("p-3 rounded-full shrink-0 transition-colors", selectedFormat === id ? "bg-unbox-green text-white shadow-md shadow-unbox-green/30" : "bg-white/80 text-unbox-grey")}>
+                                                    <Icon className="w-6 h-6" />
+                                                </div>
+                                                <div>
+                                                    <div className={clsx("font-bold text-base leading-tight", selectedFormat === id ? "text-unbox-dark" : "text-unbox-dark")}>{label}</div>
+                                                    <div className="text-unbox-grey text-xs mt-0.5">{sub}</div>
+                                                </div>
+                                            </button>
+                                        ))}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <h3 className={clsx("font-bold text-lg sm:text-xl break-words leading-tight", selectedFormat === 'group' ? "text-teal-900" : "text-gray-900")}>
-                                            Группа
-                                        </h3>
-                                        <p className="text-gray-500 mt-1 text-xs sm:text-sm break-words leading-snug">Для команд и мероприятий</p>
-                                    </div>
-                                </button>
-                            </div>
-                        </section>
+                                </section>
 
-                        {/* Размер группы */}
-                        <AnimatePresence>
-                            {selectedFormat === 'group' && (
-                                <motion.section
-                                    initial={{ opacity: 0, height: 0, y: -20 }}
-                                    animate={{ opacity: 1, height: 'auto', y: 0 }}
-                                    exit={{ opacity: 0, height: 0, y: -20 }}
-                                    className="overflow-hidden"
-                                >
-                                    <div className="py-2 max-w-3xl mx-auto text-center">
-                                        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-5">
-                                            Количество человек
-                                        </h2>
-                                        <div className="flex flex-wrap justify-center gap-3">
-                                            {GROUP_SIZES.map(size => (
-                                                <button
-                                                    key={size.value}
-                                                    onClick={() => setSelectedSize(size.value)}
-                                                    className={clsx(
-                                                        "px-6 py-3 rounded-full border-2 text-base font-medium transition-all hover:scale-105 active:scale-95",
-                                                        selectedSize === size.value
-                                                            ? "border-teal-500 bg-teal-500 text-white shadow-md shadow-teal-500/30"
-                                                            : "border-gray-200 bg-white text-gray-600 hover:border-teal-300 hover:text-teal-700"
-                                                    )}
-                                                >
-                                                    {size.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </motion.section>
-                            )}
-                        </AnimatePresence>
-
-                        {/* Локация */}
-                        <AnimatePresence>
-                            {selectedFormat && (selectedFormat === 'individual' || selectedSize) && (
-                                <motion.section
-                                    initial={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    transition={{ delay: 0.1 }}
-                                >
-                                    <hr className="my-10 border-gray-100" />
-                                    <div className="flex items-center justify-between mb-6">
-                                        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                            <MapPin className="w-5 h-5 text-teal-600" />
-                                            2. Выберите локацию
-                                        </h2>
-                                        <div className="text-xs font-medium bg-gray-100 text-gray-500 px-3 py-1 rounded-full">
-                                            Найдено: {locations.length}
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="flex flex-col gap-5">
-                                        {locations.map((loc, index) => {
-                                            const isSelected = selectedLocId === loc.id;
-                                            return (
-                                                <motion.div
-                                                    key={loc.id}
-                                                    initial={{ opacity: 0, y: 20 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    transition={{ duration: 0.4, delay: index * 0.1 }}
-                                                >
-                                                    <Card
+                                {/* ── Размер группы ── */}
+                                <AnimatePresence>
+                                    {selectedFormat === 'group' && (
+                                        <motion.section
+                                            initial={{ opacity: 0, height: 0, y: -10 }}
+                                            animate={{ opacity: 1, height: 'auto', y: 0 }}
+                                            exit={{ opacity: 0, height: 0, y: -10 }}
+                                            className="overflow-hidden"
+                                        >
+                                            <h2 className="text-xs font-bold text-unbox-grey uppercase tracking-wider mb-5">Количество человек</h2>
+                                            <div className="flex flex-wrap gap-2">
+                                                {GROUP_SIZES.map(size => (
+                                                    <button
+                                                        key={size.value}
+                                                        onClick={() => setSelectedSize(size.value)}
                                                         className={clsx(
-                                                            "flex flex-col sm:flex-row transition-all duration-300 cursor-pointer overflow-hidden border-2 group",
-                                                            isSelected
-                                                                ? "border-teal-500 shadow-xl shadow-teal-500/10 bg-teal-50/20"
-                                                                : "border-gray-100 hover:border-teal-200 hover:shadow-lg"
+                                                            "px-4 py-2 rounded-full border-2 text-sm font-medium transition-all hover:scale-105 active:scale-95",
+                                                            selectedSize === size.value
+                                                                ? "border-unbox-green bg-unbox-green text-white shadow-md shadow-unbox-green/30"
+                                                                : "border-white/70 bg-white/60 text-unbox-dark hover:border-unbox-green/50"
                                                         )}
-                                                        onClick={() => setSelectedLocId(loc.id)}
                                                     >
-                                                        {/* Изображение сбоку для компактности */}
-                                                        <div className="h-40 sm:h-auto sm:w-48 bg-gray-100 relative overflow-hidden shrink-0">
-                                                            {loc.image ? (
-                                                                <img
-                                                                    src={loc.image}
-                                                                    alt={loc.name}
-                                                                    className={clsx(
-                                                                        "w-full h-full object-cover transition-transform duration-700",
-                                                                        !isSelected && "group-hover:scale-105"
+                                                        {size.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </motion.section>
+                                    )}
+                                </AnimatePresence>
+
+                                {/* ── Локации ── */}
+                                <AnimatePresence>
+                                    {selectedFormat && (selectedFormat === 'individual' || selectedSize) && (
+                                        <motion.section
+                                            initial={{ opacity: 0, scale: 0.97 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            transition={{ delay: 0.05 }}
+                                        >
+                                            <div
+                                                className="h-px w-full mb-6"
+                                                style={{ background: 'rgba(255,255,255,0.45)' }}
+                                            />
+                                            <div className="flex items-center justify-between mb-5">
+                                                <h2 className="text-xs font-bold text-unbox-grey uppercase tracking-wider flex items-center gap-2">
+                                                    <MapPin className="w-4 h-4 text-unbox-green" />
+                                                    2. Выберите локацию
+                                                </h2>
+                                                <span className="text-xs font-medium bg-white/60 text-unbox-grey px-3 py-1 rounded-full border border-white/70">
+                                                    Найдено: {locations.length}
+                                                </span>
+                                            </div>
+
+                                            <div className="flex flex-col gap-5">
+                                                {locations.map((loc, index) => {
+                                                    const isSelected = selectedLocId === loc.id;
+                                                    return (
+                                                        <motion.div
+                                                            key={loc.id}
+                                                            initial={{ opacity: 0, y: 16 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                            transition={{ duration: 0.3, delay: index * 0.08 }}
+                                                            className="flex items-stretch gap-3"
+                                                        >
+                                                            <button
+                                                                onClick={() => setSelectedLocId(loc.id)}
+                                                                className={clsx(
+                                                                    "flex-1 flex flex-col sm:flex-row text-left rounded-2xl border-2 overflow-hidden transition-all duration-250 group",
+                                                                    isSelected
+                                                                        ? "border-unbox-green shadow-xl shadow-unbox-green/15 scale-[1.01]"
+                                                                        : "hover:border-unbox-green/40 hover:shadow-lg hover:scale-[1.005]"
+                                                                )}
+                                                                style={isSelected
+                                                                    ? { ...glassCard, background: 'rgba(71,109,107,0.10)', border: '2px solid rgba(71,109,107,0.60)' }
+                                                                    : glassCard
+                                                                }
+                                                            >
+                                                                {/* Photo */}
+                                                                <div className="h-32 sm:h-auto sm:w-40 bg-unbox-light/50 relative overflow-hidden shrink-0">
+                                                                    {loc.image ? (
+                                                                        <img src={loc.image} alt={loc.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                                                                    ) : (
+                                                                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-unbox-light to-white">
+                                                                            <span className="text-unbox-grey text-xs font-medium">Нет фото</span>
+                                                                        </div>
                                                                     )}
-                                                                />
-                                                            ) : (
-                                                                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-200">
-                                                                    <span className="text-gray-400 font-medium tracking-wide text-sm">Нет фото</span>
+                                                                    <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider text-unbox-green shadow-sm">
+                                                                        Partner
+                                                                    </div>
                                                                 </div>
-                                                            )}
-                                                            <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider text-teal-700 shadow-sm">
-                                                                Partner
-                                                            </div>
-                                                        </div>
-                                                        
-                                                        <div className="p-5 flex-1 flex flex-col justify-between">
-                                                            <div>
-                                                                <div className="flex justify-between items-start mb-1">
-                                                                    <h3 className="text-xl font-bold text-gray-900 leading-tight">{loc.name}</h3>
-                                                                    {isSelected && (
-                                                                        <div className="text-teal-500 bg-teal-50 p-1.5 rounded-full">
-                                                                            <ArrowRight className="w-4 h-4" />
+                                                                {/* Info */}
+                                                                <div className="p-4 flex-1">
+                                                                    <div className="font-bold text-base text-unbox-dark leading-tight mb-1">{loc.name}</div>
+                                                                    <div className="flex items-center text-unbox-grey text-xs mb-3">
+                                                                        <MapPin className="w-3.5 h-3.5 mr-1 shrink-0 text-unbox-grey" />
+                                                                        {loc.address}
+                                                                    </div>
+                                                                    {loc.features && loc.features.length > 0 && (
+                                                                        <div className="flex flex-wrap gap-1.5">
+                                                                            {loc.features.slice(0, 3).map((f: string, i: number) => (
+                                                                                <span key={i} className="text-[10px] bg-white/80 text-unbox-grey px-2 py-0.5 rounded-md border border-white/90 font-medium">{f}</span>
+                                                                            ))}
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                                <div className="flex items-start text-gray-500 mb-3 text-sm font-medium">
-                                                                    <MapPin className="w-4 h-4 mr-1 mt-0.5 shrink-0 text-gray-400" />
-                                                                    <span className="line-clamp-2">{loc.address}</span>
-                                                                </div>
-                                                            </div>
+                                                            </button>
 
-                                                            {loc.features && loc.features.length > 0 && (
-                                                                <div className="flex flex-wrap gap-1.5 mt-3">
-                                                                    {loc.features.slice(0, 3).map((feature: string, i: number) => (
-                                                                        <span key={i} className="text-[11px] bg-gray-100/80 text-gray-600 px-2 py-1 rounded-md font-medium border border-gray-200/50">
-                                                                            {feature}
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </Card>
-                                                </motion.div>
-                                            );
-                                        })}
-                                    </div>
-                                </motion.section>
-                            )}
-                        </AnimatePresence>
+                                                            {/* Arrow button */}
+                                                            <AnimatePresence>
+                                                                {isSelected && (
+                                                                    <motion.button
+                                                                        initial={{ opacity: 0, x: -16, scale: 0.85 }}
+                                                                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                                                                        exit={{ opacity: 0, x: -8, scale: 0.9 }}
+                                                                        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                                                                        onClick={handleProceed}
+                                                                        className="shrink-0 w-14 rounded-2xl bg-unbox-green hover:bg-unbox-dark text-white flex flex-col items-center justify-center gap-1.5 shadow-lg shadow-unbox-green/30 hover:-translate-y-0.5 transition-all active:scale-95"
+                                                                    >
+                                                                        <ArrowRight className="w-5 h-5" />
+                                                                        <span className="text-[9px] font-bold">Далее</span>
+                                                                    </motion.button>
+                                                                )}
+                                                            </AnimatePresence>
+                                                        </motion.div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </motion.section>
+                                    )}
+                                </AnimatePresence>
 
-                        {/* Продолжить */}
-                        <div className="pt-10 flex flex-col items-center">
-                            <AnimatePresence>
-                                {canProceed ? (
-                                    <motion.div
-                                        key="proceed-btn"
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: 10 }}
-                                        className="w-full flex flex-col items-center"
-                                    >
-                                        <button
-                                            onClick={handleProceed}
-                                            className="flex items-center justify-center gap-3 w-full max-w-sm py-4 rounded-2xl font-bold text-lg bg-teal-600 hover:bg-teal-700 text-white shadow-xl shadow-teal-500/30 hover:shadow-teal-500/40 hover:-translate-y-1 transition-all active:scale-95"
-                                        >
-                                            Смотреть расписание
-                                            <ArrowRight className="w-5 h-5" />
-                                        </button>
-                                    </motion.div>
-                                ) : (
-                                    <motion.div
-                                        key="waitlist-btn"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ delay: 0.5 }}
-                                        className="mt-4 pt-6 border-t border-gray-100 max-w-sm w-full text-center"
-                                    >
-                                        <p className="text-gray-500 mb-3 font-medium text-sm">Не нашли подходящий вариант?</p>
-                                        <button
-                                            onClick={() => setIsWaitlistOpen(true)}
-                                            className="text-indigo-600 font-bold hover:text-indigo-700 underline underline-offset-4 decoration-indigo-200 hover:decoration-indigo-600 transition-colors text-sm"
-                                        >
-                                            Присоединиться к листу ожидания
-                                        </button>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-                    </div>
-                </div>
+                                {/* ── Продолжить / Лист ожидания ── */}
+                                <div className="pb-2">
+                                    <AnimatePresence mode="wait">
+                                        {canProceed ? (
+                                            <motion.div
+                                                key="proceed"
+                                                initial={{ opacity: 0, y: 12 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, y: 8 }}
+                                            >
+                                                <button
+                                                    onClick={handleProceed}
+                                                    className="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-bold text-base bg-unbox-green hover:bg-unbox-dark text-white shadow-xl shadow-unbox-green/30 hover:-translate-y-0.5 transition-all active:scale-95"
+                                                >
+                                                    Смотреть расписание
+                                                    <ArrowRight className="w-5 h-5" />
+                                                </button>
+                                            </motion.div>
+                                        ) : (
+                                            <motion.div
+                                                key="waitlist"
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                transition={{ delay: 0.4 }}
+                                                className="text-center pt-4"
+                                                style={{ borderTop: '1px solid rgba(255,255,255,0.40)' }}
+                                            >
+                                                <p className="text-unbox-grey text-sm mb-2">Не нашли подходящий вариант?</p>
+                                                <button
+                                                    onClick={() => setIsWaitlistOpen(true)}
+                                                    className="text-unbox-green font-bold hover:text-unbox-dark underline underline-offset-4 decoration-unbox-green/30 transition-colors text-sm"
+                                                >
+                                                    Присоединиться к листу ожидания
+                                                </button>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
 
-                {/* ПРАВАЯ КОЛОНКА: Карта */}
-                    <div className="hidden lg:flex lg:w-1/3 shrink-0 relative z-0 bg-unbox-light/30 items-center justify-center p-4 xl:p-8">
-                        <div className="w-full h-full max-h-[600px] min-h-[400px] rounded-3xl overflow-hidden shadow-xl border-4 border-white/90 relative">
-                            <MapContainer 
-                                center={[41.6416, 41.6415]} // Batumi center fallback
+                            </div>{/* /scrollable */}
+                        </div>{/* /left panel */}
+
+                        {/* ── RIGHT GLASS MAP PANEL ──────────────────── */}
+                        <div
+                            className="hidden lg:block flex-1 rounded-[28px] overflow-hidden relative"
+                            style={{ ...glassMapFrame, height: 'calc(100vh - 172px)' }}
+                        >
+                            <MapContainer
+                                center={[41.6416, 41.6415]}
                                 zoom={12}
                                 style={{ height: '100%', width: '100%' }}
-                            zoomControl={false}
-                        >
-                            <MapBounds locations={locations} selectedLocId={selectedLocId} />
-                            <TileLayer
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-                                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                            />
-                            {locations.filter(l => l.lat && l.lng).map(loc => (
-                                <Marker 
-                                    key={loc.id} 
-                                    position={[loc.lat!, loc.lng!]}
-                                    eventHandlers={{
-                                        click: () => {
-                                            setSelectedLocId(loc.id);
-                                            // Optional: Scroll left panel to the card
-                                        },
-                                    }}
-                                >
-                                    <Popup className="premium-popup">
-                                        <div className="font-bold text-gray-900 text-base">{loc.name}</div>
-                                        <div className="text-gray-500 text-xs mt-1">{loc.address}</div>
-                                        {selectedLocId !== loc.id && (
-                                            <button 
-                                                onClick={() => setSelectedLocId(loc.id)}
-                                                className="mt-2 w-full bg-teal-600 hover:bg-teal-700 text-white py-1.5 rounded text-xs font-bold transition-colors"
-                                            >
-                                                Выбрать
-                                            </button>
-                                        )}
-                                    </Popup>
-                                </Marker>
-                            ))}
-                        </MapContainer>
-                        
-                            {/* Плашка с фильтром на карте (декоративная/резерв для будущего) */}
+                                zoomControl={false}
+                            >
+                                <MapBounds locations={locations} selectedLocId={selectedLocId} />
+                                <TileLayer
+                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+                                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                                />
+                                {locations.filter(l => l.lat && l.lng).map(loc => (
+                                    <Marker
+                                        key={loc.id}
+                                        position={[loc.lat!, loc.lng!]}
+                                        eventHandlers={{ click: () => setSelectedLocId(loc.id) }}
+                                    >
+                                        <Popup className="premium-popup">
+                                            <div className="font-bold text-unbox-dark text-sm">{loc.name}</div>
+                                            <div className="text-unbox-grey text-xs mt-0.5">{loc.address}</div>
+                                            {selectedLocId !== loc.id && (
+                                                <button
+                                                    onClick={() => setSelectedLocId(loc.id)}
+                                                    className="mt-2 w-full bg-unbox-green hover:bg-unbox-dark text-white py-1.5 rounded text-xs font-bold transition-colors"
+                                                >
+                                                    Выбрать
+                                                </button>
+                                            )}
+                                        </Popup>
+                                    </Marker>
+                                ))}
+                            </MapContainer>
+
+                            {/* Glass filter badge */}
                             <div className="absolute top-4 right-4 z-[400]">
-                                <button className="bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg border border-gray-200 flex items-center gap-2 text-sm font-bold text-gray-700 hover:bg-white transition-colors">
+                                <button
+                                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-unbox-dark hover:bg-white/80 transition-colors"
+                                    style={glassCard}
+                                >
                                     <Filter className="w-4 h-4" />
                                     Фильтры
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
+                        </div>{/* /map panel */}
+                    </>
+                )}
+            </main>
 
             <JoinWaitlistModal isOpen={isWaitlistOpen} onClose={() => setIsWaitlistOpen(false)} />
-        </MinimalLayout>
+        </div>
     );
 }

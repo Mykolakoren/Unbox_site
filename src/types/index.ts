@@ -25,6 +25,7 @@ export interface Resource {
     minBookingHours?: number;
     formats?: Format[];
     photos?: string[];
+    services?: string[];     // IDs from CABINET_SERVICES constant
     videoUrl?: string; // Mapped from video_url
     isActive?: boolean;
 }

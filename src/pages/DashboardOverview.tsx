@@ -19,16 +19,23 @@ export function DashboardOverview() {
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div>
                 <h1 className="text-2xl font-bold mb-2">Обзор</h1>
-                <p className="text-gray-500">Сводка вашего аккаунта и быстрые действия</p>
+                <p className="text-unbox-grey">Сводка вашего аккаунта и быстрые действия</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-6">
                     {/* Balance Card */}
-                    <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div className="p-6 rounded-2xl relative overflow-hidden"
+                        style={{
+                            background: 'rgba(255,255,255,0.45)',
+                            backdropFilter: 'blur(24px) saturate(150%)',
+                            WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+                            border: '1px solid rgba(255,255,255,0.65)',
+                            boxShadow: '0 8px 32px rgba(71,109,107,0.07), inset 0 1px 0 rgba(255,255,255,0.80)',
+                        }}>
                         <div className="flex justify-between items-start mb-6">
                             <div>
-                                <div className="text-sm text-gray-500 font-medium mb-1">
+                                <div className="text-sm text-unbox-grey font-medium mb-1">
                                     {isNegative ? 'Текущая задолженность' : 'Текущий баланс'}
                                 </div>
                                 <div className={`text-4xl font-bold ${isNegative ? 'text-red-500' : 'text-green-600'}`}>
@@ -49,14 +56,14 @@ export function DashboardOverview() {
                         {isNegative && (
                             <div className="space-y-2">
                                 <div className="flex justify-between text-xs font-medium">
-                                    <span className="text-gray-500">Использовано кредита</span>
-                                    <span className={availableCredit < 50 ? 'text-red-500' : 'text-gray-700'}>
+                                    <span className="text-unbox-grey">Использовано кредита</span>
+                                    <span className={availableCredit < 50 ? 'text-red-500' : 'text-unbox-dark'}>
                                         Доступно: {availableCredit.toFixed(2)} ₾
                                     </span>
                                 </div>
-                                <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                                <div className="w-full bg-unbox-light/50 rounded-full h-2 overflow-hidden">
                                     <div
-                                        className={`h-full rounded-full ${availableCredit < 50 ? 'bg-red-500' : 'bg-blue-500'}`}
+                                        className={`h-full rounded-full ${availableCredit < 50 ? 'bg-red-500' : 'bg-unbox-green'}`}
                                         style={{ width: `${usagePercent}%` }}
                                     ></div>
                                 </div>
@@ -76,7 +83,14 @@ export function DashboardOverview() {
                 <DiscountProgress />
 
                 {/* Quick Actions (Full width on smaller, grid column on larger) */}
-                <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-center gap-4 lg:col-span-2">
+                <div className="p-6 rounded-2xl flex flex-col justify-center gap-4 lg:col-span-2"
+                    style={{
+                        background: 'rgba(255,255,255,0.45)',
+                        backdropFilter: 'blur(24px) saturate(150%)',
+                        WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+                        border: '1px solid rgba(255,255,255,0.65)',
+                        boxShadow: '0 8px 32px rgba(71,109,107,0.07), inset 0 1px 0 rgba(255,255,255,0.80)',
+                    }}>
                     <h3 className="font-bold text-lg">Быстрые действия</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Button onClick={() => navigate('/')} className="w-full justify-start py-6" size="lg">

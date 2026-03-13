@@ -47,7 +47,7 @@ export function AdminKnowledgeBase() {
                     iconText: 'text-yellow-600'
                 },
                 content: (
-                    <div className="space-y-4 text-[13px] md:text-sm text-gray-700">
+                    <div className="space-y-4 text-[13px] md:text-sm text-unbox-dark">
                         <p><strong>1. Открытие:</strong> Открытие филиала или контроль открытия к первой брони. Снятие с сигнализации.</p>
                         <p><strong>2. Кухня старт:</strong> Включение электротермоса, пополнение водой, заварка свежего имбиря.</p>
 
@@ -102,7 +102,7 @@ export function AdminKnowledgeBase() {
                     iconText: 'text-green-600'
                 },
                 content: (
-                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700">
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-unbox-dark">
                         <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-400 mt-1.5 flex-shrink-0" />Поддержание общей чистоты и порядка перед каждым новым клиентом.</li>
                         <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-400 mt-1.5 flex-shrink-0" />Своевременное пополнение расходных материалов в туалетах и кухне.</li>
                         <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-400 mt-1.5 flex-shrink-0" />Пополнение водой электротермоса.</li>
@@ -118,14 +118,14 @@ export function AdminKnowledgeBase() {
                 subtitle: 'Выключение техники, уборка, отчет по кассе',
                 icon: Moon,
                 theme: {
-                    bg: 'bg-gradient-to-br from-indigo-50/50 to-white',
-                    border: 'border-indigo-100',
-                    text: 'text-indigo-800',
-                    iconBg: 'bg-indigo-100',
-                    iconText: 'text-indigo-600'
+                    bg: 'bg-gradient-to-br from-unbox-light/50 to-white',
+                    border: 'border-unbox-green/20',
+                    text: 'text-unbox-dark',
+                    iconBg: 'bg-unbox-light',
+                    iconText: 'text-unbox-green'
                 },
                 content: (
-                    <ul className="space-y-3 text-sm text-gray-700 list-decimal pl-5 marker:font-bold marker:text-indigo-400">
+                    <ul className="space-y-3 text-sm text-unbox-dark list-decimal pl-5 marker:font-bold marker:text-unbox-green">
                         <li>Выключить электротермос, кофеварки, кондиционеры, светильники, колонку.</li>
                         <li>Закрыть окна и распахнуть шторы для утреннего солнца цветам.</li>
                         <li>Укрыть клетку Плюши и Степаши.</li>
@@ -146,16 +146,16 @@ export function AdminKnowledgeBase() {
                 icon: BookOpen,
                 theme: {
                     bg: 'bg-white',
-                    border: 'border-gray-200',
-                    text: 'text-gray-800',
-                    iconBg: 'bg-gray-100',
-                    iconText: 'text-gray-600'
+                    border: 'border-unbox-light',
+                    text: 'text-unbox-dark',
+                    iconBg: 'bg-unbox-light/50',
+                    iconText: 'text-unbox-grey'
                 },
                 content: (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-700">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-unbox-dark">
                         <div>
-                            <h3 className="font-bold flex items-center gap-2 mb-3 text-gray-900 border-b pb-2">
-                                <FileText size={16} className="text-blue-500" />
+                            <h3 className="font-bold flex items-center gap-2 mb-3 text-unbox-dark border-b pb-2">
+                                <FileText size={16} className="text-unbox-green" />
                                 Основные правила бронирования
                             </h3>
                             <ul className="space-y-2.5">
@@ -165,7 +165,7 @@ export function AdminKnowledgeBase() {
                             </ul>
                         </div>
                         <div>
-                            <h3 className="font-bold flex items-center gap-2 mb-3 text-gray-900 border-b pb-2">
+                            <h3 className="font-bold flex items-center gap-2 mb-3 text-unbox-dark border-b pb-2">
                                 <AlertCircle size={16} className="text-orange-500" />
                                 Отмена и "Горящие окна"
                             </h3>
@@ -183,64 +183,64 @@ export function AdminKnowledgeBase() {
                 subtitle: 'Тарифы, абонементы и прогрессивная система скидок',
                 icon: () => <span className="font-bold font-mono text-lg leading-none mt-1">₾</span>,
                 theme: {
-                    bg: 'bg-gradient-to-br from-blue-50/50 to-white',
+                    bg: 'bg-gradient-to-br from-unbox-light/30 to-white',
                     border: 'border-blue-100',
                     text: 'text-blue-900',
-                    iconBg: 'bg-blue-100',
-                    iconText: 'text-blue-600'
+                    iconBg: 'bg-unbox-light',
+                    iconText: 'text-unbox-green'
                 },
                 content: (
-                    <div className="space-y-6 text-sm text-gray-700">
+                    <div className="space-y-6 text-sm text-unbox-dark">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <p className="font-bold text-gray-900 mb-3 border-b pb-2">Базовые тарифы (за 1 час):</p>
+                                <p className="font-bold text-unbox-dark mb-3 border-b pb-2">Базовые тарифы (за 1 час):</p>
                                 <div className="space-y-2">
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
+                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-unbox-light shadow-sm">
                                         <span>Индивидуальный формат (Кабинет)</span>
-                                        <strong className="text-blue-700">20 GEL</strong>
+                                        <strong className="text-unbox-dark">20 GEL</strong>
                                     </div>
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
+                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-unbox-light shadow-sm">
                                         <span>Индивидуальный формат (Капсула)</span>
-                                        <strong className="text-blue-700">10 GEL</strong>
+                                        <strong className="text-unbox-dark">10 GEL</strong>
                                     </div>
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
+                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-unbox-light shadow-sm">
                                         <span>Групповой формат (Кабинет)</span>
-                                        <strong className="text-blue-700">35 GEL</strong>
+                                        <strong className="text-unbox-dark">35 GEL</strong>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="bg-white/80 p-4 rounded-xl border border-blue-100/60 shadow-sm">
-                                <p className="font-bold text-gray-900 mb-1">Прогрессивная еженедельная скидка (ПН-ВС)</p>
-                                <p className="text-[11px] text-gray-500 mb-3 leading-tight">Применяется к базовой стоимости автоматически, исходя из накопленных часов за текущую календарную неделю.</p>
+                                <p className="font-bold text-unbox-dark mb-1">Прогрессивная еженедельная скидка (ПН-ВС)</p>
+                                <p className="text-[11px] text-unbox-grey mb-3 leading-tight">Применяется к базовой стоимости автоматически, исходя из накопленных часов за текущую календарную неделю.</p>
                                 <ul className="space-y-2">
-                                    <li className="flex justify-between items-center"><span className="text-gray-600">до 5 часов</span> <strong className="bg-gray-100 px-2 rounded">0%</strong></li>
-                                    <li className="flex justify-between items-center"><span className="text-gray-600">5 - 11 часов</span> <strong className="bg-blue-50 text-blue-700 px-2 rounded">10%</strong></li>
-                                    <li className="flex justify-between items-center"><span className="text-gray-600">11 - 16 часов</span> <strong className="bg-blue-100 text-blue-800 px-2 rounded">25%</strong></li>
-                                    <li className="flex justify-between items-center"><span className="text-gray-600">16+ часов</span> <strong className="bg-indigo-100 text-indigo-800 px-2 rounded">50%</strong></li>
+                                    <li className="flex justify-between items-center"><span className="text-unbox-grey">до 5 часов</span> <strong className="bg-unbox-light/50 px-2 rounded">0%</strong></li>
+                                    <li className="flex justify-between items-center"><span className="text-unbox-grey">5 - 11 часов</span> <strong className="bg-unbox-light text-unbox-dark px-2 rounded">10%</strong></li>
+                                    <li className="flex justify-between items-center"><span className="text-unbox-grey">11 - 16 часов</span> <strong className="bg-unbox-light text-blue-800 px-2 rounded">25%</strong></li>
+                                    <li className="flex justify-between items-center"><span className="text-unbox-grey">16+ часов</span> <strong className="bg-unbox-light text-unbox-dark px-2 rounded">50%</strong></li>
                                 </ul>
                             </div>
                         </div>
 
-                        <div className="flex items-start gap-2 text-[12px] text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-100">
-                            <AlertCircle size={16} className="mt-0.5 flex-shrink-0 text-gray-400" />
+                        <div className="flex items-start gap-2 text-[12px] text-unbox-grey bg-unbox-light/30 p-3 rounded-lg border border-unbox-light">
+                            <AlertCircle size={16} className="mt-0.5 flex-shrink-0 text-unbox-grey" />
                             <p><strong>Примечание:</strong> Скидки не суммируются. Всегда применяется наиболее выгодный для пользователя вариант. Например, скидка по купленному абонементу перекрывает прогрессивную скидку "на лету".</p>
                         </div>
 
                         <div className="flex flex-col md:flex-row gap-6 mt-6">
                             <div className="flex-1 bg-white/80 p-4 rounded-xl border border-blue-100/60 shadow-sm">
-                                <p className="font-bold text-gray-900 mb-2">Приоритет расчетов (Один чек)</p>
-                                <ul className="space-y-2 text-sm text-gray-700 list-decimal pl-4 marker:text-blue-500 marker:font-bold">
+                                <p className="font-bold text-unbox-dark mb-2">Приоритет расчетов (Один чек)</p>
+                                <ul className="space-y-2 text-sm text-unbox-dark list-decimal pl-4 marker:text-unbox-green marker:font-bold">
                                     <li><strong>Базовая цена</strong> (Тариф × Длительность)</li>
                                     <li><strong>Применение правила скидки</strong> (Скидки не суммируются! Применяется только одна с наивысшим приоритетом: Ручная скидка админа → Абонемент → Еженедельная скидка → Горящее окно)</li>
                                     <li><strong>Списание с баланса</strong> (Бонусный кошелек)</li>
                                 </ul>
                             </div>
 
-                            <div className="flex-1 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100/60 shadow-sm">
-                                <p className="font-bold text-indigo-900 mb-2">Еженедельный бонус (Кэшбэк)</p>
-                                <p className="text-[12px] text-gray-600 mb-2">Система автоматически проверяет отхоженные часы в конце недели.</p>
-                                <p className="text-[12px] text-gray-700">Если суммарный прогрессивный процент скидки в конце недели дает цену <strong>ниже</strong>, чем клиент фактически заплатил при бронировании (без абонемента), то разница автоматически зачисляется ему на <strong>бонусный баланс</strong>. <br /><em>Срок действия бонусов — 60 дней.</em></p>
+                            <div className="flex-1 bg-unbox-light/50 p-4 rounded-xl border border-unbox-green/10 shadow-sm">
+                                <p className="font-bold text-unbox-dark mb-2">Еженедельный бонус (Кэшбэк)</p>
+                                <p className="text-[12px] text-unbox-grey mb-2">Система автоматически проверяет отхоженные часы в конце недели.</p>
+                                <p className="text-[12px] text-unbox-dark">Если суммарный прогрессивный процент скидки в конце недели дает цену <strong>ниже</strong>, чем клиент фактически заплатил при бронировании (без абонемента), то разница автоматически зачисляется ему на <strong>бонусный баланс</strong>. <br /><em>Срок действия бонусов — 60 дней.</em></p>
                             </div>
                         </div>
                     </div>
@@ -259,16 +259,16 @@ export function AdminKnowledgeBase() {
                     iconText: 'text-purple-600'
                 },
                 content: (
-                    <div className="space-y-5 text-sm text-gray-700">
-                        <p className="text-[13px] text-gray-600 mb-2">Абонемент дает гарантированную скидку и фиксированный пакет часов. При покупке абонемента часы списываются в момент подтверждения брони.</p>
+                    <div className="space-y-5 text-sm text-unbox-dark">
+                        <p className="text-[13px] text-unbox-grey mb-2">Абонемент дает гарантированную скидку и фиксированный пакет часов. При покупке абонемента часы списываются в момент подтверждения брони.</p>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[13px]">
                             {/* Тёплый старт */}
                             <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-purple-300"></div>
-                                <h4 className="font-bold text-gray-900 mb-1">Тёплый старт</h4>
-                                <div className="text-purple-700 font-bold mb-3">180 GEL <span className="text-gray-400 text-xs font-normal">/ 30 дней</span></div>
-                                <ul className="space-y-1 text-gray-600">
+                                <h4 className="font-bold text-unbox-dark mb-1">Тёплый старт</h4>
+                                <div className="text-purple-700 font-bold mb-3">180 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
+                                <ul className="space-y-1 text-unbox-grey">
                                     <li><strong>Часов:</strong> 10 часов</li>
                                     <li><strong>Скидка:</strong> 10%</li>
                                     <li><strong>Формат:</strong> Индивидуальный</li>
@@ -278,9 +278,9 @@ export function AdminKnowledgeBase() {
                             {/* Регулярный практик */}
                             <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-purple-400"></div>
-                                <h4 className="font-bold text-gray-900 mb-1">Регулярный практик</h4>
-                                <div className="text-purple-700 font-bold mb-3">340 GEL <span className="text-gray-400 text-xs font-normal">/ 30 дней</span></div>
-                                <ul className="space-y-1 text-gray-600">
+                                <h4 className="font-bold text-unbox-dark mb-1">Регулярный практик</h4>
+                                <div className="text-purple-700 font-bold mb-3">340 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
+                                <ul className="space-y-1 text-unbox-grey">
                                     <li><strong>Часов:</strong> 20 часов</li>
                                     <li><strong>Скидка:</strong> 15%</li>
                                     <li><strong>Формат:</strong> Индивидуальный</li>
@@ -293,9 +293,9 @@ export function AdminKnowledgeBase() {
                                 <div className="absolute top-0 left-0 w-1 h-full bg-purple-600"></div>
                                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                                     <div>
-                                        <h4 className="font-bold text-gray-900 mb-1">Профи+</h4>
-                                        <div className="text-purple-700 font-bold mb-3">640 GEL <span className="text-gray-400 text-xs font-normal">/ 45 дней</span></div>
-                                        <ul className="space-y-1 text-gray-600">
+                                        <h4 className="font-bold text-unbox-dark mb-1">Профи+</h4>
+                                        <div className="text-purple-700 font-bold mb-3">640 GEL <span className="text-unbox-grey text-xs font-normal">/ 45 дней</span></div>
+                                        <ul className="space-y-1 text-unbox-grey">
                                             <li><strong>Часов:</strong> 40 часов <span className="text-purple-600 font-bold">(+2 бонусных)</span></li>
                                             <li><strong>Скидка:</strong> 20%</li>
                                             <li><strong>Формат:</strong> Инд. и Групповой</li>
@@ -315,9 +315,9 @@ export function AdminKnowledgeBase() {
                                 <div className="absolute top-0 left-0 w-1 h-full bg-pink-400"></div>
                                 <div className="flex justify-between items-start">
                                     <div>
-                                        <h4 className="font-bold text-gray-900 mb-1">Групповой мастер</h4>
-                                        <div className="text-pink-600 font-bold mb-3">420 GEL <span className="text-gray-400 text-xs font-normal">/ 30 дней</span></div>
-                                        <ul className="space-y-1 text-gray-600">
+                                        <h4 className="font-bold text-unbox-dark mb-1">Групповой мастер</h4>
+                                        <div className="text-pink-600 font-bold mb-3">420 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
+                                        <ul className="space-y-1 text-unbox-grey">
                                             <li><strong>Гостей:</strong> Групповой (только Кабинет)</li>
                                             <li><strong>Часов:</strong> 16 часов</li>
                                             <li><strong>Скидка:</strong> 25%</li>
@@ -355,7 +355,7 @@ export function AdminKnowledgeBase() {
                                 "rounded-2xl border transition-all duration-300 overflow-hidden",
                                 section.theme.bg,
                                 section.theme.border,
-                                isExpanded ? "shadow-md" : "shadow-sm hover:shadow-md hover:border-gray-300"
+                                isExpanded ? "shadow-md" : "shadow-sm hover:shadow-md hover:border-unbox-light"
                             )}
                         >
                             {/* Header (Clickable) */}
@@ -375,7 +375,7 @@ export function AdminKnowledgeBase() {
                                         <h2 className={clsx("text-lg font-bold transition-colors", section.theme.text)}>
                                             {section.title}
                                         </h2>
-                                        <p className="text-sm text-gray-500 mt-0.5 hidden sm:block">
+                                        <p className="text-sm text-unbox-grey mt-0.5 hidden sm:block">
                                             {section.subtitle}
                                         </p>
                                     </div>
@@ -384,7 +384,7 @@ export function AdminKnowledgeBase() {
                                 <motion.div
                                     animate={{ rotate: isExpanded ? 180 : 0 }}
                                     transition={{ duration: 0.2 }}
-                                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 text-gray-400 shrink-0"
+                                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 text-unbox-grey shrink-0"
                                 >
                                     <ChevronDown size={20} />
                                 </motion.div>

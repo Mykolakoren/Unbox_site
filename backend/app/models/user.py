@@ -32,6 +32,11 @@ class UserBase(SQLModel):
     
     is_admin: bool = Field(default=False) # Legacy flag, check usage
 
+    # Pipeline / CRM assignment (admin panel)
+    manual_status: Optional[str] = Field(default=None)          # new|active|sleeping|vip|partner|bad_client
+    responsible_admin_id: Optional[str] = Field(default=None)   # UUID of responsible admin
+    attracted_by_admin_id: Optional[str] = Field(default=None)  # UUID of admin who attracted the client
+
     # OAuth
     google_id: Optional[str] = Field(default=None, index=True)
     telegram_id: Optional[str] = Field(default=None, index=True)
@@ -74,5 +79,7 @@ class UserUpdateAdmin(UserUpdate):
     crm_data: Optional[dict] = None
     admin_tasks: Optional[List[dict]] = None
     comment_history: Optional[List[dict]] = None
-    # Tasks likely need their own management or full replacement
+    manual_status: Optional[str] = None
+    responsible_admin_id: Optional[str] = None
+    attracted_by_admin_id: Optional[str] = None
 

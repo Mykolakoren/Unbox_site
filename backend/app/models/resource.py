@@ -17,8 +17,9 @@ class ResourceBase(SQLModel):
     # JSON Fields
     formats: List[str] = Field(sa_column=Column(JSON), default=["individual"])
     photos: List[str] = Field(sa_column=Column(JSON), default=[])
+    services: List[str] = Field(sa_column=Column(JSON), default=[])
     video_url: Optional[str] = None
-    
+
     is_active: bool = True
 
 class Resource(ResourceBase, table=True):
@@ -34,7 +35,11 @@ class ResourceUpdate(SQLModel):
     name: Optional[str] = None
     hourly_rate: Optional[float] = None
     capacity: Optional[int] = None
+    area: Optional[int] = None
+    min_booking_hours: Optional[int] = None
     description: Optional[str] = None
     photos: Optional[List[str]] = None
+    services: Optional[List[str]] = None
+    formats: Optional[List[str]] = None
     video_url: Optional[str] = None
     is_active: Optional[bool] = None

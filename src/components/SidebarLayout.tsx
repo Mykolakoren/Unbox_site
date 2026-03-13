@@ -37,12 +37,29 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
     };
 
     return (
-        <div className="min-h-screen bg-unbox-light/30 flex text-unbox-dark">
+        <div className="min-h-screen flex text-unbox-dark relative">
+            {/* Full-page photo background */}
+            <div className="fixed inset-0 z-0">
+                <img
+                    src="/hero-bg.jpg"
+                    alt=""
+                    className="w-full h-full object-cover object-[center_45%]"
+                />
+                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+            </div>
+
             {/* Sidebar (Desktop) */}
-            <aside className="w-64 glass-card border-r border-unbox-light/50 hidden md:flex flex-col fixed h-full z-10 rounded-r-3xl my-2 ml-2 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-                <div className="p-6 border-b border-gray-100 flex items-center justify-center">
-                    <Link to="/">
-                        <img src="/unbox-logo.png" alt="Unbox" className="h-10 object-contain cursor-pointer hover:scale-105 premium-transition" />
+            <aside className="w-64 hidden md:flex flex-col fixed h-full z-10 rounded-r-3xl my-2 ml-2"
+                style={{
+                    background: 'rgba(255,255,255,0.55)',
+                    backdropFilter: 'blur(28px) saturate(160%)',
+                    WebkitBackdropFilter: 'blur(28px) saturate(160%)',
+                    border: '1px solid rgba(255,255,255,0.65)',
+                    boxShadow: '4px 0 32px rgba(71,109,107,0.06), inset -1px 0 0 rgba(255,255,255,0.80)',
+                }}>
+                <div className="p-6 border-b border-unbox-light/50 flex items-center justify-center">
+                    <Link to="/" className="group">
+                        <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200" />
                     </Link>
                 </div>
 
@@ -69,16 +86,16 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                                 "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-300 font-medium",
                                 isActive(item.path, item.exact)
                                     ? "bg-unbox-green text-white shadow-md shadow-unbox-green/20 translate-x-1"
-                                    : "text-gray-500 hover:bg-unbox-light/50 hover:text-unbox-dark"
+                                    : "text-unbox-grey hover:bg-unbox-light/50 hover:text-unbox-dark"
                             )}
                         >
-                            <item.icon size={18} className={isActive(item.path, item.exact) ? "text-white" : "text-gray-400"} />
+                            <item.icon size={18} className={isActive(item.path, item.exact) ? "text-white" : "text-unbox-grey"} />
                             {item.label}
                         </Link>
                     ))}
                 </nav>
 
-                <div className="p-4 border-t border-gray-100">
+                <div className="p-4 border-t border-unbox-light/50">
                     {customBottomContent && <div className="mb-4">{customBottomContent}</div>}
                     
                     <button
@@ -88,7 +105,7 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                         <LogOut size={18} />
                         Выйти
                     </button>
-                    <Link to="/" className="flex items-center gap-3 px-3 py-2 mt-2 text-sm text-gray-400 hover:text-unbox-dark premium-transition">
+                    <Link to="/" className="flex items-center gap-3 px-3 py-2 mt-2 text-sm text-unbox-grey hover:text-unbox-dark premium-transition">
                         <ArrowLeft size={16} /> На сайт
                     </Link>
                 </div>
@@ -96,8 +113,8 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
 
             {/* Mobile Header */}
             <header className="md:hidden fixed top-0 left-0 right-0 h-16 glass z-20 flex items-center justify-between px-4 border-b border-unbox-light/50">
-                <Link to="/">
-                    <img src="/unbox-logo.png" alt="Unbox" className="h-8 object-contain" />
+                <Link to="/" className="group">
+                    <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain group-hover:scale-[1.15] transition-transform duration-200" />
                 </Link>
                 <button
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -117,11 +134,11 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                 "fixed inset-y-0 left-0 w-72 bg-white/95 backdrop-blur-xl z-40 transform transition-transform duration-400 cubic-bezier(0.16, 1, 0.3, 1) md:hidden flex flex-col border-r border-unbox-light shadow-2xl",
                 isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
             )}>
-                <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                    <Link to="/" onClick={() => setIsMobileMenuOpen(false)}>
-                        <img src="/unbox-logo.png" alt="Unbox" className="h-8 object-contain" />
+                <div className="p-6 border-b border-unbox-light/50 flex items-center justify-between">
+                    <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className="group">
+                        <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain group-hover:scale-[1.15] transition-transform duration-200" />
                     </Link>
-                    <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-gray-50 rounded-full text-gray-500">
+                    <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-unbox-light/30 rounded-full text-unbox-grey">
                         <X size={18} />
                     </button>
                 </div>
@@ -136,7 +153,7 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                                 "flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm",
                                 isActive(item.path, item.exact)
                                     ? "bg-unbox-green text-white shadow-md shadow-unbox-green/20"
-                                    : "text-gray-500 hover:bg-unbox-light/50 hover:text-unbox-dark"
+                                    : "text-unbox-grey hover:bg-unbox-light/50 hover:text-unbox-dark"
                             )}
                         >
                             <item.icon size={18} />
@@ -145,7 +162,7 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                     ))}
                 </nav>
 
-                <div className="p-6 border-t border-gray-100 bg-gray-50/50">
+                <div className="p-6 border-t border-unbox-light/50 bg-unbox-light/30">
                     {customBottomContent && <div className="mb-4">{customBottomContent}</div>}
                     <button
                         onClick={handleLogout}
@@ -158,7 +175,7 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
             </div>
 
             {/* Main Content */}
-            <main className="flex-1 md:ml-[272px] p-4 pt-24 md:pt-8 md:p-8 md:pr-10 w-full min-w-0">
+            <main className="flex-1 md:ml-[272px] p-4 pt-24 md:pt-8 md:p-8 md:pr-10 w-full min-w-0 relative z-10">
                 <div className="max-w-6xl mx-auto">
                     {children}
                 </div>

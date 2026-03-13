@@ -107,7 +107,7 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
                         </div>
                         <div className="bg-gray-50 p-3 rounded-xl">
                             <div className="text-xs text-gray-500 uppercase font-bold mb-1">Ваша скидка</div>
-                            <div className="text-2xl font-bold text-blue-600">{analysis.discountPercent}%</div>
+                            <div className="text-2xl font-bold text-unbox-green">{analysis.discountPercent}%</div>
                         </div>
                     </div>
 
@@ -120,7 +120,7 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
                             </div>
                             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                                 <div
-                                    className="h-full bg-blue-500 rounded-full transition-all duration-1000"
+                                    className="h-full bg-unbox-green rounded-full transition-all duration-1000"
                                     style={{ width: `${Math.min(100, (analysis.totalHours / analysis.nextTier.hours) * 100)}%` }}
                                 />
                             </div>

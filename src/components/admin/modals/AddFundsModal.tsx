@@ -69,7 +69,7 @@ export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps
                             value={amount}
                             onChange={(e) => setAmount(e.target.value)}
                             placeholder="0.00"
-                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black transition-shadow text-lg font-medium"
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green transition-shadow text-lg font-medium"
                             autoFocus
                         />
                     </div>
@@ -85,7 +85,7 @@ export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps
                                     type="button"
                                     onClick={() => setMethod(pm.id)}
                                     className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${method === pm.id
-                                        ? 'border-black bg-gray-50 text-black font-medium'
+                                        ? 'border-unbox-green bg-gray-50 text-unbox-dark font-medium'
                                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                         }`}
                                 >

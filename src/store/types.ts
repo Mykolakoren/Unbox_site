@@ -69,7 +69,9 @@ export interface User {
     tags?: string[]; // Tag names or IDs
     adminTasks?: Task[];
     additionalContacts?: { type: string; value: string }[];
-    manualStatus?: 'vip' | 'partner' | 'bad_client';
+    manualStatus?: 'new' | 'active' | 'sleeping' | 'vip' | 'partner' | 'bad_client';
+    responsibleAdminId?: string | null;
+    attractedByAdminId?: string | null;
     profession?: string;
     targetAudience?: string[];
 }
@@ -105,6 +107,7 @@ export interface BookingHistoryItem extends BookingState {
     googleCalendarEventId?: string;
     cancellationReason?: string;
     cancelledBy?: string; // Admin Name/ID who cancelled
+    crmClientId?: string; // Link to TherapistClient.id
 }
 
 export interface WaitlistEntry {

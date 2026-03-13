@@ -54,7 +54,7 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
                             setCustomValue('');
                         }
                     }}
-                    className="w-full text-sm p-1.5 rounded border border-gray-200 mb-2 focus:outline-none focus:ring-2 focus:ring-black"
+                    className="w-full text-sm p-1.5 rounded border border-gray-200 mb-2 focus:outline-none focus:ring-2 focus:ring-unbox-green"
                     autoFocus
                 >
                     <option value="">Выберите...</option>
@@ -70,14 +70,14 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
                         value={customValue}
                         onChange={(e) => setCustomValue(e.target.value)}
                         placeholder="Название профессии..."
-                        className="w-full text-sm p-1.5 rounded border border-gray-200 mb-2 focus:outline-none focus:ring-2 focus:ring-black"
+                        className="w-full text-sm p-1.5 rounded border border-gray-200 mb-2 focus:outline-none focus:ring-2 focus:ring-unbox-green"
                     />
                 )}
 
                 <div className="flex gap-2">
                     <button
                         onClick={handleSave}
-                        className="flex-1 bg-black text-white text-xs py-1 rounded hover:bg-gray-800 transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 bg-unbox-green text-white text-xs py-1 rounded hover:bg-unbox-dark transition-colors flex items-center justify-center gap-1"
                     >
                         <Check size={12} />
                         Сохранить

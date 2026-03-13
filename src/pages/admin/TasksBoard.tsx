@@ -10,7 +10,7 @@ import { Button } from '../../components/ui/Button';
 
 const COLUMNS: { id: TaskStatus; title: string; color: string; headerColor: string }[] = [
     { id: 'TODO', title: 'К выполнению', color: 'bg-slate-50 border-slate-200/60', headerColor: 'text-slate-700 bg-slate-200/50' },
-    { id: 'IN_PROGRESS', title: 'В процессе', color: 'bg-blue-50/50 border-blue-100', headerColor: 'text-blue-700 bg-blue-100/50' },
+    { id: 'IN_PROGRESS', title: 'В процессе', color: 'bg-unbox-light/50 border-blue-100', headerColor: 'text-unbox-dark bg-unbox-light/50' },
     { id: 'DONE', title: 'Готово', color: 'bg-emerald-50/50 border-emerald-100', headerColor: 'text-emerald-700 bg-emerald-100/50' },
 ];
 
@@ -84,14 +84,14 @@ export function AdminTasksBoard() {
             case 'HIGH': return 'text-red-600 bg-red-100';
             case 'MEDIUM': return 'text-yellow-600 bg-yellow-100';
             case 'LOW': return 'text-green-600 bg-green-100';
-            default: return 'text-gray-600 bg-gray-100';
+            default: return 'text-unbox-grey bg-unbox-light/50';
         }
     };
 
     const formatDeadline = (isoStr?: string) => {
         if (!isoStr) return null;
         const d = new Date(isoStr);
-        let color = 'text-gray-500';
+        let color = 'text-unbox-grey';
 
         if (isPast(d) && !isToday(d)) color = 'text-red-500 font-bold';
         else if (isToday(d)) color = 'text-orange-500 font-bold';
@@ -124,7 +124,7 @@ export function AdminTasksBoard() {
                 <Card className="mb-6 animate-in slide-in-from-top-4">
                     <form onSubmit={handleCreateTask} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                         <div className="md:col-span-2">
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Задача *</label>
+                            <label className="block text-xs font-semibold text-unbox-grey mb-1">Задача *</label>
                             <input
                                 required
                                 value={newTaskTitle}
@@ -134,7 +134,7 @@ export function AdminTasksBoard() {
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Ответственный</label>
+                            <label className="block text-xs font-semibold text-unbox-grey mb-1">Ответственный</label>
                             <input
                                 value={newTaskAssignee}
                                 onChange={e => setNewTaskAssignee(e.target.value)}
@@ -143,7 +143,7 @@ export function AdminTasksBoard() {
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Дедлайн</label>
+                            <label className="block text-xs font-semibold text-unbox-grey mb-1">Дедлайн</label>
                             <input
                                 type="datetime-local"
                                 value={newTaskDate}
@@ -153,7 +153,7 @@ export function AdminTasksBoard() {
                         </div>
                         <div className="flex gap-2">
                             <div className="flex-1">
-                                <label className="block text-xs font-semibold text-gray-500 mb-1">Приоритет</label>
+                                <label className="block text-xs font-semibold text-unbox-grey mb-1">Приоритет</label>
                                 <select
                                     value={newTaskPriority}
                                     onChange={(e) => setNewTaskPriority(e.target.value as TaskPriority)}
@@ -184,7 +184,7 @@ export function AdminTasksBoard() {
                             >
                                 <div className="flex items-center justify-between mb-1 px-1">
                                     <div className="flex items-center gap-2">
-                                        <h3 className="font-bold text-sm text-gray-800">{col.title}</h3>
+                                        <h3 className="font-bold text-sm text-unbox-dark">{col.title}</h3>
                                         <span className={clsx("text-xs font-bold px-2 py-0.5 rounded-full", col.headerColor)}>
                                             {colTasks.length}
                                         </span>
@@ -198,10 +198,10 @@ export function AdminTasksBoard() {
                                             draggable
                                             onDragStart={(e) => handleDragStart(e, task.id)}
                                             onDragEnd={handleDragEnd}
-                                            className="bg-white p-3.5 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-gray-100/80 cursor-grab active:cursor-grabbing hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-gray-200 transition-all duration-200 group relative"
+                                            className="bg-white p-3.5 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-unbox-light/80 cursor-grab active:cursor-grabbing hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-unbox-light transition-all duration-200 group relative"
                                         >
                                             <div className="flex items-start gap-2.5">
-                                                <div className="mt-0.5 text-gray-300 group-hover:text-gray-400 transition-colors">
+                                                <div className="mt-0.5 text-gray-300 group-hover:text-unbox-grey transition-colors">
                                                     <GripVertical size={16} />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
@@ -216,15 +216,15 @@ export function AdminTasksBoard() {
                                                             <Trash2 size={14} />
                                                         </button>
                                                     </div>
-                                                    <p className="text-[13px] font-semibold text-gray-800 leading-snug">{task.title}</p>
+                                                    <p className="text-[13px] font-semibold text-unbox-dark leading-snug">{task.title}</p>
 
                                                     {task.description && (
-                                                        <p className="text-xs text-gray-500 mt-1.5 leading-relaxed line-clamp-2">{task.description}</p>
+                                                        <p className="text-xs text-unbox-grey mt-1.5 leading-relaxed line-clamp-2">{task.description}</p>
                                                     )}
 
                                                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-50">
                                                         {task.assignee ? (
-                                                            <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-600 bg-gray-50 border border-gray-100 px-2 py-1 rounded-md">
+                                                            <div className="flex items-center gap-1.5 text-[11px] font-medium text-unbox-grey bg-unbox-light/30 border border-unbox-light px-2 py-1 rounded-md">
                                                                 <User size={12} strokeWidth={2.5} />
                                                                 <span className="truncate max-w-[100px]">{task.assignee}</span>
                                                             </div>
@@ -238,7 +238,7 @@ export function AdminTasksBoard() {
                                     ))}
 
                                     {colTasks.length === 0 && (
-                                        <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200/60 rounded-xl bg-gray-50/30 text-gray-400 text-sm italic py-8">
+                                        <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-unbox-light/60 rounded-xl bg-unbox-light/30/30 text-unbox-grey text-sm italic py-8">
                                             <span>Перетащите сюда</span>
                                         </div>
                                     )}

@@ -46,7 +46,7 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
                                 type="checkbox"
                                 checked={selected.includes(option)}
                                 onChange={() => toggleOption(option)}
-                                className="rounded border-gray-300 text-black focus:ring-black"
+                                className="rounded border-gray-300 text-unbox-green focus:ring-unbox-green"
                             />
                             <span>{option}</span>
                         </label>
@@ -56,7 +56,7 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
                 <div className="flex gap-2">
                     <button
                         onClick={handleSave}
-                        className="flex-1 bg-black text-white text-xs py-1 rounded hover:bg-gray-800 transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 bg-unbox-green text-white text-xs py-1 rounded hover:bg-unbox-dark transition-colors flex items-center justify-center gap-1"
                     >
                         <Check size={12} />
                         Сохранить

@@ -1,8 +1,8 @@
 import type { Location, Resource, ExtraOption } from '../types';
 
 export const LOCATIONS: Location[] = [
-    { id: 'unbox_one', name: 'Unbox One', address: 'Палиашвили, 4' },
     { id: 'unbox_uni', name: 'Unbox Uni', address: 'Тбел Абусеридзе, 38' },
+    { id: 'unbox_one', name: 'Unbox One', address: 'Палиашвили, 4' },
     { id: 'neo_school', name: 'Neo School', address: 'Алесандра Сулаберидзе, 80' },
 ];
 
@@ -117,6 +117,22 @@ export const RESOURCES: Resource[] = [
         formats: ['individual'],
         description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.'
     },
+];
+
+// Cabinet/Room services with display metadata
+export const CABINET_SERVICES: { id: string; label: string; emoji: string }[] = [
+    { id: 'sandbox',         label: 'Песочница',           emoji: '🪣' },
+    { id: 'natural_light',   label: 'Естественный свет',   emoji: '☀️' },
+    { id: 'soundproof',      label: 'Звукоизоляция',       emoji: '🔇' },
+    { id: 'couch',           label: 'Диван / Кушетка',     emoji: '🛋️' },
+    { id: 'washbasin',       label: 'Умывальник',          emoji: '💧' },
+    { id: 'private_entrance',label: 'Отдельный вход',      emoji: '🚪' },
+    { id: 'coffee',          label: 'Кофемашина',          emoji: '☕' },
+    { id: 'flipchart',       label: 'Флипчарт',            emoji: '📋' },
+    { id: 'projector',       label: 'Проектор',            emoji: '📽️' },
+    { id: 'whiteboard',      label: 'Маркерная доска',     emoji: '✏️' },
+    { id: 'climate_control', label: 'Кондиционер',         emoji: '❄️' },
+    { id: 'wifi',            label: 'Wi-Fi',               emoji: '📶' },
 ];
 
 export const EXTRAS: ExtraOption[] = [

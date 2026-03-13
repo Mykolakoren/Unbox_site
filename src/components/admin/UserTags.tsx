@@ -68,7 +68,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
                         <input
                             type="text"
                             autoFocus
-                            className="px-3 py-1 rounded-full border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-black w-32"
+                            className="px-3 py-1 rounded-full border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green w-32"
                             placeholder="Название..."
                             value={newTag}
                             onChange={(e) => setNewTag(e.target.value)}

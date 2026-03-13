@@ -121,7 +121,7 @@ export function AdminDashboard() {
                                         "text-[10px] px-2 py-0.5 rounded-full inline-block",
                                         {
                                             'bg-unbox-light text-unbox-green': booking.status === 'confirmed',
-                                            'bg-gray-100 text-unbox-grey': booking.status === 'cancelled',
+                                            'bg-unbox-light/50 text-unbox-grey': booking.status === 'cancelled',
                                             'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
                                         }
                                     )}>

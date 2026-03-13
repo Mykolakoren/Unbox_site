@@ -24,7 +24,7 @@ export function AdminWaitlist() {
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-bold">Лист ожидания</h1>
-                <p className="text-gray-500">Пользователи, ожидающие освобождения слотов</p>
+                <p className="text-unbox-grey">Пользователи, ожидающие освобождения слотов</p>
             </div>
 
             <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
@@ -67,7 +67,7 @@ export function AdminWaitlist() {
                                     <td className="p-4 text-center">
                                         <span className={clsx(
                                             "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                                            entry.status === 'active' ? "bg-unbox-light text-unbox-dark border border-unbox-green/50" : "bg-gray-100 text-unbox-grey"
+                                            entry.status === 'active' ? "bg-unbox-light text-unbox-dark border border-unbox-green/50" : "bg-unbox-light/50 text-unbox-grey"
                                         )}>
                                             {entry.status === 'active' ? 'Ожидает' : entry.status}
                                         </span>

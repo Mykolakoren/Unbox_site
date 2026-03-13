@@ -1,6 +1,75 @@
-node_modules
-dist
+# ─── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
-.env
-.idea
-.vscode
+Thumbs.db
+
+# ─── IDE ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ─── Frontend ────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Frontend env (содержит секреты)
+.env.local
+.env.*.local
+
+# ─── Backend: Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Backend env (содержит секреты)
+backend/.env
+backend/.env.*
+
+# Packaging
+build/
+*.egg-info/
+*.egg
+dist/
+
+# ─── Database ────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ─── Secrets & Credentials ───────────────────────────────────────────────────
+*.pem
+*.key
+credentials.json
+service_account*.json
+*secret*.json
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ─── Testing ─────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.hypothesis/
+
+# ─── Misc ────────────────────────────────────────────────────────────────────
+.cache/
+tmp/
