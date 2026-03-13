@@ -43,8 +43,8 @@ export function AdminUserDetails() {
     const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
     const adminUsers = users.filter(u => u.role && ADMIN_ROLES.includes(u.role));
     const adminMap = new Map(adminUsers.map(a => [a.id, a]));
-    const responsibleAdmin = user.responsibleAdminId ? adminMap.get(user.responsibleAdminId) : null;
-    const attractedAdmin   = user.attractedByAdminId  ? adminMap.get(user.attractedByAdminId)  : null;
+    const responsibleAdmin = user?.responsibleAdminId ? adminMap.get(user.responsibleAdminId) : null;
+    const attractedAdmin   = user?.attractedByAdminId  ? adminMap.get(user.attractedByAdminId)  : null;
     // Let's keep 'overview' default but I will change it in the replacement to 'timeline' to show it off immediately, or maybe 'overview' is safer. Let's use 'overview' but add 'timeline' to type.
 
     if (!user) {

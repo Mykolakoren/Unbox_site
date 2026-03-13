@@ -272,7 +272,7 @@ function DayGroup({
     clientMap: Map<string, CrmClient>;
     editingId: string | null;
     setEditingId: (id: string | null) => void;
-    updateSession: (id: string, data: CrmSessionUpdate) => Promise<void>;
+    updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string) => Promise<void>;
     quickPaySession: (id: string) => Promise<{ amount: number; currency: string }>;
     onBookRoom?: (day: string) => void;
