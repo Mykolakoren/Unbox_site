@@ -64,11 +64,9 @@ def read_bookings(
     session: Session = Depends(deps.get_session),
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """Retrieve all bookings (Admin only)."""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized")
     bookings = session.exec(select(Booking).offset(skip).limit(limit)).all()
     return [enrich_booking_status(b) for b in bookings]
 

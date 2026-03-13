@@ -113,14 +113,11 @@ def update_user(
     user_id: str,
     session: Session = Depends(get_session),
     user_in: UserUpdateAdmin,
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """
     Update a user by ID or Email (Admin only).
     """
-    allowed_roles = ["owner", "senior_admin", "admin"]
-    if current_user.role not in allowed_roles and not current_user.is_admin:
-         raise HTTPException(status_code=403, detail="Not authorized")
 
     user = None
     # Try as UUID
@@ -211,13 +208,11 @@ def toggle_subscription_freeze(
     *,
     user_id: str,
     session: Session = Depends(get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """
     Toggle subscription freeze status.
     """
-    if not current_user.is_admin:
-         raise HTTPException(status_code=403, detail="Not authorized")
     
     # User Lookup (Reuse logic or refactor to dep? For now inline)
     user = None
@@ -279,13 +274,11 @@ def update_personal_discount(
     user_id: str,
     payload: dict, # { percent: int, reason: str }
     session: Session = Depends(get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """
     Update personal discount with logging.
     """
-    if not current_user.is_admin:
-         raise HTTPException(status_code=403, detail="Not authorized")
     
     # User Lookup
     user = None
@@ -379,14 +372,11 @@ def read_users(
     session: Session = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """
-    Retrieve users.
+    Retrieve users (Admin only).
     """
-    allowed_roles = ["owner", "senior_admin", "admin"]
-    if current_user.role not in allowed_roles and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized")
         
     users = session.exec(select(User).offset(skip).limit(limit)).all()
     return users

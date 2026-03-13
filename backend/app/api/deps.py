@@ -56,12 +56,27 @@ def get_current_active_user(
     # Assuming all users are active for now or check current_user.is_active if exists
     return current_user
 
+ADMIN_ROLES = {"owner", "senior_admin", "admin"}
+
 def get_current_superuser(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    if not current_user.is_admin:
+    """Legacy alias — prefer require_admin for new routes."""
+    if current_user.role not in ADMIN_ROLES:
         raise HTTPException(
-            status_code=400, detail="The user doesn't have enough privileges"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough privileges",
+        )
+    return current_user
+
+def require_admin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Dependency: требует роль admin/senior_admin/owner. HTTP 403 иначе."""
+    if current_user.role not in ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough privileges",
         )
     return current_user
 
