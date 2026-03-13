@@ -81,7 +81,7 @@ export function AdminChessboardView() {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
         return bookings.filter(b => {
             if (!b.date) return false;
-            const bd = parseBookingDate(b.date as string);
+            const bd = parseBookingDate(b.date);
             return format(bd, 'yyyy-MM-dd') === dateStr &&
                 (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed');
         });
@@ -395,11 +395,11 @@ export function AdminChessboardView() {
                     <div className="p-4 space-y-2.5 text-sm">
                         <InfoRow
                             label="Ресурс"
-                            value={resources.find(r => r.id === selectedBooking.resourceId)?.name ?? selectedBooking.resourceId}
+                            value={resources.find(r => r.id === selectedBooking.resourceId)?.name ?? (selectedBooking.resourceId ?? '')}
                         />
                         <InfoRow
                             label="Дата"
-                            value={format(parseBookingDate(selectedBooking.date as string), 'd MMMM yyyy', { locale: ru })}
+                            value={format(parseBookingDate(selectedBooking.date), 'd MMMM yyyy', { locale: ru })}
                         />
                         <InfoRow
                             label="Время"

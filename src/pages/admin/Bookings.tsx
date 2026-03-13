@@ -170,7 +170,7 @@ export function AdminBookings() {
                                         <td className="p-4">
                                             <div className="flex items-center gap-2 text-unbox-dark">
                                                 <CalendarIcon size={14} className="text-unbox-grey" />
-                                                {format(new Date(booking.date as string), 'dd.MM.yyyy')}
+                                                {format(booking.date, 'dd.MM.yyyy')}
                                             </div>
                                             <div className="flex items-center gap-2 text-unbox-grey mt-1">
                                                 <ClockIcon size={14} className="text-unbox-grey" />

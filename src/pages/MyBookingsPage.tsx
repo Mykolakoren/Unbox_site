@@ -40,7 +40,7 @@ const minsToTime = (m: number) =>
 // ─── Chess board sub-component ───────────────────────────────────────────────
 function BookingsChessboard({
     userBookings,
-    allBookings,
+    allBookings: _allBookings,
     publicBookings,
     onCancel,
     onReschedule,
@@ -68,6 +68,7 @@ function BookingsChessboard({
     usersMap?: Map<string, string>;
 }) {
     const { updateSession } = useCrmStore();
+    const location = useLocation();
     const crmTargetDate = crmMode ? new Date(crmMode.date) : null;
     const navTargetDate = location.state?.targetDate ? new Date(location.state.targetDate) : null;
     const initialDate = crmTargetDate ?? navTargetDate ?? new Date();
@@ -689,7 +690,7 @@ function BookingsChessboard({
 export function MyBookingsPage() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { currentUser, bookings, users, fetchUsers, cancelBooking, listForReRent, fetchBookings } = useUserStore();
+    const { currentUser, bookings, users, fetchUsers, cancelBooking, fetchBookings } = useUserStore();
     const startEditing = useBookingStore(s => s.startEditing);
     const { clients: crmClients, fetchClients } = useCrmStore();
     const [viewMode, setViewMode] = useState<'list' | 'grid'>(location.state?.openGrid ? 'grid' : 'list');
@@ -990,7 +991,7 @@ function BookingCard({
     onEdit,
     onReRent,
     onBookAgain,
-    onLinkClient,
+    onLinkClient: _onLinkClient,
     isPast = false,
 }: {
     booking: BookingHistoryItem;
@@ -1204,10 +1205,10 @@ function CrmQuickBookingModal({
         try {
             const booking = await bookingsApi.createBooking({
                 resourceId: slot.resId,
-                date: dateStr,
+                date: new Date(dateStr),
                 startTime: slot.time,
                 duration,
-                format: resource?.formats?.[0] || 'Стандарт',
+                format: resource?.formats?.[0],
                 locationId: resource?.locationId,
             });
             await bookingsApi.linkCrmClient(booking.id, crmMode.clientId);
