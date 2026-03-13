@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
-    BookOpen, ClipboardList, Target, LogOut, Menu, X, ChevronDown,
+    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
@@ -13,7 +13,6 @@ const NAV_ITEMS = [
     { path: '/admin/cabinets',   icon: Box,             label: 'Кабинеты' },
     { path: '/admin/bookings',   icon: Calendar,        label: 'Бронирования' },
     { path: '/admin/users',      icon: Users,           label: 'Клиенты' },
-    { path: '/admin/crm',        icon: Target,          label: 'CRM' },
     { path: '/admin/waitlist',   icon: Clock,           label: 'Лист ожидания' },
     { path: '/admin/tasks',      icon: ClipboardList,   label: 'Задачи' },
     { path: '/admin/knowledge-base', icon: BookOpen,    label: 'База данных' },

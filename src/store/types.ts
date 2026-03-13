@@ -61,7 +61,8 @@ export interface User {
     pricingSystem?: 'standard' | 'personal';
     personalDiscountPercent?: number; // Added field
     isAdmin?: boolean; // Legacy, keep for backward compat
-    role?: 'owner' | 'senior_admin' | 'admin' | 'user'; // Specific access role
+    role?: 'owner' | 'senior_admin' | 'admin' | 'specialist' | 'user'; // Specific access role
+    permissions?: string[]; // Granular permission overrides
     notes?: string; // Legacy simple note
     commentHistory?: UserNote[]; // New structured comments
     registrationDate?: string; // ISO string

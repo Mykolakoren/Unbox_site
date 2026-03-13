@@ -17,11 +17,12 @@ export function DashboardLayout() {
     if (!currentUser) return null;
 
     const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
+    const isSpecialist = currentUser.role === 'specialist';
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Обзор', path: '/dashboard' },
         { icon: Calendar, label: 'Мои бронирования', path: '/dashboard/bookings' },
-        { icon: BriefcaseMedical, label: 'Мой CRM', path: '/crm' },
+        ...(isSpecialist ? [{ icon: BriefcaseMedical, label: 'Мой CRM', path: '/crm' }] : []),
         { icon: Settings, label: 'Настройки', path: '/dashboard/profile' },
         ...(isAdmin ? [{ icon: ShieldCheck, label: 'Админ-панель', path: '/admin' }] : []),
     ];

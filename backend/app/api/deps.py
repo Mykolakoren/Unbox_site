@@ -57,6 +57,30 @@ def get_current_active_user(
     return current_user
 
 ADMIN_ROLES = {"owner", "senior_admin", "admin"}
+SPECIALIST_ROLE = "specialist"
+
+# ── Granular permissions ───────────────────────────────────────────────────────
+# Permissions that senior_admin is allowed to grant/revoke (subset of all)
+SENIOR_ADMIN_GRANTABLE = {
+    "bookings.override_24h",
+    "bookings.cancel_any",
+    "bookings.reschedule_any",
+    "users.set_personal_discount",
+    "users.manage_subscription",
+    "finance.topup",
+    "finance.view_reports",
+}
+# Owner can grant everything above + these
+OWNER_ONLY_GRANTABLE = {
+    "content.edit_locations",
+    "content.edit_pricing",
+    "users.assign_admin",
+}
+ALL_GRANTABLE = SENIOR_ADMIN_GRANTABLE | OWNER_ONLY_GRANTABLE
+
+def has_permission(user: User, permission: str) -> bool:
+    """Check if user has a specific granular permission."""
+    return permission in (user.permissions or [])
 
 def get_current_superuser(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -77,6 +101,17 @@ def require_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough privileges",
+        )
+    return current_user
+
+def require_specialist(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Dependency: требует роль specialist. HTTP 403 для всех остальных, включая admin."""
+    if current_user.role != SPECIALIST_ROLE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CRM доступен только специалистам",
         )
     return current_user
 

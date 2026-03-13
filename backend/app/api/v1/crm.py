@@ -31,25 +31,15 @@ def _get_crm_calendar_id(user: User) -> Optional[str]:
     return None
 
 
-ADMIN_ROLES = {"owner", "senior_admin", "admin"}
-
-def _resolve_uid(current_user: User, specialist_id: Optional[str] = None) -> str:
-    """Return target specialist_id. Admins can view any specialist's data."""
-    if specialist_id and current_user.role in ADMIN_ROLES:
-        return specialist_id
-    return str(current_user.id)
-
-
 # ── Clients ───────────────────────────────────────────────────────────────────
 
 @router.get("/clients", response_model=List[TherapistClientRead])
 def list_clients(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     active_only: bool = Query(False),
-    specialist_id: Optional[str] = Query(None),
 ):
-    uid = _resolve_uid(current_user, specialist_id)
+    uid = str(current_user.id)
     stmt = select(TherapistClient).where(TherapistClient.specialist_id == uid)
     if active_only:
         stmt = stmt.where(TherapistClient.is_active == True)
@@ -61,13 +51,11 @@ def list_clients(
 def get_client(
     client_id: str,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     client = session.get(TherapistClient, client_id)
-    if not client:
-        raise HTTPException(404, "Client not found")
-    # Admins can view any client
-    if client.specialist_id != str(current_user.id) and current_user.role not in ADMIN_ROLES:
+    # Only return client if it belongs to this specialist — no admin bypass
+    if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Client not found")
     return client
 
@@ -76,7 +64,7 @@ def get_client(
 def create_client(
     data: TherapistClientCreate,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     client = TherapistClient(
         **data.model_dump(),
@@ -93,7 +81,7 @@ def update_client(
     client_id: str,
     data: TherapistClientUpdate,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
@@ -114,7 +102,7 @@ def update_client(
 def delete_client(
     client_id: str,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
@@ -132,14 +120,13 @@ def delete_client(
 @router.get("/sessions", response_model=List[TherapySessionRead])
 def list_sessions(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     client_id: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    specialist_id: Optional[str] = Query(None),
 ):
-    uid = _resolve_uid(current_user, specialist_id)
+    uid = str(current_user.id)
     stmt = select(TherapySession).where(TherapySession.specialist_id == uid)
     if client_id:
         stmt = stmt.where(TherapySession.client_id == client_id)
@@ -157,7 +144,7 @@ def list_sessions(
 def create_session(
     data: TherapySessionCreate,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     # Verify client belongs to this specialist
     client = session.get(TherapistClient, data.client_id)
@@ -200,7 +187,7 @@ def update_session(
     session_id: str,
     data: TherapySessionUpdate,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
@@ -221,7 +208,7 @@ def update_session(
 def delete_session(
     session_id: str,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
@@ -235,7 +222,7 @@ def delete_session(
 def quick_pay_session(
     session_id: str,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     """Mark session as paid and create a payment record using client defaults."""
     ts = session.get(TherapySession, session_id)
@@ -274,13 +261,12 @@ def quick_pay_session(
 @router.get("/payments", response_model=List[TherapistPaymentRead])
 def list_payments(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     client_id: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    specialist_id: Optional[str] = Query(None),
 ):
-    uid = _resolve_uid(current_user, specialist_id)
+    uid = str(current_user.id)
     stmt = select(TherapistPayment).where(TherapistPayment.specialist_id == uid)
     if client_id:
         stmt = stmt.where(TherapistPayment.client_id == client_id)
@@ -296,7 +282,7 @@ def list_payments(
 def create_payment(
     data: TherapistPaymentCreate,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     client = session.get(TherapistClient, data.client_id)
     if not client or client.specialist_id != str(current_user.id):
@@ -326,11 +312,10 @@ def create_payment(
 @router.get("/notes", response_model=List[TherapistNoteRead])
 def list_notes(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     client_id: Optional[str] = Query(None),
-    specialist_id: Optional[str] = Query(None),
 ):
-    uid = _resolve_uid(current_user, specialist_id)
+    uid = str(current_user.id)
     stmt = select(TherapistNote).where(TherapistNote.specialist_id == uid)
     if client_id:
         stmt = stmt.where(TherapistNote.client_id == client_id)
@@ -342,7 +327,7 @@ def list_notes(
 def create_note(
     data: TherapistNoteCreate,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     client = session.get(TherapistClient, data.client_id)
     if not client or client.specialist_id != str(current_user.id):
@@ -362,7 +347,7 @@ def create_note(
 def delete_note(
     note_id: str,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     note = session.get(TherapistNote, note_id)
     if not note or note.specialist_id != str(current_user.id):
@@ -377,11 +362,10 @@ def delete_note(
 @router.get("/dashboard")
 def crm_dashboard(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
-    specialist_id: Optional[str] = Query(None),
+    current_user: User = Depends(deps.require_specialist),
 ):
     """Summary stats for the specialist's CRM dashboard."""
-    uid = _resolve_uid(current_user, specialist_id)
+    uid = str(current_user.id)
     now = datetime.utcnow()
 
     # Active clients count
@@ -452,39 +436,14 @@ def crm_dashboard(
     }
 
 
-# ── Specialists list (admin only) ─────────────────────────────────────────────
-
-@router.get("/specialists")
-def list_specialists(
-    session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Return list of users who have CRM clients. Admin only."""
-    if current_user.role not in ADMIN_ROLES:
-        raise HTTPException(403, "Not authorized")
-    # Find distinct specialist_ids that have at least one client
-    rows = session.exec(
-        select(TherapistClient.specialist_id).distinct()
-    ).all()
-    specialist_ids = [r for r in rows]
-    # Fetch user info for each
-    result = []
-    for sid in specialist_ids:
-        from uuid import UUID
-        try:
-            user = session.get(User, UUID(sid))
-        except Exception:
-            user = None
-        if user:
-            result.append({"id": sid, "name": user.name, "email": user.email})
-    return result
+# /specialists endpoint removed — CRM data is fully isolated from admins
 
 
 # ── CRM Settings (Calendar ID etc.) ───────────────────────────────────────────
 
 @router.get("/settings")
 def get_crm_settings(
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
 ):
     """Get specialist's CRM settings (calendar_id, etc.)."""
     crm_data = current_user.crm_data or {}
@@ -497,7 +456,7 @@ def get_crm_settings(
 @router.patch("/settings")
 def update_crm_settings(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     calendar_id: Optional[str] = Body(None, embed=True),
 ):
     """Update specialist's CRM settings."""
@@ -519,7 +478,7 @@ def update_crm_settings(
 @router.post("/sync/calendar")
 def sync_from_calendar(
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     dry_run: bool = Query(False, description="Preview without saving"),
     months_back: int = Query(24),
     months_forward: int = Query(3),
@@ -621,7 +580,7 @@ def sync_from_calendar(
 def sync_client_history(
     client_id: str,
     session: Session = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.require_specialist),
     years_back: int = Query(5),
 ):
     """

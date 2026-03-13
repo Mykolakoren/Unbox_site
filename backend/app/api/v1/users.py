@@ -1,5 +1,5 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, select, func
 from app.api import deps
@@ -377,6 +377,142 @@ def read_users(
     """
     Retrieve users (Admin only).
     """
-        
     users = session.exec(select(User).offset(skip).limit(limit)).all()
     return users
+
+
+# ── Permissions management ────────────────────────────────────────────────────
+
+@router.patch("/{user_id}/permissions", response_model=UserRead)
+def update_permissions(
+    user_id: str,
+    permissions: List[str] = Body(..., embed=True),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """
+    Update granular permissions for a user.
+    Owner: can grant/revoke any permission.
+    Senior Admin: can only grant/revoke permissions within SENIOR_ADMIN_GRANTABLE set.
+    """
+    # Resolve target user
+    try:
+        user = session.get(User, UUID(user_id))
+    except Exception:
+        user = None
+    if not user:
+        stmt = select(User).where(User.email == user_id)
+        user = session.exec(stmt).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    # Validate permissions against allowed set
+    invalid = [p for p in permissions if p not in deps.ALL_GRANTABLE]
+    if invalid:
+        raise HTTPException(400, f"Unknown permissions: {invalid}")
+
+    # Senior admin can only manage permissions within their grantable set
+    if current_user.role == "senior_admin":
+        disallowed = [p for p in permissions if p not in deps.SENIOR_ADMIN_GRANTABLE]
+        if disallowed:
+            raise HTTPException(403, f"Senior Admin cannot grant: {disallowed}")
+        # Also cannot remove owner-only permissions that were set by owner
+        existing_owner_perms = [
+            p for p in (user.permissions or [])
+            if p in deps.OWNER_ONLY_GRANTABLE
+        ]
+        # Merge: keep existing owner-only perms, replace senior_admin-grantable
+        senior_perms = [p for p in permissions if p in deps.SENIOR_ADMIN_GRANTABLE]
+        final_permissions = existing_owner_perms + senior_perms
+    else:
+        # Owner: full control
+        final_permissions = permissions
+
+    user.permissions = final_permissions
+    user.updated_at = datetime.utcnow()
+    session.add(user)
+
+    # Log in comment_history
+    comment_history = list(user.comment_history or [])
+    comment_history.append({
+        "date": datetime.utcnow().isoformat(),
+        "adminName": current_user.name,
+        "text": f"Обновлены права доступа: {', '.join(final_permissions) if final_permissions else 'все сброшены'}",
+        "type": "permissions_update",
+    })
+    user.comment_history = comment_history
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+# ── Subscription top-up ───────────────────────────────────────────────────────
+
+@router.post("/{user_id}/subscription/topup", response_model=UserRead)
+def topup_subscription(
+    user_id: str,
+    payload: dict = Body(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """
+    Top-up subscription hours for a user.
+    payload: { hours: float, amount: float, payment_method: str, account: str, note?: str }
+    Requires permission 'finance.topup' for regular admins.
+    Senior admin and owner always allowed.
+    """
+    if current_user.role == "admin" and not deps.has_permission(current_user, "finance.topup"):
+        raise HTTPException(403, "Requires finance.topup permission")
+
+    # Resolve target user
+    try:
+        user = session.get(User, UUID(user_id))
+    except Exception:
+        user = None
+    if not user:
+        stmt = select(User).where(User.email == user_id)
+        user = session.exec(stmt).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    hours = float(payload.get("hours", 0))
+    amount = float(payload.get("amount", 0))
+    payment_method = payload.get("payment_method", "")
+    account = payload.get("account", "")
+    note = payload.get("note", "")
+
+    if hours <= 0:
+        raise HTTPException(400, "Hours must be positive")
+
+    # Update subscription remaining hours
+    subscription = dict(user.subscription or {})
+    current_hours = float(subscription.get("remainingHours", 0))
+    total_hours = float(subscription.get("totalHours", 0))
+    subscription["remainingHours"] = round(current_hours + hours, 2)
+    subscription["totalHours"] = round(total_hours + hours, 2)
+    user.subscription = subscription
+
+    # Log in comment_history
+    comment_history = list(user.comment_history or [])
+    log_text = (
+        f"Пополнение абонемента: +{hours}ч · {amount} · {payment_method} · счёт: {account}"
+        + (f" · {note}" if note else "")
+    )
+    comment_history.append({
+        "date": datetime.utcnow().isoformat(),
+        "adminName": current_user.name,
+        "text": log_text,
+        "type": "subscription_topup",
+        "meta": {
+            "hours": hours,
+            "amount": amount,
+            "payment_method": payment_method,
+            "account": account,
+        },
+    })
+    user.comment_history = comment_history
+    user.updated_at = datetime.utcnow()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user

@@ -12,7 +12,8 @@ class UserBase(SQLModel):
     email: str = Field(unique=True, index=True)
     name: str = Field(index=True)
     phone: Optional[str] = None
-    role: str = Field(default="user") # owner, senior_admin, admin, user
+    role: str = Field(default="user") # owner, senior_admin, admin, specialist, user
+    permissions: List[str] = Field(default_factory=list, sa_column=Column(JSON))  # granular permissions
     balance: float = Field(default=0.0)
     
     # JSON Fields for complex data structures

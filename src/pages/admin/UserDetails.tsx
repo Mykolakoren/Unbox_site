@@ -3,7 +3,7 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useState } from 'react';
@@ -24,6 +24,8 @@ import { ClientTimeline } from '../../components/admin/ClientTimeline';
 import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
 import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLimitModal';
+import { PermissionsEditor } from '../../components/admin/PermissionsEditor';
+import { api } from '../../api/client';
 
 export function AdminUserDetails() {
     const { email } = useParams<{ email: string }>();
@@ -39,6 +41,11 @@ export function AdminUserDetails() {
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
     const [adminPickerType, setAdminPickerType] = useState<'responsible' | 'attracted' | null>(null);
     const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'finance' | 'timeline'>('overview');
+
+    // Subscription topup form state
+    const [isTopupOpen, setIsTopupOpen] = useState(false);
+    const [topupForm, setTopupForm] = useState({ hours: '', amount: '', payment_method: 'cash', note: '' });
+    const [topupSaving, setTopupSaving] = useState(false);
 
     const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
     const adminUsers = users.filter(u => u.role && ADMIN_ROLES.includes(u.role));
@@ -146,6 +153,27 @@ export function AdminUserDetails() {
         navigate(`/admin/bookings?reschedule=${id}`);
     };
 
+    const handleTopup = async () => {
+        if (!topupForm.hours || !topupForm.amount) return;
+        setTopupSaving(true);
+        try {
+            await api.post(`/users/${user.id}/subscription/topup`, {
+                hours: Number(topupForm.hours),
+                amount: Number(topupForm.amount),
+                payment_method: topupForm.payment_method,
+                ...(topupForm.note ? { note: topupForm.note } : {}),
+            });
+            await useUserStore.getState().fetchUsers();
+            toast.success(`Абонемент пополнен на ${topupForm.hours} ч`);
+            setIsTopupOpen(false);
+            setTopupForm({ hours: '', amount: '', payment_method: 'cash', note: '' });
+        } catch {
+            toast.error('Ошибка пополнения абонемента');
+        } finally {
+            setTopupSaving(false);
+        }
+    };
+
     // Analytics
     const completedBookings = sortedBookings.filter(b => b.status === 'completed');
     const firstBookingDate = sortedBookings.length > 0 ? sortedBookings[sortedBookings.length - 1].date : null;
@@ -226,9 +254,9 @@ export function AdminUserDetails() {
                                         e.stopPropagation();
                                         // Simple prompt for now - ideally a dropdown
                                         if (currentUser?.role === 'owner' || true) { // Allow for demo/MVP
-                                            const newRole = prompt(`Текущая роль: ${user.role || (user.isAdmin ? 'admin' : 'user')}\nВведите новую роль (owner, senior_admin, admin) или пусто для сброса:`);
+                                            const newRole = prompt(`Текущая роль: ${user.role || (user.isAdmin ? 'admin' : 'user')}\nВведите новую роль (owner, senior_admin, admin, specialist, user) или пусто для сброса:`);
                                             if (newRole !== null) {
-                                                const validRoles = ['owner', 'senior_admin', 'admin'];
+                                                const validRoles = ['owner', 'senior_admin', 'admin', 'specialist', 'user'];
                                                 if (newRole === '' || validRoles.includes(newRole)) {
                                                     updateUserById(user.email, {
                                                         role: newRole as any,
@@ -245,7 +273,8 @@ export function AdminUserDetails() {
                                     <Shield size={14} />
                                     {user.role === 'owner' ? 'OWNER' :
                                         user.role === 'senior_admin' ? 'SENIOR' :
-                                            (user.role === 'admin' || user.isAdmin) ? 'ADMIN' : 'USER'}
+                                            user.role === 'admin' || user.isAdmin ? 'ADMIN' :
+                                                user.role === 'specialist' ? 'SPECIALIST' : 'USER'}
                                 </div>
                             </div>
                         </h1>
@@ -663,6 +692,13 @@ export function AdminUserDetails() {
                                                         <div className="text-sm text-purple-700 font-mono">
                                                             Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч
                                                         </div>
+                                                        <button
+                                                            onClick={() => setIsTopupOpen(o => !o)}
+                                                            className="mt-2 flex items-center gap-1 text-xs text-purple-600 hover:text-purple-900 underline"
+                                                        >
+                                                            <PackagePlus size={11} />
+                                                            Пополнить часы
+                                                        </button>
                                                     </>
                                                 ) : (
                                                     <div className="text-unbox-grey italic">Отсутствует</div>
@@ -685,12 +721,94 @@ export function AdminUserDetails() {
                                                 </div>
                                             )}
                                         </div>
+
+                                        {/* ── Topup inline form ─────────────────────────── */}
+                                        {isTopupOpen && (
+                                            <div className="relative z-10 mt-4 border-t border-purple-100 pt-4">
+                                                <div className="text-xs font-semibold text-purple-800 mb-3">Пополнение абонемента</div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="text-[11px] text-unbox-grey block mb-1">Часов</label>
+                                                        <input
+                                                            type="number"
+                                                            value={topupForm.hours}
+                                                            onChange={e => setTopupForm(f => ({ ...f, hours: e.target.value }))}
+                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            min="1"
+                                                            placeholder="10"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[11px] text-unbox-grey block mb-1">Сумма (₾)</label>
+                                                        <input
+                                                            type="number"
+                                                            value={topupForm.amount}
+                                                            onChange={e => setTopupForm(f => ({ ...f, amount: e.target.value }))}
+                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            min="0"
+                                                            placeholder="150"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3 mt-2">
+                                                    <div>
+                                                        <label className="text-[11px] text-unbox-grey block mb-1">Способ оплаты</label>
+                                                        <select
+                                                            value={topupForm.payment_method}
+                                                            onChange={e => setTopupForm(f => ({ ...f, payment_method: e.target.value }))}
+                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                        >
+                                                            <option value="cash">Наличные</option>
+                                                            <option value="card">Карта</option>
+                                                            <option value="transfer">Перевод</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[11px] text-unbox-grey block mb-1">Заметка</label>
+                                                        <input
+                                                            type="text"
+                                                            value={topupForm.note}
+                                                            onChange={e => setTopupForm(f => ({ ...f, note: e.target.value }))}
+                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            placeholder="необязательно"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2 mt-3">
+                                                    <button
+                                                        onClick={() => setIsTopupOpen(false)}
+                                                        className="flex-1 py-2 text-sm rounded-xl border border-purple-200 text-purple-700 hover:bg-purple-50 transition-colors"
+                                                    >
+                                                        Отмена
+                                                    </button>
+                                                    <button
+                                                        onClick={handleTopup}
+                                                        disabled={topupSaving || !topupForm.hours || !topupForm.amount}
+                                                        className="flex-1 py-2 text-sm rounded-xl bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+                                                    >
+                                                        {topupSaving && <Loader2 size={14} className="animate-spin" />}
+                                                        Подтвердить
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </Card>
 
                             {/* Loyalty System (New) */}
                             <UserLoyaltyCard email={user.email} />
+
+                            {/* Granular Permissions Editor — owner / senior_admin only */}
+                            {(currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') && (
+                                <Card className="p-6">
+                                    <PermissionsEditor
+                                        user={user}
+                                        currentUserRole={currentUser.role}
+                                        onUpdate={(updated) => updateUserById(user.email, updated)}
+                                    />
+                                </Card>
+                            )}
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                                 <div className="space-y-6">
