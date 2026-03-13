@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { PERMISSION_GROUPS } from '../../components/admin/PermissionsEditor';
 
 // Flat list of all permissions
-const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap(g => g.permissions);
+type Permission = { id: string; label: string; seniorAdmin: boolean };
+const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap(g => [...g.permissions] as Permission[]);
 const SPECIALIST_PRESET = ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'];
 
 interface RowState {
@@ -68,7 +69,7 @@ export function AdminAccessRights() {
         });
     }, [users]);
 
-    const canToggle = (permId: string, seniorAdminOk: boolean) => {
+    const canToggle = (_permId: string, seniorAdminOk: boolean) => {
         if (isOwner) return true;
         if (isSeniorAdmin && seniorAdminOk) return true;
         return false;

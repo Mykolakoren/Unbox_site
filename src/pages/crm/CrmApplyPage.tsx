@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { BriefcaseMedical, CheckCircle2, ChevronRight, Loader2 } from 'lucide-react';
-import { useUserStore } from '../../store/userStore';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
 
 export function CrmApplyPage() {
-    const { currentUser } = useUserStore();
     const [sent, setSent] = useState(false);
     const [loading, setLoading] = useState(false);
     const [form, setForm] = useState({ profession: '', message: '' });

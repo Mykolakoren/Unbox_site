@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import {
     format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
-    startOfWeek, endOfWeek, addWeeks, subWeeks, eachDayOfInterval, isSameDay, isToday as isTodayFn,
+    startOfWeek, endOfWeek, addWeeks, subWeeks, eachDayOfInterval, isToday as isTodayFn,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -278,7 +278,6 @@ export function CrmSessions() {
                         setShowForm(true);
                     }}
                     updateSession={updateSession}
-                    deleteSession={deleteSession}
                     quickPaySession={quickPaySession}
                 />
             )}
@@ -337,7 +336,6 @@ function WeekCalendar({
     navigate,
     onAddSession,
     updateSession,
-    deleteSession,
     quickPaySession,
 }: {
     weekAnchor: Date;
@@ -346,7 +344,6 @@ function WeekCalendar({
     navigate: ReturnType<typeof useNavigate>;
     onAddSession: (dateStr: string) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    deleteSession: (id: string) => Promise<void>;
     quickPaySession: (id: string) => Promise<{ amount: number; currency: string }>;
 }) {
     const weekStart = startOfWeek(weekAnchor, { weekStartsOn: 1 });

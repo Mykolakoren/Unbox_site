@@ -75,7 +75,7 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
     const isSeniorAdmin = currentUserRole === 'senior_admin';
     const canEdit = isOwner || isSeniorAdmin;
 
-    const canToggle = (permId: string, isSeniorAdminGrantable: boolean): boolean => {
+    const canToggle = (_permId: string, isSeniorAdminGrantable: boolean): boolean => {
         if (isOwner) return true;
         if (isSeniorAdmin && isSeniorAdminGrantable) return true;
         return false;
