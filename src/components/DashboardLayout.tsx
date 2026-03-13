@@ -3,6 +3,7 @@ import { useUserStore } from '../store/userStore';
 import { SidebarLayout } from './SidebarLayout';
 import { Calendar, Settings, LayoutDashboard, ShieldCheck, BriefcaseMedical } from 'lucide-react';
 import { useEffect } from 'react';
+import { hasPermission } from '../utils/permissions';
 
 export function DashboardLayout() {
     const { currentUser } = useUserStore();
@@ -17,12 +18,12 @@ export function DashboardLayout() {
     if (!currentUser) return null;
 
     const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
-    const isSpecialist = currentUser.role === 'specialist';
+    const hasCrm = hasPermission(currentUser, 'crm.access');
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Обзор', path: '/dashboard' },
         { icon: Calendar, label: 'Мои бронирования', path: '/dashboard/bookings' },
-        ...(isSpecialist ? [{ icon: BriefcaseMedical, label: 'Мой CRM', path: '/crm' }] : []),
+        ...(hasCrm ? [{ icon: BriefcaseMedical, label: 'Мой CRM', path: '/crm' }] : []),
         { icon: Settings, label: 'Настройки', path: '/dashboard/profile' },
         ...(isAdmin ? [{ icon: ShieldCheck, label: 'Админ-панель', path: '/admin' }] : []),
     ];

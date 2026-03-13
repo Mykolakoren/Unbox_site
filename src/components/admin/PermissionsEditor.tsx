@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Shield, Check, Loader2, Info } from 'lucide-react';
+import { Shield, Check, Loader2, Info, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
 import type { User } from '../../store/types';
@@ -8,33 +8,50 @@ import type { User } from '../../store/types';
 
 export const PERMISSION_GROUPS = [
     {
+        group: 'CRM',
+        permissions: [
+            { id: 'crm.access',    label: 'Доступ к CRM-кабинету специалиста',       seniorAdmin: true },
+            { id: 'crm.clients',   label: 'Управление клиентами в CRM',               seniorAdmin: true },
+            { id: 'crm.sessions',  label: 'Управление сессиями и бронированиями CRM', seniorAdmin: true },
+            { id: 'crm.finances',  label: 'Просмотр финансов в CRM',                  seniorAdmin: true },
+        ],
+    },
+    {
         group: 'Бронирования',
         permissions: [
-            { id: 'bookings.override_24h',   label: 'Отмена/перенос позже 24ч до брони',        seniorAdmin: true },
-            { id: 'bookings.cancel_any',     label: 'Отмена бронирований любых клиентов',        seniorAdmin: true },
-            { id: 'bookings.reschedule_any', label: 'Перенос бронирований любых клиентов',       seniorAdmin: true },
+            { id: 'bookings.override_24h',   label: 'Отмена/перенос позже 24ч до брони',   seniorAdmin: true },
+            { id: 'bookings.cancel_any',     label: 'Отмена бронирований любых клиентов',   seniorAdmin: true },
+            { id: 'bookings.reschedule_any', label: 'Перенос бронирований любых клиентов',  seniorAdmin: true },
         ],
     },
     {
         group: 'Клиенты',
         permissions: [
-            { id: 'users.set_personal_discount', label: 'Установка персональных скидок',         seniorAdmin: true },
-            { id: 'users.manage_subscription',   label: 'Управление абонементами клиентов',       seniorAdmin: true },
-            { id: 'users.assign_admin',          label: 'Назначение роли администратора',         seniorAdmin: false },
+            { id: 'users.set_personal_discount', label: 'Установка персональных скидок',       seniorAdmin: true },
+            { id: 'users.manage_subscription',   label: 'Управление абонементами клиентов',     seniorAdmin: true },
+            { id: 'users.assign_roles',          label: 'Назначение ролей пользователям',       seniorAdmin: false },
         ],
     },
     {
         group: 'Финансы',
         permissions: [
-            { id: 'finance.topup',          label: 'Пополнение баланса клиентов',                seniorAdmin: true },
-            { id: 'finance.view_reports',   label: 'Просмотр финансовых отчётов',                seniorAdmin: true },
+            { id: 'finance.topup',        label: 'Пополнение абонемента клиентов',       seniorAdmin: true },
+            { id: 'finance.add_funds',    label: 'Пополнение баланса клиентов',           seniorAdmin: true },
+            { id: 'finance.view_reports', label: 'Просмотр финансовых отчётов',           seniorAdmin: true },
         ],
     },
     {
         group: 'Контент',
         permissions: [
-            { id: 'content.edit_locations', label: 'Редактирование локаций и кабинетов',         seniorAdmin: false },
-            { id: 'content.edit_pricing',   label: 'Редактирование цен и тарифов',               seniorAdmin: false },
+            { id: 'content.edit_locations', label: 'Редактирование локаций и кабинетов',  seniorAdmin: false },
+            { id: 'content.edit_pricing',   label: 'Редактирование цен и тарифов',         seniorAdmin: false },
+        ],
+    },
+    {
+        group: 'Система (только владелец)',
+        permissions: [
+            { id: 'admin.access',       label: 'Доступ к панели администратора',          seniorAdmin: false },
+            { id: 'admin.assign_owner', label: 'Назначение роли владельца',               seniorAdmin: false },
         ],
     },
 ] as const;
@@ -89,6 +106,16 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
         }
     };
 
+    const SPECIALIST_PRESET = ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'];
+
+    const applySpecialistPreset = () => {
+        setSelected(prev => {
+            const next = new Set(prev);
+            for (const p of SPECIALIST_PRESET) next.add(p);
+            return next;
+        });
+    };
+
     const hasChanges = () => {
         const orig = new Set(user.permissions ?? []);
         if (orig.size !== selected.size) return true;
@@ -101,8 +128,18 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
             <div className="flex items-center gap-2 mb-1">
                 <Shield size={16} className="text-unbox-green" />
                 <span className="text-sm font-semibold text-unbox-dark">Гранулярные права доступа</span>
+                {canEdit && (
+                    <button
+                        type="button"
+                        onClick={applySpecialistPreset}
+                        className="ml-auto flex items-center gap-1 text-[11px] text-unbox-green hover:text-unbox-green/80 transition-colors"
+                    >
+                        <Zap size={11} />
+                        Пресет специалиста
+                    </button>
+                )}
                 {!isOwner && isSeniorAdmin && (
-                    <span className="ml-auto flex items-center gap-1 text-[11px] text-unbox-grey">
+                    <span className={`${canEdit ? '' : 'ml-auto'} flex items-center gap-1 text-[11px] text-unbox-grey`}>
                         <Info size={11} />
                         Серые пункты — только для владельца
                     </span>

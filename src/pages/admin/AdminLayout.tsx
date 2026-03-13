@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
-    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown,
+    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
@@ -24,6 +24,10 @@ export function AdminLayout() {
     const location = useLocation();
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
+    const isOwner = currentUser?.role === 'owner';
+    const navItems = isOwner
+        ? [...NAV_ITEMS, { path: '/admin/access-rights', icon: Shield, label: 'Права доступа' }]
+        : NAV_ITEMS;
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
 
@@ -82,7 +86,7 @@ export function AdminLayout() {
 
                     {/* Desktop Nav */}
                     <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
-                        {NAV_ITEMS.map(item => (
+                        {navItems.map(item => (
                             <Link
                                 key={item.path}
                                 to={item.path}
@@ -185,7 +189,7 @@ export function AdminLayout() {
                         }}
                     >
                         <nav className="p-3 grid grid-cols-2 gap-1">
-                            {NAV_ITEMS.map(item => (
+                            {navItems.map(item => (
                                 <Link
                                     key={item.path}
                                     to={item.path}

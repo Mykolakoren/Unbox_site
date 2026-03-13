@@ -39,6 +39,7 @@ import { CrmNotes } from './pages/crm/CrmNotes';
 
 // Admin CRM
 import { AdminCrm } from './pages/admin/AdminCrm';
+import { AdminAccessRights } from './pages/admin/AccessRights';
 
 // ── Glass panel style for wizard steps (mirrors ExplorePage) ───────────────
 const glassPanel: React.CSSProperties = {
@@ -187,6 +188,7 @@ function App() {
           <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
           <Route path="tasks" element={<AdminTasksBoard />} />
           <Route path="crm" element={<AdminCrm />} />
+          <Route path="access-rights" element={<AdminAccessRights />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

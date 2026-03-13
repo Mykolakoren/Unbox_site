@@ -436,6 +436,32 @@ def crm_dashboard(
     }
 
 
+# ── CRM Access Application ────────────────────────────────────────────────────
+
+@router.post("/apply")
+def apply_for_crm_access(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_active_user),
+    profession: Optional[str] = Body(None, embed=True),
+    message: Optional[str] = Body(None, embed=True),
+):
+    """Any authenticated user can apply for crm.access. Stores request in user.crm_data."""
+    crm_data = dict(current_user.crm_data or {})
+    crm_data["access_application"] = {
+        "status": "pending",
+        "profession": profession or "",
+        "message": message or "",
+        "submitted_at": datetime.utcnow().isoformat(),
+    }
+    if profession:
+        current_user.profession = profession
+    current_user.crm_data = crm_data
+    current_user.updated_at = datetime.utcnow()
+    session.add(current_user)
+    session.commit()
+    return {"ok": True, "status": "pending"}
+
+
 # /specialists endpoint removed — CRM data is fully isolated from admins
 
 

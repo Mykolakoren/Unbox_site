@@ -14,8 +14,12 @@ import {
     Trash2,
     ChevronDown,
     LayoutGrid,
+    List,
 } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, addDays } from 'date-fns';
+import {
+    format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
+    startOfWeek, endOfWeek, addWeeks, subWeeks, eachDayOfInterval, isSameDay, isToday as isTodayFn,
+} from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient } from '../../api/crm';
@@ -45,13 +49,18 @@ function getEffectiveStatus(session: CrmSession): string {
     return session.status;
 }
 
+type ViewMode = 'list' | 'week';
+
 export function CrmSessions() {
     const navigate = useNavigate();
     const { sessions, clients, fetchSessions, fetchClients, createSession, updateSession, deleteSession, quickPaySession, loading } =
         useCrmStore();
+    const [view, setView] = useState<ViewMode>('list');
     const [currentMonth, setCurrentMonth] = useState(new Date());
+    const [weekAnchor, setWeekAnchor] = useState(new Date());
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [showForm, setShowForm] = useState(false);
+    const [prefillDate, setPrefillDate] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -134,15 +143,25 @@ export function CrmSessions() {
                     <p className="text-unbox-grey text-sm">Управление расписанием и оплатой</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* View toggle */}
+                    <div className="flex gap-1 bg-white border border-unbox-light rounded-xl p-1 shadow-sm">
+                        <button
+                            onClick={() => setView('list')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === 'list' ? 'bg-unbox-green text-white' : 'text-unbox-grey hover:text-unbox-dark'}`}
+                        >
+                            <List className="w-3.5 h-3.5" />
+                            Список
+                        </button>
+                        <button
+                            onClick={() => setView('week')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === 'week' ? 'bg-unbox-green text-white' : 'text-unbox-grey hover:text-unbox-dark'}`}
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            Неделя
+                        </button>
+                    </div>
                     <button
-                        onClick={() => navigate('/dashboard/bookings', { state: { openGrid: true } })}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-white border border-unbox-light text-unbox-dark rounded-xl font-medium text-sm hover:bg-unbox-light/40 transition-colors shadow-sm"
-                    >
-                        <LayoutGrid className="w-4 h-4" />
-                        Расписание
-                    </button>
-                    <button
-                        onClick={() => setShowForm(true)}
+                        onClick={() => { setPrefillDate(null); setShowForm(true); }}
                         className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
                     >
                         <Plus className="w-4 h-4" />
@@ -151,66 +170,121 @@ export function CrmSessions() {
                 </div>
             </div>
 
-            {/* Month Navigation + Filters */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex items-center gap-2 bg-white rounded-xl border border-unbox-light px-1 py-1 shadow-sm">
-                    <button
-                        onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-                        className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
-                    >
-                        <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <span className="font-medium text-sm w-32 text-center capitalize">
-                        {format(currentMonth, 'LLLL yyyy', { locale: ru })}
-                    </span>
-                    <button
-                        onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-                        className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
-                    >
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                    {['all', 'PLANNED', 'COMPLETED', 'CANCELLED_CLIENT'].map((s) => (
+            {/* Navigation + Filters (List view only) */}
+            {view === 'list' && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="flex items-center gap-2 bg-white rounded-xl border border-unbox-light px-1 py-1 shadow-sm">
                         <button
-                            key={s}
-                            onClick={() => setStatusFilter(s)}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                                statusFilter === s
-                                    ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-white text-unbox-grey border-unbox-light hover:bg-unbox-light/30'
-                            }`}
+                            onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+                            className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
                         >
-                            {s === 'all' ? 'Все' : STATUS_LABELS[s]}
+                            <ChevronLeft className="w-4 h-4" />
                         </button>
-                    ))}
-                </div>
-            </div>
+                        <span className="font-medium text-sm w-32 text-center capitalize">
+                            {format(currentMonth, 'LLLL yyyy', { locale: ru })}
+                        </span>
+                        <button
+                            onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+                            className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <MiniStat label="Всего" value={stats.total} />
-                <MiniStat label="Завершено" value={stats.completed} />
-                <MiniStat label="Неоплачено" value={stats.unpaid} color={stats.unpaid > 0 ? 'red' : undefined} />
-                <MiniStat label="Оплачено" value={`${stats.revenue} ₾`} color="green" />
-            </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {['all', 'PLANNED', 'COMPLETED', 'CANCELLED_CLIENT'].map((s) => (
+                            <button
+                                key={s}
+                                onClick={() => setStatusFilter(s)}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                    statusFilter === s
+                                        ? 'bg-unbox-green text-white border-unbox-green'
+                                        : 'bg-white text-unbox-grey border-unbox-light hover:bg-unbox-light/30'
+                                }`}
+                            >
+                                {s === 'all' ? 'Все' : STATUS_LABELS[s]}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Week navigation (Week view only) */}
+            {view === 'week' && (
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 bg-white rounded-xl border border-unbox-light px-1 py-1 shadow-sm">
+                        <button
+                            onClick={() => setWeekAnchor(d => subWeeks(d, 1))}
+                            className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
+                        >
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="font-medium text-sm w-48 text-center">
+                            {format(startOfWeek(weekAnchor, { weekStartsOn: 1 }), 'd MMM', { locale: ru })} –{' '}
+                            {format(endOfWeek(weekAnchor, { weekStartsOn: 1 }), 'd MMM yyyy', { locale: ru })}
+                        </span>
+                        <button
+                            onClick={() => setWeekAnchor(d => addWeeks(d, 1))}
+                            className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+                    {!isTodayFn(weekAnchor) && (
+                        <button
+                            onClick={() => setWeekAnchor(new Date())}
+                            className="px-3 py-2 text-xs text-unbox-grey bg-white border border-unbox-light rounded-xl hover:text-unbox-dark transition-colors shadow-sm"
+                        >
+                            Эта неделя
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Stats (list view only) */}
+            {view === 'list' && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <MiniStat label="Всего" value={stats.total} />
+                    <MiniStat label="Завершено" value={stats.completed} />
+                    <MiniStat label="Неоплачено" value={stats.unpaid} color={stats.unpaid > 0 ? 'red' : undefined} />
+                    <MiniStat label="Оплачено" value={`${stats.revenue} ₾`} color="green" />
+                </div>
+            )}
 
             {/* New Session Form */}
             {showForm && (
                 <SessionForm
                     clients={clients.filter((c) => c.isActive)}
+                    prefillDate={prefillDate ?? undefined}
                     onSave={async (data) => {
                         await createSession(data);
                         setShowForm(false);
+                        setPrefillDate(null);
                         toast.success('Сессия создана');
                     }}
-                    onCancel={() => setShowForm(false)}
+                    onCancel={() => { setShowForm(false); setPrefillDate(null); }}
                 />
             )}
 
-            {/* Sessions by Date */}
-            {loading && !sessions.length ? (
+            {/* Week Calendar View */}
+            {view === 'week' && (
+                <WeekCalendar
+                    weekAnchor={weekAnchor}
+                    sessions={sessions}
+                    clientMap={clientMap}
+                    navigate={navigate}
+                    onAddSession={(dateStr) => {
+                        setPrefillDate(dateStr);
+                        setShowForm(true);
+                    }}
+                    updateSession={updateSession}
+                    deleteSession={deleteSession}
+                    quickPaySession={quickPaySession}
+                />
+            )}
+
+            {/* Sessions by Date (list view) */}
+            {view === 'list' && (loading && !sessions.length ? (
                 <div className="flex items-center justify-center h-40">
                     <Loader2 className="w-6 h-6 animate-spin text-unbox-grey" />
                 </div>
@@ -249,7 +323,149 @@ export function CrmSessions() {
                         </div>
                     )}
                 </div>
-            )}
+            ))}
+        </div>
+    );
+}
+
+// ── Week Calendar View ────────────────────────────────────────────────────────
+
+function WeekCalendar({
+    weekAnchor,
+    sessions,
+    clientMap,
+    navigate,
+    onAddSession,
+    updateSession,
+    deleteSession,
+    quickPaySession,
+}: {
+    weekAnchor: Date;
+    sessions: CrmSession[];
+    clientMap: Map<string, CrmClient>;
+    navigate: ReturnType<typeof useNavigate>;
+    onAddSession: (dateStr: string) => void;
+    updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
+    deleteSession: (id: string) => Promise<void>;
+    quickPaySession: (id: string) => Promise<{ amount: number; currency: string }>;
+}) {
+    const weekStart = startOfWeek(weekAnchor, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(weekAnchor, { weekStartsOn: 1 });
+    const days = eachDayOfInterval({ start: weekStart, end: weekEnd });
+    const [editingId, setEditingId] = useState<string | null>(null);
+
+    return (
+        <div className="space-y-2">
+            {days.map(day => {
+                const dayStr = format(day, 'yyyy-MM-dd');
+                const daySessions = sessions.filter(s => {
+                    const sDay = format(parseISO(s.date), 'yyyy-MM-dd');
+                    return sDay === dayStr;
+                }).sort((a, b) => a.date.localeCompare(b.date));
+
+                const today = isTodayFn(day);
+                const past = day < new Date() && !today;
+
+                return (
+                    <div key={dayStr} className={`bg-white/70 rounded-2xl border overflow-hidden ${today ? 'border-unbox-green/40' : 'border-white/80'}`}>
+                        {/* Day header */}
+                        <div className={`flex items-center justify-between px-4 py-2.5 ${today ? 'bg-unbox-green/5' : past ? 'bg-gray-50/60' : 'bg-white/50'}`}>
+                            <div className="flex items-center gap-2">
+                                <span className={`text-sm font-semibold capitalize ${today ? 'text-unbox-green' : past ? 'text-unbox-grey' : 'text-unbox-dark'}`}>
+                                    {format(day, 'EEEE', { locale: ru })}
+                                </span>
+                                <span className={`text-xs ${today ? 'text-unbox-green font-medium' : 'text-unbox-grey'}`}>
+                                    {format(day, 'd MMMM', { locale: ru })}
+                                    {today && ' · Сегодня'}
+                                </span>
+                                {daySessions.length > 0 && (
+                                    <span className="text-xs bg-unbox-green/10 text-unbox-green px-1.5 py-0.5 rounded-md font-medium">
+                                        {daySessions.length} сессий
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => navigate('/dashboard/bookings', { state: { openGrid: true, targetDate: dayStr } })}
+                                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-light bg-white hover:bg-unbox-light/40 text-unbox-grey hover:text-unbox-dark transition-colors"
+                                >
+                                    <LayoutGrid className="w-3 h-3" />
+                                    Кабинеты
+                                </button>
+                                <button
+                                    onClick={() => onAddSession(format(day, "yyyy-MM-dd'T'10:00"))}
+                                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-green/30 bg-unbox-green/5 text-unbox-green hover:bg-unbox-green/10 transition-colors"
+                                >
+                                    <Plus className="w-3 h-3" />
+                                    Сессия
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Sessions */}
+                        {daySessions.length > 0 ? (
+                            <div className="divide-y divide-unbox-light/50">
+                                {daySessions.map(session => {
+                                    const client = clientMap.get(session.clientId);
+                                    const dt = parseISO(session.date);
+                                    const isEditing = editingId === session.id;
+                                    const effectiveStatus = getEffectiveStatus(session);
+                                    const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
+                                    return (
+                                        <div key={session.id}>
+                                            <div className="flex items-center gap-3 px-4 py-2.5">
+                                                <div className="text-sm font-bold text-unbox-dark w-12 shrink-0">{format(dt, 'HH:mm')}</div>
+                                                <div className="w-0.5 h-8 rounded-full shrink-0" style={{
+                                                    background: effectiveStatus === 'COMPLETED' ? '#22c55e' : effectiveStatus.startsWith('CANCELLED') ? '#f97316' : '#476D6B',
+                                                }} />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-sm font-medium text-unbox-dark">{client?.name || 'Клиент'}</div>
+                                                    <div className="text-xs text-unbox-grey">{session.durationMinutes} мин · {STATUS_LABELS[effectiveStatus]}</div>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    {session.isBooked ? (
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">Каб ✓</span>
+                                                    ) : !isCancelled && (
+                                                        <button
+                                                            onClick={() => navigate('/dashboard/bookings', { state: { crmMode: { sessionId: session.id, clientId: session.clientId, clientName: client?.name, date: session.date, duration: session.durationMinutes } } })}
+                                                            className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors"
+                                                        >+Каб</button>
+                                                    )}
+                                                    <div className="font-semibold text-xs text-unbox-dark">{session.price ?? client?.basePrice ?? '—'} ₾</div>
+                                                    {!session.isPaid && !isCancelled && (
+                                                        <button
+                                                            onClick={async () => {
+                                                                try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); }
+                                                            }}
+                                                            className="p-1 bg-green-50 hover:bg-green-100 text-green-600 rounded-lg transition-colors"
+                                                            title="Быстрая оплата"
+                                                        >
+                                                            <Banknote className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => setEditingId(isEditing ? null : session.id)} className="p-1 hover:bg-unbox-light/50 text-unbox-grey hover:text-unbox-green rounded-lg transition-colors">
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {isEditing && (
+                                                <SessionEditPanel
+                                                    session={session}
+                                                    clientCurrency={client?.currency}
+                                                    onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
+                                                    onCancel={() => setEditingId(null)}
+                                                />
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="px-4 py-3 text-xs text-unbox-grey/60 italic">Нет сессий</div>
+                        )}
+                    </div>
+                );
+            })}
         </div>
     );
 }
@@ -660,13 +876,15 @@ function SessionForm({
     clients,
     onSave,
     onCancel,
+    prefillDate,
 }: {
     clients: CrmClient[];
     onSave: (data: CrmSessionCreate) => Promise<void>;
     onCancel: () => void;
+    prefillDate?: string;
 }) {
     const [clientId, setClientId] = useState('');
-    const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+    const [date, setDate] = useState(prefillDate ?? format(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [duration, setDuration] = useState('60');
     const [price, setPrice] = useState('');
     const [saving, setSaving] = useState(false);
