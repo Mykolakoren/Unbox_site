@@ -43,7 +43,10 @@ export const PERMISSION_GROUPS = [
     {
         group: 'Контент',
         permissions: [
-            { id: 'content.edit_locations', label: 'Редактирование локаций и кабинетов',  seniorAdmin: false },
+            { id: 'content.edit_locations', label: 'Редактирование локаций',               seniorAdmin: true },
+            { id: 'content.edit_rooms',     label: 'Редактирование кабинетов',             seniorAdmin: true },
+            { id: 'content.add_locations',  label: 'Добавление локаций',                   seniorAdmin: true },
+            { id: 'content.add_rooms',      label: 'Добавление кабинетов',                 seniorAdmin: true },
             { id: 'content.edit_pricing',   label: 'Редактирование цен и тарифов',         seniorAdmin: false },
         ],
     },
@@ -58,9 +61,9 @@ export const PERMISSION_GROUPS = [
 
 // ── Role-inherited permissions ────────────────────────────────────────────────
 const ROLE_INHERITED: Record<string, string[]> = {
-    owner:       ['admin.access', 'admin.assign_owner', 'users.assign_roles', 'content.edit_locations', 'content.edit_pricing', 'finance.add_funds', 'finance.topup', 'finance.view_reports', 'users.set_personal_discount', 'users.manage_subscription', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any'],
-    senior_admin: ['admin.access', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any', 'users.set_personal_discount', 'users.manage_subscription', 'finance.topup', 'finance.add_funds', 'finance.view_reports'],
-    admin:        ['admin.access'],
+    owner:       ['admin.access', 'admin.assign_owner', 'users.assign_roles', 'content.edit_locations', 'content.edit_rooms', 'content.add_locations', 'content.add_rooms', 'content.edit_pricing', 'finance.add_funds', 'finance.topup', 'finance.view_reports', 'users.set_personal_discount', 'users.manage_subscription', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any'],
+    senior_admin: ['admin.access', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any', 'users.set_personal_discount', 'users.manage_subscription', 'finance.topup', 'finance.add_funds', 'finance.view_reports', 'content.add_locations', 'content.add_rooms'],
+    admin:        ['admin.access', 'content.edit_locations', 'content.edit_rooms'],
     specialist:   ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'],
 };
 
