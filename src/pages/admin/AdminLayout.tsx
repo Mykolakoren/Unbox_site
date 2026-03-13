@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
     BookOpen, ClipboardList, Target, LogOut, Menu, X, ChevronDown,
@@ -19,12 +19,27 @@ const NAV_ITEMS = [
     { path: '/admin/knowledge-base', icon: BookOpen,    label: 'База данных' },
 ];
 
+const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
+
 export function AdminLayout() {
     const location = useLocation();
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+    // ── Access Guard ──────────────────────────────────────────────────────────
+    const hasToken = Boolean(localStorage.getItem('token'));
+
+    // No token → redirect to login immediately (no flash)
+    if (!hasToken) return <Navigate to="/login" replace />;
+
+    // Token exists but user not yet loaded → show blank screen while fetching
+    if (!currentUser) return null;
+
+    // User loaded but not an admin → redirect to home
+    if (!ADMIN_ROLES.includes(currentUser.role ?? '')) return <Navigate to="/" replace />;
+    // ─────────────────────────────────────────────────────────────────────────
 
     const isActive = (path: string, exact?: boolean) => {
         if (exact) return location.pathname === path;
