@@ -24,7 +24,6 @@ import { ClientTimeline } from '../../components/admin/ClientTimeline';
 import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
 import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLimitModal';
-import { PermissionsEditor } from '../../components/admin/PermissionsEditor';
 import { api } from '../../api/client';
 
 export function AdminUserDetails() {
@@ -39,6 +38,7 @@ export function AdminUserDetails() {
     const [isAssignSubOpen, setIsAssignSubOpen] = useState(false);
     const [isEditLimitOpen, setIsEditLimitOpen] = useState(false);
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+    const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
     const [adminPickerType, setAdminPickerType] = useState<'responsible' | 'attracted' | null>(null);
     const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'finance' | 'timeline'>('overview');
 
@@ -243,40 +243,76 @@ export function AdminUserDetails() {
                             {user.name}
 
                             {/* Role Badge / Selector */}
-                            <div className="relative group/role">
-                                <div
-                                    className={clsx(
-                                        "flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold uppercase cursor-pointer transition-colors",
-                                        (user.role === 'owner' || user.isAdmin) ? "bg-unbox-light text-unbox-dark hover:bg-blue-200" : "bg-unbox-light/50 text-unbox-grey hover:bg-unbox-light"
-                                    )}
-                                    title="Нажмите чтобы изменить роль"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        // Simple prompt for now - ideally a dropdown
-                                        if (currentUser?.role === 'owner' || true) { // Allow for demo/MVP
-                                            const newRole = prompt(`Текущая роль: ${user.role || (user.isAdmin ? 'admin' : 'user')}\nВведите новую роль (owner, senior_admin, admin, specialist, user) или пусто для сброса:`);
-                                            if (newRole !== null) {
-                                                const validRoles = ['owner', 'senior_admin', 'admin', 'specialist', 'user'];
-                                                if (newRole === '' || validRoles.includes(newRole)) {
-                                                    updateUserById(user.email, {
-                                                        role: newRole as any,
-                                                        isAdmin: !!newRole // Sync isAdmin for legacy
-                                                    });
-                                                    toast.success('Роль обновлена');
-                                                } else {
-                                                    toast.error('Некорректная роль');
-                                                }
-                                            }
-                                        }
-                                    }}
-                                >
-                                    <Shield size={14} />
-                                    {user.role === 'owner' ? 'OWNER' :
-                                        user.role === 'senior_admin' ? 'SENIOR' :
-                                            user.role === 'admin' || user.isAdmin ? 'ADMIN' :
-                                                user.role === 'specialist' ? 'SPECIALIST' : 'USER'}
-                                </div>
-                            </div>
+                            {(() => {
+                                const isOwner = currentUser?.role === 'owner';
+                                const isSeniorAdmin = currentUser?.role === 'senior_admin';
+                                const canEditRole = isOwner || (isSeniorAdmin && user.role !== 'owner' && user.role !== 'senior_admin');
+                                const availableRoles = isOwner
+                                    ? ['user', 'specialist', 'admin', 'senior_admin', 'owner']
+                                    : isSeniorAdmin ? ['user', 'specialist', 'admin'] : [];
+                                const ROLE_LABELS: Record<string, string> = {
+                                    user: 'Пользователь', specialist: 'Специалист',
+                                    admin: 'Админ', senior_admin: 'Ст. Админ', owner: 'Владелец',
+                                };
+                                const ROLE_COLORS: Record<string, string> = {
+                                    owner: 'bg-purple-100 text-purple-700',
+                                    senior_admin: 'bg-blue-100 text-blue-700',
+                                    admin: 'bg-green-100 text-green-700',
+                                    specialist: 'bg-amber-100 text-amber-700',
+                                    user: 'bg-gray-100 text-gray-600',
+                                };
+                                const currentRole = user.role || 'user';
+                                return (
+                                    <div className="relative">
+                                        <button
+                                            onClick={() => canEditRole && setIsRoleDropdownOpen(v => !v)}
+                                            title={canEditRole ? 'Изменить роль' : 'Нет прав для изменения'}
+                                            className={clsx(
+                                                'flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold uppercase transition-all',
+                                                ROLE_COLORS[currentRole] ?? 'bg-gray-100 text-gray-600',
+                                                canEditRole && 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-current'
+                                            )}
+                                        >
+                                            <Shield size={13} />
+                                            {ROLE_LABELS[currentRole] ?? currentRole}
+                                        </button>
+                                        {isRoleDropdownOpen && canEditRole && (
+                                            <>
+                                                <div className="fixed inset-0 z-10" onClick={() => setIsRoleDropdownOpen(false)} />
+                                                <div className="absolute top-full left-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-unbox-light overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-150">
+                                                    <div className="p-2 text-[10px] font-bold text-unbox-grey uppercase tracking-wider border-b border-unbox-light">
+                                                        Изменить роль
+                                                    </div>
+                                                    {availableRoles.map(role => (
+                                                        <button
+                                                            key={role}
+                                                            onClick={async () => {
+                                                                setIsRoleDropdownOpen(false);
+                                                                await updateUserById(user.email, { role: role as any });
+                                                                toast.success(`Роль изменена: ${ROLE_LABELS[role]}`);
+                                                            }}
+                                                            className={clsx(
+                                                                'w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-unbox-light/50 transition-colors',
+                                                                currentRole === role && 'font-semibold bg-unbox-light/30'
+                                                            )}
+                                                        >
+                                                            <span className={clsx('w-2 h-2 rounded-full', {
+                                                                'bg-purple-500': role === 'owner',
+                                                                'bg-blue-500': role === 'senior_admin',
+                                                                'bg-green-500': role === 'admin',
+                                                                'bg-amber-500': role === 'specialist',
+                                                                'bg-gray-400': role === 'user',
+                                                            })} />
+                                                            {ROLE_LABELS[role]}
+                                                            {currentRole === role && <span className="ml-auto text-[10px] text-unbox-grey">текущая</span>}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </h1>
                         <div className="relative">
                             <button
@@ -799,16 +835,6 @@ export function AdminUserDetails() {
                             {/* Loyalty System (New) */}
                             <UserLoyaltyCard email={user.email} />
 
-                            {/* Granular Permissions Editor — owner / senior_admin only */}
-                            {(currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') && (
-                                <Card className="p-6">
-                                    <PermissionsEditor
-                                        user={user}
-                                        currentUserRole={currentUser.role}
-                                        onUpdate={(updated) => updateUserById(user.email, updated)}
-                                    />
-                                </Card>
-                            )}
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                                 <div className="space-y-6">

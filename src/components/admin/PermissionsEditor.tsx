@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Shield, Check, Loader2, Info, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
@@ -56,6 +56,14 @@ export const PERMISSION_GROUPS = [
     },
 ] as const;
 
+// ── Role-inherited permissions ────────────────────────────────────────────────
+const ROLE_INHERITED: Record<string, string[]> = {
+    owner:       ['admin.access', 'admin.assign_owner', 'users.assign_roles', 'content.edit_locations', 'content.edit_pricing', 'finance.add_funds', 'finance.topup', 'finance.view_reports', 'users.set_personal_discount', 'users.manage_subscription', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any'],
+    senior_admin: ['admin.access', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any', 'users.set_personal_discount', 'users.manage_subscription', 'finance.topup', 'finance.add_funds', 'finance.view_reports'],
+    admin:        ['admin.access'],
+    specialist:   ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'],
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -71,6 +79,12 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
         new Set(user.permissions ?? [])
     );
     const [saving, setSaving] = useState(false);
+    const inheritedPerms = new Set(ROLE_INHERITED[user.role ?? ''] ?? []);
+
+    // Reset when user changes
+    useEffect(() => {
+        setSelected(new Set(user.permissions ?? []));
+    }, [user.id]);
     const isOwner = currentUserRole === 'owner';
     const isSeniorAdmin = currentUserRole === 'senior_admin';
     const canEdit = isOwner || isSeniorAdmin;
@@ -153,30 +167,32 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
                     </div>
                     <div className="bg-white rounded-xl border border-unbox-light overflow-hidden">
                         {group.permissions.map((perm, idx) => {
-                            const active = selected.has(perm.id);
-                            const editable = canEdit && canToggle(perm.id, perm.seniorAdmin);
+                            const isInherited = inheritedPerms.has(perm.id);
+                            const active = selected.has(perm.id) || isInherited;
+                            const editable = canEdit && canToggle(perm.id, perm.seniorAdmin) && !isInherited;
                             const locked = !editable;
 
                             return (
                                 <button
                                     key={perm.id}
                                     type="button"
-                                    onClick={() => toggle(perm.id, perm.seniorAdmin)}
+                                    onClick={() => !isInherited && toggle(perm.id, perm.seniorAdmin)}
                                     disabled={locked}
                                     className={[
                                         'w-full flex items-center gap-3 px-4 py-3 text-left transition-colors',
                                         idx > 0 && 'border-t border-unbox-light',
                                         editable && active && 'bg-unbox-green/5',
                                         editable && !active && 'hover:bg-unbox-light/50',
-                                        locked && 'opacity-40 cursor-not-allowed',
+                                        isInherited && 'bg-blue-50/60',
+                                        locked && !isInherited && 'opacity-40 cursor-not-allowed',
                                     ].filter(Boolean).join(' ')}
                                 >
                                     {/* Checkbox */}
                                     <div className={[
                                         'w-4.5 h-4.5 rounded flex-shrink-0 border flex items-center justify-center transition-all',
-                                        active
-                                            ? 'bg-unbox-green border-unbox-green'
-                                            : 'border-unbox-light bg-white',
+                                        active && isInherited ? 'bg-blue-400 border-blue-400' :
+                                        active ? 'bg-unbox-green border-unbox-green' :
+                                        'border-unbox-light bg-white',
                                     ].join(' ')}>
                                         {active && <Check size={10} strokeWidth={3} className="text-white" />}
                                     </div>
@@ -185,7 +201,12 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
                                         {perm.label}
                                     </span>
 
-                                    {locked && (
+                                    {isInherited && (
+                                        <span className="ml-auto text-[10px] text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                                            от роли
+                                        </span>
+                                    )}
+                                    {locked && !isInherited && (
                                         <span className="ml-auto text-[10px] text-unbox-grey/60 flex-shrink-0">
                                             Только владелец
                                         </span>

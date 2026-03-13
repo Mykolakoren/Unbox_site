@@ -1,39 +1,27 @@
-import { useEffect, useState } from 'react';
-import { Shield, Search, Zap, Check, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Shield, Search, ChevronDown, User as UserIcon } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { api } from '../../api/client';
-import { toast } from 'sonner';
-import { PERMISSION_GROUPS } from '../../components/admin/PermissionsEditor';
-
-// Flat list of all permissions
-type Permission = { id: string; label: string; seniorAdmin: boolean };
-const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap(g => [...g.permissions] as Permission[]);
-const SPECIALIST_PRESET = ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'];
-
-interface RowState {
-    permissions: Set<string>;
-    dirty: boolean;
-    saving: boolean;
-    expanded: boolean;
-}
+import { PermissionsEditor } from '../../components/admin/PermissionsEditor';
+import type { User } from '../../store/types';
+import clsx from 'clsx';
 
 function roleLabel(role?: string) {
     switch (role) {
-        case 'owner': return 'Владелец';
+        case 'owner':        return 'Владелец';
         case 'senior_admin': return 'Ст. Админ';
-        case 'admin': return 'Admin';
-        case 'specialist': return 'Специалист';
-        default: return 'Клиент';
+        case 'admin':        return 'Администратор';
+        case 'specialist':   return 'Специалист';
+        default:             return 'Пользователь';
     }
 }
 
 function roleBadgeClass(role?: string) {
     switch (role) {
-        case 'owner': return 'bg-purple-100 text-purple-700';
+        case 'owner':        return 'bg-purple-100 text-purple-700';
         case 'senior_admin': return 'bg-blue-100 text-blue-700';
-        case 'admin': return 'bg-green-100 text-green-700';
-        case 'specialist': return 'bg-amber-100 text-amber-700';
-        default: return 'bg-gray-100 text-gray-600';
+        case 'admin':        return 'bg-green-100 text-green-700';
+        case 'specialist':   return 'bg-amber-100 text-amber-700';
+        default:             return 'bg-gray-100 text-gray-600';
     }
 }
 
@@ -41,91 +29,37 @@ export function AdminAccessRights() {
     const users = useUserStore(s => s.users);
     const fetchUsers = useUserStore(s => s.fetchUsers);
     const currentUser = useUserStore(s => s.currentUser);
+
     const [search, setSearch] = useState('');
-    const [rows, setRows] = useState<Record<string, RowState>>({});
+    const [dropdownOpen, setDropdownOpen] = useState(false);
+    const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-    const isOwner = currentUser?.role === 'owner';
-    const isSeniorAdmin = currentUser?.role === 'senior_admin';
+    useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
+    const filtered = useMemo(() =>
+        users.filter(u =>
+            u.name.toLowerCase().includes(search.toLowerCase()) ||
+            u.email.toLowerCase().includes(search.toLowerCase())
+        ),
+        [users, search]
+    );
+
+    // Sync selectedUser when users list refreshes (after save)
     useEffect(() => {
-        fetchUsers();
-    }, [fetchUsers]);
-
-    // Initialize row state from user data
-    useEffect(() => {
-        setRows(prev => {
-            const next = { ...prev };
-            for (const u of users) {
-                if (!next[u.id]) {
-                    next[u.id] = {
-                        permissions: new Set(u.permissions ?? []),
-                        dirty: false,
-                        saving: false,
-                        expanded: false,
-                    };
-                }
-            }
-            return next;
-        });
+        if (selectedUser) {
+            const updated = users.find(u => u.id === selectedUser.id);
+            if (updated) setSelectedUser(updated);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [users]);
 
-    const canToggle = (_permId: string, seniorAdminOk: boolean) => {
-        if (isOwner) return true;
-        if (isSeniorAdmin && seniorAdminOk) return true;
-        return false;
+    const handleSelect = (user: User) => {
+        setSelectedUser(user);
+        setDropdownOpen(false);
+        setSearch('');
     };
 
-    const toggle = (userId: string, permId: string, seniorAdminOk: boolean) => {
-        if (!canToggle(permId, seniorAdminOk)) return;
-        setRows(prev => {
-            const row = prev[userId];
-            if (!row) return prev;
-            const perms = new Set(row.permissions);
-            if (perms.has(permId)) perms.delete(permId);
-            else perms.add(permId);
-            return { ...prev, [userId]: { ...row, permissions: perms, dirty: true } };
-        });
-    };
-
-    const applyPreset = (userId: string) => {
-        setRows(prev => {
-            const row = prev[userId];
-            if (!row) return prev;
-            const perms = new Set(row.permissions);
-            for (const p of SPECIALIST_PRESET) perms.add(p);
-            return { ...prev, [userId]: { ...row, permissions: perms, dirty: true } };
-        });
-    };
-
-    const save = async (userId: string) => {
-        const row = rows[userId];
-        if (!row) return;
-        setRows(prev => ({ ...prev, [userId]: { ...prev[userId], saving: true } }));
-        try {
-            await api.patch(`/users/${userId}/permissions`, {
-                permissions: Array.from(row.permissions),
-            });
-            await fetchUsers();
-            setRows(prev => ({ ...prev, [userId]: { ...prev[userId], dirty: false, saving: false } }));
-            toast.success('Права сохранены');
-        } catch {
-            toast.error('Ошибка сохранения');
-            setRows(prev => ({ ...prev, [userId]: { ...prev[userId], saving: false } }));
-        }
-    };
-
-    const toggleExpand = (userId: string) => {
-        setRows(prev => {
-            const row = prev[userId];
-            if (!row) return prev;
-            return { ...prev, [userId]: { ...row, expanded: !row.expanded } };
-        });
-    };
-
-    const filtered = users.filter(u =>
-        u.name.toLowerCase().includes(search.toLowerCase()) ||
-        u.email.toLowerCase().includes(search.toLowerCase())
-    );
+    const currentUserRole = currentUser?.role ?? '';
 
     return (
         <div className="space-y-6">
@@ -140,155 +74,104 @@ export function AdminAccessRights() {
                 </div>
             </div>
 
-            {/* Search */}
-            <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" />
-                <input
-                    type="text"
-                    placeholder="Поиск по имени или email..."
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-unbox-light bg-white/80 focus:outline-none focus:ring-2 focus:ring-unbox-green/30 focus:border-unbox-green"
-                />
-            </div>
+            {/* User selector */}
+            <div className="bg-white/80 rounded-2xl border border-white/80 shadow-sm p-5 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-unbox-grey">Выберите пользователя</p>
 
-            {/* Legend */}
-            <div className="flex flex-wrap gap-3 text-xs text-unbox-grey">
-                <span className="flex items-center gap-1">
-                    <Zap size={12} className="text-unbox-green" />
-                    Пресет специалиста — автоматически выдаёт все crm.* права
-                </span>
-                {!isOwner && isSeniorAdmin && (
-                    <span className="opacity-60">Серые разрешения — только для владельца</span>
-                )}
-            </div>
-
-            {/* Users table */}
-            <div className="space-y-2">
-                {filtered.map(user => {
-                    const row = rows[user.id];
-                    if (!row) return null;
-
-                    // Count active permissions
-                    const activeCnt = ALL_PERMISSIONS.filter(p => row.permissions.has(p.id)).length;
-
-                    return (
-                        <div key={user.id} className="bg-white/80 rounded-2xl border border-white/80 shadow-sm overflow-hidden">
-                            {/* Row header */}
-                            <div className="flex items-center gap-3 px-5 py-3.5">
-                                <div className="w-9 h-9 rounded-xl bg-unbox-dark text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                                    {user.name[0].toUpperCase()}
+                <div className="relative">
+                    <button
+                        onClick={() => setDropdownOpen(v => !v)}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-unbox-light bg-white hover:border-unbox-green/50 transition-colors text-left"
+                    >
+                        {selectedUser ? (
+                            <>
+                                <div className="w-8 h-8 rounded-lg bg-unbox-dark text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                                    {selectedUser.name[0].toUpperCase()}
                                 </div>
-
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-sm font-semibold text-unbox-dark truncate">{user.name}</span>
-                                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${roleBadgeClass(user.role)}`}>
-                                            {roleLabel(user.role)}
-                                        </span>
-                                    </div>
-                                    <div className="text-xs text-unbox-grey truncate">{user.email}</div>
+                                    <div className="text-sm font-semibold text-unbox-dark truncate">{selectedUser.name}</div>
+                                    <div className="text-xs text-unbox-grey truncate">{selectedUser.email}</div>
                                 </div>
+                                <span className={clsx('text-[10px] font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0', roleBadgeClass(selectedUser.role))}>
+                                    {roleLabel(selectedUser.role)}
+                                </span>
+                            </>
+                        ) : (
+                            <>
+                                <UserIcon size={18} className="text-unbox-grey" />
+                                <span className="text-sm text-unbox-grey flex-1">Не выбран...</span>
+                            </>
+                        )}
+                        <ChevronDown size={16} className={clsx('text-unbox-grey transition-transform flex-shrink-0', dropdownOpen && 'rotate-180')} />
+                    </button>
 
-                                {/* Permission count badge */}
-                                <div className="hidden sm:flex items-center gap-1 text-xs text-unbox-grey">
-                                    <span className={`font-semibold ${activeCnt > 0 ? 'text-unbox-green' : ''}`}>{activeCnt}</span>
-                                    <span>/ {ALL_PERMISSIONS.length} прав</span>
-                                </div>
-
-                                {/* Quick crm status */}
-                                <div className="hidden md:flex items-center gap-1">
-                                    {SPECIALIST_PRESET.map(p => (
-                                        <div
-                                            key={p}
-                                            title={p}
-                                            className={`w-2 h-2 rounded-full ${row.permissions.has(p) ? 'bg-unbox-green' : 'bg-gray-200'}`}
+                    {dropdownOpen && (
+                        <>
+                            <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
+                            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl border border-unbox-light shadow-xl z-20 overflow-hidden">
+                                <div className="p-2 border-b border-unbox-light">
+                                    <div className="relative">
+                                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" />
+                                        <input
+                                            autoFocus
+                                            type="text"
+                                            placeholder="Поиск по имени или email..."
+                                            value={search}
+                                            onChange={e => setSearch(e.target.value)}
+                                            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green/30"
                                         />
+                                    </div>
+                                </div>
+                                <div className="max-h-64 overflow-y-auto">
+                                    {filtered.length === 0 && (
+                                        <div className="px-4 py-3 text-sm text-unbox-grey text-center">Ничего не найдено</div>
+                                    )}
+                                    {filtered.map(user => (
+                                        <button
+                                            key={user.id}
+                                            onClick={() => handleSelect(user)}
+                                            className={clsx(
+                                                'w-full flex items-center gap-3 px-4 py-2.5 hover:bg-unbox-light/50 transition-colors text-left',
+                                                selectedUser?.id === user.id && 'bg-unbox-green/5'
+                                            )}
+                                        >
+                                            <div className="w-7 h-7 rounded-lg bg-unbox-dark text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                                {user.name[0].toUpperCase()}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium text-unbox-dark truncate">{user.name}</div>
+                                                <div className="text-xs text-unbox-grey truncate">{user.email}</div>
+                                            </div>
+                                            <span className={clsx('text-[10px] font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0', roleBadgeClass(user.role))}>
+                                                {roleLabel(user.role)}
+                                            </span>
+                                        </button>
                                     ))}
                                 </div>
-
-                                {/* Save button */}
-                                {row.dirty && (
-                                    <button
-                                        onClick={() => save(user.id)}
-                                        disabled={row.saving}
-                                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-unbox-green text-white text-xs font-medium hover:bg-unbox-green/90 transition-colors disabled:opacity-60 flex-shrink-0"
-                                    >
-                                        {row.saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                        Сохранить
-                                    </button>
-                                )}
-
-                                {/* Expand */}
-                                <button
-                                    onClick={() => toggleExpand(user.id)}
-                                    className="p-1.5 text-unbox-grey hover:text-unbox-dark rounded-lg hover:bg-unbox-light/50 transition-colors flex-shrink-0"
-                                >
-                                    {row.expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                                </button>
                             </div>
-
-                            {/* Expanded permissions */}
-                            {row.expanded && (
-                                <div className="px-5 pb-4 border-t border-unbox-light/50 pt-3 space-y-3">
-                                    {/* Preset button */}
-                                    {(isOwner || isSeniorAdmin) && (
-                                        <button
-                                            type="button"
-                                            onClick={() => applyPreset(user.id)}
-                                            className="flex items-center gap-1.5 text-xs text-unbox-green hover:text-unbox-green/80 transition-colors font-medium"
-                                        >
-                                            <Zap size={12} />
-                                            Применить пресет специалиста
-                                        </button>
-                                    )}
-
-                                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                        {PERMISSION_GROUPS.map(group => (
-                                            <div key={group.group}>
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-unbox-grey mb-1.5">
-                                                    {group.group}
-                                                </div>
-                                                <div className="bg-white rounded-xl border border-unbox-light overflow-hidden">
-                                                    {group.permissions.map((perm, idx) => {
-                                                        const active = row.permissions.has(perm.id);
-                                                        const editable = canToggle(perm.id, perm.seniorAdmin);
-                                                        return (
-                                                            <button
-                                                                key={perm.id}
-                                                                type="button"
-                                                                onClick={() => toggle(user.id, perm.id, perm.seniorAdmin)}
-                                                                disabled={!editable}
-                                                                className={[
-                                                                    'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors text-xs',
-                                                                    idx > 0 && 'border-t border-unbox-light',
-                                                                    editable && active && 'bg-unbox-green/5',
-                                                                    editable && !active && 'hover:bg-unbox-light/50',
-                                                                    !editable && 'opacity-35 cursor-not-allowed',
-                                                                ].filter(Boolean).join(' ')}
-                                                            >
-                                                                <div className={[
-                                                                    'w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-all',
-                                                                    active ? 'bg-unbox-green border-unbox-green' : 'border-unbox-light bg-white',
-                                                                ].join(' ')}>
-                                                                    {active && <Check size={8} strokeWidth={3} className="text-white" />}
-                                                                </div>
-                                                                <span className={active ? 'text-unbox-dark font-medium' : 'text-unbox-grey'}>
-                                                                    {perm.label}
-                                                                </span>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
+                        </>
+                    )}
+                </div>
             </div>
+
+            {/* Permissions panel */}
+            {selectedUser ? (
+                <div className="bg-white/80 rounded-2xl border border-white/80 shadow-sm p-5">
+                    <PermissionsEditor
+                        user={selectedUser}
+                        currentUserRole={currentUserRole}
+                        onUpdate={(updated) => {
+                            setSelectedUser(updated as User);
+                            fetchUsers();
+                        }}
+                    />
+                </div>
+            ) : (
+                <div className="bg-white/40 rounded-2xl border border-white/60 p-10 text-center text-unbox-grey">
+                    <Shield size={32} className="mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Выберите пользователя чтобы управлять правами доступа</p>
+                </div>
+            )}
         </div>
     );
 }

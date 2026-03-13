@@ -70,17 +70,23 @@ export function AdminUsers() {
                                     </Link>
                                 </td>
                                 <td className="p-4">
-                                    <span className={clsx(
-                                        "px-2 py-1 rounded text-xs font-medium border",
-                                        user.role === 'owner' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                            user.role === 'senior_admin' ? "bg-unbox-light text-unbox-dark border-blue-200" :
-                                                user.role === 'admin' ? "bg-green-50 text-green-700 border-green-200" :
-                                                    "bg-unbox-light/30 text-unbox-grey border-unbox-light"
-                                    )}>
+                                    <button
+                                        onClick={() => setSelectedUser(user)}
+                                        title="Нажмите чтобы изменить роль"
+                                        className={clsx(
+                                            "px-2 py-1 rounded text-xs font-medium border transition-all hover:ring-2 hover:ring-offset-1",
+                                            user.role === 'owner' ? "bg-purple-50 text-purple-700 border-purple-200 hover:ring-purple-300" :
+                                                user.role === 'senior_admin' ? "bg-unbox-light text-unbox-dark border-blue-200 hover:ring-blue-300" :
+                                                    user.role === 'admin' ? "bg-green-50 text-green-700 border-green-200 hover:ring-green-300" :
+                                                        user.role === 'specialist' ? "bg-amber-50 text-amber-700 border-amber-200 hover:ring-amber-300" :
+                                                            "bg-unbox-light/30 text-unbox-grey border-unbox-light hover:ring-gray-300"
+                                        )}
+                                    >
                                         {user.role === 'owner' ? 'Владелец' :
                                             user.role === 'senior_admin' ? 'Ст. Админ' :
-                                                user.role === 'admin' ? 'Админ' : 'Пользователь'}
-                                    </span>
+                                                user.role === 'admin' ? 'Админ' :
+                                                    user.role === 'specialist' ? 'Специалист' : 'Пользователь'}
+                                    </button>
                                 </td>
                                 <td className="p-4">
                                     <span className={clsx(

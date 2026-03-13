@@ -24,8 +24,8 @@ export function AdminLayout() {
     const location = useLocation();
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
-    const isOwner = currentUser?.role === 'owner';
-    const navItems = isOwner
+    const canAccessRights = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
+    const navItems = canAccessRights
         ? [...NAV_ITEMS, { path: '/admin/access-rights', icon: Shield, label: 'Права доступа' }]
         : NAV_ITEMS;
     const [mobileOpen, setMobileOpen] = useState(false);
