@@ -255,8 +255,8 @@ export function ExplorePage() {
                         transition={{ duration: 0.45, delay: 0.1 }}
                         className="relative z-10 pt-[132px] pb-10 px-6 md:px-12 flex flex-col lg:flex-row gap-8 items-stretch"
                     >
-                        {currentUser?.role === 'specialist' ? (
-                            /* ── Logged-in specialist: full-width portal with bookings ── */
+                        {currentUser ? (
+                            /* ── Any logged-in user: full-width portal with bookings ── */
                             <div className="w-full max-w-4xl mx-auto">
                                 <SpecialistPortalHero user={currentUser} />
                             </div>
@@ -306,8 +306,8 @@ export function ExplorePage() {
                             <TeamSection />
                             <ContactSection />
                         </>
-                    ) : currentUser?.role === 'specialist' ? (
-                        // Logged-in specialist: no onboarding sections, no apply form
+                    ) : currentUser ? (
+                        // Logged-in user: no onboarding, just useful sections
                         <>
                             <CabinetsShowcaseSection />
                             <SpecialistsSection />
@@ -315,7 +315,7 @@ export function ExplorePage() {
                             <ContactSection />
                         </>
                     ) : (
-                        // Guest / non-specialist: full onboarding funnel
+                        // Guest / not logged in: full onboarding funnel
                         <>
                             <WhyUnboxSection />
                             <CabinetsShowcaseSection />
