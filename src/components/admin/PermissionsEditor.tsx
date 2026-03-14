@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Check, Loader2, Info, Zap } from 'lucide-react';
+import { Shield, Check, Loader2, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
 import type { User } from '../../store/types';
@@ -7,15 +7,6 @@ import type { User } from '../../store/types';
 // ── Permission definitions ────────────────────────────────────────────────────
 
 export const PERMISSION_GROUPS = [
-    {
-        group: 'Psy-CRM (кабинет специалиста)',
-        permissions: [
-            { id: 'psy_crm.access',    label: 'Доступ к Psy-CRM',                         seniorAdmin: true },
-            { id: 'psy_crm.clients',   label: 'Управление клиентами практики',             seniorAdmin: true },
-            { id: 'psy_crm.sessions',  label: 'Управление сессиями',                       seniorAdmin: true },
-            { id: 'psy_crm.finances',  label: 'Финансы практики',                          seniorAdmin: true },
-        ],
-    },
     {
         group: 'CRM Unbox (клиенты сервиса)',
         permissions: [
@@ -196,16 +187,6 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
         }
     };
 
-    const SPECIALIST_PRESET = ['psy_crm.access', 'psy_crm.clients', 'psy_crm.sessions', 'psy_crm.finances'];
-
-    const applySpecialistPreset = () => {
-        setSelected(prev => {
-            const next = new Set(prev);
-            for (const p of SPECIALIST_PRESET) next.add(p);
-            return next;
-        });
-    };
-
     const hasChanges = () => {
         const orig = new Set(user.permissions ?? []);
         if (orig.size !== selected.size) return true;
@@ -218,16 +199,6 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
             <div className="flex items-center gap-2 mb-1">
                 <Shield size={16} className="text-unbox-green" />
                 <span className="text-sm font-semibold text-unbox-dark">Гранулярные права доступа</span>
-                {canEdit && (
-                    <button
-                        type="button"
-                        onClick={applySpecialistPreset}
-                        className="ml-auto flex items-center gap-1 text-[11px] text-unbox-green hover:text-unbox-green/80 transition-colors"
-                    >
-                        <Zap size={11} />
-                        Пресет специалиста
-                    </button>
-                )}
                 {!isOwner && isSeniorAdmin && (
                     <span className={`${canEdit ? '' : 'ml-auto'} flex items-center gap-1 text-[11px] text-unbox-grey`}>
                         <Info size={11} />

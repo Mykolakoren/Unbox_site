@@ -65,8 +65,6 @@ PSY_CRM_PERMISSIONS = {"psy_crm.access", "psy_crm.clients", "psy_crm.sessions", 
 
 # Permissions that senior_admin is allowed to grant/revoke (subset of all)
 SENIOR_ADMIN_GRANTABLE = {
-    # Psy-CRM
-    "psy_crm.access", "psy_crm.clients", "psy_crm.sessions", "psy_crm.finances",
     # CRM Unbox
     "crm.view_clients", "crm.create_client", "crm.edit_client", "crm.manage_status",
     # Бронирования
