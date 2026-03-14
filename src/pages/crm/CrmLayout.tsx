@@ -69,7 +69,7 @@ export function CrmLayout() {
     if (!hasToken) return <Navigate to="/login" replace />;
     if (!currentUser) return null;
 
-    if (!hasPermission(currentUser, 'crm.access')) {
+    if (!hasPermission(currentUser, 'psy_crm.access')) {
         return <CrmApplyPage />;
     }
 

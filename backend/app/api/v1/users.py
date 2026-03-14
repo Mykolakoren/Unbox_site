@@ -458,11 +458,11 @@ def topup_subscription(
     """
     Top-up subscription hours for a user.
     payload: { hours: float, amount: float, payment_method: str, account: str, note?: str }
-    Requires permission 'finance.topup' for regular admins.
+    Requires permission 'subscriptions.manage' for regular admins.
     Senior admin and owner always allowed.
     """
-    if current_user.role == "admin" and not deps.has_permission(current_user, "finance.topup"):
-        raise HTTPException(403, "Requires finance.topup permission")
+    if current_user.role == "admin" and not deps.has_permission(current_user, "subscriptions.manage"):
+        raise HTTPException(403, "Requires subscriptions.manage permission")
 
     # Resolve target user
     try:

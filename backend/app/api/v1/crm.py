@@ -445,7 +445,7 @@ def apply_for_crm_access(
     profession: Optional[str] = Body(None, embed=True),
     message: Optional[str] = Body(None, embed=True),
 ):
-    """Any authenticated user can apply for crm.access. Stores request in user.crm_data."""
+    """Any authenticated user can apply for psy_crm.access. Stores request in user.crm_data."""
     crm_data = dict(current_user.crm_data or {})
     crm_data["access_application"] = {
         "status": "pending",

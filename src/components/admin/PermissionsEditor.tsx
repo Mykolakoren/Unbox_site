@@ -8,63 +8,136 @@ import type { User } from '../../store/types';
 
 export const PERMISSION_GROUPS = [
     {
-        group: 'CRM',
+        group: 'Psy-CRM (кабинет специалиста)',
         permissions: [
-            { id: 'crm.access',    label: 'Доступ к CRM-кабинету специалиста',       seniorAdmin: true },
-            { id: 'crm.clients',   label: 'Управление клиентами в CRM',               seniorAdmin: true },
-            { id: 'crm.sessions',  label: 'Управление сессиями и бронированиями CRM', seniorAdmin: true },
-            { id: 'crm.finances',  label: 'Просмотр финансов в CRM',                  seniorAdmin: true },
+            { id: 'psy_crm.access',    label: 'Доступ к Psy-CRM',                         seniorAdmin: true },
+            { id: 'psy_crm.clients',   label: 'Управление клиентами практики',             seniorAdmin: true },
+            { id: 'psy_crm.sessions',  label: 'Управление сессиями',                       seniorAdmin: true },
+            { id: 'psy_crm.finances',  label: 'Финансы практики',                          seniorAdmin: true },
+        ],
+    },
+    {
+        group: 'CRM Unbox (клиенты сервиса)',
+        permissions: [
+            { id: 'crm.view_clients',   label: 'Просмотр списка клиентов',                 seniorAdmin: true },
+            { id: 'crm.create_client',  label: 'Создание карточки клиента',                seniorAdmin: true },
+            { id: 'crm.edit_client',    label: 'Редактирование профиля клиента',            seniorAdmin: true },
+            { id: 'crm.manage_status',  label: 'Управление статусом в воронке',             seniorAdmin: true },
         ],
     },
     {
         group: 'Бронирования',
         permissions: [
-            { id: 'bookings.override_24h',   label: 'Отмена/перенос позже 24ч до брони',   seniorAdmin: true },
-            { id: 'bookings.cancel_any',     label: 'Отмена бронирований любых клиентов',   seniorAdmin: true },
-            { id: 'bookings.reschedule_any', label: 'Перенос бронирований любых клиентов',  seniorAdmin: true },
+            { id: 'bookings.view_all',       label: 'Просмотр всех бронирований',           seniorAdmin: true },
+            { id: 'bookings.cancel_any',     label: 'Отмена бронирований (в рамках 24ч)',   seniorAdmin: true },
+            { id: 'bookings.reschedule_any', label: 'Перенос бронирований (в рамках 24ч)',  seniorAdmin: true },
+            { id: 'bookings.override_24h',   label: 'Обход правила 24ч (с причиной)',       seniorAdmin: true },
+            { id: 'bookings.manage_rerent',  label: 'Управление переарендой',               seniorAdmin: true },
         ],
     },
     {
-        group: 'Клиенты',
+        group: 'Абонементы и скидки',
         permissions: [
-            { id: 'users.set_personal_discount', label: 'Установка персональных скидок',       seniorAdmin: true },
-            { id: 'users.manage_subscription',   label: 'Управление абонементами клиентов',     seniorAdmin: true },
-            { id: 'users.assign_roles',          label: 'Назначение ролей пользователям',       seniorAdmin: false },
+            { id: 'subscriptions.manage',           label: 'Назначение абонементов',                  seniorAdmin: true },
+            { id: 'subscriptions.request_discount',  label: 'Запрос персональной скидки (через акцепт)', seniorAdmin: true },
+            { id: 'subscriptions.set_discount',      label: 'Установка скидки напрямую',                seniorAdmin: true },
         ],
     },
     {
         group: 'Финансы',
         permissions: [
-            { id: 'finance.topup',        label: 'Пополнение абонемента клиентов',       seniorAdmin: true },
-            { id: 'finance.add_funds',    label: 'Пополнение баланса клиентов',           seniorAdmin: true },
-            { id: 'finance.view_reports', label: 'Просмотр финансовых отчётов',           seniorAdmin: true },
+            { id: 'finance.topup_balance',   label: 'Пополнение баланса (с прикреплением файла)',  seniorAdmin: true },
+            { id: 'finance.set_credit_limit', label: 'Установка кредитного лимита',                seniorAdmin: true },
+            { id: 'finance.view_reports',     label: 'Просмотр финансовых отчётов',                seniorAdmin: true },
+            { id: 'finance.manage_cashbox',   label: 'Управление кассой и финансовым учётом',      seniorAdmin: true },
         ],
     },
     {
         group: 'Контент',
         permissions: [
-            { id: 'content.edit_locations', label: 'Редактирование локаций',               seniorAdmin: true },
-            { id: 'content.edit_rooms',     label: 'Редактирование кабинетов',             seniorAdmin: true },
-            { id: 'content.add_locations',  label: 'Добавление локаций',                   seniorAdmin: true },
-            { id: 'content.add_rooms',      label: 'Добавление кабинетов',                 seniorAdmin: true },
-            { id: 'content.edit_pricing',   label: 'Редактирование цен и тарифов',         seniorAdmin: false },
+            { id: 'content.edit_locations',  label: 'Редактирование локаций',                      seniorAdmin: true },
+            { id: 'content.edit_rooms',      label: 'Редактирование кабинетов',                    seniorAdmin: true },
+            { id: 'content.add_locations',   label: 'Добавление локаций',                          seniorAdmin: true },
+            { id: 'content.add_rooms',       label: 'Добавление кабинетов',                        seniorAdmin: true },
+            { id: 'content.delete',          label: 'Удаление локаций и кабинетов',                seniorAdmin: false },
+            { id: 'content.set_hours',       label: 'Назначение доступных часов для аренды',       seniorAdmin: true },
+            { id: 'content.edit_pricing',    label: 'Редактирование цен и тарифов',                seniorAdmin: true },
         ],
     },
     {
-        group: 'Система (только владелец)',
+        group: 'Специалисты',
         permissions: [
-            { id: 'admin.access',       label: 'Доступ к панели администратора',          seniorAdmin: false },
-            { id: 'admin.assign_owner', label: 'Назначение роли владельца',               seniorAdmin: false },
+            { id: 'specialists.verify',  label: 'Верификация заявок специалистов',                 seniorAdmin: true },
+        ],
+    },
+    {
+        group: 'Система',
+        permissions: [
+            { id: 'admin.access',           label: 'Доступ к панели администратора',               seniorAdmin: true },
+            { id: 'admin.dashboard',        label: 'Просмотр дашборда и аналитики',                seniorAdmin: true },
+            { id: 'admin.assign_roles',     label: 'Назначение ролей',                             seniorAdmin: false },
+            { id: 'admin.accept_requests',  label: 'Акцептование запросов админов',                seniorAdmin: true },
+            { id: 'admin.assign_owner',     label: 'Назначение роли владельца',                    seniorAdmin: false },
         ],
     },
 ] as const;
 
 // ── Role-inherited permissions ────────────────────────────────────────────────
+
 const ROLE_INHERITED: Record<string, string[]> = {
-    owner:       ['admin.access', 'admin.assign_owner', 'users.assign_roles', 'content.edit_locations', 'content.edit_rooms', 'content.add_locations', 'content.add_rooms', 'content.edit_pricing', 'finance.add_funds', 'finance.topup', 'finance.view_reports', 'users.set_personal_discount', 'users.manage_subscription', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any'],
-    senior_admin: ['admin.access', 'bookings.override_24h', 'bookings.cancel_any', 'bookings.reschedule_any', 'users.set_personal_discount', 'users.manage_subscription', 'finance.topup', 'finance.add_funds', 'finance.view_reports', 'content.add_locations', 'content.add_rooms'],
-    admin:        ['admin.access', 'content.edit_locations', 'content.edit_rooms'],
-    specialist:   ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'],
+    owner: [
+        // Система
+        'admin.access', 'admin.dashboard', 'admin.assign_roles', 'admin.accept_requests', 'admin.assign_owner',
+        // CRM Unbox
+        'crm.view_clients', 'crm.create_client', 'crm.edit_client', 'crm.manage_status',
+        // Бронирования
+        'bookings.view_all', 'bookings.cancel_any', 'bookings.reschedule_any', 'bookings.override_24h', 'bookings.manage_rerent',
+        // Абонементы и скидки
+        'subscriptions.manage', 'subscriptions.request_discount', 'subscriptions.set_discount',
+        // Финансы
+        'finance.topup_balance', 'finance.set_credit_limit', 'finance.view_reports', 'finance.manage_cashbox',
+        // Контент
+        'content.edit_locations', 'content.edit_rooms', 'content.add_locations', 'content.add_rooms',
+        'content.delete', 'content.set_hours', 'content.edit_pricing',
+        // Специалисты
+        'specialists.verify',
+    ],
+    senior_admin: [
+        // Система
+        'admin.access', 'admin.dashboard', 'admin.assign_roles', 'admin.accept_requests',
+        // CRM Unbox
+        'crm.view_clients', 'crm.create_client', 'crm.edit_client', 'crm.manage_status',
+        // Бронирования
+        'bookings.view_all', 'bookings.cancel_any', 'bookings.reschedule_any', 'bookings.override_24h', 'bookings.manage_rerent',
+        // Абонементы и скидки
+        'subscriptions.manage', 'subscriptions.request_discount', 'subscriptions.set_discount',
+        // Финансы
+        'finance.topup_balance', 'finance.set_credit_limit', 'finance.view_reports', 'finance.manage_cashbox',
+        // Контент
+        'content.edit_locations', 'content.edit_rooms', 'content.add_locations', 'content.add_rooms',
+        'content.set_hours', 'content.edit_pricing',
+        // Специалисты
+        'specialists.verify',
+    ],
+    admin: [
+        // Система
+        'admin.access', 'admin.dashboard',
+        // CRM Unbox
+        'crm.view_clients', 'crm.create_client', 'crm.edit_client', 'crm.manage_status',
+        // Бронирования
+        'bookings.view_all', 'bookings.cancel_any', 'bookings.reschedule_any', 'bookings.manage_rerent',
+        // Абонементы и скидки
+        'subscriptions.manage', 'subscriptions.request_discount',
+        // Финансы
+        'finance.topup_balance', 'finance.set_credit_limit', 'finance.view_reports',
+        // Контент
+        'content.edit_locations', 'content.edit_rooms', 'content.set_hours',
+        // Специалисты
+        'specialists.verify',
+    ],
+    specialist: [
+        'psy_crm.access', 'psy_crm.clients', 'psy_crm.sessions', 'psy_crm.finances',
+    ],
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -123,7 +196,7 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
         }
     };
 
-    const SPECIALIST_PRESET = ['crm.access', 'crm.clients', 'crm.sessions', 'crm.finances'];
+    const SPECIALIST_PRESET = ['psy_crm.access', 'psy_crm.clients', 'psy_crm.sessions', 'psy_crm.finances'];
 
     const applySpecialistPreset = () => {
         setSelected(prev => {

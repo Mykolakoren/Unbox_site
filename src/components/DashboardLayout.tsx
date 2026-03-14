@@ -18,7 +18,7 @@ export function DashboardLayout() {
     if (!currentUser) return null;
 
     const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
-    const hasCrm = hasPermission(currentUser, 'crm.access');
+    const hasCrm = hasPermission(currentUser, 'psy_crm.access');
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Обзор', path: '/dashboard' },
