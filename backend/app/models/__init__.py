@@ -11,3 +11,11 @@ from .therapist_client import TherapistClient, TherapistClientCreate, TherapistC
 from .therapy_session import TherapySession, TherapySessionCreate, TherapySessionRead, TherapySessionUpdate
 from .therapist_payment import TherapistPayment, TherapistPaymentCreate, TherapistPaymentRead
 from .therapist_note import TherapistNote, TherapistNoteCreate, TherapistNoteRead
+
+# Cashbox / Finance models
+from .expense_category import ExpenseCategory, ExpenseCategoryCreate, ExpenseCategoryRead
+from .cashbox_transaction import CashboxTransaction, CashboxTransactionCreate, CashboxTransactionRead
+from .shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
+
+# Team members
+from .team_member import TeamMember, TeamMemberCreate, TeamMemberRead, TeamMemberUpdate

@@ -40,6 +40,10 @@ import { CrmNotes } from './pages/crm/CrmNotes';
 // Admin CRM
 import { AdminCrm } from './pages/admin/AdminCrm';
 import { AdminAccessRights } from './pages/admin/AccessRights';
+import { AdminFinance } from './pages/admin/Finance';
+import { AdminTeam } from './pages/admin/AdminTeam';
+import { AdminSpecialists } from './pages/admin/AdminSpecialists';
+import { TestPage } from './pages/TestPage';
 
 // ── Glass panel style for wizard steps (mirrors ExplorePage) ───────────────
 const glassPanel: React.CSSProperties = {
@@ -155,6 +159,9 @@ function App() {
         <Route path="/specialists" element={<SpecialistsPage />} />
         <Route path="/specialists/:id" element={<SpecialistProfilePage />} />
 
+        {/* Self-assessment tests */}
+        <Route path="/tests/:testId" element={<TestPage />} />
+
         {/* Legacy Checkout Wizard Route (for backward compat / direct checkout) */}
         <Route path="/checkout" element={<BookingWizard />} />
 
@@ -188,6 +195,9 @@ function App() {
           <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
           <Route path="tasks" element={<AdminTasksBoard />} />
           <Route path="crm" element={<AdminCrm />} />
+          <Route path="finance" element={<AdminFinance />} />
+          <Route path="team" element={<AdminTeam />} />
+          <Route path="specialists" element={<AdminSpecialists />} />
           <Route path="access-rights" element={<AdminAccessRights />} />
         </Route>
 

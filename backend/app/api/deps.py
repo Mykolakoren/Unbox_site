@@ -94,9 +94,13 @@ ALL_GRANTABLE = SENIOR_ADMIN_GRANTABLE | OWNER_ONLY_GRANTABLE
 def has_permission(user: User, permission: str) -> bool:
     """Check if user has a specific granular permission.
 
+    Owner auto-has ALL permissions.
     Specialists auto-have all psy_crm.* permissions via their role.
     Admins/owners auto-have admin.access via their role.
     """
+    # Owner has all permissions
+    if user.role == "owner":
+        return True
     if permission in PSY_CRM_PERMISSIONS and user.role == SPECIALIST_ROLE:
         return True
     if permission == "admin.access" and user.role in ADMIN_ROLES:

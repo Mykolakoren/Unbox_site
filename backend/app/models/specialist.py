@@ -13,13 +13,16 @@ class SpecialistBase(SQLModel):
     photo_url: Optional[str] = None
     tagline: str = Field(default="", max_length=150)
     bio: str = Field(default="")
-    
+
     # Store lists as JSON in the database
     specializations: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     formats: List[str] = Field(default_factory=list, sa_column=Column(JSON))
-    
+
     base_price_gel: int = Field(default=0)
     is_verified: bool = Field(default=False)
+    # Category for public catalog filtering
+    # Values: psychology | psychiatry | narcology | coaching | education
+    category: Optional[str] = Field(default=None)
 
 class Specialist(SpecialistBase, table=True):
     __tablename__ = "specialists" # type: ignore
@@ -43,6 +46,7 @@ class SpecialistUpdate(SQLModel):
     formats: Optional[List[str]] = None
     base_price_gel: Optional[int] = None
     is_verified: Optional[bool] = None
+    category: Optional[str] = None
 
 class SpecialistRead(SpecialistBase):
     id: UUID

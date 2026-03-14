@@ -28,6 +28,8 @@ def run_migrations():
         ("therapist_clients", "pipeline_status", "VARCHAR DEFAULT 'ACTIVE'"),
         # TherapySession — notes field
         ("therapy_sessions", "notes", "TEXT"),
+        # Specialist — category for public catalog
+        ("specialists", "category", "VARCHAR"),
     ]
     with Session(engine) as session:
         for table, column, col_type in migrations:

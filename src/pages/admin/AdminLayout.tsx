@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
-    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield,
+    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
 import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
+import { hasPermission } from '../../utils/permissions';
 
 const NAV_ITEMS = [
     { path: '/admin',            icon: LayoutDashboard, label: 'Обзор',        exact: true },
@@ -14,7 +15,9 @@ const NAV_ITEMS = [
     { path: '/admin/bookings',   icon: Calendar,        label: 'Бронирования' },
     { path: '/admin/users',      icon: Users,           label: 'Клиенты' },
     { path: '/admin/waitlist',   icon: Clock,           label: 'Лист ожидания' },
-    { path: '/admin/tasks',      icon: ClipboardList,   label: 'Задачи' },
+    { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
+    { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
+    { path: '/admin/tasks',       icon: ClipboardList,   label: 'Задачи' },
     { path: '/admin/knowledge-base', icon: BookOpen,    label: 'База данных' },
 ];
 
@@ -25,9 +28,13 @@ export function AdminLayout() {
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
     const canAccessRights = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
-    const navItems = canAccessRights
-        ? [...NAV_ITEMS, { path: '/admin/access-rights', icon: Shield, label: 'Права доступа' }]
-        : NAV_ITEMS;
+    const canAccessFinance = hasPermission(currentUser, 'finance.manage_cashbox')
+        || hasPermission(currentUser, 'finance.view_reports');
+    const navItems = [
+        ...NAV_ITEMS,
+        ...(canAccessFinance ? [{ path: '/admin/finance', icon: Wallet, label: 'Финансы' }] : []),
+        ...(canAccessRights ? [{ path: '/admin/access-rights', icon: Shield, label: 'Права доступа' }] : []),
+    ];
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
 

@@ -5,11 +5,14 @@ const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
 
 /**
  * Check if user has a specific granular permission.
+ * Owner auto-has ALL permissions.
  * Specialists auto-have all psy_crm.* permissions.
  * Admins/owners auto-have admin.access.
  */
 export function hasPermission(user: User | null | undefined, permission: string): boolean {
     if (!user) return false;
+    // Owner has all permissions
+    if (user.role === 'owner') return true;
     if (PSY_CRM_PERMISSIONS.includes(permission) && user.role === 'specialist') return true;
     if (permission === 'admin.access' && user.role && ADMIN_ROLES.includes(user.role)) return true;
     return (user.permissions ?? []).includes(permission);
