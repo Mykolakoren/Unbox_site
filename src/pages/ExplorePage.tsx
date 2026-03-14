@@ -255,28 +255,33 @@ export function ExplorePage() {
                         transition={{ duration: 0.45, delay: 0.1 }}
                         className="relative z-10 pt-[132px] pb-10 px-6 md:px-12 flex flex-col lg:flex-row gap-8 items-stretch"
                     >
-                        {/* ── LEFT: Onboarding or Portal ── */}
-                        <div className="w-full lg:w-[58%] shrink-0 flex items-start">
-                            {currentUser?.role === 'specialist' ? (
+                        {currentUser?.role === 'specialist' ? (
+                            /* ── Logged-in specialist: full-width portal with bookings ── */
+                            <div className="w-full max-w-4xl mx-auto">
                                 <SpecialistPortalHero user={currentUser} />
-                            ) : (
-                                <SpecialistOnboardingHero
-                                    onApply={() => document.getElementById('apply')?.scrollIntoView({ behavior: 'smooth' })}
-                                />
-                            )}
-                        </div>
+                            </div>
+                        ) : (
+                            <>
+                                {/* ── LEFT: Onboarding for guests ── */}
+                                <div className="w-full lg:w-[58%] shrink-0 flex items-start">
+                                    <SpecialistOnboardingHero
+                                        onApply={() => document.getElementById('apply')?.scrollIntoView({ behavior: 'smooth' })}
+                                    />
+                                </div>
 
-                        {/* ── RIGHT: Cabinet photo ── */}
-                        <div
-                            className="hidden lg:block flex-1 rounded-[28px] overflow-hidden"
-                            style={{ maxHeight: 'calc(100vh - 172px)' }}
-                        >
-                            <img
-                                src="/cabinet-bg.jpg"
-                                alt="Кабинет Unbox"
-                                className="w-full h-full object-cover"
-                            />
-                        </div>
+                                {/* ── RIGHT: Cabinet photo ── */}
+                                <div
+                                    className="hidden lg:block flex-1 rounded-[28px] overflow-hidden"
+                                    style={{ maxHeight: 'calc(100vh - 172px)' }}
+                                >
+                                    <img
+                                        src="/cabinet-bg.jpg"
+                                        alt="Кабинет Unbox"
+                                        className="w-full h-full object-cover"
+                                    />
+                                </div>
+                            </>
+                        )}
                     </motion.main>
                 )}
             </AnimatePresence>
