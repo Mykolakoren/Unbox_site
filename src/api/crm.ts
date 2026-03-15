@@ -162,6 +162,24 @@ export interface CrmSpecialist {
     email: string;
 }
 
+export interface CrmAccessStatus {
+    access_status: 'none' | 'pending' | 'active' | 'expired' | 'rejected';
+    permanent: boolean;
+    expires_at: string | null;
+    days_remaining: number | null;
+}
+
+export interface CrmAccessRequest {
+    user_id: string;
+    name: string;
+    email: string;
+    phone?: string;
+    profession: string;
+    message: string;
+    submitted_at: string;
+    avatar_url?: string;
+}
+
 export const crmApi = {
     // Specialists (admin only)
     getSpecialists: async (): Promise<CrmSpecialist[]> => {
@@ -304,6 +322,32 @@ export const crmApi = {
 
     syncClientHistory: async (clientId: string): Promise<{ totalFound: number; created: number }> => {
         const response = await api.post(`/crm/clients/${clientId}/sync-history`);
+        return response.data;
+    },
+
+    // CRM Access / Subscription
+    getMyAccess: async (): Promise<CrmAccessStatus> => {
+        const response = await api.get('/crm/my-access');
+        return response.data;
+    },
+
+    applyForAccess: async (profession?: string, message?: string): Promise<{ ok: boolean; status: string }> => {
+        const response = await api.post('/crm/apply', { profession, message });
+        return response.data;
+    },
+
+    getAccessRequests: async (): Promise<CrmAccessRequest[]> => {
+        const response = await api.get('/crm/access-requests');
+        return response.data;
+    },
+
+    approveAccessRequest: async (userId: string, days = 30): Promise<{ ok: boolean }> => {
+        const response = await api.post(`/crm/access-requests/${userId}/approve`, { days });
+        return response.data;
+    },
+
+    rejectAccessRequest: async (userId: string, reason?: string): Promise<{ ok: boolean }> => {
+        const response = await api.post(`/crm/access-requests/${userId}/reject`, { reason });
         return response.data;
     },
 };

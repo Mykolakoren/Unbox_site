@@ -132,12 +132,33 @@ def require_admin(
 def require_specialist(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    """Legacy: requires specialist role OR psy_crm.access permission."""
+    """Requires specialist role OR active psy_crm.access with valid expiry."""
+    # Permanent access for specialist role and owner
+    if current_user.role in ("specialist", "owner"):
+        return current_user
+
+    # For other roles — check permission + expiry
     if not has_permission(current_user, "psy_crm.access"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Psy-CRM доступен только пользователям с правом psy_crm.access",
         )
+
+    # Check expiry date
+    crm_data = current_user.crm_data or {}
+    expires_at = crm_data.get("access_expires_at")
+    if expires_at:
+        from datetime import datetime
+        try:
+            expiry_dt = datetime.fromisoformat(expires_at)
+            if datetime.utcnow() > expiry_dt:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Срок доступа к CRM истёк. Запросите продление.",
+                )
+        except (ValueError, TypeError):
+            pass
+
     return current_user
 
 def require_crm_access(

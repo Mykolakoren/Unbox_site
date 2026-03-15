@@ -9,10 +9,11 @@ import {
     Calendar,
     Wallet,
     StickyNote,
+    Loader2,
 } from 'lucide-react';
-import { useEffect } from 'react';
-import { hasPermission } from '../../utils/permissions';
+import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
+import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import clsx from 'clsx';
 
 const CRM_TABS = [
@@ -61,15 +62,45 @@ export function CrmLayout() {
     const { currentUser } = useUserStore();
     const navigate = useNavigate();
     const hasToken = Boolean(localStorage.getItem('token'));
+    const [accessStatus, setAccessStatus] = useState<CrmAccessStatus | null>(null);
+    const [accessLoading, setAccessLoading] = useState(true);
 
     useEffect(() => {
         if (!hasToken) navigate('/login');
     }, [hasToken, navigate]);
 
+    // Check CRM access via API
+    useEffect(() => {
+        if (!currentUser) return;
+
+        // Quick check: specialist and owner always have access
+        const hasRoleAccess = currentUser.role === 'specialist' || currentUser.role === 'owner';
+        if (hasRoleAccess) {
+            setAccessStatus({ access_status: 'active', permanent: true, expires_at: null, days_remaining: null });
+            setAccessLoading(false);
+            return;
+        }
+
+        crmApi.getMyAccess()
+            .then(setAccessStatus)
+            .catch(() => setAccessStatus({ access_status: 'none', permanent: false, expires_at: null, days_remaining: null }))
+            .finally(() => setAccessLoading(false));
+    }, [currentUser]);
+
     if (!hasToken) return <Navigate to="/login" replace />;
     if (!currentUser) return null;
 
-    if (!hasPermission(currentUser, 'psy_crm.access')) {
+    // Show loading while checking access
+    if (accessLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50/80">
+                <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
+            </div>
+        );
+    }
+
+    // Show apply page if no active access
+    if (!accessStatus || accessStatus.access_status !== 'active') {
         return <CrmApplyPage />;
     }
 

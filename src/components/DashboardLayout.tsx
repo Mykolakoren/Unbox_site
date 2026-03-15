@@ -1,9 +1,9 @@
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { SidebarLayout } from './SidebarLayout';
-import { Calendar, Settings, LayoutDashboard, ShieldCheck, BriefcaseMedical, Loader2 } from 'lucide-react';
+import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { hasPermission } from '../utils/permissions';
+import { CrmAccessToggle } from './CrmAccessToggle';
 
 export function DashboardLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
@@ -45,18 +45,16 @@ export function DashboardLayout() {
     }
 
     const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
-    const hasCrm = hasPermission(currentUser, 'psy_crm.access');
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Обзор', path: '/dashboard' },
         { icon: Calendar, label: 'Мои бронирования', path: '/dashboard/bookings' },
-        ...(hasCrm ? [{ icon: BriefcaseMedical, label: 'Мой CRM', path: '/crm' }] : []),
         { icon: Settings, label: 'Настройки', path: '/dashboard/profile' },
         ...(isAdmin ? [{ icon: ShieldCheck, label: 'Админ-панель', path: '/admin' }] : []),
     ];
 
     return (
-        <SidebarLayout navItems={navItems}>
+        <SidebarLayout navItems={navItems} customBottomContent={<CrmAccessToggle />}>
             <Outlet />
         </SidebarLayout>
     );

@@ -693,7 +693,7 @@ export function MyBookingsPage() {
     const { currentUser, bookings, users, fetchUsers, cancelBooking, fetchBookings } = useUserStore();
     const startEditing = useBookingStore(s => s.startEditing);
     const { clients: crmClients, fetchClients } = useCrmStore();
-    const [viewMode, setViewMode] = useState<'list' | 'grid'>(location.state?.openGrid ? 'grid' : 'list');
+    const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
     const [publicBookings, setPublicBookings] = useState<BookingHistoryItem[]>([]);
 
     // CRM booking mode: passed from CRM Dashboard "Без кабинета"
