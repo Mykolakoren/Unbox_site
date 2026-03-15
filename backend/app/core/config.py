@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8 # 8 days
     
     # OAuth — defaults must match frontend Google client ID & Telegram bot
-    GOOGLE_CLIENT_ID: Optional[str] = "737163019349-24utj0eaemakjvr1ve8lpfgdno2q4tfr.apps.googleusercontent.com"
+    GOOGLE_CLIENT_ID: Optional[str] = "277953497231-ejqnao55sn2b8seegf3ckldg7704hdq3.apps.googleusercontent.com"
     TELEGRAM_BOT_TOKEN: Optional[str] = "8209648149:AAEJlsuCaMzbm0im_0cDRlqcIzug0Ihi9J0"
     
     # First Superuser (for auto-creation on deploy)

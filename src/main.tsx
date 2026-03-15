@@ -17,7 +17,7 @@ const queryClient = new QueryClient({
   },
 })
 
-const GOOGLE_CLIENT_ID = "737163019349-24utj0eaemakjvr1ve8lpfgdno2q4tfr.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "277953497231-ejqnao55sn2b8seegf3ckldg7704hdq3.apps.googleusercontent.com";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
   constructor(props: { children: ReactNode }) {
