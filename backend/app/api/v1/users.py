@@ -367,6 +367,68 @@ def update_personal_discount(
     
     return user
 
+@router.post("/{user_id}/change-password")
+def change_user_password(
+    *,
+    user_id: str,
+    payload: dict = Body(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """
+    Change password for a user (Admin only).
+    Owner can change any user's password.
+    Senior admin can change passwords for admin/specialist/user roles.
+    payload: { new_password: str }
+    """
+    from app.core.security import get_password_hash
+
+    new_password = payload.get("new_password")
+    if not new_password or len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    # Resolve target user
+    user = None
+    try:
+        user = session.get(User, UUID(user_id))
+    except ValueError:
+        pass
+    if not user:
+        user = session.exec(select(User).where(User.email == user_id)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User not found (ID: {user_id})")
+
+    # Permission check
+    if current_user.role == "owner":
+        pass  # Owner can change any password
+    elif current_user.role == "senior_admin":
+        if user.role in ["owner", "senior_admin"]:
+            raise HTTPException(status_code=403, detail="Senior Admin cannot change Owner/Senior Admin passwords")
+    else:
+        raise HTTPException(status_code=403, detail="Not authorized to change passwords")
+
+    # Update password
+    user.hashed_password = get_password_hash(new_password)
+    user.updated_at = datetime.utcnow()
+    session.add(user)
+    session.commit()
+
+    # Audit log
+    from app.services.timeline import timeline_service
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(user.id),
+        target_type="user",
+        event_type="password_change",
+        description=f"Password changed by {current_user.name}",
+        metadata={"changed_by": current_user.name}
+    )
+
+    return {"status": "ok", "message": "Password changed successfully"}
+
+
 @router.get("/", response_model=List[UserRead])
 def read_users(
     session: Session = Depends(get_session),

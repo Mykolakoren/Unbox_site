@@ -1,35 +1,16 @@
 import { useUserStore } from '../store/userStore';
 import { Button } from '../components/ui/Button';
-import { Shield, RefreshCcw, User, Phone, Mail, Plus } from 'lucide-react';
+import { Shield, User, Phone, Mail, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SubscriptionCard } from '../components/SubscriptionCard';
-import type { Format } from '../types';
-
-import { ReconciliationModal } from '../components/ReconciliationModal';
-import { useState } from 'react';
+import { hasPermission } from '../utils/permissions';
 
 export function ProfilePage() {
     const { currentUser, updateUser } = useUserStore();
-    const [isReconciliationModalOpen, setIsReconciliationModalOpen] = useState(false);
 
     if (!currentUser) return null;
 
-    const handleGrantSubscription = () => {
-        updateUser({
-            subscription: {
-                id: 'sub_123',
-                planId: 'pro',
-                name: 'Pro',
-                totalHours: 20,
-                remainingHours: 6,
-                freeReschedules: 0,
-                expiryDate: '2026-04-01T00:00:00.000Z',
-                isFrozen: false,
-                freezeCount: 0,
-                includedFormats: ['individual', 'group'] as Format[],
-            }
-        });
-    };
+    const isAdmin = currentUser.role && ['owner', 'senior_admin', 'admin'].includes(currentUser.role);
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -131,126 +112,26 @@ export function ProfilePage() {
                 </div>
             </div>
 
-            {/* Mock Admin Controls */}
-            <div className="bg-unbox-light/30 border border-dashed border-unbox-light p-6 rounded-2xl">
-                <h3 className="text-sm font-bold text-unbox-grey uppercase tracking-wider mb-4">⚙️ Админ-панель (Демо)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Кредитный лимит (₾)</label>
-                        <input
-                            type="number"
-                            className="w-full px-4 py-2 rounded-xl border border-unbox-light focus:ring-unbox-green focus:border-unbox-green"
-                            value={currentUser.creditLimit}
-                            onChange={(e) => updateUser({ creditLimit: Number(e.target.value) })}
-                        />
-                        <p className="text-xs text-unbox-grey mt-1">Максимальная сумма долга</p>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Установить баланс (₾)</label>
-                        <input
-                            type="number"
-                            className="w-full px-4 py-2 rounded-xl border border-unbox-light focus:ring-unbox-green focus:border-unbox-green"
-                            value={currentUser.balance}
-                            onChange={(e) => updateUser({ balance: Number(e.target.value) })}
-                        />
-                        <p className="text-xs text-unbox-grey mt-1">Для теста (пополнение/списание)</p>
-                    </div>
-                    <div className="md:col-span-2 pt-4 border-t border-unbox-light">
-                        <label className="block text-sm font-medium mb-2">Абонемент</label>
-                        <div className="flex flex-wrap gap-2">
-                            <Button
-                                variant="primary"
-                                className="w-full md:w-auto"
-                                onClick={handleGrantSubscription}
-                            >
-                                <Plus size={16} className="mr-2" />
-                                Начислить тестовый абонемент (50ч)
+            {/* Admin Access Section — only for users with admin role or admin.access permission */}
+            {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
+                <div className="bg-white p-6 rounded-2xl border border-unbox-light">
+                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                        <Shield className="text-unbox-green" size={20} />
+                        Администрирование
+                    </h3>
+
+                    <div className="bg-unbox-light border border-unbox-green/20 rounded-xl p-6">
+                        <p className="text-unbox-dark mb-4">
+                            Вам доступна панель администратора для управления бронированиями и клиентами.
+                        </p>
+                        <Link to="/admin">
+                            <Button className="w-full sm:w-auto">
+                                Перейти в панель администратора
                             </Button>
-
-                            <Button
-                                variant="outline"
-                                className="w-full md:w-auto"
-                                onClick={() => setIsReconciliationModalOpen(true)}
-                            >
-                                <RefreshCcw size={16} className="mr-2" />
-                                Пересчет скидки (Текущая неделя)
-                            </Button>
-                        </div>
-                        <p className="text-xs text-unbox-grey mt-1">Добавит/перезапишет текущий абонемент</p>
+                        </Link>
                     </div>
                 </div>
-
-                <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-2xl font-bold">Профиль</h1>
-
-                    {/* Reconciliation Button */}
-                    <button
-                        onClick={() => setIsReconciliationModalOpen(true)}
-                        className="flex items-center gap-2 text-sm font-medium text-unbox-grey hover:text-unbox-dark bg-unbox-light/30 hover:bg-unbox-light px-3 py-2 rounded-lg transition-colors"
-                    >
-                        <RefreshCcw size={16} />
-                        Сверка бонусов
-                    </button>
-                </div>
-
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-unbox-light">
-                    <div className="flex items-center gap-4 mb-6">
-                        <div className="w-16 h-16 rounded-full bg-unbox-dark text-white flex items-center justify-center text-2xl font-bold">
-                            {currentUser?.name?.[0].toUpperCase()}
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold">{currentUser?.name}</h2>
-                            <p className="text-unbox-grey">{currentUser?.email}</p>
-                            <p className="text-unbox-grey text-sm">{currentUser?.phone}</p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label className="block text-sm font-medium text-unbox-dark mb-1">
-                                Текущий баланс
-                            </label>
-                            <div className="text-2xl font-bold">
-                                {currentUser?.balance ?? 0} ₾
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-unbox-dark mb-1">
-                                Статус
-                            </label>
-                            <div className="inline-flex items-center px-3 py-1 rounded-full bg-unbox-light/50 text-unbox-dark text-sm font-medium">
-                                Standard
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Admin Access Section */}
-                {(currentUser?.email === 'admin@unbox.ge' || true) && ( // Temporary: Allow everyone to see for demo
-                    <div className="pt-6 border-t border-unbox-light mt-6">
-                        <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                            <Shield className="text-unbox-green" size={20} />
-                            Администрирование
-                        </h3>
-
-                        <div className="bg-unbox-light border border-unbox-green/20 rounded-xl p-6">
-                            <p className="text-unbox-dark mb-4">
-                                Вам доступна панель администратора для управления бронированиями и клиентами.
-                            </p>
-                            <Link to="/admin">
-                                <Button className="w-full sm:w-auto">
-                                    Перейти в панель администратора
-                                </Button>
-                            </Link>
-                        </div>
-                    </div>
-                )}    </div>
-
-            <ReconciliationModal
-                isOpen={isReconciliationModalOpen}
-                onClose={() => setIsReconciliationModalOpen(false)}
-            />
+            )}
         </div>
     );
 }

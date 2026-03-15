@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
+import { useUserStore } from '../../store/userStore';
 import {
     Plus,
     Search,
@@ -22,6 +23,7 @@ import { toast } from 'sonner';
 export function CrmClients() {
     const { clients, fetchClients, createClient, updateClient, deleteClient, loading } =
         useCrmStore();
+    const { currentUser } = useUserStore();
     const navigate = useNavigate();
     const [search, setSearch] = useState('');
     const [showInactive, setShowInactive] = useState(false);
@@ -197,6 +199,13 @@ export function CrmClients() {
                                             updateClient(client.id, { isActive: true });
                                             toast.success('Клиент восстановлен');
                                         }}
+                                        onPermanentDelete={() => {
+                                            if (confirm(`Вы уверены, что хотите НАВСЕГДА удалить клиента "${client.name}"?\n\nВсе сессии, платежи и заметки будут удалены. Это действие необратимо.`)) {
+                                                deleteClient(client.id, true);
+                                                toast.success('Клиент удалён навсегда');
+                                            }
+                                        }}
+                                        canPermanentDelete={currentUser?.role === 'owner' || currentUser?.role === 'senior_admin'}
                                     />
                                 </div>
                             </div>
@@ -442,10 +451,14 @@ function ClientMenu({
     isActive,
     onDelete,
     onRestore,
+    onPermanentDelete,
+    canPermanentDelete = false,
 }: {
     isActive: boolean;
     onDelete: () => void;
     onRestore: () => void;
+    onPermanentDelete?: () => void;
+    canPermanentDelete?: boolean;
 }) {
     const [open, setOpen] = useState(false);
 
@@ -460,14 +473,14 @@ function ClientMenu({
             {open && (
                 <>
                     <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-                    <div className="absolute right-0 top-8 z-20 bg-white rounded-xl border border-unbox-light shadow-lg py-1 w-40 animate-in fade-in slide-in-from-top-2">
+                    <div className="absolute right-0 top-8 z-20 bg-white rounded-xl border border-unbox-light shadow-lg py-1 w-44 animate-in fade-in slide-in-from-top-2">
                         {isActive ? (
                             <button
                                 onClick={() => {
                                     onDelete();
                                     setOpen(false);
                                 }}
-                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-amber-50 transition-colors"
                             >
                                 Деактивировать
                             </button>
@@ -481,6 +494,20 @@ function ClientMenu({
                             >
                                 Восстановить
                             </button>
+                        )}
+                        {canPermanentDelete && onPermanentDelete && (
+                            <>
+                                <div className="h-px bg-gray-100 my-1" />
+                                <button
+                                    onClick={() => {
+                                        onPermanentDelete();
+                                        setOpen(false);
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors font-medium"
+                                >
+                                    Удалить навсегда
+                                </button>
+                            </>
                         )}
                     </div>
                 </>

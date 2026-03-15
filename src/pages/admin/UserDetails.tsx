@@ -536,6 +536,43 @@ export function AdminUserDetails() {
                                 <span className="text-xs text-unbox-grey shrink-0">✎</span>
                             </button>
                         </div>
+
+                        {/* ── Password Change ── */}
+                        {(currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') && (
+                            <div className="border-t border-unbox-light pt-4">
+                                <div className="text-xs font-semibold text-unbox-grey uppercase tracking-wider mb-3">Безопасность</div>
+                                <button
+                                    onClick={async () => {
+                                        const newPassword = prompt('Введите новый пароль (мин. 6 символов):');
+                                        if (!newPassword) return;
+                                        if (newPassword.length < 6) {
+                                            toast.error('Пароль должен быть не менее 6 символов');
+                                            return;
+                                        }
+                                        const confirmPassword = prompt('Подтвердите новый пароль:');
+                                        if (newPassword !== confirmPassword) {
+                                            toast.error('Пароли не совпадают');
+                                            return;
+                                        }
+                                        try {
+                                            await api.post(`/users/${user.id}/change-password`, { new_password: newPassword });
+                                            toast.success('Пароль успешно изменён');
+                                        } catch (err: any) {
+                                            toast.error(err.response?.data?.detail || 'Ошибка смены пароля');
+                                        }
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
+                                >
+                                    <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                                        <Shield size={14} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-unbox-dark">Сменить пароль</div>
+                                        <div className="text-[10px] text-unbox-grey">Установить новый пароль для пользователя</div>
+                                    </div>
+                                </button>
+                            </div>
+                        )}
                     </Card>
 
                     {/* ── Admin Picker Modal (fixed, escapes overflow:hidden) ── */}

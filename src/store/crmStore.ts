@@ -28,7 +28,7 @@ interface CrmStore {
     fetchClients: (activeOnly?: boolean) => Promise<void>;
     createClient: (data: CrmClientCreate) => Promise<CrmClient>;
     updateClient: (id: string, data: CrmClientUpdate) => Promise<CrmClient>;
-    deleteClient: (id: string) => Promise<void>;
+    deleteClient: (id: string, permanent?: boolean) => Promise<void>;
 
     // Sessions
     fetchSessions: (params?: { clientId?: string; dateFrom?: string; dateTo?: string; status?: string }) => Promise<void>;
@@ -100,12 +100,19 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
         return updated;
     },
 
-    deleteClient: async (id) => {
-        await crmApi.deleteClient(id);
-        // Soft delete — update is_active to false locally
-        set((s) => ({
-            clients: s.clients.map((c) => (c.id === id ? { ...c, isActive: false } : c)),
-        }));
+    deleteClient: async (id, permanent = false) => {
+        await crmApi.deleteClient(id, permanent);
+        if (permanent) {
+            // Hard delete — remove from local state
+            set((s) => ({
+                clients: s.clients.filter((c) => c.id !== id),
+            }));
+        } else {
+            // Soft delete — update is_active to false locally
+            set((s) => ({
+                clients: s.clients.map((c) => (c.id === id ? { ...c, isActive: false } : c)),
+            }));
+        }
     },
 
     // ── Sessions ─────────────────────────────────────────────────────────────

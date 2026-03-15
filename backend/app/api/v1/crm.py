@@ -101,12 +101,42 @@ def update_client(
 @router.delete("/clients/{client_id}")
 def delete_client(
     client_id: str,
+    permanent: bool = Query(False),
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Client not found")
+
+    # Permanent delete — only for owner/senior_admin
+    if permanent:
+        if current_user.role not in ("owner", "senior_admin"):
+            raise HTTPException(403, "Only owner or senior admin can permanently delete clients")
+
+        # Delete related sessions, payments, notes
+        sessions_to_del = session.exec(
+            select(TherapySession).where(TherapySession.client_id == client_id)
+        ).all()
+        for s in sessions_to_del:
+            session.delete(s)
+
+        payments_to_del = session.exec(
+            select(TherapistPayment).where(TherapistPayment.client_id == client_id)
+        ).all()
+        for p in payments_to_del:
+            session.delete(p)
+
+        notes_to_del = session.exec(
+            select(TherapistNote).where(TherapistNote.client_id == client_id)
+        ).all()
+        for n in notes_to_del:
+            session.delete(n)
+
+        session.delete(client)
+        session.commit()
+        return {"ok": True, "permanent": True}
+
     # Soft delete — mark as inactive
     client.is_active = False
     client.updated_at = datetime.utcnow()

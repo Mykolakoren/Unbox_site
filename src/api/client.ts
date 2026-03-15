@@ -1,13 +1,9 @@
 import axios from 'axios';
 
-// Backend on Render.com
-const PROD_API_URL = 'https://unbox-site.onrender.com/api/v1';
-
-// In production (Vercel), point to Render backend
+// API URL:
 // In development, use VITE_API_URL or fallback to relative path (proxied by Vite)
-export const API_URL = import.meta.env.PROD
-    ? PROD_API_URL
-    : (import.meta.env.VITE_API_URL || '/api/v1');
+// In production (DigitalOcean), relative path '/api/v1' is proxied by nginx to backend
+export const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 export const api = axios.create({
     baseURL: API_URL,

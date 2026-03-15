@@ -8,9 +8,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8 # 8 days
     
-    # OAuth
-    GOOGLE_CLIENT_ID: Optional[str] = "277953497231-ejqnao55sn2b8seegf3ckldg7704hdq3.apps.googleusercontent.com"
-    TELEGRAM_BOT_TOKEN: Optional[str] = "7646959645:AAGnZh85gvYCCEMcgyTyj6sU_iJbql2k8cc"
+    # OAuth — defaults must match frontend Google client ID & Telegram bot
+    GOOGLE_CLIENT_ID: Optional[str] = "737163019349-24utj0eaemakjvr1ve8lpfgdno2q4tfr.apps.googleusercontent.com"
+    TELEGRAM_BOT_TOKEN: Optional[str] = "8209648149:AAEJlsuCaMzbm0im_0cDRlqcIzug0Ihi9J0"
     
     # First Superuser (for auto-creation on deploy)
     FIRST_SUPERUSER: str = "admin@unbox.com"

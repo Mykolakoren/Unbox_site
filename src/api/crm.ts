@@ -192,8 +192,8 @@ export const crmApi = {
         return response.data;
     },
 
-    deleteClient: async (id: string): Promise<void> => {
-        await api.delete(`/crm/clients/${id}`);
+    deleteClient: async (id: string, permanent = false): Promise<void> => {
+        await api.delete(`/crm/clients/${id}`, { params: permanent ? { permanent: true } : {} });
     },
 
     // Sessions
