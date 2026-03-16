@@ -309,7 +309,7 @@ export function ConfirmationStep() {
                     locationId: state.locationId || 'unbox_one', // Fallback
                     resourceId: item.resourceId,
                     format: state.format,
-                    date: state.date,
+                    date: format(state.date, 'yyyy-MM-dd'),
                     startTime: item.startTime,
                     duration: item.duration,
                     extras: state.extras,

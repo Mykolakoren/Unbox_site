@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from typing import Optional
 from google.oauth2 import service_account
@@ -18,34 +19,44 @@ class GoogleCalendarService:
 
     def _authenticate(self):
         """
-        Authenticate using Service Account JSON from env variable.
-        Expected ENV: GOOGLE_SERVICE_ACCOUNT_JSON (content of the file)
+        Authenticate using Service Account credentials.
+        Supports two methods:
+        1. GOOGLE_SERVICE_ACCOUNT_FILE — path to credentials JSON file
+        2. GOOGLE_SERVICE_ACCOUNT_JSON — raw JSON content as env variable
         """
         try:
-            # We expect the actual JSON content in the env var for simplicity in Render,
-            # OR a path to a file. Render supports "Secret Files", which appear as files.
-            # Let's support both: Path or Content?
-            # Easiest for Render Secret Files is a PATH.
-            # Let's assume GOOGLE_APPLICATION_CREDENTIALS is set by Render if using that feature,
-            # OR we use a custom var GOOGLE_SERVICE_ACCOUNT_FILE.
-            
-            # Using specific logic for Unbox:
+            # Method 1: JSON content from env variable (preferred for cloud deployments)
+            json_content = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON') or getattr(settings, 'GOOGLE_SERVICE_ACCOUNT_JSON', None)
+            if json_content:
+                try:
+                    info = json.loads(json_content)
+                    self.creds = service_account.Credentials.from_service_account_info(
+                        info, scopes=SCOPES
+                    )
+                    self.service = build('calendar', 'v3', credentials=self.creds)
+                    logger.info("Google Calendar: Authenticated via GOOGLE_SERVICE_ACCOUNT_JSON env variable.")
+                    return
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(f"Google Calendar: Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
+
+            # Method 2: File path
             json_path = settings.GOOGLE_SERVICE_ACCOUNT_FILE or "credentials.json"
-            
+
             if os.path.exists(json_path):
                 self.creds = service_account.Credentials.from_service_account_file(
                     json_path, scopes=SCOPES
                 )
+                self.service = build('calendar', 'v3', credentials=self.creds)
+                logger.info(f"Google Calendar: Authenticated via file: {json_path}")
             else:
-                logger.error(f"GOOGLE_SERVICE_ACCOUNT_FILE not found: {json_path}. Please check your environment variables and file presence.")
-                # We do NOT return here, so that 'service' remains None and is_connected() returns False.
-                return
-
-            self.service = build('calendar', 'v3', credentials=self.creds)
-            logger.info("Google Calendar Service Authenticated successfully.")
+                logger.warning(
+                    f"Google Calendar: NOT CONNECTED. "
+                    f"No credentials found. Set GOOGLE_SERVICE_ACCOUNT_JSON env var "
+                    f"(with JSON content) or place credentials file at: {os.path.abspath(json_path)}"
+                )
 
         except Exception as e:
-            logger.error(f"Failed to authenticate Google Calendar Service: {e}")
+            logger.error(f"Google Calendar: Authentication failed: {e}")
 
     def get_calendar_id(self, resource_id: str) -> Optional[str]:
         """
@@ -55,33 +66,36 @@ class GoogleCalendarService:
             # Unbox One
             "unbox_one_room_1": "CALENDAR_ID_CABINET_1",
             "unbox_one_room_2": "CALENDAR_ID_CABINET_2",
-            
+
             # Unbox Uni
             "unbox_uni_room_5": "CALENDAR_ID_CABINET_5",
             "unbox_uni_room_6": "CALENDAR_ID_CABINET_6",
             "unbox_uni_room_7": "CALENDAR_ID_CABINET_7",
             "unbox_uni_room_8": "CALENDAR_ID_CABINET_8",
             "unbox_uni_room_9": "CALENDAR_ID_CABINET_9",
-            
+
             # Capsules
             "unbox_uni_capsule_1": "CALENDAR_ID_CAPSULE_1",
             "unbox_uni_capsule_2": "CALENDAR_ID_CAPSULE_2",
         }
-        
+
         env_var = mapping.get(resource_id)
-        
+
         # Legacy fallback / Aliases
         if not env_var:
              if "capsule" in resource_id and "1" in resource_id: env_var = "CALENDAR_ID_CAPSULE_1"
              if "capsule" in resource_id and "2" in resource_id: env_var = "CALENDAR_ID_CAPSULE_2"
              # Fallback for old "capsule" var if user hasn't updated to _1 yet
              if resource_id == "unbox_uni_capsule_1" and not os.environ.get("CALENDAR_ID_CAPSULE_1"):
-                  return os.environ.get("CALENDAR_ID_CAPSULE") 
+                  return os.environ.get("CALENDAR_ID_CAPSULE")
 
         if env_var:
-            # Use settings object instead of os.environ
-            return getattr(settings, env_var, None)
-            
+            cal_id = getattr(settings, env_var, None) or os.environ.get(env_var)
+            if not cal_id:
+                logger.warning(f"Google Calendar: Env var {env_var} is not set for resource {resource_id}")
+            return cal_id
+
+        logger.warning(f"Google Calendar: No mapping found for resource_id: {resource_id}")
         return None
 
     def create_event(self, booking: Booking) -> Optional[str]:
@@ -89,30 +103,25 @@ class GoogleCalendarService:
         Create an event in Google Calendar. Returns event ID.
         """
         if not self.service:
+            logger.warning(f"Google Calendar: Cannot create event — service not connected. Booking {booking.id}")
             return None
-            
+
         calendar_id = self.get_calendar_id(booking.resource_id)
         if not calendar_id:
-            logger.warning(f"No Calendar ID found for resource {booking.resource_id}")
+            logger.warning(f"Google Calendar: No Calendar ID found for resource {booking.resource_id}")
             return None
 
         summary = f"Бронь: {booking.format} ({booking.payment_method})"
-        if booking.user_id: # Might be email
+        if booking.user_id:
              summary += f" - {booking.user_id}"
 
-        # Convert times. Booking date is datetime, start_time is "HH:MM".
-        # Need ISO format with timezone. 
-        # Assuming UTC for now or local? 
-        # Render is UTC. Tbilis is UTC+4. 
-        # Better to send explicit timeZone in body.
-        
         try:
-            # Construct start/end dt
+            # Construct start/end datetime strings
             date_str = booking.date.strftime("%Y-%m-%d")
-            
+
             start_dt = f"{date_str}T{booking.start_time}:00"
-            
-            # Calculate end
+
+            # Calculate end time
             start_h, start_m = map(int, booking.start_time.split(':'))
             total_minutes = start_h * 60 + start_m + booking.duration
             end_h = total_minutes // 60
@@ -121,10 +130,10 @@ class GoogleCalendarService:
 
             event = {
                 'summary': summary,
-                'description': f"Id: {booking.id}\nExtras: {booking.extras}",
+                'description': f"Booking ID: {booking.id}\nExtras: {booking.extras}",
                 'start': {
                     'dateTime': start_dt,
-                    'timeZone': 'Asia/Tbilisi', # Hardcoded for Unbox
+                    'timeZone': 'Asia/Tbilisi',
                 },
                 'end': {
                     'dateTime': end_dt,
@@ -132,11 +141,17 @@ class GoogleCalendarService:
                 },
             }
 
+            logger.info(f"Google Calendar: Creating event for booking {booking.id} "
+                       f"on calendar {calendar_id[:20]}... "
+                       f"Date: {date_str}, Time: {booking.start_time}, Duration: {booking.duration}min")
+
             created_event = self.service.events().insert(calendarId=calendar_id, body=event).execute()
-            return created_event.get('id')
-            
+            event_id = created_event.get('id')
+            logger.info(f"Google Calendar: Event created successfully. Event ID: {event_id}")
+            return event_id
+
         except Exception as e:
-            logger.error(f"Failed to create GCal event: {e}")
+            logger.error(f"Google Calendar: Failed to create event for booking {booking.id}: {e}")
             return None
 
     def delete_event(self, event_id: str, resource_id: str):
@@ -152,9 +167,9 @@ class GoogleCalendarService:
 
         try:
             self.service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
-            logger.info(f"Deleted GCal event {event_id}")
+            logger.info(f"Google Calendar: Deleted event {event_id}")
         except Exception as e:
-            logger.error(f"Failed to delete GCal event {event_id}: {e}")
+            logger.error(f"Google Calendar: Failed to delete event {event_id}: {e}")
 
     def is_connected(self) -> bool:
         """

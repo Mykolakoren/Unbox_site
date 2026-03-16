@@ -147,6 +147,11 @@ def create_booking(
 ) -> Any:
     """Create new booking."""
     try:
+        # Normalize date — strip time component to avoid timezone shift issues
+        # Frontend may send "2026-03-19" or "2026-03-18T20:00:00Z" (UTC offset)
+        if booking_in.date:
+            booking_in.date = booking_in.date.replace(hour=0, minute=0, second=0, microsecond=0)
+
         is_available, reason = check_availability(
             session=session,
             resource_id=booking_in.resource_id,
@@ -233,14 +238,20 @@ def create_booking(
 
         # Google Calendar Sync
         try:
+            print(f"[GCal Sync] Attempting for booking {booking.id}, resource={booking.resource_id}, connected={gcal_service.is_connected()}")
             event_id = gcal_service.create_event(booking)
             if event_id:
                 booking.gcal_event_id = event_id
                 session.add(booking)
                 session.commit()
                 session.refresh(booking)
+                print(f"[GCal Sync] SUCCESS: event_id={event_id}")
+            else:
+                print(f"[GCal Sync] No event created (service not connected or no calendar ID)")
         except Exception as e:
-            print(f"GCal Sync Failed (Non-blocking): {e}")
+            print(f"[GCal Sync] FAILED (Non-blocking): {e}")
+            import traceback
+            traceback.print_exc()
 
         return booking
 

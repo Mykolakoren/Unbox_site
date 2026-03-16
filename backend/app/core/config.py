@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     
     # Google Calendar
     GOOGLE_SERVICE_ACCOUNT_FILE: Optional[str] = None
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # JSON content as env var
     CALENDAR_ID_CABINET_1: Optional[str] = None
     CALENDAR_ID_CABINET_2: Optional[str] = None
     CALENDAR_ID_CABINET_5: Optional[str] = None
