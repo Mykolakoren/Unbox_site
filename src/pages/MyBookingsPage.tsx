@@ -67,6 +67,8 @@ function BookingsChessboard({
     usersMap?: Map<string, string>;
 }) {
     const { updateSession } = useCrmStore();
+    const navigate = useNavigate();
+    const bookingStoreActions = useBookingStore();
     const location = useLocation();
     const crmTargetDate = crmMode ? new Date(crmMode.date) : null;
     const navTargetDate = location.state?.targetDate ? new Date(location.state.targetDate) : null;
@@ -91,7 +93,7 @@ function BookingsChessboard({
 
     // ── Drag-to-select NEW booking slots ──
     const [newSlots, setNewSlots] = useState<string[]>([]); // "resId|time" format
-    const [bookingSaving, setBookingSaving] = useState(false);
+    const bookingSaving = false; // sync navigation, no async state needed
     type NewDragMode = 'new' | 'resize-start' | 'resize-end' | null;
     const newDragModeRef = useRef<NewDragMode>(null);
     const newDragStartRef = useRef<{ resId: string; time: string } | null>(null);
@@ -332,36 +334,28 @@ function BookingsChessboard({
     // Clear selection when date changes
     useEffect(() => { setNewSlots([]); }, [selectedDate]);
 
-    // ── Handle "Продолжить" — create booking ──
-    const handleConfirmNewBooking = async () => {
+    // ── Handle "Продолжить" — navigate to checkout wizard ──
+    const handleConfirmNewBooking = () => {
         if (newSlots.length === 0) return;
         const block = selectedNewBlocks[0];
         if (!block) return;
 
         const resource = RESOURCES.find(r => r.id === block.resId);
-        const startTime = timeSlots[block.start];
-        const duration = (block.end - block.start + 1) * 30;
 
-        setBookingSaving(true);
-        try {
-            await bookingsApi.createBooking({
-                resourceId: block.resId,
-                date: new Date(format(selectedDate, 'yyyy-MM-dd')),
-                startTime,
-                duration,
-                format: resource?.formats?.[0] || 'individual',
-                locationId: resource?.locationId,
-            } as any);
-            toast.success('Бронирование создано!');
-            setNewSlots([]);
-            refreshBookings();
-        } catch (e: any) {
-            const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка';
-            toast.error(msg);
-        } finally {
-            setBookingSaving(false);
-        }
+        // Sync selection into bookingStore for the checkout wizard.
+        // Use reset() then set all fields at once to avoid intermediate
+        // sideeffects from individual setters (setLocation/setDate clear selectedSlots).
+        bookingStoreActions.reset();
+        useBookingStore.setState({
+            locationId: resource?.locationId || 'unbox_one',
+            date: selectedDate,
+            format: (resource?.formats?.[0] as any) || 'individual',
+            selectedSlots: [...newSlots],
+            step: 4, // confirmation: cost calculation + payment method + CRM client
+        });
+
+        setNewSlots([]);
+        navigate('/checkout');
     };
 
     // ─── Drag handlers (rescheduling) ──────────────────────────────────────────
