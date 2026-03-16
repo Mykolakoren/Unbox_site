@@ -57,11 +57,12 @@ export function ChessboardStep() {
     };
 
     // Toggle for View Mode (Specific Location vs All)
-    const [showAllLocations, setShowAllLocations] = useState(false);
+    // Auto-show all locations when no location is selected (e.g. admin booking from client card)
+    const [showAllLocations, setShowAllLocations] = useState(!locationId);
 
     // 1. Get Resources
     const resources = useMemo(() => {
-        let res = showAllLocations ? RESOURCES : RESOURCES.filter(r => r.locationId === locationId);
+        let res = (showAllLocations || !locationId) ? RESOURCES : RESOURCES.filter(r => r.locationId === locationId);
 
         // Filter by format
         if (bookingFormat) {
