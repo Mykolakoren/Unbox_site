@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-    CalendarDays, Plus, Clock, CheckCircle2, AlertCircle,
+    CalendarDays, Plus, Clock, CheckCircle2,
     Users, BriefcaseMedical, Wallet, CalendarPlus,
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isBefore } from 'date-fns';
@@ -151,6 +151,7 @@ export function SpecialistPortalHero({ user }: Props) {
     const navigate = useNavigate();
     const firstName = user.name?.split(' ')[0] ?? 'Специалист';
     const isVerified = user.role === 'specialist';
+    const isAdmin = user.role === 'admin' || user.role === 'senior_admin' || user.role === 'owner';
 
     useEffect(() => {
         fetchBookings();
@@ -223,19 +224,20 @@ export function SpecialistPortalHero({ user }: Props) {
                             <h1 className="text-xl font-black text-unbox-dark leading-none">
                                 {firstName}, добро пожаловать!
                             </h1>
-                            {isVerified ? (
+                            {isVerified && (
                                 <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
                                     style={{ background: 'rgba(71,109,107,0.15)', color: 'rgb(71,109,107)', border: '1px solid rgba(71,109,107,0.25)' }}
                                 >
                                     <CheckCircle2 size={10} />
                                     Верифицирован
                                 </span>
-                            ) : (
+                            )}
+                            {isAdmin && (
                                 <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                    style={{ background: 'rgba(245,158,11,0.12)', color: 'rgb(180,120,20)', border: '1px solid rgba(245,158,11,0.25)' }}
+                                    style={{ background: 'rgba(71,109,107,0.15)', color: 'rgb(71,109,107)', border: '1px solid rgba(71,109,107,0.25)' }}
                                 >
-                                    <AlertCircle size={10} />
-                                    На проверке
+                                    <CheckCircle2 size={10} />
+                                    {user.role === 'owner' ? 'Owner' : user.role === 'senior_admin' ? 'Senior Admin' : 'Admin'}
                                 </span>
                             )}
                         </div>
