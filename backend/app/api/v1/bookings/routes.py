@@ -61,22 +61,31 @@ def _resolve_booking_owner(session: Session, booking: Booking) -> User | None:
 
 
 def _refund_booking_to_owner(
-    session: Session, booking: Booking, owner: User
+    session: Session, booking: Booking, owner: User, refund_percent: float = 1.0
 ) -> dict:
     """
     Refund booking cost to owner. Returns metadata dict for audit logging.
     Handles both balance and subscription payment methods.
+
+    refund_percent: 1.0 = full refund (cancellation), 0.5 = 50% (re-rent claim).
+    The non-refunded portion is retained as Unbox income.
     """
-    refund_meta = {"refunded_to": str(owner.id), "refunded_to_email": owner.email}
+    refund_meta = {
+        "refunded_to": str(owner.id),
+        "refunded_to_email": owner.email,
+        "refund_percent": refund_percent,
+    }
 
     if booking.payment_method == "subscription":
         if owner.subscription:
             new_sub = owner.subscription.copy()
-            refund_hours = (
+            full_hours = (
                 booking.hours_deducted
                 if booking.hours_deducted is not None
                 else (booking.duration / 60)
             )
+            refund_hours = round(full_hours * refund_percent, 4)
+            retained_hours = round(full_hours - refund_hours, 4)
             rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
             new_sub["remaining_hours"] = float(rem) + refund_hours
             if "remainingHours" in new_sub:
@@ -84,14 +93,18 @@ def _refund_booking_to_owner(
             owner.subscription = new_sub
             session.add(owner)
             refund_meta["refunded_hours"] = refund_hours
+            refund_meta["retained_hours_unbox_income"] = retained_hours
         else:
             refund_meta["refunded_hours"] = 0
             refund_meta["warning"] = "Owner has no subscription to refund to"
     else:
-        refund_amount = booking.final_price if booking.final_price is not None else 0.0
+        full_amount = booking.final_price if booking.final_price is not None else 0.0
+        refund_amount = round(full_amount * refund_percent, 2)
+        retained_amount = round(full_amount - refund_amount, 2)
         owner.balance += refund_amount
         session.add(owner)
         refund_meta["refunded_amount"] = refund_amount
+        refund_meta["retained_amount_unbox_income"] = retained_amount
 
     return refund_meta
 
@@ -256,17 +269,24 @@ def create_booking(
                     status_code=400, detail=f"Time slot is already booked: {reason}"
                 )
 
-            # Auto-cancel all conflicting re-rent bookings with refund
+            # Auto-cancel all conflicting re-rent bookings with 50% refund.
+            # Re-rent policy: original owner gets 50%, remaining 50% = Unbox income.
+            RE_RENT_REFUND_PERCENT = 0.5
+
             for re_rent_booking in re_rent_conflicts:
                 re_rent_owner = _resolve_booking_owner(session, re_rent_booking)
+                refund_meta = {}
 
                 if re_rent_owner:
-                    _refund_booking_to_owner(session, re_rent_booking, re_rent_owner)
+                    refund_meta = _refund_booking_to_owner(
+                        session, re_rent_booking, re_rent_owner,
+                        refund_percent=RE_RENT_REFUND_PERCENT,
+                    )
 
                 # Cancel the re-rent booking
                 re_rent_booking.status = "cancelled"
                 re_rent_booking.cancellation_reason = (
-                    "Auto-cancelled: slot re-rented to another user"
+                    "Auto-cancelled: slot re-rented to another user (50% refund)"
                 )
                 re_rent_booking.cancelled_by = "system:re-rent"
                 re_rent_booking.is_re_rent_listed = False
@@ -283,7 +303,7 @@ def create_booking(
                         pass
                     re_rent_booking.gcal_event_id = None
 
-                # Audit log for auto-cancel
+                # Audit log for auto-cancel with 50% refund details
                 timeline_service.log_event(
                     session=session,
                     actor_id=current_user.id,
@@ -291,10 +311,14 @@ def create_booking(
                     target_id=str(re_rent_booking.id),
                     target_type="booking",
                     event_type="booking_auto_cancelled_re_rent",
-                    description=f"Booking auto-cancelled due to re-rent claim by {current_user.name}",
+                    description=(
+                        f"Booking auto-cancelled due to re-rent claim by {current_user.name}. "
+                        f"Owner refunded {int(RE_RENT_REFUND_PERCENT * 100)}%, rest → Unbox income."
+                    ),
                     metadata={
-                        "refunded_to": str(re_rent_owner.id) if re_rent_owner else None,
+                        "refund_percent": RE_RENT_REFUND_PERCENT,
                         "new_booking_user": current_user.email,
+                        **refund_meta,
                     },
                 )
             # Slot is now free — proceed with creating the new booking
