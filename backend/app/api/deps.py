@@ -133,8 +133,8 @@ def require_specialist(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     """Requires specialist role OR active psy_crm.access with valid expiry."""
-    # Permanent access for specialist role and owner
-    if current_user.role in ("specialist", "owner"):
+    # Permanent access for specialist role, owner, and senior_admin
+    if current_user.role in ("specialist", "owner", "senior_admin"):
         return current_user
 
     # For other roles — check permission + expiry

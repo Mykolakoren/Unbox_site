@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BriefcaseMedical, Loader2, Clock, AlertCircle } from 'lucide-react';
 import { crmApi, type CrmAccessStatus } from '../api/crm';
+import { useUserStore } from '../store/userStore';
 
 export function CrmAccessToggle() {
     const navigate = useNavigate();
+    const currentUser = useUserStore(s => s.currentUser);
     const [access, setAccess] = useState<CrmAccessStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const [applying, setApplying] = useState(false);
@@ -28,11 +30,17 @@ export function CrmAccessToggle() {
         // If pending — do nothing
         if (access.access_status === 'pending') return;
 
-        // If none/expired/rejected — apply
+        // Owner and senior_admin get auto-approved — apply then navigate
+        const isPrivileged = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
         setApplying(true);
         try {
-            await crmApi.applyForAccess();
-            setAccess(prev => prev ? { ...prev, access_status: 'pending' } : prev);
+            const result = await crmApi.applyForAccess();
+            if (isPrivileged || result.status === 'active') {
+                setAccess(prev => prev ? { ...prev, access_status: 'active', permanent: true } : prev);
+                navigate('/crm');
+            } else {
+                setAccess(prev => prev ? { ...prev, access_status: 'pending' } : prev);
+            }
         } catch {
             // Error handled silently
         } finally {

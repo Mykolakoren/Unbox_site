@@ -756,7 +756,7 @@ export function MyBookingsPage() {
 
     const handleEdit = (booking: any) => {
         startEditing(booking, 'reschedule');
-        navigate('/');
+        navigate('/checkout');
     };
 
     const handleCancel = (id: string) => {

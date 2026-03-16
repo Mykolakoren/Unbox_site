@@ -73,8 +73,8 @@ export function CrmLayout() {
     useEffect(() => {
         if (!currentUser) return;
 
-        // Quick check: specialist and owner always have access
-        const hasRoleAccess = currentUser.role === 'specialist' || currentUser.role === 'owner';
+        // Quick check: specialist, owner, and senior_admin always have access
+        const hasRoleAccess = currentUser.role === 'specialist' || currentUser.role === 'owner' || currentUser.role === 'senior_admin';
         if (hasRoleAccess) {
             setAccessStatus({ access_status: 'active', permanent: true, expires_at: null, days_remaining: null });
             setAccessLoading(false);

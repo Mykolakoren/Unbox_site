@@ -476,9 +476,27 @@ def apply_for_crm_access(
     message: Optional[str] = Body(None, embed=True),
 ):
     """Any authenticated user can apply for psy_crm.access (monthly subscription).
-    Blocks duplicate pending requests."""
+    Owner and senior_admin get auto-approved. Blocks duplicate pending requests."""
+    now = datetime.utcnow()
     crm_data = dict(current_user.crm_data or {})
     current_status = crm_data.get("access_status", "none")
+
+    # Auto-approve for owner and senior_admin
+    if current_user.role in ("owner", "senior_admin"):
+        crm_data["access_status"] = "active"
+        crm_data["access_expires_at"] = (now + timedelta(days=365 * 10)).isoformat()
+        crm_data["access_granted_by"] = "auto"
+        crm_data["access_granted_at"] = now.isoformat()
+        # Add psy_crm.access permission
+        perms = list(current_user.permissions or [])
+        if "psy_crm.access" not in perms:
+            perms.append("psy_crm.access")
+            current_user.permissions = perms
+        current_user.crm_data = crm_data
+        current_user.updated_at = now
+        session.add(current_user)
+        session.commit()
+        return {"ok": True, "status": "active"}
 
     # Block duplicate pending applications
     if current_status == "pending":
@@ -488,12 +506,12 @@ def apply_for_crm_access(
     crm_data["access_application"] = {
         "profession": profession or "",
         "message": message or "",
-        "submitted_at": datetime.utcnow().isoformat(),
+        "submitted_at": now.isoformat(),
     }
     if profession:
         current_user.profession = profession
     current_user.crm_data = crm_data
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = now
     session.add(current_user)
     session.commit()
     return {"ok": True, "status": "pending"}
@@ -505,8 +523,8 @@ def get_my_crm_access(
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Returns the current user's CRM access status, checking expiry."""
-    # Permanent access for specialists and owners
-    if current_user.role in ("specialist", "owner"):
+    # Permanent access for specialists, owners, and senior admins
+    if current_user.role in ("specialist", "owner", "senior_admin"):
         return {
             "access_status": "active",
             "permanent": True,
