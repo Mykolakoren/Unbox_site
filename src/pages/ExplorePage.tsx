@@ -258,7 +258,7 @@ export function ExplorePage() {
                         {currentUser ? (
                             /* ── Any logged-in user: full-width portal with bookings ── */
                             <div className="w-full max-w-4xl mx-auto">
-                                <SpecialistPortalHero user={currentUser} />
+                                <SpecialistPortalHero user={currentUser} onNewBooking={() => handleModeSelect('client')} />
                             </div>
                         ) : (
                             <>
