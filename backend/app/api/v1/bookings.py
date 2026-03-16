@@ -147,6 +147,14 @@ def create_booking(
 ) -> Any:
     """Create new booking."""
     try:
+        # Minimum booking duration: 60 minutes (Unbox policy)
+        MIN_BOOKING_DURATION = 60
+        if booking_in.duration < MIN_BOOKING_DURATION:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Минимальная длительность бронирования — {MIN_BOOKING_DURATION} минут (1 час)."
+            )
+
         # Normalize date — strip time component to avoid timezone shift issues
         # Frontend may send "2026-03-19" or "2026-03-18T20:00:00Z" (UTC offset)
         if booking_in.date:
