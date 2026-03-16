@@ -1458,12 +1458,12 @@ function CrmQuickBookingModal({
         try {
             const booking = await bookingsApi.createBooking({
                 resourceId: slot.resId,
-                date: new Date(dateStr),
+                date: dateStr, // Send as string 'YYYY-MM-DD' to avoid timezone shift
                 startTime: slot.time,
                 duration,
                 format: resource?.formats?.[0],
                 locationId: resource?.locationId,
-            });
+            } as any);
             await bookingsApi.linkCrmClient(booking.id, crmMode.clientId);
             // Sync booking time back to CRM session (non-blocking)
             try {

@@ -210,7 +210,14 @@ def create_booking(
         else:
             available_funds = booking_owner.balance + booking_owner.credit_limit
             if available_funds < quote.final_price:
-                raise HTTPException(status_code=400, detail=f"Insufficient funds. Required: {quote.final_price}, Available: {available_funds}")
+                user_name = booking_owner.name or booking_owner.email
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Недостаточно средств у пользователя {user_name}. "
+                           f"Необходимо: {quote.final_price}₾, доступно: {available_funds}₾ "
+                           f"(баланс: {booking_owner.balance}₾, кредит: {booking_owner.credit_limit}₾). "
+                           f"Пополните баланс перед бронированием."
+                )
             booking_owner.balance -= quote.final_price
 
         booking_in.final_price = quote.final_price

@@ -755,7 +755,7 @@ function AdminQuickBookingModal({
         try {
             await bookingsApi.createBooking({
                 resourceId: slot.resId,
-                date: new Date(dateStr),
+                date: dateStr, // Send as string 'YYYY-MM-DD' to avoid timezone shift
                 startTime: slot.time,
                 duration,
                 format: resource?.formats?.[0] || 'individual',
