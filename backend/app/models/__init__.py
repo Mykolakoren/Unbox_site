@@ -19,3 +19,6 @@ from .shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
 
 # Team members
 from .team_member import TeamMember, TeamMemberCreate, TeamMemberRead, TeamMemberUpdate
+
+# Notifications
+from .notification import Notification, NotificationCreate, NotificationRead

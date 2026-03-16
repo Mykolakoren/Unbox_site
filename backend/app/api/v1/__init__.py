@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import bookings, users, auth, waitlist, health, timeline, resources, upload, pricing, locations, specialists, crm, cashbox, team
+from app.api.v1 import bookings, users, auth, waitlist, health, timeline, resources, upload, pricing, locations, specialists, crm, cashbox, team, notifications
 
 api_router = APIRouter()
 api_router.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
@@ -16,3 +16,4 @@ api_router.include_router(specialists.router, prefix="/specialists", tags=["spec
 api_router.include_router(crm.router, prefix="/crm", tags=["crm"])
 api_router.include_router(cashbox.router, prefix="/cashbox", tags=["cashbox"])
 api_router.include_router(team.router, prefix="/team", tags=["team"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

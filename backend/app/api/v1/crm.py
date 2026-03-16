@@ -514,6 +514,19 @@ def apply_for_crm_access(
     current_user.updated_at = now
     session.add(current_user)
     session.commit()
+
+    # Notify admins with accept_requests permission
+    from app.services.notification_service import notification_service
+    notification_service.notify_by_permission(
+        session, "admin.accept_requests",
+        type="crm_access_request",
+        title="Новый запрос на CRM",
+        description=f"{current_user.name} подал(а) запрос на доступ к CRM",
+        icon="UserPlus",
+        link="/admin/specialists",
+    )
+    session.commit()
+
     return {"ok": True, "status": "pending"}
 
 

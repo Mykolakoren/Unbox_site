@@ -7,6 +7,7 @@ import {
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
 import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
+import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
 
 const NAV_ITEMS = [
@@ -116,6 +117,8 @@ export function AdminLayout() {
                         <div className="hidden lg:block">
                             <IntegrationStatus compact />
                         </div>
+
+                        <NotificationBell />
 
                         {/* User menu */}
                         <div className="relative">

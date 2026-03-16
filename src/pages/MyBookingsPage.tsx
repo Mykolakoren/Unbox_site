@@ -7,7 +7,7 @@ import { Button } from '../components/ui/Button';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2, Plus
+    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
@@ -80,16 +80,24 @@ function BookingsChessboard({
     const [crmSlot, setCrmSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
     const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
-    // Quick booking state (for free slot clicks)
-    const [quickBookSlot, setQuickBookSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     const tableRef = useRef<HTMLDivElement>(null);
 
-    // Drag state
+    // Drag state (rescheduling existing bookings)
     const [dragBooking, setDragBooking] = useState<BookingHistoryItem | null>(null);
     const [dragTarget, setDragTarget] = useState<{ resId: string; time: string } | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ resId: string; time: string; offsetMins: number } | null>(null);
+
+    // ── Drag-to-select NEW booking slots ──
+    const [newSlots, setNewSlots] = useState<string[]>([]); // "resId|time" format
+    const [bookingSaving, setBookingSaving] = useState(false);
+    type NewDragMode = 'new' | 'resize-start' | 'resize-end' | null;
+    const newDragModeRef = useRef<NewDragMode>(null);
+    const newDragStartRef = useRef<{ resId: string; time: string } | null>(null);
+    const newDragInitialBlockRef = useRef<{ resId: string; start: number; end: number } | null>(null);
+    const [, setNewDragTick] = useState(0);
+    const forceNewDragUpdate = () => setNewDragTick(t => t + 1);
 
     // CRM session time hint (dashed overlay on chessboard)
     const crmHintDate = crmMode?.date ? format(parseISO(crmMode.date), 'yyyy-MM-dd') : null;
@@ -183,7 +191,180 @@ function BookingsChessboard({
         return map;
     }, [crmClients]);
 
-    // ─── Drag handlers ──────────────────────────────────────────
+    // ── Is slot occupied (blocked for new booking)? ──
+    const isSlotOccupied = useCallback((resId: string, time: string) => {
+        if (isSlotPast(time)) return true;
+        return !!findBookingAtSlot(dayUserBookings, resId, time) ||
+            !!findBookingAtSlot(dayPublicBookings, resId, time);
+    }, [isSlotPast, dayUserBookings, dayPublicBookings]);
+
+    // ── Selected new block info ──
+    const selectedNewBlocks = useMemo(() => {
+        const byRes: Record<string, number[]> = {};
+        for (const slot of newSlots) {
+            const [resId, timeStr] = slot.split('|');
+            const idx = timeSlots.indexOf(timeStr);
+            if (idx === -1) continue;
+            if (!byRes[resId]) byRes[resId] = [];
+            byRes[resId].push(idx);
+        }
+        return Object.entries(byRes).map(([resId, indices]) => {
+            const sorted = [...indices].sort((a, b) => a - b);
+            return { resId, start: sorted[0], end: sorted[sorted.length - 1] };
+        });
+    }, [newSlots, timeSlots]);
+
+    const getNewBlockForResource = (resId: string) =>
+        selectedNewBlocks.find(b => b.resId === resId) ?? null;
+
+    const isNewSlotSelected = (resId: string, time: string) =>
+        newSlots.includes(`${resId}|${time}`);
+
+    const setNewSlotRange = (resId: string, times: string[]) => {
+        const other = newSlots.filter(s => !s.startsWith(`${resId}|`));
+        setNewSlots([...other, ...times.map(t => `${resId}|${t}`)]);
+    };
+
+    // ── New booking drag handlers ──
+    const handleNewDragDown = (resId: string, time: string, mode: NewDragMode) => {
+        if (isSlotOccupied(resId, time) && mode === 'new') return;
+
+        newDragModeRef.current = mode;
+        newDragStartRef.current = { resId, time };
+
+        if (mode === 'new') {
+            setNewSlotRange(resId, [time]);
+        } else {
+            const block = getNewBlockForResource(resId);
+            if (block) newDragInitialBlockRef.current = block;
+        }
+        forceNewDragUpdate();
+    };
+
+    const handleNewDragEnter = useCallback((resId: string, time: string) => {
+        const mode = newDragModeRef.current;
+        const startSlot = newDragStartRef.current;
+        const initBlock = newDragInitialBlockRef.current;
+        if (!mode || !startSlot) return;
+
+        const currentIdx = timeSlots.indexOf(time);
+        const startIdx = timeSlots.indexOf(startSlot.time);
+        if (currentIdx === -1 || startIdx === -1) return;
+
+        if (mode === 'new') {
+            if (startSlot.resId !== resId) return;
+            const minIdx = Math.min(startIdx, currentIdx);
+            const maxIdx = Math.max(startIdx, currentIdx);
+            const slots: string[] = [];
+            let blocked = false;
+            for (let i = minIdx; i <= maxIdx; i++) {
+                if (isSlotOccupied(resId, timeSlots[i])) { blocked = true; break; }
+                slots.push(timeSlots[i]);
+            }
+            if (!blocked) setNewSlotRange(resId, slots);
+        } else if (mode === 'resize-end' && initBlock) {
+            if (initBlock.resId !== resId) return;
+            const minIdx = initBlock.start;
+            const maxIdx = Math.max(minIdx, currentIdx);
+            const slots: string[] = [];
+            let blocked = false;
+            for (let i = minIdx; i <= maxIdx; i++) {
+                if (isSlotOccupied(resId, timeSlots[i])) { blocked = true; break; }
+                slots.push(timeSlots[i]);
+            }
+            if (!blocked) setNewSlotRange(resId, slots);
+        } else if (mode === 'resize-start' && initBlock) {
+            if (initBlock.resId !== resId) return;
+            const maxIdx = initBlock.end;
+            const minIdx = Math.min(maxIdx, currentIdx);
+            const slots: string[] = [];
+            let blocked = false;
+            for (let i = minIdx; i <= maxIdx; i++) {
+                if (isSlotOccupied(resId, timeSlots[i])) { blocked = true; break; }
+                slots.push(timeSlots[i]);
+            }
+            if (!blocked) setNewSlotRange(resId, slots);
+        }
+    }, [timeSlots, isSlotOccupied]);
+
+    const handleNewDragUp = useCallback(() => {
+        if (!newDragModeRef.current) return;
+        newDragModeRef.current = null;
+        newDragStartRef.current = null;
+        newDragInitialBlockRef.current = null;
+        forceNewDragUpdate();
+
+        // Min 1h: if only 1 slot selected, auto-add next
+        setNewSlots(prev => {
+            if (prev.length !== 1) return prev;
+            const [resId, timeStr] = prev[0].split('|');
+            const idx = timeSlots.indexOf(timeStr);
+            if (idx >= 0 && idx + 1 < timeSlots.length && !isSlotOccupied(resId, timeSlots[idx + 1])) {
+                return [...prev, `${resId}|${timeSlots[idx + 1]}`];
+            }
+            return prev;
+        });
+    }, [timeSlots, isSlotOccupied]);
+
+    // Global pointer events for new drag
+    useEffect(() => {
+        const handleMove = (e: PointerEvent) => {
+            if (!newDragModeRef.current) return;
+            if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                const target = document.elementFromPoint(e.clientX, e.clientY);
+                if (!target) return;
+                const slotEl = target.closest('[data-newresid][data-newtime]');
+                if (slotEl) {
+                    const rId = slotEl.getAttribute('data-newresid');
+                    const tStr = slotEl.getAttribute('data-newtime');
+                    if (rId && tStr) handleNewDragEnter(rId, tStr);
+                }
+            }
+        };
+        window.addEventListener('pointerup', handleNewDragUp);
+        window.addEventListener('pointermove', handleMove);
+        return () => {
+            window.removeEventListener('pointerup', handleNewDragUp);
+            window.removeEventListener('pointermove', handleMove);
+        };
+    }, [handleNewDragUp, handleNewDragEnter]);
+
+    // Clear selection when date changes
+    useEffect(() => { setNewSlots([]); }, [selectedDate]);
+
+    // ── Handle "Продолжить" — create booking ──
+    const handleConfirmNewBooking = async () => {
+        if (newSlots.length === 0) return;
+        const block = selectedNewBlocks[0];
+        if (!block) return;
+
+        const resource = RESOURCES.find(r => r.id === block.resId);
+        const startTime = timeSlots[block.start];
+        const duration = (block.end - block.start + 1) * 30;
+
+        setBookingSaving(true);
+        try {
+            await bookingsApi.createBooking({
+                resourceId: block.resId,
+                date: new Date(format(selectedDate, 'yyyy-MM-dd')),
+                startTime,
+                duration,
+                format: resource?.formats?.[0] || 'individual',
+                locationId: resource?.locationId,
+            } as any);
+            toast.success('Бронирование создано!');
+            setNewSlots([]);
+            refreshBookings();
+        } catch (e: any) {
+            const detail = e?.response?.data?.detail;
+            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка';
+            toast.error(msg);
+        } finally {
+            setBookingSaving(false);
+        }
+    };
+
+    // ─── Drag handlers (rescheduling) ──────────────────────────────────────────
     const handleDragStart = (booking: BookingHistoryItem, resId: string, time: string, e: React.PointerEvent) => {
         if (!canModify(booking)) return;
         e.preventDefault();
@@ -336,6 +517,10 @@ function BookingsChessboard({
                                     {t}
                                 </th>
                             ))}
+                            {!crmMode && (
+                                <th className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/50 z-20 w-28 p-2"
+                                    style={{ background: 'rgba(212,226,225,0.60)' }} />
+                            )}
                         </tr>
                     </thead>
                     <tbody>
@@ -480,24 +665,81 @@ function BookingsChessboard({
                                     const isCrmHint = !isPast && crmMode && crmHintDate === format(selectedDate, 'yyyy-MM-dd') &&
                                         timeToMins(time) >= crmHintStartMins &&
                                         timeToMins(time) < crmHintEndMins;
+                                    const newSel = isNewSlotSelected(r.id, time);
+                                    const newBlock = newSel ? getNewBlockForResource(r.id) : null;
+                                    const isNewStart = newBlock ? newBlock.start === idx : false;
+                                    const isNewEnd = newBlock ? newBlock.end === idx : false;
+                                    const isNewSingle = newBlock ? newBlock.start === newBlock.end : false;
+
+                                    const NewResizeHandle = ({ type }: { type: 'start' | 'end' }) => (
+                                        <div
+                                            className={`absolute top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center z-20 hover:bg-white/20 transition-colors ${type === 'start' ? 'left-0 rounded-l-md' : 'right-0 rounded-r-md'}`}
+                                            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); handleNewDragDown(r.id, time, type === 'start' ? 'resize-start' : 'resize-end'); }}
+                                        >
+                                            <div className="w-1 h-3 bg-white/70 rounded-full" />
+                                        </div>
+                                    );
+
                                     cells.push(
-                                        <td
-                                            key={`${r.id}-${time}`}
-                                            className={clsx(
-                                                "p-0 border-r border-unbox-light/30 h-14 relative",
-                                                isPast ? "bg-black/[0.03]" : "hover:bg-unbox-green/5 cursor-pointer"
-                                            )}
-                                            style={isCrmHint ? { background: 'repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(249,115,22,0.12) 5px, rgba(249,115,22,0.12) 10px)', outline: '1.5px dashed rgba(249,115,22,0.5)', outlineOffset: '-1px' } : undefined}
-                                            title={isCrmHint ? `Время сессии: ${format(parseISO(crmMode!.date), 'HH:mm')} (${crmMode!.duration ?? 60} мин)` : undefined}
-                                            onPointerEnter={isDragging ? () => handleDragOver(r.id, time) : undefined}
-                                            onClick={(!isPast && !isDragging) ? () => {
-                                                if (crmMode) {
-                                                    setCrmSlot({ resId: r.id, time, date: selectedDate });
-                                                } else {
-                                                    setQuickBookSlot({ resId: r.id, time, date: selectedDate });
-                                                }
-                                            } : undefined}
-                                        />
+                                        <td key={`${r.id}-${time}`} className="p-0 border-r border-unbox-light/30 h-14 relative">
+                                            <div
+                                                data-newresid={r.id}
+                                                data-newtime={time}
+                                                onPointerDown={(e) => {
+                                                    if (isPast || isDragging) return;
+                                                    if ((e.target as HTMLElement).tagName.toLowerCase() === 'button') return;
+                                                    e.preventDefault();
+                                                    if (crmMode) {
+                                                        setCrmSlot({ resId: r.id, time, date: selectedDate });
+                                                        return;
+                                                    }
+                                                    handleNewDragDown(r.id, time, 'new');
+                                                }}
+                                                onPointerEnter={() => {
+                                                    if (isDragging) handleDragOver(r.id, time);
+                                                    else handleNewDragEnter(r.id, time);
+                                                }}
+                                                className={clsx(
+                                                    "w-full h-full flex items-center justify-center text-[9px] relative select-none touch-none transition-colors",
+                                                    isPast
+                                                        ? "bg-black/[0.03]"
+                                                        : newSel
+                                                            ? "bg-unbox-green text-white z-10 cursor-grab shadow-sm"
+                                                            : "hover:bg-unbox-green/5 text-unbox-dark/50 hover:text-unbox-green cursor-pointer",
+                                                    newSel && !isNewSingle && !isNewStart && "border-l border-white/20",
+                                                    isNewStart && newSel && "rounded-l-lg",
+                                                    isNewEnd && newSel && "rounded-r-lg"
+                                                )}
+                                                style={(!newSel && isCrmHint) ? { background: 'repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(249,115,22,0.12) 5px, rgba(249,115,22,0.12) 10px)', outline: '1.5px dashed rgba(249,115,22,0.5)', outlineOffset: '-1px' } : undefined}
+                                                title={isCrmHint ? `Время сессии: ${format(parseISO(crmMode!.date), 'HH:mm')} (${crmMode!.duration ?? 60} мин)` : undefined}
+                                            >
+                                                {newSel ? (
+                                                    <>
+                                                        <div className="flex items-center justify-between w-full h-full px-1 relative">
+                                                            {isNewStart && !isNewSingle && <NewResizeHandle type="start" />}
+                                                            {isNewStart && (
+                                                                <div className="flex flex-col items-center justify-center w-full">
+                                                                    <div className="font-bold text-white text-xs">{time}</div>
+                                                                </div>
+                                                            )}
+                                                            {isNewEnd && !isNewSingle && <NewResizeHandle type="end" />}
+                                                        </div>
+                                                        {isNewEnd && (
+                                                            <button
+                                                                onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); setNewSlotRange(r.id, []); }}
+                                                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); setNewSlotRange(r.id, []); }}
+                                                                className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:bg-red-600 hover:scale-110 transition-all z-50"
+                                                                title="Удалить"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    !isPast && <span>{time}</span>
+                                                )}
+                                            </div>
+                                        </td>
                                     );
                                 }
                             });
@@ -510,6 +752,21 @@ function BookingsChessboard({
                                         <div className="text-[10px] text-unbox-grey">{r.capacity} чел.</div>
                                     </td>
                                     {cells}
+                                    {!crmMode && (
+                                        <td className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/40 z-10 h-14 p-2 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]"
+                                            style={{ background: 'rgba(212,226,225,0.50)' }}>
+                                            {getNewBlockForResource(r.id) ? (
+                                                <button
+                                                    onClick={handleConfirmNewBooking}
+                                                    disabled={bookingSaving}
+                                                    className="flex items-center gap-1.5 bg-unbox-green text-white text-xs font-bold px-3 py-2 rounded-xl shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap animate-in fade-in zoom-in-90 duration-200 h-full"
+                                                >
+                                                    {bookingSaving ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <ArrowRight size={14} className="shrink-0" />}
+                                                    <span>Продолжить</span>
+                                                </button>
+                                            ) : null}
+                                        </td>
+                                    )}
                                 </tr>
                             );
                         })}
@@ -655,18 +912,6 @@ function BookingsChessboard({
                         </div>
                     )}
                 </div>
-            )}
-
-            {/* Quick Booking Modal (free slot click) */}
-            {!crmMode && quickBookSlot && (
-                <QuickBookingModal
-                    slot={quickBookSlot}
-                    onClose={() => setQuickBookSlot(null)}
-                    onBooked={() => {
-                        setQuickBookSlot(null);
-                        refreshBookings();
-                    }}
-                />
             )}
 
             {/* CRM Quick Booking Modal */}
@@ -1301,118 +1546,3 @@ function CrmQuickBookingModal({
     );
 }
 
-// ── Quick Booking Modal (for free slot clicks) ────────────────────────────────
-function QuickBookingModal({
-    slot,
-    onClose,
-    onBooked,
-    bookingForUser,
-}: {
-    slot: { resId: string; time: string; date: Date };
-    onClose: () => void;
-    onBooked: () => void;
-    bookingForUser?: string | null;
-}) {
-    const resource = RESOURCES.find(r => r.id === slot.resId);
-    const [duration, setDuration] = useState(60);
-    const [saving, setSaving] = useState(false);
-    const dateStr = format(slot.date, 'yyyy-MM-dd');
-
-    const endTime = (() => {
-        const [h, m] = slot.time.split(':').map(Number);
-        const end = addMinutes(setMinutes(setHours(slot.date, h), m), duration);
-        return format(end, 'HH:mm');
-    })();
-
-    const hourlyRate = resource?.hourlyRate ?? 20;
-    const estimatedPrice = (hourlyRate * duration / 60).toFixed(0);
-
-    const handleBook = async () => {
-        setSaving(true);
-        try {
-            await bookingsApi.createBooking({
-                resourceId: slot.resId,
-                date: new Date(dateStr),
-                startTime: slot.time,
-                duration,
-                format: resource?.formats?.[0] || 'individual',
-                locationId: resource?.locationId,
-                ...(bookingForUser ? { targetUserId: bookingForUser } : {}),
-            } as any);
-            toast.success('Бронирование создано!');
-            onBooked();
-        } catch (e: any) {
-            const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
-            toast.error(msg);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-            <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-200"
-                onClick={e => e.stopPropagation()}
-            >
-                <div className="flex items-start justify-between">
-                    <div>
-                        <h3 className="font-bold text-lg">Новое бронирование</h3>
-                        <p className="text-sm text-unbox-grey mt-0.5">{resource?.name || slot.resId}</p>
-                    </div>
-                    <button onClick={onClose} className="p-1 hover:bg-unbox-light rounded-lg">
-                        <X className="w-5 h-5 text-unbox-grey" />
-                    </button>
-                </div>
-
-                <div className="bg-unbox-light/50 rounded-xl p-3 space-y-1.5 text-sm">
-                    <div className="flex justify-between">
-                        <span className="text-unbox-grey">Кабинет</span>
-                        <span className="font-medium">{resource?.name || slot.resId}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span className="text-unbox-grey">Дата</span>
-                        <span className="font-medium">{format(slot.date, 'd MMMM yyyy', { locale: ru })}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span className="text-unbox-grey">Время</span>
-                        <span className="font-medium">{slot.time} — {endTime}</span>
-                    </div>
-                    <div className="flex justify-between border-t border-unbox-light pt-1.5">
-                        <span className="text-unbox-grey">Стоимость</span>
-                        <span className="font-bold text-unbox-green">{estimatedPrice} ₾</span>
-                    </div>
-                </div>
-
-                <div>
-                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Длительность</label>
-                    <div className="flex gap-2">
-                        {[60, 90, 120, 180].map(d => (
-                            <button
-                                key={d}
-                                onClick={() => setDuration(d)}
-                                className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                                    duration === d
-                                        ? 'bg-unbox-green text-white border-unbox-green'
-                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
-                                }`}
-                            >
-                                {d >= 120 ? `${d / 60}ч` : `${d}м`}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                <button
-                    onClick={handleBook}
-                    disabled={saving}
-                    className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
-                >
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Забронировать
-                </button>
-            </div>
-        </div>
-    );
-}
