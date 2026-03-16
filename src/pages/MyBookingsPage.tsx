@@ -7,7 +7,7 @@ import { Button } from '../components/ui/Button';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight
+    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
@@ -228,6 +228,24 @@ function BookingsChessboard({
     const getNewBlockForResource = (resId: string) =>
         selectedNewBlocks.find(b => b.resId === resId) ?? null;
 
+    // Overlap detection: warn when selecting time-overlapping slots in different rooms
+    const hasTimeOverlap = useMemo(() => {
+        if (selectedNewBlocks.length < 2) return false;
+        const blocks = selectedNewBlocks.map(b => {
+            const slots = new Set<number>();
+            for (let i = b.start; i <= b.end; i++) slots.add(i);
+            return slots;
+        });
+        for (let i = 0; i < blocks.length; i++) {
+            for (let j = i + 1; j < blocks.length; j++) {
+                for (const idx of blocks[i]) {
+                    if (blocks[j].has(idx)) return true;
+                }
+            }
+        }
+        return false;
+    }, [selectedNewBlocks]);
+
     const isNewSlotSelected = (resId: string, time: string) =>
         newSlots.includes(`${resId}|${time}`);
 
@@ -343,8 +361,11 @@ function BookingsChessboard({
     // Clear selection when date changes
     useEffect(() => { setNewSlots([]); }, [selectedDate]);
 
+    // Overlap warning state
+    const [showOverlapWarning, setShowOverlapWarning] = useState(false);
+
     // ── Handle "Продолжить" — navigate to checkout wizard ──
-    const handleConfirmNewBooking = () => {
+    const proceedToCheckout = () => {
         if (newSlots.length === 0) return;
         const block = selectedNewBlocks[0];
         if (!block) return;
@@ -352,8 +373,6 @@ function BookingsChessboard({
         const resource = RESOURCES.find(r => r.id === block.resId);
 
         // Sync selection into bookingStore for the checkout wizard.
-        // Use reset() then set all fields at once to avoid intermediate
-        // sideeffects from individual setters (setLocation/setDate clear selectedSlots).
         bookingStoreActions.reset();
         useBookingStore.setState({
             locationId: resource?.locationId || 'unbox_one',
@@ -365,6 +384,14 @@ function BookingsChessboard({
 
         setNewSlots([]);
         navigate('/checkout');
+    };
+
+    const handleConfirmNewBooking = () => {
+        if (hasTimeOverlap) {
+            setShowOverlapWarning(true);
+        } else {
+            proceedToCheckout();
+        }
     };
 
     // ─── Drag handlers (rescheduling) ──────────────────────────────────────────
@@ -800,6 +827,41 @@ function BookingsChessboard({
                     <span>Занято</span>
                 </div>
             </div>
+
+            {/* Time overlap warning */}
+            {hasTimeOverlap && newSlots.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center gap-2 text-sm">
+                    <AlertTriangle size={16} className="shrink-0" />
+                    <span>Выбранные слоты накладываются по времени в разных кабинетах</span>
+                </div>
+            )}
+
+            {/* Overlap confirmation modal */}
+            {showOverlapWarning && (
+                <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowOverlapWarning(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4 mx-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                                <AlertTriangle size={20} className="text-amber-600" />
+                            </div>
+                            <h3 className="font-bold text-lg">Наложение по времени</h3>
+                        </div>
+                        <p className="text-sm text-unbox-grey">
+                            Вы выбрали слоты, которые пересекаются по времени в разных кабинетах. Вы уверены, что хотите продолжить?
+                        </p>
+                        <div className="flex gap-3">
+                            <button onClick={() => setShowOverlapWarning(false)}
+                                className="flex-1 px-4 py-2.5 rounded-xl border border-unbox-light text-sm font-medium hover:bg-gray-50 transition">
+                                Отмена
+                            </button>
+                            <button onClick={() => { setShowOverlapWarning(false); proceedToCheckout(); }}
+                                className="flex-1 px-4 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-bold hover:bg-unbox-dark transition">
+                                Продолжить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Booking action popup */}
             {activeBooking && popupPos && (

@@ -18,13 +18,19 @@ export function ChessboardStep() {
         setStep
     } = useBookingStore();
 
-    const { bookings, fetchBookings } = useUserStore();
+    const { bookings, fetchBookings, fetchAllBookings, currentUser } = useUserStore();
+    const bookingForUser = useBookingStore(s => s.bookingForUser);
+    const isAdminBooking = !!bookingForUser && !!currentUser?.isAdmin;
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
 
-    // Refresh bookings on mount to ensure availability is up to date
+    // Refresh bookings on mount — admin sees ALL bookings, users see only their own
     useEffect(() => {
-        fetchBookings();
-    }, [fetchBookings]);
+        if (isAdminBooking) {
+            fetchAllBookings();
+        } else {
+            fetchBookings();
+        }
+    }, [fetchBookings, fetchAllBookings, isAdminBooking]);
 
     // Week View State
     const [weekStart, setWeekStart] = useState(() => startOfWeek(date, { weekStartsOn: 1 }));
@@ -185,6 +191,30 @@ export function ChessboardStep() {
         }
 
         return false;
+    };
+
+    // Get the booker name/email for a blocked slot (admin only)
+    const getSlotBookerInfo = (resId: string, timeStr: string): string | null => {
+        if (!isAdminBooking) return null;
+        const booking = bookings.find(b =>
+            b.resourceId === resId &&
+            b.status === 'confirmed' &&
+            !b.isReRentListed &&
+            isSameDay(parseUTC(b.date), new Date(date)) &&
+            b.startTime &&
+            (() => {
+                const bStart = Number(b.startTime!.split(':')[0]) * 60 + Number(b.startTime!.split(':')[1]);
+                const bEnd = bStart + b.duration;
+                const slotStart = Number(timeStr.split(':')[0]) * 60 + Number(timeStr.split(':')[1]);
+                const slotEnd = slotStart + 30;
+                return slotStart < bEnd && slotEnd > bStart;
+            })()
+        );
+        if (!booking) return null;
+        // Return short name: first name or email prefix
+        const userId = booking.userId || '';
+        if (userId.includes('@')) return userId.split('@')[0];
+        return userId;
     };
 
     const isSelected = (resId: string, timeStr: string) => selectedSlots.includes(`${resId}|${timeStr}`);
@@ -587,12 +617,19 @@ export function ChessboardStep() {
                                                 ) : (
                                                     !isBlocked && <span>{time}</span>
                                                 )}
-                                                {isBlocked && (
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 group-hover/slot:opacity-100 transition-opacity duration-300 gap-0.5">
-                                                        <Clock size={10} className="text-amber-500" />
-                                                        <span className="text-[8px] font-semibold text-amber-600 leading-none">Ожидание</span>
-                                                    </div>
-                                                )}
+                                                {isBlocked && (() => {
+                                                    const bookerName = getSlotBookerInfo(r.id, time);
+                                                    return bookerName ? (
+                                                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0">
+                                                            <span className="text-[8px] font-bold text-unbox-dark/60 leading-none truncate max-w-[55px]">{bookerName}</span>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 group-hover/slot:opacity-100 transition-opacity duration-300 gap-0.5">
+                                                            <Clock size={10} className="text-amber-500" />
+                                                            <span className="text-[8px] font-semibold text-amber-600 leading-none">Ожидание</span>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </td>
                                     );
