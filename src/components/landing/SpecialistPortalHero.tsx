@@ -144,10 +144,9 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
 // ── Main portal ──────────────────────────────────────────────────────────────
 interface Props {
     user: User;
-    onNewBooking?: () => void;
 }
 
-export function SpecialistPortalHero({ user, onNewBooking }: Props) {
+export function SpecialistPortalHero({ user }: Props) {
     const { bookings, fetchBookings } = useUserStore();
     const navigate = useNavigate();
     const firstName = user.name?.split(' ')[0] ?? 'Специалист';
@@ -287,7 +286,7 @@ export function SpecialistPortalHero({ user, onNewBooking }: Props) {
                         <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            onClick={() => onNewBooking ? onNewBooking() : navigate('/')}
+                            onClick={() => navigate('/dashboard/bookings')}
                             className="text-xs font-semibold px-3 py-1.5 rounded-xl text-white transition-colors flex items-center gap-1"
                             style={{ background: 'rgba(71,109,107,0.85)' }}
                         >
@@ -304,7 +303,7 @@ export function SpecialistPortalHero({ user, onNewBooking }: Props) {
                         <motion.button
                             whileHover={{ scale: 1.03 }}
                             whileTap={{ scale: 0.97 }}
-                            onClick={() => onNewBooking ? onNewBooking() : navigate('/')}
+                            onClick={() => navigate('/dashboard/bookings')}
                             className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
                             style={{ background: 'rgba(71,109,107,0.85)' }}
                         >

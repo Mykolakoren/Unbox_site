@@ -368,8 +368,10 @@ export function ConfirmationStep() {
                 toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
 
                 // Navigate after showing success screen; reset happens in useEffect cleanup on unmount
+                // Pass the booking date so the chessboard opens on the correct day
+                const bookingDate = state.date instanceof Date ? state.date.toISOString() : new Date(state.date).toISOString();
                 setTimeout(() => {
-                    navigate('/dashboard/bookings');
+                    navigate('/dashboard/bookings', { state: { targetDate: bookingDate } });
                 }, 2000);
             } else {
                 toast.error("Ошибка создания бронирования: не удалось сформировать данные.");

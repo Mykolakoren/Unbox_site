@@ -78,6 +78,15 @@ function BookingsChessboard({
         startOfWeek(initialDate, { weekStartsOn: 1 })
     );
 
+    // Update selected date when navigating back with targetDate in state
+    useEffect(() => {
+        if (navTargetDate && !isSameDay(selectedDate, navTargetDate)) {
+            setSelectedDate(navTargetDate);
+            setWeekStart(startOfWeek(navTargetDate, { weekStartsOn: 1 }));
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.state?.targetDate]);
+
     // Quick booking slot for CRM mode
     const [crmSlot, setCrmSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
