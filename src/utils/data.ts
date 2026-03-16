@@ -18,7 +18,8 @@ export const RESOURCES: Resource[] = [
         area: 9,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Компактный кабинет для индивидуальной, детской и семейной терапии.'
+        description: 'Компактный кабинет для индивидуальной, детской и семейной терапии.',
+        sortOrder: 1,
     },
     {
         id: 'unbox_one_room_2',
@@ -30,7 +31,8 @@ export const RESOURCES: Resource[] = [
         area: 12,
         minBookingHours: 1,
         formats: ['individual', 'group'],
-        description: 'Универсальный кабинет для индивидуальной работы, семейных консультаций и малых групп.'
+        description: 'Универсальный кабинет для индивидуальной работы, семейных консультаций и малых групп.',
+        sortOrder: 2,
     },
     // Unbox Uni
     {
@@ -43,7 +45,8 @@ export const RESOURCES: Resource[] = [
         area: 10,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Кабинет для индивидуальной, детской и семейной терапии.'
+        description: 'Кабинет для индивидуальной, детской и семейной терапии.',
+        sortOrder: 3,
     },
     {
         id: 'unbox_uni_room_6',
@@ -55,7 +58,8 @@ export const RESOURCES: Resource[] = [
         area: 16,
         minBookingHours: 1,
         formats: ['individual', 'group'],
-        description: 'Кабинет подходит для индивидуальной и групповой работы, а также для работы с детьми и семейных консультаций.'
+        description: 'Кабинет подходит для индивидуальной и групповой работы, а также для работы с детьми и семейных консультаций.',
+        sortOrder: 4,
     },
     {
         id: 'unbox_uni_room_7',
@@ -67,7 +71,8 @@ export const RESOURCES: Resource[] = [
         area: 25,
         minBookingHours: 1,
         formats: ['individual', 'group'],
-        description: 'Большой кабинет для групповых встреч, тренингов, лекций и мероприятий.'
+        description: 'Большой кабинет для групповых встреч, тренингов, лекций и мероприятий.',
+        sortOrder: 5,
     },
     {
         id: 'unbox_uni_room_8',
@@ -79,7 +84,8 @@ export const RESOURCES: Resource[] = [
         area: 20,
         minBookingHours: 1,
         formats: ['individual', 'group'],
-        description: 'Просторный кабинет для групповой и индивидуальной работы.'
+        description: 'Просторный кабинет для групповой и индивидуальной работы.',
+        sortOrder: 6,
     },
     {
         id: 'unbox_uni_room_9',
@@ -91,7 +97,8 @@ export const RESOURCES: Resource[] = [
         area: 16,
         minBookingHours: 1,
         formats: ['individual', 'group'],
-        description: 'Уютный кабинет для индивидуальной и групповой работы.'
+        description: 'Уютный кабинет для индивидуальной и групповой работы.',
+        sortOrder: 7,
     },
     {
         id: 'unbox_uni_capsule_1',
@@ -103,7 +110,8 @@ export const RESOURCES: Resource[] = [
         area: 2,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.'
+        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.',
+        sortOrder: 8,
     },
     {
         id: 'unbox_uni_capsule_2',
@@ -115,7 +123,8 @@ export const RESOURCES: Resource[] = [
         area: 2,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.'
+        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.',
+        sortOrder: 9,
     },
 ];
 

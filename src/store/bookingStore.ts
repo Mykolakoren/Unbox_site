@@ -74,6 +74,8 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     fetchResources: async () => {
         try {
             const data = await resourcesApi.getAll();
+            // Sort by sort_order (backend may already sort, but ensure consistent order)
+            data.sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
             set({ resources: data });
         } catch (error) {
             console.error("Failed to fetch resources:", error);

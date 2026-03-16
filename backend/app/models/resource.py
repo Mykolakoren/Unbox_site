@@ -21,6 +21,7 @@ class ResourceBase(SQLModel):
     video_url: Optional[str] = None
 
     is_active: bool = True
+    sort_order: int = Field(default=0)
 
 class Resource(ResourceBase, table=True):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -43,3 +44,4 @@ class ResourceUpdate(SQLModel):
     formats: Optional[List[str]] = None
     video_url: Optional[str] = None
     is_active: Optional[bool] = None
+    sort_order: Optional[int] = None

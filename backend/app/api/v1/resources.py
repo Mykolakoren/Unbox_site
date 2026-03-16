@@ -18,7 +18,9 @@ def read_resources(
     limit: int = 100,
     session: Session = Depends(get_session)
 ):
-    resources = session.exec(select(Resource).offset(skip).limit(limit)).all()
+    resources = session.exec(
+        select(Resource).order_by(Resource.sort_order, Resource.name).offset(skip).limit(limit)
+    ).all()
     return resources
 
 

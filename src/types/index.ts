@@ -28,6 +28,7 @@ export interface Resource {
     services?: string[];     // IDs from CABINET_SERVICES constant
     videoUrl?: string; // Mapped from video_url
     isActive?: boolean;
+    sortOrder?: number;
 }
 
 export interface TimeSlot {
