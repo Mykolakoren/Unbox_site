@@ -1,12 +1,13 @@
+"""Bookings — all booking endpoints: list, create, cancel, reschedule, re-rent, link-client."""
 from typing import Any, List, Optional
+from datetime import datetime, timedelta
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
 from app.api import deps
 from app.models.booking import Booking, BookingCreate, BookingRead
 from app.models.user import User
-from datetime import datetime, timedelta
-from uuid import UUID
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
 from app.services.booking import check_availability
@@ -19,8 +20,10 @@ router = APIRouter()
 def _booking_end_dt(booking: Booking) -> datetime:
     """Get booking end datetime (UTC)."""
     try:
-        h, m = map(int, booking.start_time.split(':'))
-        return booking.date.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(minutes=booking.duration)
+        h, m = map(int, booking.start_time.split(":"))
+        return booking.date.replace(
+            hour=h, minute=m, second=0, microsecond=0
+        ) + timedelta(minutes=booking.duration)
     except Exception:
         return booking.date
 
@@ -37,8 +40,9 @@ def enrich_booking_status(booking: Booking) -> Booking:
 
 
 def _check_ownership(booking: Booking, user: User) -> bool:
-    return (booking.user_uuid and booking.user_uuid == user.id) or \
-           (booking.user_id == user.email)
+    return (booking.user_uuid and booking.user_uuid == user.id) or (
+        booking.user_id == user.email
+    )
 
 
 # ─── GET endpoints ────────────────────────────────────────────────────────────
@@ -51,15 +55,14 @@ def read_my_bookings(
     limit: int = 100,
 ) -> Any:
     """Retrieve current user's bookings."""
-    statement = select(Booking).where(
-        Booking.user_id == current_user.email
-    ).offset(skip).limit(limit)
+    statement = (
+        select(Booking).where(Booking.user_id == current_user.email).offset(skip).limit(limit)
+    )
     bookings = session.exec(statement).all()
     return [enrich_booking_status(b) for b in bookings]
 
 
-@router.get("", response_model=List[BookingRead])
-@router.get("/", response_model=List[BookingRead], include_in_schema=False)
+@router.get("/", response_model=List[BookingRead])
 def read_bookings(
     session: Session = Depends(deps.get_session),
     skip: int = 0,
@@ -72,11 +75,10 @@ def read_bookings(
 
 
 @router.get("/public", response_model=List[BookingRead])
-@router.get("/public/", response_model=List[BookingRead], include_in_schema=False)
 def read_public_bookings(
     session: Session = Depends(deps.get_session),
     start_date: str = None,
-    end_date: str = None
+    end_date: str = None,
 ) -> Any:
     """Retrieve ALL confirmed bookings for availability display (Public)."""
     query = select(Booking).where(Booking.status == "confirmed")
@@ -104,9 +106,9 @@ def read_public_bookings(
 
 class SlotCheckItem(PydanticBaseModel):
     resource_id: str
-    date: str       # "YYYY-MM-DD"
-    start_time: str # "HH:MM"
-    duration: int   # minutes
+    date: str  # "YYYY-MM-DD"
+    start_time: str  # "HH:MM"
+    duration: int  # minutes
 
 
 @router.post("/check-availability")
@@ -137,8 +139,7 @@ def check_slots_availability(
 
 # ─── Create booking ──────────────────────────────────────────────────────────
 
-@router.post("", response_model=BookingRead)
-@router.post("/", response_model=BookingRead, include_in_schema=False)
+@router.post("/", response_model=BookingRead)
 def create_booking(
     *,
     session: Session = Depends(deps.get_session),
@@ -152,24 +153,27 @@ def create_booking(
         if booking_in.duration < MIN_BOOKING_DURATION:
             raise HTTPException(
                 status_code=400,
-                detail=f"Минимальная длительность бронирования — {MIN_BOOKING_DURATION} минут (1 час)."
+                detail=f"Минимальная длительность бронирования — {MIN_BOOKING_DURATION} минут (1 час).",
             )
 
         # Normalize date — strip time component to avoid timezone shift issues
-        # Frontend may send "2026-03-19" or "2026-03-18T20:00:00Z" (UTC offset)
         if booking_in.date:
-            booking_in.date = booking_in.date.replace(hour=0, minute=0, second=0, microsecond=0)
+            booking_in.date = booking_in.date.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
 
         is_available, reason = check_availability(
             session=session,
             resource_id=booking_in.resource_id,
             date=booking_in.date,
             start_time=booking_in.start_time,
-            duration=booking_in.duration
+            duration=booking_in.duration,
         )
 
         if not is_available:
-            raise HTTPException(status_code=400, detail=f"Time slot is already booked: {reason}")
+            raise HTTPException(
+                status_code=400, detail=f"Time slot is already booked: {reason}"
+            )
 
         # Determine Booking Owner
         booking_owner = current_user
@@ -180,17 +184,20 @@ def create_booking(
             except ValueError:
                 pass
             if not target:
-                target = session.exec(select(User).where(User.email == booking_in.target_user_id)).first()
+                target = session.exec(
+                    select(User).where(User.email == booking_in.target_user_id)
+                ).first()
             if target:
                 booking_owner = target
 
         # Pricing & Payment
         from app.services.pricing import PricingService
-        from datetime import time
 
         try:
-            h, m = map(int, booking_in.start_time.split(':'))
-            start_dt = booking_in.date.replace(hour=h, minute=m, second=0, microsecond=0)
+            h, m = map(int, booking_in.start_time.split(":"))
+            start_dt = booking_in.date.replace(
+                hour=h, minute=m, second=0, microsecond=0
+            )
         except Exception:
             start_dt = booking_in.date
 
@@ -200,20 +207,29 @@ def create_booking(
             resource_id=booking_in.resource_id,
             start_time=start_dt,
             duration_minutes=booking_in.duration,
-            format_type=booking_in.format
+            format_type=booking_in.format,
         )
 
-        if booking_in.payment_method == 'subscription':
-            if quote.applied_rule != 'SUBSCRIPTION':
-                raise HTTPException(status_code=400, detail="Insufficient subscription hours or invalid format for plan")
+        if booking_in.payment_method == "subscription":
+            if quote.applied_rule != "SUBSCRIPTION":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Insufficient subscription hours or invalid format for plan",
+                )
             if booking_owner.subscription:
                 new_sub = booking_owner.subscription.copy()
-                rem = new_sub.get('remaining_hours', new_sub.get('remainingHours', 0))
-                used = new_sub.get('used_hours', new_sub.get('usedHours', 0))
-                new_sub['remaining_hours'] = max(0, float(rem) - quote.hours_deducted)
-                new_sub['used_hours'] = float(used) + quote.hours_deducted
-                if 'remainingHours' in new_sub: del new_sub['remainingHours']
-                if 'usedHours' in new_sub: del new_sub['usedHours']
+                rem = new_sub.get(
+                    "remaining_hours", new_sub.get("remainingHours", 0)
+                )
+                used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
+                new_sub["remaining_hours"] = max(
+                    0, float(rem) - quote.hours_deducted
+                )
+                new_sub["used_hours"] = float(used) + quote.hours_deducted
+                if "remainingHours" in new_sub:
+                    del new_sub["remainingHours"]
+                if "usedHours" in new_sub:
+                    del new_sub["usedHours"]
                 booking_owner.subscription = new_sub
         else:
             available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -222,9 +238,9 @@ def create_booking(
                 raise HTTPException(
                     status_code=400,
                     detail=f"Недостаточно средств у пользователя {user_name}. "
-                           f"Необходимо: {quote.final_price}₾, доступно: {available_funds}₾ "
-                           f"(баланс: {booking_owner.balance}₾, кредит: {booking_owner.credit_limit}₾). "
-                           f"Пополните баланс перед бронированием."
+                    f"Необходимо: {quote.final_price}₾, доступно: {available_funds}₾ "
+                    f"(баланс: {booking_owner.balance}₾, кредит: {booking_owner.credit_limit}₾). "
+                    f"Пополните баланс перед бронированием.",
                 )
             booking_owner.balance -= quote.final_price
 
@@ -238,13 +254,13 @@ def create_booking(
         session.add(booking_owner)
 
         booking_data = booking_in.dict()
-        booking_data['user_uuid'] = booking_owner.id
-        booking_data['user_id'] = booking_owner.email
-        if 'target_user_id' in booking_data:
-            del booking_data['target_user_id']
+        booking_data["user_uuid"] = booking_owner.id
+        booking_data["user_id"] = booking_owner.email
+        if "target_user_id" in booking_data:
+            del booking_data["target_user_id"]
 
         booking = Booking(**booking_data)
-        if booking.payment_method == 'subscription':
+        if booking.payment_method == "subscription":
             booking.hours_deducted = booking.duration / 60
 
         session.add(booking)
@@ -253,7 +269,9 @@ def create_booking(
 
         # Google Calendar Sync
         try:
-            print(f"[GCal Sync] Attempting for booking {booking.id}, resource={booking.resource_id}, connected={gcal_service.is_connected()}")
+            print(
+                f"[GCal Sync] Attempting for booking {booking.id}, resource={booking.resource_id}, connected={gcal_service.is_connected()}"
+            )
             event_id = gcal_service.create_event(booking)
             if event_id:
                 booking.gcal_event_id = event_id
@@ -262,10 +280,13 @@ def create_booking(
                 session.refresh(booking)
                 print(f"[GCal Sync] SUCCESS: event_id={event_id}")
             else:
-                print(f"[GCal Sync] No event created (service not connected or no calendar ID)")
+                print(
+                    f"[GCal Sync] No event created (service not connected or no calendar ID)"
+                )
         except Exception as e:
             print(f"[GCal Sync] FAILED (Non-blocking): {e}")
             import traceback
+
             traceback.print_exc()
 
         return booking
@@ -303,14 +324,18 @@ def cancel_booking(
 
     # ── Past booking protection ──
     if _is_past(booking):
-        if current_user.role not in ('senior_admin', 'owner'):
-            raise HTTPException(status_code=403, detail="Past bookings cannot be modified. Only senior admin or owner can delete them.")
-        # Senior admin / owner can delete past bookings
+        if current_user.role not in ("senior_admin", "owner"):
+            raise HTTPException(
+                status_code=403,
+                detail="Past bookings cannot be modified. Only senior admin or owner can delete them.",
+            )
 
     # ── Time-based cancellation policy (>24h check) ──
     try:
-        h, m = map(int, booking.start_time.split(':'))
-        booking_start = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
+        h, m = map(int, booking.start_time.split(":"))
+        booking_start = booking.date.replace(
+            hour=h, minute=m, second=0, microsecond=0
+        )
     except Exception:
         booking_start = booking.date
 
@@ -320,7 +345,7 @@ def cancel_booking(
     if is_late_cancellation and not _is_past(booking) and not current_user.is_admin:
         raise HTTPException(
             status_code=400,
-            detail=f"Cancellation is not allowed less than 24 hours before start. Time remaining: {hours_until_start:.1f}h"
+            detail=f"Cancellation is not allowed less than 24 hours before start. Time remaining: {hours_until_start:.1f}h",
         )
 
     # ── Google Calendar Sync (Delete) ──
@@ -332,17 +357,24 @@ def cancel_booking(
         booking.gcal_event_id = None
 
     # ── Refund ──
-    if booking.payment_method == 'subscription':
+    if booking.payment_method == "subscription":
         if current_user.subscription:
             new_sub = current_user.subscription.copy()
-            refund_hours = booking.hours_deducted if booking.hours_deducted is not None else (booking.duration / 60)
-            rem = new_sub.get('remaining_hours', new_sub.get('remainingHours', 0))
-            new_sub['remaining_hours'] = float(rem) + refund_hours
-            if 'remainingHours' in new_sub: del new_sub['remainingHours']
+            refund_hours = (
+                booking.hours_deducted
+                if booking.hours_deducted is not None
+                else (booking.duration / 60)
+            )
+            rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
+            new_sub["remaining_hours"] = float(rem) + refund_hours
+            if "remainingHours" in new_sub:
+                del new_sub["remainingHours"]
             current_user.subscription = new_sub
             session.add(current_user)
     else:
-        refund_amount = booking.final_price if booking.final_price is not None else 0.0
+        refund_amount = (
+            booking.final_price if booking.final_price is not None else 0.0
+        )
         current_user.balance += refund_amount
         session.add(current_user)
 
@@ -366,9 +398,13 @@ def cancel_booking(
         metadata={
             "is_late_cancellation": is_late_cancellation,
             "hours_until_start": hours_until_start,
-            "refunded_amount": booking.final_price if booking.payment_method != 'subscription' else 0,
-            "refunded_hours": booking.hours_deducted if booking.payment_method == 'subscription' else 0
-        }
+            "refunded_amount": booking.final_price
+            if booking.payment_method != "subscription"
+            else 0,
+            "refunded_hours": booking.hours_deducted
+            if booking.payment_method == "subscription"
+            else 0,
+        },
     )
 
     return booking
@@ -377,8 +413,8 @@ def cancel_booking(
 # ─── Reschedule booking (drag-to-move) ────────────────────────────────────────
 
 class RescheduleRequest(PydanticBaseModel):
-    new_date: str                       # "YYYY-MM-DD"
-    new_start_time: str                 # "HH:MM"
+    new_date: str  # "YYYY-MM-DD"
+    new_start_time: str  # "HH:MM"
     new_resource_id: Optional[str] = None  # If moving to a different room
 
 
@@ -404,32 +440,40 @@ def reschedule_booking(
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status != "confirmed":
-        raise HTTPException(status_code=400, detail="Only confirmed bookings can be rescheduled")
+        raise HTTPException(
+            status_code=400, detail="Only confirmed bookings can be rescheduled"
+        )
 
-    # Past booking check
     if _is_past(booking):
-        raise HTTPException(status_code=400, detail="Cannot reschedule a past booking")
+        raise HTTPException(
+            status_code=400, detail="Cannot reschedule a past booking"
+        )
 
     # 24h policy
     try:
-        h, m = map(int, booking.start_time.split(':'))
-        booking_start = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
+        h, m = map(int, booking.start_time.split(":"))
+        booking_start = booking.date.replace(
+            hour=h, minute=m, second=0, microsecond=0
+        )
     except Exception:
         booking_start = booking.date
 
     hours_until = (booking_start - datetime.utcnow()).total_seconds() / 3600
     if hours_until < 24 and not current_user.is_admin:
-        raise HTTPException(status_code=400, detail=f"Cannot reschedule less than 24h before start ({hours_until:.1f}h remaining)")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot reschedule less than 24h before start ({hours_until:.1f}h remaining)",
+        )
 
-    # Parse new date
     try:
         new_date = datetime.strptime(data.new_date, "%Y-%m-%d")
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD"
+        )
 
     new_resource = data.new_resource_id or booking.resource_id
 
-    # Check availability at new slot (exclude this booking)
     available, conflict = check_availability(
         session=session,
         resource_id=new_resource,
@@ -439,14 +483,14 @@ def reschedule_booking(
         exclude_booking_id=str(booking.id),
     )
     if not available:
-        raise HTTPException(status_code=400, detail=f"New slot is not available: {conflict}")
+        raise HTTPException(
+            status_code=400, detail=f"New slot is not available: {conflict}"
+        )
 
-    # Store old values for audit
     old_date = booking.date
     old_time = booking.start_time
     old_resource = booking.resource_id
 
-    # Update booking
     booking.date = new_date
     booking.start_time = data.new_start_time
     booking.resource_id = new_resource
@@ -470,7 +514,6 @@ def reschedule_booking(
     session.commit()
     session.refresh(booking)
 
-    # Audit
     timeline_service.log_event(
         session=session,
         actor_id=current_user.id,
@@ -486,7 +529,7 @@ def reschedule_booking(
             "new_date": data.new_date,
             "new_time": data.new_start_time,
             "new_resource": new_resource,
-        }
+        },
     )
 
     return enrich_booking_status(booking)
@@ -519,14 +562,16 @@ def link_crm_client(
     if not is_owner and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # Validate CRM client belongs to this specialist
     if data.crm_client_id:
         from app.models.therapist_client import TherapistClient
+
         client = session.get(TherapistClient, data.crm_client_id)
         if not client:
             raise HTTPException(status_code=404, detail="CRM client not found")
         if client.specialist_id != str(current_user.id):
-            raise HTTPException(status_code=403, detail="CRM client does not belong to you")
+            raise HTTPException(
+                status_code=403, detail="CRM client does not belong to you"
+            )
 
     booking.crm_client_id = data.crm_client_id
     booking.updated_at = datetime.utcnow()
@@ -561,10 +606,15 @@ def toggle_re_rent(
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status != "confirmed":
-        raise HTTPException(status_code=400, detail="Only confirmed bookings can be listed for re-rent")
+        raise HTTPException(
+            status_code=400,
+            detail="Only confirmed bookings can be listed for re-rent",
+        )
 
     if _is_past(booking):
-        raise HTTPException(status_code=400, detail="Cannot re-rent a past booking")
+        raise HTTPException(
+            status_code=400, detail="Cannot re-rent a past booking"
+        )
 
     booking.is_re_rent_listed = not booking.is_re_rent_listed
     booking.updated_at = datetime.utcnow()
