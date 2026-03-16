@@ -15,9 +15,9 @@ export function AdminUsers() {
     }, [fetchUsers]);
 
     const filteredUsers = users.filter(u =>
-        u.name.toLowerCase().includes(search.toLowerCase()) ||
-        u.email.toLowerCase().includes(search.toLowerCase()) ||
-        u.phone.includes(search)
+        (u.name || '').toLowerCase().includes(search.toLowerCase()) ||
+        (u.email || '').toLowerCase().includes(search.toLowerCase()) ||
+        (u.phone || '').includes(search)
     );
 
     return (
