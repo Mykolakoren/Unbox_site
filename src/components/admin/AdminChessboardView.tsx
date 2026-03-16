@@ -1,15 +1,17 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
-import { LOCATIONS } from '../../utils/data';
+import { LOCATIONS, RESOURCES } from '../../utils/data';
 import {
     format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
     addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval,
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'sonner';
+import { bookingsApi } from '../../api/bookings';
 import type { BookingHistoryItem } from '../../store/types';
 
 // ─── Time Slots: 09:00 – 20:30 (30-min steps) ───────────────────────────────
@@ -49,6 +51,9 @@ export function AdminChessboardView() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [selectedBooking, setSelectedBooking] = useState<BookingHistoryItem | null>(null);
+
+    // Admin booking state
+    const [adminBookSlot, setAdminBookSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
 
     useEffect(() => {
         fetchAllBookings();
@@ -338,7 +343,10 @@ export function AdminChessboardView() {
                                                 )}
                                             >
                                                 {!cell.past && (
-                                                    <div className="w-full h-full hover:bg-unbox-green/10 cursor-pointer transition-colors" />
+                                                    <div
+                                                        className="w-full h-full hover:bg-unbox-green/10 cursor-pointer transition-colors"
+                                                        onClick={() => setAdminBookSlot({ resId: resource.id, time: cell.slot, date: selectedDate })}
+                                                    />
                                                 )}
                                             </td>
                                         );
@@ -369,6 +377,19 @@ export function AdminChessboardView() {
                 <LegendItem color="bg-gray-100 border-gray-200" label="Завершено" />
                 <LegendItem color="bg-gray-50 border-gray-100" label="Прошедшее время" />
             </div>
+
+            {/* ── Admin Quick Booking Modal ── */}
+            {adminBookSlot && (
+                <AdminQuickBookingModal
+                    slot={adminBookSlot}
+                    users={users}
+                    onClose={() => setAdminBookSlot(null)}
+                    onBooked={() => {
+                        setAdminBookSlot(null);
+                        fetchAllBookings();
+                    }}
+                />
+            )}
 
             {/* ── Booking detail popup (bottom-right) ── */}
             {selectedBooking && (
@@ -459,6 +480,176 @@ function InfoRow({ label, value }: { label: string; value: string }) {
         <div className="flex justify-between gap-3">
             <span className="text-unbox-grey shrink-0">{label}</span>
             <span className="font-medium text-unbox-dark text-right">{value}</span>
+        </div>
+    );
+}
+
+// ── Admin Quick Booking Modal ───────────────────────────────────────────────
+function AdminQuickBookingModal({
+    slot,
+    users,
+    onClose,
+    onBooked,
+}: {
+    slot: { resId: string; time: string; date: Date };
+    users: Array<{ id: string; email: string; name: string }>;
+    onClose: () => void;
+    onBooked: () => void;
+}) {
+    const resource = RESOURCES.find(r => r.id === slot.resId);
+    const [duration, setDuration] = useState(60);
+    const [saving, setSaving] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedUser, setSelectedUser] = useState<{ id: string; email: string; name: string } | null>(null);
+    const dateStr = format(slot.date, 'yyyy-MM-dd');
+
+    const endTime = (() => {
+        const [h, m] = slot.time.split(':').map(Number);
+        const end = addMinutes(setMinutes(setHours(slot.date, h), m), duration);
+        return format(end, 'HH:mm');
+    })();
+
+    const filteredUsers = searchQuery.length >= 1
+        ? users.filter(u =>
+            u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            u.email?.toLowerCase().includes(searchQuery.toLowerCase())
+        ).slice(0, 8)
+        : [];
+
+    const handleBook = async () => {
+        if (!selectedUser) {
+            toast.error('Выберите пользователя');
+            return;
+        }
+        setSaving(true);
+        try {
+            await bookingsApi.createBooking({
+                resourceId: slot.resId,
+                date: new Date(dateStr),
+                startTime: slot.time,
+                duration,
+                format: resource?.formats?.[0] || 'individual',
+                locationId: resource?.locationId,
+                targetUserId: selectedUser.email,
+            } as any);
+            toast.success(`Бронирование создано для ${selectedUser.name}`);
+            onBooked();
+        } catch (e: any) {
+            const detail = e?.response?.data?.detail;
+            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
+            toast.error(msg);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+            <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-200"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="flex items-start justify-between">
+                    <div>
+                        <h3 className="font-bold text-lg flex items-center gap-2">
+                            <Plus size={18} className="text-unbox-green" />
+                            Новое бронирование
+                        </h3>
+                        <p className="text-sm text-unbox-grey mt-0.5">от имени пользователя</p>
+                    </div>
+                    <button onClick={onClose} className="p-1 hover:bg-unbox-light rounded-lg">
+                        <X className="w-5 h-5 text-unbox-grey" />
+                    </button>
+                </div>
+
+                {/* User search */}
+                <div>
+                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Пользователь</label>
+                    {selectedUser ? (
+                        <div className="flex items-center justify-between bg-unbox-light/50 rounded-xl px-3 py-2.5">
+                            <div>
+                                <div className="font-medium text-sm">{selectedUser.name}</div>
+                                <div className="text-xs text-unbox-grey">{selectedUser.email}</div>
+                            </div>
+                            <button
+                                onClick={() => { setSelectedUser(null); setSearchQuery(''); }}
+                                className="p-1 hover:bg-white rounded-lg"
+                            >
+                                <X size={14} className="text-unbox-grey" />
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" />
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                placeholder="Поиск по имени или email..."
+                                className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                autoFocus
+                            />
+                            {filteredUsers.length > 0 && (
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-unbox-light shadow-lg max-h-48 overflow-y-auto z-10">
+                                    {filteredUsers.map(u => (
+                                        <button
+                                            key={u.id}
+                                            onClick={() => { setSelectedUser(u); setSearchQuery(''); }}
+                                            className="w-full text-left px-3 py-2 hover:bg-unbox-light/30 transition-colors text-sm border-b border-unbox-light/30 last:border-0"
+                                        >
+                                            <div className="font-medium">{u.name}</div>
+                                            <div className="text-xs text-unbox-grey">{u.email}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-unbox-light/50 rounded-xl p-3 space-y-1.5 text-sm">
+                    <div className="flex justify-between">
+                        <span className="text-unbox-grey">Кабинет</span>
+                        <span className="font-medium">{resource?.name || slot.resId}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-unbox-grey">Дата</span>
+                        <span className="font-medium">{format(slot.date, 'd MMMM yyyy', { locale: ru })}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-unbox-grey">Время</span>
+                        <span className="font-medium">{slot.time} — {endTime}</span>
+                    </div>
+                </div>
+
+                <div>
+                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Длительность</label>
+                    <div className="flex gap-2">
+                        {[60, 90, 120, 180].map(d => (
+                            <button
+                                key={d}
+                                onClick={() => setDuration(d)}
+                                className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                                    duration === d
+                                        ? 'bg-unbox-green text-white border-unbox-green'
+                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                }`}
+                            >
+                                {d >= 120 ? `${d / 60}ч` : `${d}м`}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <button
+                    onClick={handleBook}
+                    disabled={saving || !selectedUser}
+                    className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    Забронировать
+                </button>
+            </div>
         </div>
     );
 }

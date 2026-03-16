@@ -923,8 +923,9 @@ export function AdminUserDetails() {
                                 <h2 className="text-xl font-bold">История бронирований</h2>
                                 <Button size="sm" onClick={() => {
                                     useBookingStore.getState().reset();
-                                    useBookingStore.getState().setBookingForUser(user.email); // Setting target user
-                                    navigate('/');
+                                    useBookingStore.getState().setBookingForUser(user.email);
+                                    useBookingStore.getState().setStep(2);
+                                    navigate('/checkout');
                                 }}>
                                     <Plus size={16} className="mr-2" />
                                     Создать бронь

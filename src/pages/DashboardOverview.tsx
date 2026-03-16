@@ -132,7 +132,7 @@ export function DashboardOverview() {
                     }}>
                     <h3 className="font-bold text-lg">Быстрые действия</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Button onClick={() => navigate('/')} className="w-full justify-start py-6" size="lg">
+                        <Button onClick={() => navigate('/dashboard/bookings')} className="w-full justify-start py-6" size="lg">
                             <Plus className="mr-2" />
                             Новое бронирование
                         </Button>

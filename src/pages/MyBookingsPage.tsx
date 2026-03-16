@@ -4,11 +4,10 @@ import { useCrmStore } from '../store/crmStore';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { WaitlistModal } from '../components/WaitlistModal';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2
+    User as UserIcon, Check, Pencil, Loader2, Plus
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
@@ -81,9 +80,8 @@ function BookingsChessboard({
     const [crmSlot, setCrmSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
     const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
-    const [waitlistOpen, setWaitlistOpen] = useState(false);
-    const [waitlistSlot, setWaitlistSlot] = useState<string>('');
-    const [waitlistRes, setWaitlistRes] = useState<string>('');
+    // Quick booking state (for free slot clicks)
+    const [quickBookSlot, setQuickBookSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     const tableRef = useRef<HTMLDivElement>(null);
 
@@ -496,9 +494,7 @@ function BookingsChessboard({
                                                 if (crmMode) {
                                                     setCrmSlot({ resId: r.id, time, date: selectedDate });
                                                 } else {
-                                                    setWaitlistRes(r.id);
-                                                    setWaitlistSlot(time);
-                                                    setWaitlistOpen(true);
+                                                    setQuickBookSlot({ resId: r.id, time, date: selectedDate });
                                                 }
                                             } : undefined}
                                         />
@@ -661,13 +657,17 @@ function BookingsChessboard({
                 </div>
             )}
 
-            <WaitlistModal
-                isOpen={waitlistOpen}
-                onClose={() => setWaitlistOpen(false)}
-                resourceId={waitlistRes}
-                startTime={waitlistSlot}
-                date={selectedDate}
-            />
+            {/* Quick Booking Modal (free slot click) */}
+            {!crmMode && quickBookSlot && (
+                <QuickBookingModal
+                    slot={quickBookSlot}
+                    onClose={() => setQuickBookSlot(null)}
+                    onBooked={() => {
+                        setQuickBookSlot(null);
+                        refreshBookings();
+                    }}
+                />
+            )}
 
             {/* CRM Quick Booking Modal */}
             {crmMode && crmSlot && (
@@ -830,13 +830,8 @@ export function MyBookingsPage() {
         }
     };
 
-    const handleBookAgain = (booking: any) => {
-        const store = useBookingStore.getState();
-        store.reset();
-        store.setLocation(booking.locationId);
-        store.setFormat(booking.format);
-        store.setStep(2);
-        navigate('/');
+    const handleBookAgain = (_booking: any) => {
+        setViewMode('grid');
     };
 
     return (
@@ -844,6 +839,15 @@ export function MyBookingsPage() {
             {/* Header + view toggle */}
             <div className="flex items-center justify-between px-4 pt-6">
                 <h1 className="text-2xl font-bold">Мои бронирования</h1>
+                <div className="flex items-center gap-2">
+                    {viewMode === 'list' && (
+                        <button
+                            onClick={() => setViewMode('grid')}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-unbox-green text-white text-xs font-semibold rounded-xl hover:bg-unbox-dark transition-colors shadow-sm"
+                        >
+                            <Plus size={14} /> Новая бронь
+                        </button>
+                    )}
                 <div className="flex items-center gap-1 p-1 rounded-xl border border-unbox-light bg-white/60">
                     <button
                         onClick={() => setViewMode('list')}
@@ -867,6 +871,7 @@ export function MyBookingsPage() {
                     >
                         <LayoutGrid size={14} /> Шахматка
                     </button>
+                </div>
                 </div>
             </div>
 
@@ -920,7 +925,7 @@ export function MyBookingsPage() {
                     </div>
                     <h2 className="text-xl font-bold text-unbox-dark mb-2">У вас пока нет бронирований</h2>
                     <p className="mb-6">Самое время забронировать кабинет!</p>
-                    <Link to="/"><Button onClick={() => useBookingStore.getState().reset()}>Забронировать</Button></Link>
+                    <Button onClick={() => setViewMode('grid')}>Забронировать</Button>
                 </div>
             ) : (
                 <div className="px-4 space-y-6">
@@ -1278,6 +1283,122 @@ function CrmQuickBookingModal({
                                 }`}
                             >
                                 {d === 120 ? '2ч' : `${d}м`}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <button
+                    onClick={handleBook}
+                    disabled={saving}
+                    className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    Забронировать
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// ── Quick Booking Modal (for free slot clicks) ────────────────────────────────
+function QuickBookingModal({
+    slot,
+    onClose,
+    onBooked,
+    bookingForUser,
+}: {
+    slot: { resId: string; time: string; date: Date };
+    onClose: () => void;
+    onBooked: () => void;
+    bookingForUser?: string | null;
+}) {
+    const resource = RESOURCES.find(r => r.id === slot.resId);
+    const [duration, setDuration] = useState(60);
+    const [saving, setSaving] = useState(false);
+    const dateStr = format(slot.date, 'yyyy-MM-dd');
+
+    const endTime = (() => {
+        const [h, m] = slot.time.split(':').map(Number);
+        const end = addMinutes(setMinutes(setHours(slot.date, h), m), duration);
+        return format(end, 'HH:mm');
+    })();
+
+    const hourlyRate = resource?.hourlyRate ?? 20;
+    const estimatedPrice = (hourlyRate * duration / 60).toFixed(0);
+
+    const handleBook = async () => {
+        setSaving(true);
+        try {
+            await bookingsApi.createBooking({
+                resourceId: slot.resId,
+                date: new Date(dateStr),
+                startTime: slot.time,
+                duration,
+                format: resource?.formats?.[0] || 'individual',
+                locationId: resource?.locationId,
+                ...(bookingForUser ? { targetUserId: bookingForUser } : {}),
+            } as any);
+            toast.success('Бронирование создано!');
+            onBooked();
+        } catch (e: any) {
+            const detail = e?.response?.data?.detail;
+            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
+            toast.error(msg);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+            <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-200"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="flex items-start justify-between">
+                    <div>
+                        <h3 className="font-bold text-lg">Новое бронирование</h3>
+                        <p className="text-sm text-unbox-grey mt-0.5">{resource?.name || slot.resId}</p>
+                    </div>
+                    <button onClick={onClose} className="p-1 hover:bg-unbox-light rounded-lg">
+                        <X className="w-5 h-5 text-unbox-grey" />
+                    </button>
+                </div>
+
+                <div className="bg-unbox-light/50 rounded-xl p-3 space-y-1.5 text-sm">
+                    <div className="flex justify-between">
+                        <span className="text-unbox-grey">Кабинет</span>
+                        <span className="font-medium">{resource?.name || slot.resId}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-unbox-grey">Дата</span>
+                        <span className="font-medium">{format(slot.date, 'd MMMM yyyy', { locale: ru })}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-unbox-grey">Время</span>
+                        <span className="font-medium">{slot.time} — {endTime}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-unbox-light pt-1.5">
+                        <span className="text-unbox-grey">Стоимость</span>
+                        <span className="font-bold text-unbox-green">{estimatedPrice} ₾</span>
+                    </div>
+                </div>
+
+                <div>
+                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Длительность</label>
+                    <div className="flex gap-2">
+                        {[60, 90, 120, 180].map(d => (
+                            <button
+                                key={d}
+                                onClick={() => setDuration(d)}
+                                className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                                    duration === d
+                                        ? 'bg-unbox-green text-white border-unbox-green'
+                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                }`}
+                            >
+                                {d >= 120 ? `${d / 60}ч` : `${d}м`}
                             </button>
                         ))}
                     </div>
