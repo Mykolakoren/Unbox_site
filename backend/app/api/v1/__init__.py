@@ -1,19 +1,45 @@
+"""
+API v1 router aggregation with fault-tolerant module loading.
+
+Critical modules (auth, health) fail hard — without them the system is useless.
+All other modules load via safe_include() — if one fails, the rest still work.
+"""
+import importlib
+import logging
+
 from fastapi import APIRouter
-from app.api.v1 import bookings, users, auth, waitlist, health, timeline, resources, upload, pricing, locations, specialists, crm, cashbox, team, notifications
+
+logger = logging.getLogger("unbox.modules")
 
 api_router = APIRouter()
-api_router.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
-api_router.include_router(users.router, prefix="/users", tags=["users"])
+
+
+def safe_include(router: APIRouter, module_path: str, prefix: str, tags: list[str]):
+    """Import a module and register its router. Log and skip on failure."""
+    try:
+        mod = importlib.import_module(module_path)
+        router.include_router(mod.router, prefix=prefix, tags=tags)
+        logger.info(f"✅ Module loaded: {prefix}")
+    except Exception as e:
+        logger.error(f"❌ Module FAILED: {prefix} — {e}", exc_info=True)
+
+
+# ── Critical modules (hard import — app won't start without these) ───────────
+from app.api.v1 import auth, health  # noqa: E402
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(waitlist.router, prefix="/waitlist", tags=["waitlist"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
-api_router.include_router(timeline.router, prefix="/timeline", tags=["timeline"])
-api_router.include_router(resources.router, prefix="/resources", tags=["resources"])
-api_router.include_router(locations.router, prefix="/locations", tags=["locations"])
-api_router.include_router(upload.router, prefix="/upload", tags=["upload"])
-api_router.include_router(pricing.router, prefix="/pricing", tags=["pricing"])
-api_router.include_router(specialists.router, prefix="/specialists", tags=["specialists"])
-api_router.include_router(crm.router, prefix="/crm", tags=["crm"])
-api_router.include_router(cashbox.router, prefix="/cashbox", tags=["cashbox"])
-api_router.include_router(team.router, prefix="/team", tags=["team"])
-api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+
+# ── Isolated business modules (graceful degradation) ─────────────────────────
+safe_include(api_router, "app.api.v1.bookings", "/bookings", ["bookings"])
+safe_include(api_router, "app.api.v1.users", "/users", ["users"])
+safe_include(api_router, "app.api.v1.crm", "/crm", ["crm"])
+safe_include(api_router, "app.api.v1.cashbox", "/cashbox", ["cashbox"])
+safe_include(api_router, "app.api.v1.resources", "/resources", ["resources"])
+safe_include(api_router, "app.api.v1.locations", "/locations", ["locations"])
+safe_include(api_router, "app.api.v1.specialists", "/specialists", ["specialists"])
+safe_include(api_router, "app.api.v1.notifications", "/notifications", ["notifications"])
+safe_include(api_router, "app.api.v1.timeline", "/timeline", ["timeline"])
+safe_include(api_router, "app.api.v1.waitlist", "/waitlist", ["waitlist"])
+safe_include(api_router, "app.api.v1.team", "/team", ["team"])
+safe_include(api_router, "app.api.v1.upload", "/upload", ["upload"])
+safe_include(api_router, "app.api.v1.pricing", "/pricing", ["pricing"])

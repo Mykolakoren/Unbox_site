@@ -2,7 +2,7 @@ from typing import Optional
 from sqlmodel import Session, select
 from app.models.notification import Notification
 from app.models.user import User
-from app.api.deps import ADMIN_ROLES, has_permission
+from app.core.permissions import ADMIN_ROLES, has_permission
 
 
 class NotificationService:
