@@ -10,7 +10,7 @@ from app.models.booking import Booking, BookingCreate, BookingRead
 from app.models.user import User
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
-from app.services.booking import check_availability
+from app.services.booking import check_availability, find_re_rent_conflicts
 
 router = APIRouter()
 
@@ -43,6 +43,57 @@ def _check_ownership(booking: Booking, user: User) -> bool:
     return (booking.user_uuid and booking.user_uuid == user.id) or (
         booking.user_id == user.email
     )
+
+
+def _resolve_booking_owner(session: Session, booking: Booking) -> User | None:
+    """Resolve the actual owner of a booking from user_uuid or user_id (email)."""
+    if booking.user_uuid:
+        owner = session.get(User, booking.user_uuid)
+        if owner:
+            return owner
+    if booking.user_id:
+        owner = session.exec(
+            select(User).where(User.email == booking.user_id)
+        ).first()
+        if owner:
+            return owner
+    return None
+
+
+def _refund_booking_to_owner(
+    session: Session, booking: Booking, owner: User
+) -> dict:
+    """
+    Refund booking cost to owner. Returns metadata dict for audit logging.
+    Handles both balance and subscription payment methods.
+    """
+    refund_meta = {"refunded_to": str(owner.id), "refunded_to_email": owner.email}
+
+    if booking.payment_method == "subscription":
+        if owner.subscription:
+            new_sub = owner.subscription.copy()
+            refund_hours = (
+                booking.hours_deducted
+                if booking.hours_deducted is not None
+                else (booking.duration / 60)
+            )
+            rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
+            new_sub["remaining_hours"] = float(rem) + refund_hours
+            if "remainingHours" in new_sub:
+                del new_sub["remainingHours"]
+            owner.subscription = new_sub
+            session.add(owner)
+            refund_meta["refunded_hours"] = refund_hours
+        else:
+            refund_meta["refunded_hours"] = 0
+            refund_meta["warning"] = "Owner has no subscription to refund to"
+    else:
+        refund_amount = booking.final_price if booking.final_price is not None else 0.0
+        owner.balance += refund_amount
+        session.add(owner)
+        refund_meta["refunded_amount"] = refund_amount
+
+    return refund_meta
 
 
 # ─── GET endpoints ────────────────────────────────────────────────────────────
@@ -133,6 +184,25 @@ def check_slots_availability(
             start_time=slot.start_time,
             duration=slot.duration,
         )
+
+        if not available:
+            # Check if conflict is with a re-rent-listed booking
+            re_rent = find_re_rent_conflicts(
+                session=session,
+                resource_id=slot.resource_id,
+                date=date,
+                start_time=slot.start_time,
+                duration=slot.duration,
+            )
+            if re_rent:
+                results.append({
+                    "available": False,
+                    "conflict": conflict,
+                    "re_rent_available": True,
+                    "re_rent_booking_ids": [str(b.id) for b in re_rent],
+                })
+                continue
+
         results.append({"available": available, "conflict": conflict})
     return results
 
@@ -171,9 +241,63 @@ def create_booking(
         )
 
         if not is_available:
-            raise HTTPException(
-                status_code=400, detail=f"Time slot is already booked: {reason}"
+            # Check if conflict is with re-rent-listed booking(s)
+            re_rent_conflicts = find_re_rent_conflicts(
+                session=session,
+                resource_id=booking_in.resource_id,
+                date=booking_in.date,
+                start_time=booking_in.start_time,
+                duration=booking_in.duration,
             )
+
+            if not re_rent_conflicts:
+                # Genuine conflict with non-re-rent booking
+                raise HTTPException(
+                    status_code=400, detail=f"Time slot is already booked: {reason}"
+                )
+
+            # Auto-cancel all conflicting re-rent bookings with refund
+            for re_rent_booking in re_rent_conflicts:
+                re_rent_owner = _resolve_booking_owner(session, re_rent_booking)
+
+                if re_rent_owner:
+                    _refund_booking_to_owner(session, re_rent_booking, re_rent_owner)
+
+                # Cancel the re-rent booking
+                re_rent_booking.status = "cancelled"
+                re_rent_booking.cancellation_reason = (
+                    "Auto-cancelled: slot re-rented to another user"
+                )
+                re_rent_booking.cancelled_by = "system:re-rent"
+                re_rent_booking.is_re_rent_listed = False
+                session.add(re_rent_booking)
+
+                # GCal cleanup
+                if re_rent_booking.gcal_event_id:
+                    try:
+                        gcal_service.delete_event(
+                            re_rent_booking.gcal_event_id,
+                            re_rent_booking.resource_id,
+                        )
+                    except Exception:
+                        pass
+                    re_rent_booking.gcal_event_id = None
+
+                # Audit log for auto-cancel
+                timeline_service.log_event(
+                    session=session,
+                    actor_id=current_user.id,
+                    actor_role=current_user.role,
+                    target_id=str(re_rent_booking.id),
+                    target_type="booking",
+                    event_type="booking_auto_cancelled_re_rent",
+                    description=f"Booking auto-cancelled due to re-rent claim by {current_user.name}",
+                    metadata={
+                        "refunded_to": str(re_rent_owner.id) if re_rent_owner else None,
+                        "new_booking_user": current_user.email,
+                    },
+                )
+            # Slot is now free — proceed with creating the new booking
 
         # Determine Booking Owner
         booking_owner = current_user
@@ -260,8 +384,7 @@ def create_booking(
             del booking_data["target_user_id"]
 
         booking = Booking(**booking_data)
-        if booking.payment_method == "subscription":
-            booking.hours_deducted = booking.duration / 60
+        # hours_deducted already set from quote via booking_data (line 252)
 
         session.add(booking)
         session.commit()
@@ -356,27 +479,14 @@ def cancel_booking(
             pass
         booking.gcal_event_id = None
 
-    # ── Refund ──
-    if booking.payment_method == "subscription":
-        if current_user.subscription:
-            new_sub = current_user.subscription.copy()
-            refund_hours = (
-                booking.hours_deducted
-                if booking.hours_deducted is not None
-                else (booking.duration / 60)
-            )
-            rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
-            new_sub["remaining_hours"] = float(rem) + refund_hours
-            if "remainingHours" in new_sub:
-                del new_sub["remainingHours"]
-            current_user.subscription = new_sub
-            session.add(current_user)
+    # ── Refund to booking OWNER (not current_user!) ──
+    booking_owner = _resolve_booking_owner(session, booking)
+    refund_meta = {}
+    if not booking_owner:
+        print(f"[WARN] Cannot refund: booking owner not found for booking {booking.id}")
+        refund_meta = {"warning": "Booking owner not found, no refund issued"}
     else:
-        refund_amount = (
-            booking.final_price if booking.final_price is not None else 0.0
-        )
-        current_user.balance += refund_amount
-        session.add(current_user)
+        refund_meta = _refund_booking_to_owner(session, booking, booking_owner)
 
     booking.status = "cancelled"
     booking.cancellation_reason = "User cancelled"
@@ -398,12 +508,7 @@ def cancel_booking(
         metadata={
             "is_late_cancellation": is_late_cancellation,
             "hours_until_start": hours_until_start,
-            "refunded_amount": booking.final_price
-            if booking.payment_method != "subscription"
-            else 0,
-            "refunded_hours": booking.hours_deducted
-            if booking.payment_method == "subscription"
-            else 0,
+            **refund_meta,
         },
     )
 
@@ -491,6 +596,71 @@ def reschedule_booking(
     old_time = booking.start_time
     old_resource = booking.resource_id
 
+    # ── Price recalculation when room changes ──
+    room_changed = new_resource != booking.resource_id
+    old_price = booking.final_price or 0.0
+    new_price = old_price
+    price_diff = 0.0
+
+    if room_changed:
+        # Block room change for subscription bookings (complex hour recalc)
+        if booking.payment_method == "subscription":
+            raise HTTPException(
+                status_code=400,
+                detail="Нельзя менять комнату для бронирований по абонементу. "
+                "Отмените текущее и создайте новое.",
+            )
+
+        booking_owner = _resolve_booking_owner(session, booking)
+        if not booking_owner:
+            raise HTTPException(
+                status_code=400,
+                detail="Не удалось определить владельца бронирования для перерасчёта",
+            )
+
+        from app.services.pricing import PricingService
+
+        try:
+            h, m = map(int, data.new_start_time.split(":"))
+            new_start_dt = new_date.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            new_start_dt = new_date
+
+        pricing_service = PricingService(session)
+        new_quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=new_resource,
+            start_time=new_start_dt,
+            duration_minutes=booking.duration,
+            format_type=booking.format,
+        )
+
+        new_price = new_quote.final_price
+        price_diff = new_price - old_price
+
+        if price_diff > 0:
+            # Price increased — check funds and charge
+            available_funds = booking_owner.balance + booking_owner.credit_limit
+            if available_funds < price_diff:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Недостаточно средств для перерасчёта. "
+                    f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
+                )
+            booking_owner.balance -= price_diff
+            session.add(booking_owner)
+        elif price_diff < 0:
+            # Price decreased — refund the difference
+            booking_owner.balance += abs(price_diff)
+            session.add(booking_owner)
+
+        # Update booking price fields
+        booking.final_price = new_quote.final_price
+        booking.base_price = new_quote.base_price
+        booking.applied_rule = new_quote.applied_rule
+        booking.discount_amount = new_quote.discount_amount
+        booking.discount_percent = new_quote.discount_percent
+
     booking.date = new_date
     booking.start_time = data.new_start_time
     booking.resource_id = new_resource
@@ -529,6 +699,10 @@ def reschedule_booking(
             "new_date": data.new_date,
             "new_time": data.new_start_time,
             "new_resource": new_resource,
+            "room_changed": room_changed,
+            "old_price": old_price if room_changed else None,
+            "new_price": new_price if room_changed else None,
+            "price_diff": price_diff if room_changed else None,
         },
     )
 
