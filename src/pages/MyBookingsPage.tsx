@@ -249,10 +249,12 @@ function BookingsChessboard({
     const isNewSlotSelected = (resId: string, time: string) =>
         newSlots.includes(`${resId}|${time}`);
 
-    const setNewSlotRange = (resId: string, times: string[]) => {
-        const other = newSlots.filter(s => !s.startsWith(`${resId}|`));
-        setNewSlots([...other, ...times.map(t => `${resId}|${t}`)]);
-    };
+    const setNewSlotRange = useCallback((resId: string, times: string[]) => {
+        setNewSlots(prev => {
+            const other = prev.filter(s => !s.startsWith(`${resId}|`));
+            return [...other, ...times.map(t => `${resId}|${t}`)];
+        });
+    }, []);
 
     // ── New booking drag handlers ──
     const handleNewDragDown = (resId: string, time: string, mode: NewDragMode) => {
@@ -318,18 +320,21 @@ function BookingsChessboard({
 
     const handleNewDragUp = useCallback(() => {
         if (!newDragModeRef.current) return;
+        const dragResId = newDragStartRef.current?.resId ?? null;
         newDragModeRef.current = null;
         newDragStartRef.current = null;
         newDragInitialBlockRef.current = null;
         forceNewDragUpdate();
 
-        // Min 1h: if only 1 slot selected, auto-add next
+        // Min 1h per resource: if the just-dragged resource has only 1 slot, auto-add next
         setNewSlots(prev => {
-            if (prev.length !== 1) return prev;
-            const [resId, timeStr] = prev[0].split('|');
+            if (!dragResId) return prev;
+            const resSlots = prev.filter(s => s.startsWith(`${dragResId}|`));
+            if (resSlots.length !== 1) return prev;
+            const timeStr = resSlots[0].split('|')[1];
             const idx = timeSlots.indexOf(timeStr);
-            if (idx >= 0 && idx + 1 < timeSlots.length && !isSlotOccupied(resId, timeSlots[idx + 1])) {
-                return [...prev, `${resId}|${timeSlots[idx + 1]}`];
+            if (idx >= 0 && idx + 1 < timeSlots.length && !isSlotOccupied(dragResId, timeSlots[idx + 1])) {
+                return [...prev, `${dragResId}|${timeSlots[idx + 1]}`];
             }
             return prev;
         });
