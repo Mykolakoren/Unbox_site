@@ -552,10 +552,7 @@ function BookingsChessboard({
                                     {t}
                                 </th>
                             ))}
-                            {!crmMode && (
-                                <th className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/50 z-20 w-28 p-2"
-                                    style={{ background: 'rgba(212,226,225,0.60)' }} />
-                            )}
+                            {/* Right column removed — single floating "Продолжить" bar below grid */}
                         </tr>
                     </thead>
                     <tbody>
@@ -787,21 +784,6 @@ function BookingsChessboard({
                                         <div className="text-[10px] text-unbox-grey">{r.capacity} чел.</div>
                                     </td>
                                     {cells}
-                                    {!crmMode && (
-                                        <td className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/40 z-10 h-14 p-2 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]"
-                                            style={{ background: 'rgba(212,226,225,0.50)' }}>
-                                            {getNewBlockForResource(r.id) ? (
-                                                <button
-                                                    onClick={handleConfirmNewBooking}
-                                                    disabled={bookingSaving}
-                                                    className="flex items-center gap-1.5 bg-unbox-green text-white text-xs font-bold px-3 py-2 rounded-xl shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap animate-in fade-in zoom-in-90 duration-200 h-full"
-                                                >
-                                                    {bookingSaving ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <ArrowRight size={14} className="shrink-0" />}
-                                                    <span>Продолжить</span>
-                                                </button>
-                                            ) : null}
-                                        </td>
-                                    )}
                                 </tr>
                             );
                         })}
@@ -833,11 +815,50 @@ function BookingsChessboard({
                 </div>
             </div>
 
-            {/* Time overlap warning */}
-            {hasTimeOverlap && newSlots.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center gap-2 text-sm">
-                    <AlertTriangle size={16} className="shrink-0" />
-                    <span>Выбранные слоты накладываются по времени в разных кабинетах</span>
+            {/* ── Floating booking bar ── */}
+            {!crmMode && newSlots.length > 0 && (
+                <div className="sticky bottom-0 z-30 -mx-1">
+                    <div className="bg-white/95 backdrop-blur-md border border-unbox-light/50 rounded-2xl shadow-lg px-5 py-3 flex items-center justify-between gap-4 animate-in slide-in-from-bottom-4 duration-200">
+                        <div className="flex items-center gap-4 flex-wrap min-w-0">
+                            {/* Summary chips */}
+                            {selectedNewBlocks.map(block => {
+                                const res = resources.find(r => r.id === block.resId);
+                                const slots = block.end - block.start + 1;
+                                const hours = (slots * 30) / 60;
+                                return (
+                                    <div key={block.resId} className="flex items-center gap-1.5 bg-unbox-green/10 text-unbox-green rounded-lg px-2.5 py-1.5 text-xs font-semibold">
+                                        <span>{res?.name || block.resId}</span>
+                                        <span className="opacity-60">·</span>
+                                        <span>{timeSlots[block.start]}-{minsToTime(timeToMins(timeSlots[block.end]) + 30)}</span>
+                                        <span className="opacity-60">·</span>
+                                        <span>{hours}ч</span>
+                                        <button
+                                            onClick={() => setNewSlotRange(block.resId, [])}
+                                            className="ml-1 hover:bg-red-100 rounded-full p-0.5 transition-colors"
+                                            title="Убрать"
+                                        >
+                                            <X size={10} className="text-red-500" />
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                            {/* Time overlap warning */}
+                            {hasTimeOverlap && (
+                                <div className="flex items-center gap-1.5 text-amber-600 text-xs font-medium">
+                                    <AlertTriangle size={14} className="shrink-0" />
+                                    <span>Наложение по времени</span>
+                                </div>
+                            )}
+                        </div>
+                        <button
+                            onClick={handleConfirmNewBooking}
+                            disabled={bookingSaving}
+                            className="flex items-center gap-2 bg-unbox-green text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap shrink-0"
+                        >
+                            {bookingSaving ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                            <span>Продолжить</span>
+                        </button>
+                    </div>
                 </div>
             )}
 
