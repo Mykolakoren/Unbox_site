@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { X, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
 
@@ -31,14 +32,22 @@ function flattenCategories(cats: ExpenseCategory[]): { id: string; name: string;
     return result;
 }
 
+const ACCOUNTS = [
+    { id: 'cash', label: 'Наличные' },
+    { id: 'card_tbc', label: 'Карта TBC' },
+    { id: 'card_bog', label: 'Карта BOG' },
+] as const;
+
 export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const { createTransaction, categories } = useCashboxStore();
-    const [type, setType] = useState<'income' | 'expense'>('income');
+    const [type, setType] = useState<'income' | 'expense' | 'transfer'>('income');
     const [amount, setAmount] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [categoryId, setCategoryId] = useState('');
     const [description, setDescription] = useState('');
     const [branch, setBranch] = useState('');
+    const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+    const [transferTo, setTransferTo] = useState('card_tbc');
     const [saving, setSaving] = useState(false);
 
     if (!isOpen) return null;
@@ -52,21 +61,52 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             toast.error('Введите корректную сумму');
             return;
         }
+        if (type === 'transfer' && paymentMethod === transferTo) {
+            toast.error('Счёт-источник и счёт-получатель должны отличаться');
+            return;
+        }
         setSaving(true);
         try {
-            await createTransaction({
-                type,
-                amount: value,
-                payment_method: paymentMethod,
-                category_id: categoryId || undefined,
-                description: description || undefined,
-                branch: branch || undefined,
-            });
-            toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
+            const dateValue = txDate ? new Date(txDate).toISOString() : undefined;
+            if (type === 'transfer') {
+                // Transfer = expense from source + income to target
+                const fromLabel = ACCOUNTS.find(a => a.id === paymentMethod)?.label || paymentMethod;
+                const toLabel = ACCOUNTS.find(a => a.id === transferTo)?.label || transferTo;
+                const transferDesc = `Перевод: ${fromLabel} → ${toLabel}${description ? ` (${description})` : ''}`;
+                await createTransaction({
+                    type: 'expense',
+                    amount: value,
+                    payment_method: paymentMethod,
+                    description: transferDesc,
+                    branch: branch || undefined,
+                    date: dateValue,
+                });
+                await createTransaction({
+                    type: 'income',
+                    amount: value,
+                    payment_method: transferTo,
+                    description: transferDesc,
+                    branch: branch || undefined,
+                    date: dateValue,
+                });
+                toast.success('Перевод записан');
+            } else {
+                await createTransaction({
+                    type,
+                    amount: value,
+                    payment_method: paymentMethod,
+                    category_id: categoryId || undefined,
+                    description: description || undefined,
+                    branch: branch || undefined,
+                    date: dateValue,
+                });
+                toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
+            }
             setAmount('');
             setDescription('');
             setCategoryId('');
             setBranch('');
+            setTxDate(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
             onClose();
         } catch {
             toast.error('Ошибка при сохранении');
@@ -93,11 +133,11 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Type toggle */}
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                         <button
                             type="button"
                             onClick={() => setType('income')}
-                            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'income'
                                     ? 'bg-green-100 text-green-800 border-2 border-green-300'
                                     : 'bg-gray-50 text-gray-500 border-2 border-transparent hover:bg-gray-100'
@@ -109,7 +149,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         <button
                             type="button"
                             onClick={() => setType('expense')}
-                            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'expense'
                                     ? 'bg-red-100 text-red-800 border-2 border-red-300'
                                     : 'bg-gray-50 text-gray-500 border-2 border-transparent hover:bg-gray-100'
@@ -117,6 +157,18 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         >
                             <ArrowUpRight size={16} />
                             Расход
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setType('transfer')}
+                            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                                type === 'transfer'
+                                    ? 'bg-blue-100 text-blue-800 border-2 border-blue-300'
+                                    : 'bg-gray-50 text-gray-500 border-2 border-transparent hover:bg-gray-100'
+                            }`}
+                        >
+                            <ArrowLeftRight size={16} />
+                            Перевод
                         </button>
                     </div>
 
@@ -134,9 +186,22 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         />
                     </div>
 
-                    {/* Payment method */}
+                    {/* Date */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Способ оплаты</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Дата операции</label>
+                        <input
+                            type="datetime-local"
+                            value={txDate}
+                            onChange={e => setTxDate(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                        />
+                    </div>
+
+                    {/* Payment method / Source account */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                            {type === 'transfer' ? 'Со счёта' : 'Способ оплаты'}
+                        </label>
                         <div className="grid grid-cols-3 gap-2">
                             {PAYMENT_METHODS.map(pm => (
                                 <button
@@ -156,22 +221,51 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         </div>
                     </div>
 
-                    {/* Category */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Категория</label>
-                        <select
-                            value={categoryId}
-                            onChange={e => setCategoryId(e.target.value)}
-                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm bg-white"
-                        >
-                            <option value="">Без категории</option>
-                            {flatCats.map(c => (
-                                <option key={c.id} value={c.id}>
-                                    {c.depth > 0 ? `  └ ${c.name}` : c.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                    {/* Transfer target account */}
+                    {type === 'transfer' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">На счёт</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {PAYMENT_METHODS.map(pm => (
+                                    <button
+                                        key={pm.id}
+                                        type="button"
+                                        onClick={() => setTransferTo(pm.id)}
+                                        className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
+                                            transferTo === pm.id
+                                                ? 'border-blue-400 bg-blue-50 text-blue-800 font-medium'
+                                                : pm.id === paymentMethod
+                                                    ? 'border-gray-100 text-gray-300 cursor-not-allowed'
+                                                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                                        }`}
+                                        disabled={pm.id === paymentMethod}
+                                    >
+                                        <span className="text-lg">{pm.icon}</span>
+                                        {pm.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Category (not for transfers) */}
+                    {type !== 'transfer' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Категория</label>
+                            <select
+                                value={categoryId}
+                                onChange={e => setCategoryId(e.target.value)}
+                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm bg-white"
+                            >
+                                <option value="">Без категории</option>
+                                {flatCats.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.depth > 0 ? `  └ ${c.name}` : c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     {/* Branch */}
                     <div>

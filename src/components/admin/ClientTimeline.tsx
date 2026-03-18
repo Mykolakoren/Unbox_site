@@ -196,7 +196,18 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
 
         // 5. Comments & CRM events
         user.commentHistory?.forEach(c => {
-            if (c.type === 'crm_access_approved') {
+            if (c.type === 'crm_access_requested') {
+                list.push({
+                    id: c.id || `crm-req-${c.date}`,
+                    date: new Date(c.date),
+                    type: 'crm_access',
+                    title: 'Запрос на CRM',
+                    description: c.text,
+                    icon: KeyRound,
+                    color: 'text-blue-600',
+                    bg: 'bg-blue-50 border border-blue-200'
+                });
+            } else if (c.type === 'crm_access_approved') {
                 list.push({
                     id: c.id || `crm-${c.date}`,
                     date: new Date(c.date),

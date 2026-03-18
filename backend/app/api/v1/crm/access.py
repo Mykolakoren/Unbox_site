@@ -48,6 +48,27 @@ def apply_for_crm_access(
         "submitted_at": now.isoformat(),
     }
     current_user.crm_data = crm_data
+
+    # Record request in comment_history for timeline
+    comment_history = list(current_user.comment_history or [])
+    req_text = f"Подана заявка на CRM"
+    if profession:
+        req_text += f" (специализация: {profession})"
+    if message:
+        req_text += f" — {message}"
+    comment_history.append({
+        "id": f"crm-request-{now.timestamp()}",
+        "date": now.isoformat(),
+        "adminName": current_user.name,
+        "text": req_text,
+        "type": "crm_access_requested",
+        "meta": {
+            "profession": profession or "",
+            "message": message or "",
+        },
+    })
+    current_user.comment_history = comment_history
+
     current_user.updated_at = now
     session.add(current_user)
     session.commit()
