@@ -39,18 +39,45 @@ OWNER_ONLY_GRANTABLE = {
 ALL_GRANTABLE = SENIOR_ADMIN_GRANTABLE | OWNER_ONLY_GRANTABLE
 
 
+# Default permissions by admin role (auto-granted without storing in DB)
+ADMIN_DEFAULT_PERMISSIONS = {
+    "admin.access", "admin.dashboard",
+    "crm.view_clients", "crm.create_client", "crm.edit_client", "crm.manage_status",
+    "bookings.view_all", "bookings.cancel_any", "bookings.reschedule_any", "bookings.manage_rerent",
+    "subscriptions.manage", "subscriptions.request_discount",
+    "finance.topup_balance", "finance.set_credit_limit", "finance.view_reports",
+    "content.edit_locations", "content.edit_rooms", "content.set_hours",
+    "specialists.verify",
+}
+
+SENIOR_ADMIN_DEFAULT_PERMISSIONS = ADMIN_DEFAULT_PERMISSIONS | {
+    "bookings.override_24h",
+    "subscriptions.set_discount",
+    "finance.manage_cashbox",
+    "content.add_locations", "content.add_rooms", "content.edit_pricing",
+    "admin.assign_roles", "admin.accept_requests",
+}
+
+
 def has_permission(user, permission: str) -> bool:
     """Check if user has a specific granular permission.
 
     Owner auto-has ALL permissions.
+    Senior_admin auto-has admin defaults + senior extras.
+    Admin auto-has admin defaults.
     Specialists auto-have all psy_crm.* permissions via their role.
-    Admins/owners auto-have admin.access via their role.
     """
     # Owner has all permissions
     if user.role == "owner":
         return True
+    # Senior admin defaults
+    if user.role == "senior_admin" and permission in SENIOR_ADMIN_DEFAULT_PERMISSIONS:
+        return True
+    # Admin defaults
+    if user.role == "admin" and permission in ADMIN_DEFAULT_PERMISSIONS:
+        return True
+    # Specialist auto-has psy_crm.*
     if permission in PSY_CRM_PERMISSIONS and user.role == SPECIALIST_ROLE:
         return True
-    if permission == "admin.access" and user.role in ADMIN_ROLES:
-        return True
+    # Explicit permissions in user record (overrides/extras)
     return permission in (user.permissions or [])

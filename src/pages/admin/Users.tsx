@@ -168,8 +168,8 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
 
     // Determine available role options
     const availableRoles = (() => {
-        if (isOwner) return ['user', 'admin', 'senior_admin', 'owner'];
-        if (isSeniorAdmin) return ['user', 'admin'];
+        if (isOwner) return ['user', 'specialist', 'admin', 'senior_admin', 'owner'];
+        if (isSeniorAdmin) return ['user', 'specialist', 'admin'];
         return [];
     })();
 
@@ -213,13 +213,14 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () =>
                             <select
                                 className="w-full p-2 border border-unbox-light rounded-lg focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                 value={localRole}
-                                onChange={(e) => setLocalRole(e.target.value as "user" | "admin" | "senior_admin" | "owner")}
+                                onChange={(e) => setLocalRole(e.target.value as "user" | "specialist" | "admin" | "senior_admin" | "owner")}
                             >
                                 {availableRoles.map(role => (
                                     <option key={role} value={role}>
                                         {role === 'user' ? 'Пользователь' :
-                                            role === 'admin' ? 'Администратор' :
-                                                role === 'senior_admin' ? 'Старший Админ' : 'Владелец'}
+                                            role === 'specialist' ? 'Специалист' :
+                                                role === 'admin' ? 'Администратор' :
+                                                    role === 'senior_admin' ? 'Старший Админ' : 'Владелец'}
                                     </option>
                                 ))}
                             </select>
