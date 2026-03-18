@@ -47,8 +47,6 @@ def apply_for_crm_access(
         "message": message or "",
         "submitted_at": now.isoformat(),
     }
-    if profession:
-        current_user.profession = profession
     current_user.crm_data = crm_data
     current_user.updated_at = now
     session.add(current_user)
@@ -62,7 +60,7 @@ def apply_for_crm_access(
         title="Новый запрос на CRM",
         description=f"{current_user.name} подал(а) запрос на доступ к CRM",
         icon="UserPlus",
-        link="/admin/specialists",
+        link=f"/admin/users/{current_user.email}",
     )
     session.commit()
 
@@ -122,6 +120,68 @@ def get_my_crm_access(
         "permanent": False,
         "expires_at": crm_data.get("access_expires_at"),
         "days_remaining": None,
+    }
+
+
+@router.get("/access-status/{user_id}")
+def get_user_crm_access(
+    user_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+):
+    """Admin: get CRM access status for a specific user."""
+    from uuid import UUID as _UUID
+    try:
+        target_user = session.get(User, _UUID(user_id))
+    except (ValueError, TypeError):
+        raise HTTPException(404, "User not found")
+    if not target_user:
+        raise HTTPException(404, "User not found")
+
+    if target_user.role in ("specialist", "owner", "senior_admin"):
+        app_data = (target_user.crm_data or {}).get("access_application", {})
+        return {
+            "access_status": "active",
+            "permanent": True,
+            "expires_at": None,
+            "days_remaining": None,
+            "profession": app_data.get("profession", ""),
+        }
+
+    crm_data = dict(target_user.crm_data or {})
+    access_status = crm_data.get("access_status", "none")
+    app_data = crm_data.get("access_application", {})
+
+    expires_at = crm_data.get("access_expires_at")
+    days_remaining = None
+
+    if access_status == "active" and expires_at:
+        try:
+            expiry_dt = datetime.fromisoformat(expires_at)
+            if datetime.utcnow() > expiry_dt:
+                access_status = "expired"
+                crm_data["access_status"] = "expired"
+                target_user.crm_data = crm_data
+                perms = list(target_user.permissions or [])
+                if "psy_crm.access" in perms:
+                    perms.remove("psy_crm.access")
+                    target_user.permissions = perms
+                session.add(target_user)
+                session.commit()
+                days_remaining = 0
+            else:
+                days_remaining = max(0, (expiry_dt - datetime.utcnow()).days)
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "access_status": access_status,
+        "permanent": False,
+        "expires_at": expires_at,
+        "days_remaining": days_remaining,
+        "profession": app_data.get("profession", ""),
+        "message": app_data.get("message"),
+        "submitted_at": app_data.get("submitted_at"),
     }
 
 
@@ -189,6 +249,22 @@ def approve_crm_access(
         perms.append("psy_crm.access")
         target_user.permissions = perms
 
+    # Record in comment_history
+    comment_history = list(target_user.comment_history or [])
+    comment_history.append({
+        "id": f"crm-approve-{now.timestamp()}",
+        "date": now.isoformat(),
+        "adminName": current_user.name,
+        "text": f"CRM доступ одобрен на {days} дн. (до {expires_at.strftime('%d.%m.%Y')})",
+        "type": "crm_access_approved",
+        "meta": {
+            "days": days,
+            "expires_at": expires_at.isoformat(),
+            "admin_id": str(current_user.id),
+        },
+    })
+    target_user.comment_history = comment_history
+
     target_user.updated_at = now
     session.add(target_user)
     session.commit()
@@ -223,7 +299,27 @@ def reject_crm_access(
         crm_data["rejection_reason"] = reason
 
     target_user.crm_data = crm_data
-    target_user.updated_at = datetime.utcnow()
+
+    # Record in comment_history
+    now = datetime.utcnow()
+    comment_history = list(target_user.comment_history or [])
+    reject_text = f"CRM запрос отклонён"
+    if reason:
+        reject_text += f": {reason}"
+    comment_history.append({
+        "id": f"crm-reject-{now.timestamp()}",
+        "date": now.isoformat(),
+        "adminName": current_user.name,
+        "text": reject_text,
+        "type": "crm_access_rejected",
+        "meta": {
+            "admin_id": str(current_user.id),
+            "reason": reason,
+        },
+    })
+    target_user.comment_history = comment_history
+
+    target_user.updated_at = now
     session.add(target_user)
     session.commit()
 

@@ -50,6 +50,7 @@ class TherapySessionRead(TherapySessionBase):
 
 
 class TherapySessionUpdate(SQLModel):
+    client_id: Optional[str] = None
     date: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     status: Optional[str] = None

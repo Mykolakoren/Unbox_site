@@ -10,6 +10,7 @@ import {
     Wallet,
     StickyNote,
     Loader2,
+    BookOpen,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
@@ -17,11 +18,12 @@ import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import clsx from 'clsx';
 
 const CRM_TABS = [
-    { icon: LayoutDashboard, label: 'Дашборд',  path: '/crm',          exact: true },
-    { icon: Users,           label: 'Клиенты',  path: '/crm/clients' },
-    { icon: Calendar,        label: 'Сессии',   path: '/crm/sessions' },
-    { icon: Wallet,          label: 'Финансы',  path: '/crm/finances' },
-    { icon: StickyNote,      label: 'Заметки',  path: '/crm/notes' },
+    { icon: LayoutDashboard, label: 'Дашборд',       path: '/crm',               exact: true },
+    { icon: Users,           label: 'Клиенты',       path: '/crm/clients' },
+    { icon: Calendar,        label: 'Сессии',        path: '/crm/sessions' },
+    { icon: BookOpen,        label: 'Бронирования',  path: '/crm/bookings' },
+    { icon: Wallet,          label: 'Финансы',       path: '/crm/finances' },
+    { icon: StickyNote,      label: 'Заметки',       path: '/crm/notes' },
 ];
 
 function CrmTopTabs() {
@@ -76,14 +78,14 @@ export function CrmLayout() {
         // Quick check: specialist, owner, and senior_admin always have access
         const hasRoleAccess = currentUser.role === 'specialist' || currentUser.role === 'owner' || currentUser.role === 'senior_admin';
         if (hasRoleAccess) {
-            setAccessStatus({ access_status: 'active', permanent: true, expires_at: null, days_remaining: null });
+            setAccessStatus({ accessStatus: 'active', permanent: true, expiresAt: null, daysRemaining: null });
             setAccessLoading(false);
             return;
         }
 
         crmApi.getMyAccess()
             .then(setAccessStatus)
-            .catch(() => setAccessStatus({ access_status: 'none', permanent: false, expires_at: null, days_remaining: null }))
+            .catch(() => setAccessStatus({ accessStatus: 'none', permanent: false, expiresAt: null, daysRemaining: null }))
             .finally(() => setAccessLoading(false));
     }, [currentUser]);
 
@@ -100,7 +102,7 @@ export function CrmLayout() {
     }
 
     // Show apply page if no active access
-    if (!accessStatus || accessStatus.access_status !== 'active') {
+    if (!accessStatus || accessStatus.accessStatus !== 'active') {
         return <CrmApplyPage />;
     }
 

@@ -16,7 +16,8 @@ import {
     CheckCircle2,
     XCircle,
     Clock,
-    Coins
+    Coins,
+    KeyRound
 } from 'lucide-react';
 import clsx from 'clsx';
 import { RESOURCES } from '../../utils/data';
@@ -34,7 +35,8 @@ type EventType =
     | 'booking_cancelled'
     | 'transaction'
     | 'discount_change'
-    | 'comment';
+    | 'comment'
+    | 'crm_access';
 
 interface TimelineEvent {
     id: string;
@@ -192,18 +194,42 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
             });
         });
 
-        // 5. Comments
+        // 5. Comments & CRM events
         user.commentHistory?.forEach(c => {
-            list.push({
-                id: c.id,
-                date: new Date(c.date),
-                type: 'comment',
-                title: 'Комментарий',
-                description: c.text,
-                icon: MessageSquare,
-                color: 'text-unbox-dark', // Was yellow
-                bg: 'bg-unbox-light'
-            });
+            if (c.type === 'crm_access_approved') {
+                list.push({
+                    id: c.id || `crm-${c.date}`,
+                    date: new Date(c.date),
+                    type: 'crm_access',
+                    title: 'CRM доступ одобрен',
+                    description: `${c.adminName}: ${c.text}`,
+                    icon: KeyRound,
+                    color: 'text-green-700',
+                    bg: 'bg-green-50 border border-green-200'
+                });
+            } else if (c.type === 'crm_access_rejected') {
+                list.push({
+                    id: c.id || `crm-${c.date}`,
+                    date: new Date(c.date),
+                    type: 'crm_access',
+                    title: 'CRM запрос отклонён',
+                    description: `${c.adminName}: ${c.text}`,
+                    icon: KeyRound,
+                    color: 'text-red-600',
+                    bg: 'bg-red-50 border border-red-200'
+                });
+            } else {
+                list.push({
+                    id: c.id,
+                    date: new Date(c.date),
+                    type: 'comment',
+                    title: c.type === 'permissions_update' ? 'Обновление прав' : c.type === 'subscription_topup' ? 'Пополнение абонемента' : 'Комментарий',
+                    description: c.adminName ? `${c.adminName}: ${c.text}` : c.text,
+                    icon: MessageSquare,
+                    color: 'text-unbox-dark',
+                    bg: 'bg-unbox-light'
+                });
+            }
         });
 
         // Sort by date desc

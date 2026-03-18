@@ -34,6 +34,7 @@ import { CrmDashboard } from './pages/crm/CrmDashboard';
 import { CrmClients } from './pages/crm/CrmClients';
 import { CrmClientDetail } from './pages/crm/CrmClientDetail';
 import { CrmSessions } from './pages/crm/CrmSessions';
+import { CrmBookings } from './pages/crm/CrmBookings';
 import { CrmFinances } from './pages/crm/CrmFinances';
 import { CrmNotes } from './pages/crm/CrmNotes';
 
@@ -181,6 +182,7 @@ function App() {
           <Route path="clients" element={<CrmClients />} />
           <Route path="clients/:clientId" element={<CrmClientDetail />} />
           <Route path="sessions" element={<CrmSessions />} />
+          <Route path="bookings" element={<CrmBookings />} />
           <Route path="finances" element={<CrmFinances />} />
           <Route path="notes" element={<CrmNotes />} />
         </Route>

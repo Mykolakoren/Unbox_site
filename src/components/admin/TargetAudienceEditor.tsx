@@ -81,10 +81,10 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
             }}
             className="group cursor-pointer flex items-start gap-2 py-1 hover:bg-gray-50 rounded-md transition-colors -ml-1 pl-1"
         >
-            <Users size={16} className="text-gray-400 mt-0.5" />
+            <Users size={16} className="text-gray-500 mt-0.5" />
             <div className="flex-1 text-sm">
                 {(!value || value.length === 0) ? (
-                    <span className="text-gray-400 italic font-normal">Не указано</span>
+                    <span className="text-gray-500 italic font-normal">Не указано</span>
                 ) : (
                     <div className="flex flex-wrap gap-1">
                         {value.map(item => (
@@ -95,7 +95,7 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
                     </div>
                 )}
             </div>
-            <ChevronDown size={14} className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
+            <ChevronDown size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
         </div>
     );
 }

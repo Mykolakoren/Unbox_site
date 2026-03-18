@@ -3,10 +3,10 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
 import { RESOURCES, SUBSCRIPTION_PLANS } from '../../utils/data';
@@ -25,6 +25,7 @@ import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
 import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLimitModal';
 import { api } from '../../api/client';
+import { crmApi, type CrmAccessStatus } from '../../api/crm';
 
 export function AdminUserDetails() {
     const { email } = useParams<{ email: string }>();
@@ -47,6 +48,10 @@ export function AdminUserDetails() {
     const [topupForm, setTopupForm] = useState({ hours: '', amount: '', payment_method: 'cash', note: '' });
     const [topupSaving, setTopupSaving] = useState(false);
 
+    // CRM Access state
+    const [crmAccess, setCrmAccess] = useState<(CrmAccessStatus & { profession?: string; message?: string; submittedAt?: string }) | null>(null);
+    const [crmActionLoading, setCrmActionLoading] = useState(false);
+
     const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
     const adminUsers = users.filter(u => u.role && ADMIN_ROLES.includes(u.role));
     const adminMap = new Map(adminUsers.map(a => [a.id, a]));
@@ -54,9 +59,50 @@ export function AdminUserDetails() {
     const attractedAdmin   = user?.attractedByAdminId  ? adminMap.get(user.attractedByAdminId)  : null;
     // Let's keep 'overview' default but I will change it in the replacement to 'timeline' to show it off immediately, or maybe 'overview' is safer. Let's use 'overview' but add 'timeline' to type.
 
+    // Fetch CRM access status
+    const fetchCrmAccess = useCallback(async () => {
+        if (!user?.id) return;
+        try {
+            const data = await crmApi.getUserAccess(user.id);
+            setCrmAccess(data);
+        } catch {
+            setCrmAccess(null);
+        }
+    }, [user?.id]);
+
+    useEffect(() => {
+        fetchCrmAccess();
+    }, [fetchCrmAccess]);
+
     if (!user) {
         return <div className="p-8 text-center">Клиент не найден</div>;
     }
+
+    const handleCrmApprove = async (days: number) => {
+        setCrmActionLoading(true);
+        try {
+            await crmApi.approveAccessRequest(user.id, days);
+            toast.success(`CRM доступ одобрен на ${days} дней`);
+            fetchCrmAccess();
+        } catch {
+            toast.error('Ошибка при одобрении доступа');
+        } finally {
+            setCrmActionLoading(false);
+        }
+    };
+
+    const handleCrmReject = async () => {
+        setCrmActionLoading(true);
+        try {
+            await crmApi.rejectAccessRequest(user.id);
+            toast.success('Запрос отклонён');
+            fetchCrmAccess();
+        } catch {
+            toast.error('Ошибка при отклонении запроса');
+        } finally {
+            setCrmActionLoading(false);
+        }
+    };
 
     // derived data
     const sortedBookings = bookings
@@ -358,7 +404,7 @@ export function AdminUserDetails() {
                             )}
                         </div>
                     </div>
-                    <div className="text-sm text-unbox-grey">
+                    <div className="text-sm text-gray-500">
                         Участник с {user.registrationDate ? format(new Date(user.registrationDate), 'd MMMM yyyy', { locale: ru }) : 'неизвестной даты'}
                     </div>
                 </div>
@@ -430,7 +476,7 @@ export function AdminUserDetails() {
                             <div className={clsx("text-sm px-2 py-0.5 rounded-full mt-1",
                                 user.level === 'vip' ? 'bg-purple-100 text-purple-700' :
                                     user.level === 'loyal' ? 'bg-unbox-light text-unbox-dark' :
-                                        'bg-unbox-light/50 text-unbox-grey'
+                                        'bg-gray-100 text-gray-600'
                             )}>
                                 {user.level === 'vip' ? 'VIP Client' : user.level === 'loyal' ? 'Loyal Client' : 'Basic Client'}
                             </div>
@@ -459,8 +505,8 @@ export function AdminUserDetails() {
                             </div>
 
                             {/* Profession Field */}
-                            <div className="pt-2 border-t border-gray-50">
-                                <div className="text-xs text-unbox-grey mb-1">Профессия</div>
+                            <div className="pt-2 border-t border-gray-100">
+                                <div className="text-xs text-gray-500 mb-1">Профессия</div>
                                 <ProfessionEditor
                                     value={user.profession}
                                     onChange={(val) => updateUserById(user.email, { profession: val })}
@@ -468,8 +514,8 @@ export function AdminUserDetails() {
                             </div>
 
                             {/* Target Audience Field */}
-                            <div className="pt-2 border-t border-gray-50">
-                                <div className="text-xs text-unbox-grey mb-1">Работает с</div>
+                            <div className="pt-2 border-t border-gray-100">
+                                <div className="text-xs text-gray-500 mb-1">Работает с</div>
                                 <TargetAudienceEditor
                                     value={user.targetAudience}
                                     onChange={(val) => updateUserById(user.email, { targetAudience: val })}
@@ -509,7 +555,7 @@ export function AdminUserDetails() {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="text-[10px] text-unbox-grey">Ответственный</div>
-                                    <div className={clsx('text-sm font-medium truncate', responsibleAdmin ? 'text-unbox-dark' : 'text-gray-400 italic')}>
+                                    <div className={clsx('text-sm font-medium truncate', responsibleAdmin ? 'text-unbox-dark' : 'text-gray-500 italic')}>
                                         {responsibleAdmin ? responsibleAdmin.name : 'не назначен'}
                                     </div>
                                 </div>
@@ -529,7 +575,7 @@ export function AdminUserDetails() {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="text-[10px] text-unbox-grey">Привлёк клиента</div>
-                                    <div className={clsx('text-sm font-medium truncate', attractedAdmin ? 'text-unbox-dark' : 'text-gray-400 italic')}>
+                                    <div className={clsx('text-sm font-medium truncate', attractedAdmin ? 'text-unbox-dark' : 'text-gray-500 italic')}>
                                         {attractedAdmin ? attractedAdmin.name : 'не указан'}
                                     </div>
                                 </div>
@@ -679,6 +725,85 @@ export function AdminUserDetails() {
                     {/* Overview Tab Content */}
                     {activeTab === 'overview' && (
                         <div className="space-y-6 animate-in fade-in duration-300">
+                            {/* CRM Access — показываем ВВЕРХУ если есть запрос требующий действия */}
+                            {crmAccess && ['pending', 'expired', 'rejected'].includes(crmAccess.accessStatus) && (
+                                <Card className={clsx("p-5 border-2", crmAccess.accessStatus === 'pending' ? 'border-amber-300 bg-amber-50/30' : 'border-red-200 bg-red-50/20')}>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="font-bold text-base flex items-center gap-2">
+                                            <KeyRound size={18} className={crmAccess.accessStatus === 'pending' ? 'text-amber-600' : 'text-red-500'} />
+                                            Запрос на Psy-CRM
+                                        </h3>
+                                        {crmAccess.accessStatus === 'pending' && (
+                                            <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold uppercase flex items-center gap-1 animate-pulse">
+                                                <Clock size={12} />
+                                                Ожидает решения
+                                            </span>
+                                        )}
+                                        {crmAccess.accessStatus === 'expired' && (
+                                            <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-600 text-[11px] font-bold uppercase">
+                                                Истёк
+                                            </span>
+                                        )}
+                                        {crmAccess.accessStatus === 'rejected' && (
+                                            <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-600 text-[11px] font-bold uppercase">
+                                                Отклонён
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="space-y-3">
+                                        {crmAccess.profession && (
+                                            <div className="text-sm">
+                                                <span className="text-unbox-grey">Профессия:</span>{' '}
+                                                <span className="font-medium">{crmAccess.profession}</span>
+                                            </div>
+                                        )}
+                                        {crmAccess.message && (
+                                            <div className="text-sm">
+                                                <span className="text-unbox-grey">Сообщение:</span>{' '}
+                                                <span className="text-gray-700">{crmAccess.message}</span>
+                                            </div>
+                                        )}
+                                        {crmAccess.submittedAt && (
+                                            <div className="text-xs text-unbox-grey">
+                                                Подано: {format(new Date(crmAccess.submittedAt), 'd MMMM yyyy, HH:mm', { locale: ru })}
+                                            </div>
+                                        )}
+                                        <div className="flex flex-wrap gap-2 pt-2">
+                                            {crmAccess.accessStatus === 'pending' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleCrmApprove(30)}
+                                                        disabled={crmActionLoading}
+                                                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors"
+                                                    >
+                                                        {crmActionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                                                        Одобрить на 30 дней
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleCrmReject()}
+                                                        disabled={crmActionLoading}
+                                                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-50 text-red-600 text-sm font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors"
+                                                    >
+                                                        <XCircle size={14} />
+                                                        Отклонить
+                                                    </button>
+                                                </>
+                                            )}
+                                            {(crmAccess.accessStatus === 'expired' || crmAccess.accessStatus === 'rejected') && (
+                                                <button
+                                                    onClick={() => handleCrmApprove(30)}
+                                                    disabled={crmActionLoading}
+                                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors"
+                                                >
+                                                    {crmActionLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                                                    Активировать на 30 дней
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </Card>
+                            )}
+
                             <Card className="p-6">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="font-bold text-lg flex items-center gap-2">
@@ -872,6 +997,59 @@ export function AdminUserDetails() {
                             {/* Loyalty System (New) */}
                             <UserLoyaltyCard email={user.email} />
 
+                            {/* CRM Access — показываем внизу только для active (pending/expired/rejected — вверху) */}
+                            {crmAccess && crmAccess.accessStatus === 'active' && (
+                                <Card className="p-5">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="font-bold text-base flex items-center gap-2">
+                                            <KeyRound size={18} className="text-unbox-grey" />
+                                            Доступ к Psy-CRM
+                                        </h3>
+                                        {crmAccess.permanent ? (
+                                            <span className="px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 text-[11px] font-bold uppercase">
+                                                Постоянный
+                                            </span>
+                                        ) : (
+                                            <span className="px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-[11px] font-bold uppercase flex items-center gap-1">
+                                                <CheckCircle2 size={12} />
+                                                Активен
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="space-y-3">
+                                        {crmAccess.profession && (
+                                            <div className="text-sm">
+                                                <span className="text-gray-500">Профессия:</span>{' '}
+                                                <span className="font-medium text-gray-900">{crmAccess.profession}</span>
+                                            </div>
+                                        )}
+                                        {!crmAccess.permanent && crmAccess.expiresAt && (
+                                            <div className="flex items-center gap-2 text-sm bg-green-50 rounded-lg px-3 py-2">
+                                                <CalendarClock size={14} className="text-green-600" />
+                                                <span className="text-green-800">
+                                                    Действует до{' '}
+                                                    <b>{format(new Date(crmAccess.expiresAt), 'd MMMM yyyy', { locale: ru })}</b>
+                                                    {crmAccess.daysRemaining !== null && (
+                                                        <span className="text-green-600 ml-1">({crmAccess.daysRemaining} дн.)</span>
+                                                    )}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {!crmAccess.permanent && (
+                                            <div className="flex flex-wrap gap-2 pt-2">
+                                                <button
+                                                    onClick={() => handleCrmApprove(30)}
+                                                    disabled={crmActionLoading}
+                                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-semibold hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                                >
+                                                    {crmActionLoading ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
+                                                    Продлить на 30 дней
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </Card>
+                            )}
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                                 <div className="space-y-6">

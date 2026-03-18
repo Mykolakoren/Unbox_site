@@ -14,7 +14,7 @@ export function CrmAccessToggle() {
     useEffect(() => {
         crmApi.getMyAccess()
             .then(setAccess)
-            .catch(() => setAccess({ access_status: 'none', permanent: false, expires_at: null, days_remaining: null }))
+            .catch(() => setAccess({ accessStatus: 'none', permanent: false, expiresAt: null, daysRemaining: null }))
             .finally(() => setLoading(false));
     }, []);
 
@@ -22,13 +22,13 @@ export function CrmAccessToggle() {
         if (!access) return;
 
         // If active — navigate to CRM
-        if (access.access_status === 'active') {
+        if (access.accessStatus === 'active') {
             navigate('/crm');
             return;
         }
 
         // If pending — do nothing
-        if (access.access_status === 'pending') return;
+        if (access.accessStatus === 'pending') return;
 
         // Owner and senior_admin get auto-approved — apply then navigate
         const isPrivileged = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
@@ -36,10 +36,10 @@ export function CrmAccessToggle() {
         try {
             const result = await crmApi.applyForAccess();
             if (isPrivileged || result.status === 'active') {
-                setAccess(prev => prev ? { ...prev, access_status: 'active', permanent: true } : prev);
+                setAccess(prev => prev ? { ...prev, accessStatus: 'active', permanent: true } : prev);
                 navigate('/crm');
             } else {
-                setAccess(prev => prev ? { ...prev, access_status: 'pending' } : prev);
+                setAccess(prev => prev ? { ...prev, accessStatus: 'pending' } : prev);
             }
         } catch {
             // Error handled silently
@@ -59,10 +59,10 @@ export function CrmAccessToggle() {
 
     if (!access) return null;
 
-    const isActive = access.access_status === 'active';
-    const isPending = access.access_status === 'pending';
-    const isExpired = access.access_status === 'expired';
-    const isRejected = access.access_status === 'rejected';
+    const isActive = access.accessStatus === 'active';
+    const isPending = access.accessStatus === 'pending';
+    const isExpired = access.accessStatus === 'expired';
+    const isRejected = access.accessStatus === 'rejected';
 
     return (
         <button
@@ -84,10 +84,10 @@ export function CrmAccessToggle() {
                 <div className="truncate">
                     {isActive ? 'Мой CRM' : 'Режим CRM'}
                 </div>
-                {isActive && !access.permanent && access.days_remaining !== null && (
+                {isActive && !access.permanent && access.daysRemaining !== null && (
                     <div className="text-[10px] opacity-70 flex items-center gap-1">
                         <Clock size={10} />
-                        {access.days_remaining} {getDaysLabel(access.days_remaining)}
+                        {access.daysRemaining} {getDaysLabel(access.daysRemaining)}
                     </div>
                 )}
                 {isPending && (

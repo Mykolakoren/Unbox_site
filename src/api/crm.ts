@@ -80,6 +80,7 @@ export interface CrmSessionCreate {
 }
 
 export interface CrmSessionUpdate {
+    clientId?: string;
     date?: string;
     durationMinutes?: number;
     status?: string;
@@ -163,21 +164,21 @@ export interface CrmSpecialist {
 }
 
 export interface CrmAccessStatus {
-    access_status: 'none' | 'pending' | 'active' | 'expired' | 'rejected';
+    accessStatus: 'none' | 'pending' | 'active' | 'expired' | 'rejected';
     permanent: boolean;
-    expires_at: string | null;
-    days_remaining: number | null;
+    expiresAt: string | null;
+    daysRemaining: number | null;
 }
 
 export interface CrmAccessRequest {
-    user_id: string;
+    userId: string;
     name: string;
     email: string;
     phone?: string;
     profession: string;
     message: string;
-    submitted_at: string;
-    avatar_url?: string;
+    submittedAt: string;
+    avatarUrl?: string;
 }
 
 export const crmApi = {
@@ -333,6 +334,11 @@ export const crmApi = {
 
     applyForAccess: async (profession?: string, message?: string): Promise<{ ok: boolean; status: string }> => {
         const response = await api.post('/crm/apply', { profession, message });
+        return response.data;
+    },
+
+    getUserAccess: async (userId: string): Promise<CrmAccessStatus & { profession?: string; message?: string; submittedAt?: string }> => {
+        const response = await api.get(`/crm/access-status/${userId}`);
         return response.data;
     },
 

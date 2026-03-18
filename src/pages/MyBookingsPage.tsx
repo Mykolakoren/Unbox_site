@@ -228,23 +228,41 @@ function BookingsChessboard({
     const getNewBlockForResource = (resId: string) =>
         selectedNewBlocks.find(b => b.resId === resId) ?? null;
 
-    // Overlap detection: warn when selecting time-overlapping slots in different rooms
+    // Overlap detection: warn when new slots overlap with each other OR with existing user bookings
     const hasTimeOverlap = useMemo(() => {
-        if (selectedNewBlocks.length < 2) return false;
-        const blocks = selectedNewBlocks.map(b => {
+        if (selectedNewBlocks.length === 0) return false;
+
+        // Build time-index sets for each new block
+        const newBlockSets = selectedNewBlocks.map(b => {
             const slots = new Set<number>();
             for (let i = b.start; i <= b.end; i++) slots.add(i);
             return slots;
         });
-        for (let i = 0; i < blocks.length; i++) {
-            for (let j = i + 1; j < blocks.length; j++) {
-                for (const idx of blocks[i]) {
-                    if (blocks[j].has(idx)) return true;
+
+        // Check new blocks against each other
+        for (let i = 0; i < newBlockSets.length; i++) {
+            for (let j = i + 1; j < newBlockSets.length; j++) {
+                for (const idx of newBlockSets[i]) {
+                    if (newBlockSets[j].has(idx)) return true;
                 }
             }
         }
+
+        // Check new blocks against existing user bookings (different rooms only)
+        for (const block of selectedNewBlocks) {
+            const blockStartMins = timeToMins(timeSlots[block.start]);
+            const blockEndMins = timeToMins(timeSlots[block.end]) + 30; // +30 because slot end is exclusive
+            for (const booking of dayUserBookings) {
+                if (booking.resourceId === block.resId) continue; // same room — not an overlap concern
+                if (!booking.startTime) continue;
+                const bStart = timeToMins(booking.startTime);
+                const bEnd = bStart + booking.duration;
+                if (blockStartMins < bEnd && blockEndMins > bStart) return true;
+            }
+        }
+
         return false;
-    }, [selectedNewBlocks]);
+    }, [selectedNewBlocks, dayUserBookings, timeSlots]);
 
     const isNewSlotSelected = (resId: string, time: string) =>
         newSlots.includes(`${resId}|${time}`);

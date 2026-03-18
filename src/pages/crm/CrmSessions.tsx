@@ -23,6 +23,7 @@ import {
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient } from '../../api/crm';
+import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 
 const STATUS_COLORS: Record<string, string> = {
     PLANNED: 'bg-blue-100 text-blue-700 border-blue-200',
@@ -49,7 +50,7 @@ function getEffectiveStatus(session: CrmSession): string {
     return session.status;
 }
 
-type ViewMode = 'list' | 'week';
+type ViewMode = 'list' | 'week' | 'chess';
 
 export function CrmSessions() {
     const navigate = useNavigate();
@@ -158,6 +159,18 @@ export function CrmSessions() {
                         >
                             <LayoutGrid className="w-3.5 h-3.5" />
                             Неделя
+                        </button>
+                        <button
+                            onClick={() => setView('chess')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === 'chess' ? 'bg-unbox-green text-white' : 'text-unbox-grey hover:text-unbox-dark'}`}
+                        >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <rect x="1" y="1" width="6" height="6" rx="1" />
+                                <rect x="9" y="1" width="6" height="6" rx="1" />
+                                <rect x="1" y="9" width="6" height="6" rx="1" />
+                                <rect x="9" y="9" width="6" height="6" rx="1" />
+                            </svg>
+                            Шахматка
                         </button>
                     </div>
                     <button
@@ -281,6 +294,9 @@ export function CrmSessions() {
                     quickPaySession={quickPaySession}
                 />
             )}
+
+            {/* Chessboard view */}
+            {view === 'chess' && <CrmChessboardView />}
 
             {/* Sessions by Date (list view) */}
             {view === 'list' && (loading && !sessions.length ? (

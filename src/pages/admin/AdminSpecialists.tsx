@@ -131,7 +131,7 @@ function CrmAccessRequests() {
         try {
             await crmApi.approveAccessRequest(userId, 30);
             toast.success('Доступ одобрен на 30 дней');
-            setRequests(prev => prev.filter(r => r.user_id !== userId));
+            setRequests(prev => prev.filter(r => r.userId !== userId));
         } catch {
             toast.error('Ошибка при одобрении');
         } finally {
@@ -144,7 +144,7 @@ function CrmAccessRequests() {
         try {
             await crmApi.rejectAccessRequest(userId);
             toast.success('Запрос отклонён');
-            setRequests(prev => prev.filter(r => r.user_id !== userId));
+            setRequests(prev => prev.filter(r => r.userId !== userId));
         } catch {
             toast.error('Ошибка при отклонении');
         } finally {
@@ -179,11 +179,11 @@ function CrmAccessRequests() {
                 </thead>
                 <tbody className="divide-y divide-unbox-light">
                     {requests.map(req => (
-                        <tr key={req.user_id} className="hover:bg-unbox-light/50 transition-colors">
+                        <tr key={req.userId} className="hover:bg-unbox-light/50 transition-colors">
                             <td className="p-4 pl-6">
                                 <div className="flex items-center gap-3">
-                                    {req.avatar_url ? (
-                                        <img src={req.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover" />
+                                    {req.avatarUrl ? (
+                                        <img src={req.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover" />
                                     ) : (
                                         <div className="w-9 h-9 rounded-full bg-unbox-green/15 flex items-center justify-center text-unbox-green font-bold text-sm">
                                             {req.name?.[0]?.toUpperCase() || '?'}
@@ -198,23 +198,23 @@ function CrmAccessRequests() {
                             <td className="p-4 text-sm text-unbox-dark/70">{req.profession || '—'}</td>
                             <td className="p-4 text-sm text-unbox-dark/70 max-w-[200px] truncate">{req.message || '—'}</td>
                             <td className="p-4 text-sm text-unbox-dark/50">
-                                {req.submitted_at ? new Date(req.submitted_at).toLocaleDateString('ru-RU') : '—'}
+                                {req.submittedAt ? new Date(req.submittedAt).toLocaleDateString('ru-RU') : '—'}
                             </td>
                             <td className="p-4 text-right pr-6">
                                 <div className="flex items-center justify-end gap-2">
-                                    {processingId === req.user_id ? (
+                                    {processingId === req.userId ? (
                                         <Loader2 size={18} className="animate-spin text-unbox-dark/40" />
                                     ) : (
                                         <>
                                             <button
-                                                onClick={() => handleApprove(req.user_id)}
+                                                onClick={() => handleApprove(req.userId)}
                                                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-unbox-green/10 text-unbox-green text-xs font-semibold hover:bg-unbox-green/20 transition-colors"
                                             >
                                                 <Check size={14} />
                                                 Одобрить
                                             </button>
                                             <button
-                                                onClick={() => handleReject(req.user_id)}
+                                                onClick={() => handleReject(req.userId)}
                                                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 text-red-500 text-xs font-semibold hover:bg-red-100 transition-colors"
                                             >
                                                 <XCircle size={14} />

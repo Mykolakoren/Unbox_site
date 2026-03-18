@@ -44,6 +44,8 @@ export interface UserNote {
     text: string;
     date: string;
     adminName: string;
+    type?: string; // e.g. 'crm_access_approved', 'crm_access_rejected', 'permissions_update', etc.
+    meta?: Record<string, any>;
 }
 
 export interface User {
