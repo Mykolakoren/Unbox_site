@@ -60,7 +60,7 @@ def apply_for_crm_access(
         title="Новый запрос на CRM",
         description=f"{current_user.name} подал(а) запрос на доступ к CRM",
         icon="UserPlus",
-        link=f"/admin/users/{current_user.email}",
+        link="/admin/specialists?tab=crm-requests",
     )
     session.commit()
 

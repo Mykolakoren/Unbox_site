@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CheckCircle, Circle, Pencil, X, Clock, Check, XCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
@@ -239,7 +240,9 @@ export function AdminSpecialists() {
     const [specialists, setSpecialists] = useState<SpecialistExtended[]>([]);
     const [editing, setEditing] = useState<SpecialistExtended | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'specialists' | 'crm-requests'>('specialists');
+    const [searchParams] = useSearchParams();
+    const initialTab = searchParams.get('tab') === 'crm-requests' ? 'crm-requests' : 'specialists';
+    const [activeTab, setActiveTab] = useState<'specialists' | 'crm-requests'>(initialTab);
     const currentUser = useUserStore(s => s.currentUser);
     const canAcceptRequests = currentUser ? hasPermission(currentUser, 'admin.accept_requests') : false;
 
