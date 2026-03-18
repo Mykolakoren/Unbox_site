@@ -11,15 +11,15 @@ import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
 
 const NAV_ITEMS = [
-    { path: '/admin',            icon: LayoutDashboard, label: 'Обзор',        exact: true },
-    { path: '/admin/cabinets',   icon: Box,             label: 'Кабинеты' },
-    { path: '/admin/bookings',   icon: Calendar,        label: 'Бронирования' },
-    { path: '/admin/users',      icon: Users,           label: 'Клиенты' },
-    { path: '/admin/waitlist',   icon: Clock,           label: 'Лист ожидания' },
-    { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
-    { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
+    { path: '/admin',             icon: LayoutDashboard, label: 'Дашборд',       exact: true },
+    { path: '/admin/bookings',    icon: Calendar,        label: 'Бронирования' },
     { path: '/admin/tasks',       icon: ClipboardList,   label: 'Задачи' },
-    { path: '/admin/knowledge-base', icon: BookOpen,    label: 'База данных' },
+    { path: '/admin/users',       icon: Users,           label: 'Клиенты' },
+    { path: '/admin/cabinets',    icon: Box,             label: 'Кабинеты' },
+    { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
+    { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
+    { path: '/admin/waitlist',    icon: Clock,           label: 'Лист ожидания' },
+    { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База данных' },
 ];
 
 const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
@@ -31,11 +31,18 @@ export function AdminLayout() {
     const canAccessRights = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
     const canAccessFinance = hasPermission(currentUser, 'finance.manage_cashbox')
         || hasPermission(currentUser, 'finance.view_reports');
-    const navItems = [
-        ...NAV_ITEMS,
-        ...(canAccessFinance ? [{ path: '/admin/finance', icon: Wallet, label: 'Финансы' }] : []),
-        ...(canAccessRights ? [{ path: '/admin/access-rights', icon: Shield, label: 'Права доступа' }] : []),
-    ];
+    const navItems = (() => {
+        const items = [...NAV_ITEMS];
+        // Insert Финансы after Бронирования (index 1)
+        if (canAccessFinance) {
+            items.splice(2, 0, { path: '/admin/finance', icon: Wallet, label: 'Финансы' });
+        }
+        // Права доступа — в конец
+        if (canAccessRights) {
+            items.push({ path: '/admin/access-rights', icon: Shield, label: 'Права доступа' });
+        }
+        return items;
+    })();
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
 
