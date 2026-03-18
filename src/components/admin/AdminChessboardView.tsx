@@ -57,10 +57,11 @@ export function AdminChessboardView() {
 
     // ── Drag-to-select NEW booking slots ──
     const [newSlots, setNewSlots] = useState<string[]>([]);
-    type NewDragMode = 'new' | 'resize-start' | 'resize-end' | null;
+    type NewDragMode = 'new' | 'resize-start' | 'resize-end' | 'move' | null;
     const newDragModeRef = useRef<NewDragMode>(null);
     const newDragStartRef = useRef<{ resId: string; time: string } | null>(null);
     const newDragInitialBlockRef = useRef<{ resId: string; start: number; end: number } | null>(null);
+    const newDragMoveOffsetRef = useRef<number>(0);
     const [, setNewDragTick] = useState(0);
     const forceNewDragUpdate = () => setNewDragTick(t => t + 1);
 
@@ -199,6 +200,21 @@ export function AdminChessboardView() {
     // Drag handlers
     const handleNewDragDown = (resId: string, time: string, mode: NewDragMode) => {
         if (isSlotOccupied(resId, time) && mode === 'new') return;
+
+        // If clicking on already-selected slot in 'new' mode → switch to 'move'
+        if (mode === 'new' && isNewSlotSelected(resId, time)) {
+            const block = getNewBlockForResource(resId);
+            if (block) {
+                newDragModeRef.current = 'move';
+                newDragStartRef.current = { resId, time };
+                newDragInitialBlockRef.current = block;
+                const clickedIdx = TIME_SLOTS.indexOf(time);
+                newDragMoveOffsetRef.current = clickedIdx - block.start;
+                forceNewDragUpdate();
+                return;
+            }
+        }
+
         newDragModeRef.current = mode;
         newDragStartRef.current = { resId, time };
         if (mode === 'new') {
@@ -248,6 +264,19 @@ export function AdminChessboardView() {
             const slots: string[] = [];
             let blocked = false;
             for (let i = minIdx; i <= maxIdx; i++) {
+                if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
+                slots.push(TIME_SLOTS[i]);
+            }
+            if (!blocked) setNewSlotRange(resId, slots);
+        } else if (mode === 'move' && initBlock) {
+            if (initBlock.resId !== resId) return;
+            const blockLen = initBlock.end - initBlock.start + 1;
+            const newStart = currentIdx - newDragMoveOffsetRef.current;
+            const newEnd = newStart + blockLen - 1;
+            if (newStart < 0 || newEnd >= TIME_SLOTS.length) return;
+            const slots: string[] = [];
+            let blocked = false;
+            for (let i = newStart; i <= newEnd; i++) {
                 if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
                 slots.push(TIME_SLOTS[i]);
             }

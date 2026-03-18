@@ -103,10 +103,11 @@ function BookingsChessboard({
     // ── Drag-to-select NEW booking slots ──
     const [newSlots, setNewSlots] = useState<string[]>([]); // "resId|time" format
     const bookingSaving = false; // sync navigation, no async state needed
-    type NewDragMode = 'new' | 'resize-start' | 'resize-end' | null;
+    type NewDragMode = 'new' | 'resize-start' | 'resize-end' | 'move' | null;
     const newDragModeRef = useRef<NewDragMode>(null);
     const newDragStartRef = useRef<{ resId: string; time: string } | null>(null);
     const newDragInitialBlockRef = useRef<{ resId: string; start: number; end: number } | null>(null);
+    const newDragMoveOffsetRef = useRef<number>(0); // slot offset within block for move mode
     const [, setNewDragTick] = useState(0);
     const forceNewDragUpdate = () => setNewDragTick(t => t + 1);
 
@@ -278,6 +279,20 @@ function BookingsChessboard({
     const handleNewDragDown = (resId: string, time: string, mode: NewDragMode) => {
         if (isSlotOccupied(resId, time) && mode === 'new') return;
 
+        // If clicking on already-selected slot in 'new' mode → switch to 'move'
+        if (mode === 'new' && isNewSlotSelected(resId, time)) {
+            const block = getNewBlockForResource(resId);
+            if (block) {
+                newDragModeRef.current = 'move';
+                newDragStartRef.current = { resId, time };
+                newDragInitialBlockRef.current = block;
+                const clickedIdx = timeSlots.indexOf(time);
+                newDragMoveOffsetRef.current = clickedIdx - block.start;
+                forceNewDragUpdate();
+                return;
+            }
+        }
+
         newDragModeRef.current = mode;
         newDragStartRef.current = { resId, time };
 
@@ -329,6 +344,19 @@ function BookingsChessboard({
             const slots: string[] = [];
             let blocked = false;
             for (let i = minIdx; i <= maxIdx; i++) {
+                if (isSlotOccupied(resId, timeSlots[i])) { blocked = true; break; }
+                slots.push(timeSlots[i]);
+            }
+            if (!blocked) setNewSlotRange(resId, slots);
+        } else if (mode === 'move' && initBlock) {
+            if (initBlock.resId !== resId) return;
+            const blockLen = initBlock.end - initBlock.start + 1;
+            const newStart = currentIdx - newDragMoveOffsetRef.current;
+            const newEnd = newStart + blockLen - 1;
+            if (newStart < 0 || newEnd >= timeSlots.length) return;
+            const slots: string[] = [];
+            let blocked = false;
+            for (let i = newStart; i <= newEnd; i++) {
                 if (isSlotOccupied(resId, timeSlots[i])) { blocked = true; break; }
                 slots.push(timeSlots[i]);
             }
@@ -556,7 +584,7 @@ function BookingsChessboard({
             </div>
 
             {/* Grid */}
-            <div ref={tableRef} className="border border-white/30 rounded-2xl overflow-x-auto bg-white/40 backdrop-blur-sm shadow-sm select-none">
+            <div ref={tableRef} className="border border-white/30 rounded-2xl overflow-x-auto bg-white/70 backdrop-blur-md shadow-sm select-none">
                 <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
                     <thead className="text-unbox-dark font-medium border-b border-unbox-light/60"
                         style={{ background: 'rgba(212,226,225,0.45)' }}>
@@ -621,7 +649,7 @@ function BookingsChessboard({
                                                             ? "bg-amber-50 border-2 border-dashed border-amber-400 text-amber-700"
                                                             : canMod
                                                                 ? "bg-unbox-green hover:bg-unbox-green/90 text-white cursor-grab active:cursor-grabbing"
-                                                                : "bg-unbox-dark/80 hover:bg-unbox-dark text-white"
+                                                                : "bg-unbox-dark hover:bg-unbox-dark/90 text-white"
                                                 )}
                                             >
                                                 <span className="text-[10px] font-bold leading-none opacity-90">
@@ -687,23 +715,23 @@ function BookingsChessboard({
                                                     className={clsx(
                                                         "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5",
                                                         isReRentAvailable
-                                                            ? "bg-amber-50/80 border border-dashed border-amber-400 text-amber-700 cursor-pointer hover:bg-amber-100/80"
-                                                            : "bg-gray-200/70 text-gray-500"
+                                                            ? "bg-amber-50 border border-dashed border-amber-400 text-amber-800 cursor-pointer hover:bg-amber-100"
+                                                            : "bg-gray-300/90 text-gray-600"
                                                     )}
                                                     onClick={isReRentAvailable ? () => {
                                                         toast.info('Слот доступен для переаренды.');
                                                     } : undefined}
                                                 >
-                                                    <span className="text-[10px] font-bold leading-none opacity-80">
+                                                    <span className="text-[10px] font-bold leading-none">
                                                         {pubB.startTime} · {pubB.duration / 60}ч
                                                     </span>
                                                     {pubUserName && (
-                                                        <span className="text-[9px] opacity-70 leading-none flex items-center gap-0.5 truncate max-w-full">
+                                                        <span className="text-[9px] opacity-80 leading-none flex items-center gap-0.5 truncate max-w-full">
                                                             <UserIcon size={8} className="shrink-0" />
                                                             <span className="truncate">{pubUserName}</span>
                                                         </span>
                                                     )}
-                                                    {isReRentAvailable && <span className="text-[8px] opacity-80 leading-none">♻️ переаренда</span>}
+                                                    {isReRentAvailable && <span className="text-[8px] font-medium leading-none">♻️ переаренда</span>}
                                                 </div>
                                             </td>
                                         );
@@ -810,7 +838,7 @@ function BookingsChessboard({
             </div>
 
             {/* Legend */}
-            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-unbox-grey px-1">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-unbox-dark/80 bg-white/70 backdrop-blur-md rounded-xl px-4 py-2.5 shadow-sm">
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded bg-unbox-green" />
                     <span>Ваша бронь (перетаскивайте)</span>
