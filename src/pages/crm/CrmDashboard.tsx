@@ -13,7 +13,14 @@ import {
     Settings,
     Check,
     X,
+    Wallet,
+    BarChart3,
+    UserX,
 } from 'lucide-react';
+import {
+    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+    CartesianGrid,
+} from 'recharts';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { crmApi, type CrmSyncResult } from '../../api/crm';
@@ -44,7 +51,14 @@ export function CrmDashboard() {
     const [savingSettings, setSavingSettings] = useState(false);
 
     useEffect(() => {
-        fetchDashboard();
+        // Auto-complete past PLANNED sessions, then load dashboard
+        crmApi.autoCompleteSessions().then((result) => {
+            if (result.autoCompleted > 0) {
+                toast.info(`${result.autoCompleted} ${result.autoCompleted === 1 ? 'сессия автозавершена' : 'сессий автозавершены'}`);
+            }
+        }).catch(() => {}).finally(() => {
+            fetchDashboard();
+        });
         crmApi.getSettings().then((s) => {
             setCalendarIdSaved(s.calendarId);
             setCalendarId(s.calendarId ?? '');
@@ -130,6 +144,124 @@ export function CrmDashboard() {
                     onClick={() => navigate('/crm/finances')}
                 />
             </div>
+
+            {/* Extended Stats Row */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                <StatCard
+                    icon={Wallet}
+                    label="Средний чек"
+                    value={`${(dashboard?.avgCheck ?? 0).toFixed(0)} ₾`}
+                    color="blue"
+                />
+                <StatCard
+                    icon={BarChart3}
+                    label="Ставка / час"
+                    value={`${(dashboard?.avgHourlyRate ?? 0).toFixed(0)} ₾`}
+                    color="blue"
+                />
+                <StatCard
+                    icon={AlertCircle}
+                    label="Общий долг"
+                    value={`${(dashboard?.totalActiveDebt ?? 0).toFixed(0)} ₾`}
+                    color={(dashboard?.totalActiveDebt ?? 0) > 0 ? 'red' : 'gray'}
+                    onClick={() => navigate('/crm/finances')}
+                />
+            </div>
+
+            {/* Revenue Chart */}
+            {dashboard?.monthlyStats && dashboard.monthlyStats.length > 0 && (
+                <div className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5">
+                    <div className="flex items-center gap-2 mb-4">
+                        <BarChart3 className="w-5 h-5 text-unbox-grey" />
+                        <h2 className="font-bold text-lg">Доход по месяцам</h2>
+                    </div>
+                    <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={dashboard.monthlyStats} barCategoryGap="20%">
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                            <XAxis
+                                dataKey="month"
+                                tickFormatter={(v: string) => {
+                                    const [, m] = v.split('-');
+                                    const months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+                                    return months[parseInt(m, 10) - 1] || m;
+                                }}
+                                fontSize={12}
+                                tickLine={false}
+                                axisLine={false}
+                            />
+                            <YAxis fontSize={12} tickLine={false} axisLine={false} />
+                            <Tooltip
+                                formatter={(value: number, name: string) => [
+                                    `${value.toFixed(0)} ₾`,
+                                    name === 'received' ? 'Получено' : name === 'expected' ? 'Ожидалось' : 'Сессий',
+                                ]}
+                                labelFormatter={(label: string) => {
+                                    const [y, m] = label.split('-');
+                                    const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+                                    return `${months[parseInt(m, 10) - 1]} ${y}`;
+                                }}
+                                contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: 13 }}
+                            />
+                            <Bar dataKey="expected" name="expected" fill="#d4e2e1" radius={[6, 6, 0, 0]} />
+                            <Bar dataKey="received" name="received" fill="#2a8c7a" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                    <div className="flex items-center justify-center gap-6 mt-2 text-xs text-unbox-grey">
+                        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#2a8c7a]" /> Получено</span>
+                        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#d4e2e1]" /> Ожидалось</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Clients without future sessions */}
+            {dashboard?.clientsWithoutFutureSessions && dashboard.clientsWithoutFutureSessions.length > 0 && (
+                <div className="bg-white rounded-2xl border border-orange-200 shadow-sm">
+                    <div className="flex items-center gap-2 p-5 border-b border-orange-100">
+                        <UserX className="w-5 h-5 text-orange-500" />
+                        <h2 className="font-bold text-lg text-orange-700">Клиенты без будущих сессий</h2>
+                        <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">{dashboard.clientsWithoutFutureSessions.length}</span>
+                    </div>
+                    <div className="divide-y divide-orange-50">
+                        {dashboard.clientsWithoutFutureSessions.slice(0, 10).map(c => (
+                            <div
+                                key={c.id}
+                                className="flex items-center justify-between px-5 py-3 hover:bg-orange-50/30 cursor-pointer transition-colors"
+                                onClick={() => navigate(`/crm/clients/${c.id}`)}
+                            >
+                                <span className="font-medium text-sm text-unbox-dark">{c.name}</span>
+                                <span className="text-xs text-unbox-grey">
+                                    {c.lastSessionDate ? `Последняя: ${format(parseISO(c.lastSessionDate), 'd MMM yyyy', { locale: ru })}` : 'Нет сессий'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Debt by client */}
+            {dashboard?.debtByClient && dashboard.debtByClient.length > 0 && (
+                <div className="bg-white rounded-2xl border border-red-200 shadow-sm">
+                    <div className="flex items-center gap-2 p-5 border-b border-red-100">
+                        <Wallet className="w-5 h-5 text-red-500" />
+                        <h2 className="font-bold text-lg text-red-700">Долги клиентов</h2>
+                    </div>
+                    <div className="divide-y divide-red-50">
+                        {dashboard.debtByClient.map(d => (
+                            <div
+                                key={d.clientId}
+                                className="flex items-center justify-between px-5 py-3 hover:bg-red-50/30 cursor-pointer transition-colors"
+                                onClick={() => navigate(`/crm/clients/${d.clientId}`)}
+                            >
+                                <div>
+                                    <span className="font-medium text-sm text-unbox-dark">{d.clientName}</span>
+                                    <span className="text-xs text-unbox-grey ml-2">{d.unpaidSessionsCount} сессий</span>
+                                </div>
+                                <span className="font-bold text-sm text-red-600">{d.totalDebt.toFixed(0)} ₾</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Google Calendar Sync */}
             <div className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5">

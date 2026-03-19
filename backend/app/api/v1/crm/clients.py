@@ -1,8 +1,8 @@
 """CRM Clients — CRUD for specialist's therapy clients."""
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from app.api import deps
 from app.models.user import User
 from app.models.therapist_client import (
@@ -39,6 +39,60 @@ def get_client(
     if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Client not found")
     return client
+
+
+@router.get("/clients/{client_id}/balance")
+def get_client_balance(
+    client_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Calculate client's financial balance: debt, prepayment, totals."""
+    client = session.get(TherapistClient, client_id)
+    if not client or client.specialist_id != str(current_user.id):
+        raise HTTPException(404, "Client not found")
+
+    uid = str(current_user.id)
+    base = client.base_price or 0
+
+    # Unpaid non-cancelled sessions
+    unpaid_sessions = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.client_id == client_id,
+            TherapySession.is_paid == False,
+            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+        )
+    ).all()
+
+    debt = sum((s.price if s.price is not None else base) for s in unpaid_sessions)
+
+    # Total paid
+    total_paid_row = session.exec(
+        select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+            TherapistPayment.specialist_id == uid,
+            TherapistPayment.client_id == client_id,
+        )
+    ).one()
+    total_paid = float(total_paid_row)
+
+    # Total expected (all non-cancelled sessions)
+    all_sessions = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.client_id == client_id,
+            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+        )
+    ).all()
+    total_expected = sum((s.price if s.price is not None else base) for s in all_sessions)
+
+    return {
+        "total_paid": round(total_paid, 2),
+        "total_expected": round(total_expected, 2),
+        "debt": round(debt, 2),
+        "prepayment": round(max(0, total_paid - total_expected), 2),
+        "unpaid_sessions_count": len(unpaid_sessions),
+    }
 
 
 @router.post("/clients", response_model=TherapistClientRead)

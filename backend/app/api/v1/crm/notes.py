@@ -17,11 +17,14 @@ def list_notes(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
     client_id: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
 ):
     uid = str(current_user.id)
     stmt = select(TherapistNote).where(TherapistNote.specialist_id == uid)
     if client_id:
         stmt = stmt.where(TherapistNote.client_id == client_id)
+    if session_id:
+        stmt = stmt.where(TherapistNote.session_id == session_id)
     stmt = stmt.order_by(TherapistNote.created_at.desc())
     return session.exec(stmt).all()
 

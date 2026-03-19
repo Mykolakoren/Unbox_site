@@ -49,6 +49,10 @@ export function CrmClientDetail() {
     const [loading, setLoading] = useState(true);
     const [showNoteForm, setShowNoteForm] = useState(false);
     const [editingSession, setEditingSession] = useState<string | null>(null);
+    const [sessionNoteId, setSessionNoteId] = useState<string | null>(null); // session id for inline note
+    const [sessionNoteText, setSessionNoteText] = useState('');
+    const [sessionNoteTags, setSessionNoteTags] = useState('');
+    const [savingSessionNote, setSavingSessionNote] = useState(false);
 
     useEffect(() => {
         if (!clientId) return;
@@ -78,6 +82,30 @@ export function CrmClientDetail() {
             .reduce((sum, s) => sum + (s.price ?? client?.basePrice ?? 0), 0);
         return { completed, unpaidCount: unpaid.length, debt, totalPaid };
     }, [sessions, client]);
+
+    // Map session notes by session ID
+    const notesBySession = useMemo(() => {
+        const map = new Map<string, CrmNote>();
+        notes.forEach(n => { if (n.sessionId) map.set(n.sessionId, n); });
+        return map;
+    }, [notes]);
+
+    const handleAddSessionNote = async (sId: string) => {
+        if (!clientId || !sessionNoteText.trim()) return;
+        setSavingSessionNote(true);
+        try {
+            const note = await createNote({ clientId, sessionId: sId, content: sessionNoteText.trim(), tags: sessionNoteTags || undefined });
+            setNotes(prev => [note, ...prev]);
+            setSessionNoteId(null);
+            setSessionNoteText('');
+            setSessionNoteTags('');
+            toast.success('Заметка к сессии добавлена');
+        } catch {
+            toast.error('Ошибка сохранения заметки');
+        } finally {
+            setSavingSessionNote(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -171,7 +199,14 @@ export function CrmClientDetail() {
                                 {client.name[0].toUpperCase()}
                             </div>
                             <div>
-                                <h1 className="text-2xl font-bold text-unbox-dark">{client.name}</h1>
+                                <h1 className="text-2xl font-bold text-unbox-dark flex items-center gap-2">
+                                    {client.name}
+                                    {stats.debt > 0 && (
+                                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                                            Долг: {stats.debt.toFixed(0)} {client.currency || '₾'}
+                                        </span>
+                                    )}
+                                </h1>
                                 <div className="flex flex-wrap items-center gap-3 mt-1">
                                     {client.aliasCode && (
                                         <span className="flex items-center gap-1 text-sm text-unbox-grey">
@@ -338,6 +373,29 @@ export function CrmClientDetail() {
                                                         <Banknote className="w-3.5 h-3.5" />
                                                     </button>
                                                 )}
+                                            {/* Session note button */}
+                                            <button
+                                                onClick={() => {
+                                                    if (sessionNoteId === session.id) {
+                                                        setSessionNoteId(null);
+                                                    } else {
+                                                        setSessionNoteId(session.id);
+                                                        const existing = notesBySession.get(session.id);
+                                                        setSessionNoteText(existing?.content || '');
+                                                        setSessionNoteTags(existing?.tags || '');
+                                                    }
+                                                }}
+                                                className={`p-1.5 rounded-lg transition-colors ${
+                                                    notesBySession.has(session.id)
+                                                        ? 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                                                        : sessionNoteId === session.id
+                                                            ? 'bg-unbox-light text-unbox-green'
+                                                            : 'hover:bg-unbox-light/50 text-unbox-grey hover:text-amber-500'
+                                                }`}
+                                                title={notesBySession.has(session.id) ? 'Просмотреть заметку' : 'Добавить заметку'}
+                                            >
+                                                <StickyNote className="w-3.5 h-3.5" />
+                                            </button>
                                             <button
                                                 onClick={() =>
                                                     setEditingSession(isEditing ? null : session.id)
@@ -353,6 +411,48 @@ export function CrmClientDetail() {
                                             </button>
                                         </div>
                                     </div>
+
+                                    {/* Session Note Inline Form */}
+                                    {sessionNoteId === session.id && (
+                                        <div className="px-5 py-3 bg-amber-50/50 border-t border-amber-100">
+                                            <div className="space-y-2">
+                                                <textarea
+                                                    value={sessionNoteText}
+                                                    onChange={e => setSessionNoteText(e.target.value)}
+                                                    placeholder="Заметка к сессии..."
+                                                    rows={2}
+                                                    className="w-full px-3 py-2 rounded-lg border border-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300 text-sm resize-none bg-white"
+                                                />
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={sessionNoteTags}
+                                                        onChange={e => setSessionNoteTags(e.target.value)}
+                                                        placeholder="Теги (через запятую)"
+                                                        className="flex-1 px-3 py-1.5 rounded-lg border border-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300 text-xs bg-white"
+                                                    />
+                                                    <button
+                                                        onClick={() => handleAddSessionNote(session.id)}
+                                                        disabled={savingSessionNote || !sessionNoteText.trim()}
+                                                        className="px-3 py-1.5 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50"
+                                                    >
+                                                        {savingSessionNote ? '...' : notesBySession.has(session.id) ? 'Обновить' : 'Сохранить'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setSessionNoteId(null)}
+                                                        className="p-1.5 text-unbox-grey hover:text-unbox-dark transition-colors"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {notesBySession.has(session.id) && (
+                                                <div className="mt-2 text-xs text-amber-700 italic">
+                                                    Заметка: {notesBySession.get(session.id)?.content}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Quick Status Change */}
                                     {isEditing && (

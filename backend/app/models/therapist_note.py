@@ -9,6 +9,7 @@ from sqlmodel import SQLModel, Field
 
 class TherapistNoteBase(SQLModel):
     client_id: str = Field(index=True, foreign_key="therapist_clients.id")
+    session_id: Optional[str] = Field(default=None, index=True)
     content: str
     tags: Optional[str] = None  # Comma-separated tags
 
@@ -24,6 +25,7 @@ class TherapistNote(TherapistNoteBase, table=True):
 
 class TherapistNoteCreate(SQLModel):
     client_id: str
+    session_id: Optional[str] = None
     content: str
     tags: Optional[str] = None
 

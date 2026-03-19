@@ -75,12 +75,134 @@ def crm_dashboard(
             "is_booked": s.is_booked,
         })
 
+    # --- Extended stats ---
+
+    # Monthly stats (12 months)
+    monthly_stats = []
+    for i in range(11, -1, -1):
+        m_start = (now.replace(day=1) - timedelta(days=30 * i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if m_start.month == 12:
+            m_end = m_start.replace(year=m_start.year + 1, month=1)
+        else:
+            m_end = m_start.replace(month=m_start.month + 1)
+
+        received = session.exec(
+            select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+                TherapistPayment.specialist_id == uid,
+                TherapistPayment.date >= m_start,
+                TherapistPayment.date < m_end,
+            )
+        ).one()
+
+        m_sessions = session.exec(
+            select(TherapySession).where(
+                TherapySession.specialist_id == uid,
+                TherapySession.date >= m_start,
+                TherapySession.date < m_end,
+                TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            )
+        ).all()
+
+        expected = 0.0
+        for ms in m_sessions:
+            client = session.get(TherapistClient, ms.client_id)
+            expected += ms.price if ms.price is not None else (client.base_price if client else 0)
+
+        monthly_stats.append({
+            "month": m_start.strftime("%Y-%m"),
+            "received": round(float(received), 2),
+            "expected": round(expected, 2),
+            "session_count": len(m_sessions),
+        })
+
+    # Clients without future sessions
+    active_client_list = session.exec(
+        select(TherapistClient).where(
+            TherapistClient.specialist_id == uid,
+            TherapistClient.is_active == True,
+        )
+    ).all()
+
+    clients_no_future = []
+    for c in active_client_list:
+        future = session.exec(
+            select(func.count()).where(
+                TherapySession.specialist_id == uid,
+                TherapySession.client_id == c.id,
+                TherapySession.date >= now,
+                TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            )
+        ).one()
+        if future == 0:
+            last_session = session.exec(
+                select(TherapySession.date).where(
+                    TherapySession.specialist_id == uid,
+                    TherapySession.client_id == c.id,
+                ).order_by(TherapySession.date.desc())
+            ).first()
+            clients_no_future.append({
+                "id": c.id,
+                "name": c.name,
+                "last_session_date": last_session.isoformat() if last_session else None,
+            })
+
+    # Debt by client
+    unpaid_sessions_all = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.is_paid == False,
+            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+        )
+    ).all()
+
+    debt_map: dict = {}
+    for us in unpaid_sessions_all:
+        cid = us.client_id
+        client = session.get(TherapistClient, cid)
+        price = us.price if us.price is not None else (client.base_price if client else 0)
+        if cid not in debt_map:
+            debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0, "unpaid_sessions_count": 0}
+        debt_map[cid]["total_debt"] += price
+        debt_map[cid]["unpaid_sessions_count"] += 1
+
+    debt_by_client = sorted(debt_map.values(), key=lambda x: x["total_debt"], reverse=True)
+    for d in debt_by_client:
+        d["total_debt"] = round(d["total_debt"], 2)
+
+    # Avg check & hourly rate
+    total_payments_all = session.exec(
+        select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+            TherapistPayment.specialist_id == uid,
+        )
+    ).one()
+
+    completed_sessions = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.status == "COMPLETED",
+            TherapySession.is_paid == True,
+        )
+    ).all()
+
+    avg_check = round(float(total_payments_all) / max(len(completed_sessions), 1), 2)
+    total_hours = sum(s.duration_minutes or 60 for s in completed_sessions) / 60
+    avg_hourly_rate = round(float(total_payments_all) / max(total_hours, 1), 2)
+
+    total_active_debt = sum(d["total_debt"] for d in debt_by_client)
+
     return {
         "active_clients": active_clients,
         "sessions_this_month": sessions_this_month,
         "unpaid_sessions": unpaid_count,
         "revenue_this_month": round(payments_this_month, 2),
         "upcoming_sessions": upcoming_list,
+        # Extended
+        "monthly_stats": monthly_stats,
+        "clients_without_future_sessions": clients_no_future,
+        "debt_by_client": debt_by_client,
+        "avg_check": avg_check,
+        "avg_hourly_rate": avg_hourly_rate,
+        "total_active_debt": round(total_active_debt, 2),
     }
 
 

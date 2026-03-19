@@ -38,6 +38,31 @@ def list_sessions(
     return session.exec(stmt).all()
 
 
+@router.post("/sessions/auto-complete")
+def auto_complete_sessions(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Auto-mark PLANNED sessions in the past as COMPLETED."""
+    uid = str(current_user.id)
+    now = datetime.utcnow()
+    stmt = select(TherapySession).where(
+        TherapySession.specialist_id == uid,
+        TherapySession.status == "PLANNED",
+        TherapySession.date < now,
+    )
+    planned_past = session.exec(stmt).all()
+    count = 0
+    for ts in planned_past:
+        ts.status = "COMPLETED"
+        ts.updated_at = now
+        session.add(ts)
+        count += 1
+    if count > 0:
+        session.commit()
+    return {"ok": True, "auto_completed": count}
+
+
 @router.post("/sessions", response_model=TherapySessionRead)
 def create_session(
     data: TherapySessionCreate,

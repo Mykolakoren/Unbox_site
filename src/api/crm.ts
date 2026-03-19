@@ -128,6 +128,7 @@ export interface CrmPaymentCreate {
 export interface CrmNote {
     id: string;
     clientId: string;
+    sessionId?: string;
     specialistId: string;
     content: string;
     tags?: string;
@@ -136,8 +137,29 @@ export interface CrmNote {
 
 export interface CrmNoteCreate {
     clientId: string;
+    sessionId?: string;
     content: string;
     tags?: string;
+}
+
+export interface MonthlyStats {
+    month: string;
+    received: number;
+    expected: number;
+    sessionCount: number;
+}
+
+export interface ClientWithoutSessions {
+    id: string;
+    name: string;
+    lastSessionDate: string | null;
+}
+
+export interface DebtByClient {
+    clientId: string;
+    clientName: string;
+    totalDebt: number;
+    unpaidSessionsCount: number;
 }
 
 export interface CrmDashboard {
@@ -153,6 +175,13 @@ export interface CrmDashboard {
         status: string;
         isBooked: boolean;
     }[];
+    // Extended
+    monthlyStats?: MonthlyStats[];
+    clientsWithoutFutureSessions?: ClientWithoutSessions[];
+    debtByClient?: DebtByClient[];
+    avgCheck?: number;
+    avgHourlyRate?: number;
+    totalActiveDebt?: number;
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -247,6 +276,11 @@ export const crmApi = {
 
     deleteSession: async (id: string): Promise<void> => {
         await api.delete(`/crm/sessions/${id}`);
+    },
+
+    autoCompleteSessions: async (): Promise<{ ok: boolean; autoCompleted: number }> => {
+        const response = await api.post('/crm/sessions/auto-complete');
+        return response.data;
     },
 
     quickPaySession: async (id: string): Promise<{ ok: boolean; amount: number; currency: string }> => {
