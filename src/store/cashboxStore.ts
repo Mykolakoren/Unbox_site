@@ -17,7 +17,7 @@ interface CashboxStore {
     analytics: CashboxAnalytics | null;
     isLoading: boolean;
 
-    fetchBalance: () => Promise<void>;
+    fetchBalance: (branch?: string) => Promise<void>;
     fetchTransactions: (params?: Parameters<typeof cashboxApi.getTransactions>[0]) => Promise<void>;
     createTransaction: (data: Parameters<typeof cashboxApi.createTransaction>[0]) => Promise<void>;
     deleteTransaction: (id: string) => Promise<void>;
@@ -39,8 +39,8 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
     analytics: null,
     isLoading: false,
 
-    fetchBalance: async () => {
-        const data = await cashboxApi.getBalance();
+    fetchBalance: async (branch?: string) => {
+        const data = await cashboxApi.getBalance(branch);
         set({ balance: data.balance, balances: data });
     },
 

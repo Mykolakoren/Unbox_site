@@ -18,22 +18,28 @@ router = APIRouter()
 def get_balance(
     session: Session = Depends(get_session),
     current_user: User = Depends(require_cashbox),
+    branch: Optional[str] = Query(None),
 ):
-    """Балансы кассы по каждому счёту."""
+    """Балансы кассы по каждому счёту (опционально по филиалу)."""
     methods = ["cash", "card_tbc", "card_bog"]
     balances = {}
     total = 0.0
     for method in methods:
-        inc = session.exec(
+        inc_q = (
             select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
             .where(CashboxTransaction.type == "income")
             .where(CashboxTransaction.payment_method == method)
-        ).one()
-        exp = session.exec(
+        )
+        exp_q = (
             select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
             .where(CashboxTransaction.type == "expense")
             .where(CashboxTransaction.payment_method == method)
-        ).one()
+        )
+        if branch:
+            inc_q = inc_q.where(CashboxTransaction.branch == branch)
+            exp_q = exp_q.where(CashboxTransaction.branch == branch)
+        inc = session.exec(inc_q).one()
+        exp = session.exec(exp_q).one()
         bal = round(float(inc) - float(exp), 2)
         balances[method] = bal
         total += bal

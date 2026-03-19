@@ -77,8 +77,8 @@ export interface CashboxBalances {
 }
 
 export const cashboxApi = {
-    getBalance: async (): Promise<CashboxBalances> => {
-        const { data } = await api.get('/cashbox/balance');
+    getBalance: async (branch?: string): Promise<CashboxBalances> => {
+        const { data } = await api.get('/cashbox/balance', { params: branch ? { branch } : {} });
         return data;
     },
 

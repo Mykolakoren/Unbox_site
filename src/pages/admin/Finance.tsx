@@ -71,12 +71,12 @@ export function AdminFinance() {
     const canManageCategories = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
 
     useEffect(() => {
-        fetchBalance();
+        fetchBalance(selectedBranch || undefined);
         fetchTransactions();
         fetchCategories();
         fetchShiftReports();
         fetchAnalytics();
-    }, [fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics]);
+    }, [fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, selectedBranch]);
 
     // Compute period range
     const period = useMemo(() => {
