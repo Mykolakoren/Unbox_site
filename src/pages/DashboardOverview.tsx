@@ -1,10 +1,10 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import {
     Wallet, Plus, AlertCircle, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
-    GripVertical, Settings2, X, RotateCw, Eye, EyeOff,
+    GripVertical, Settings2, X, RotateCw, EyeOff,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
@@ -94,22 +94,27 @@ const glassStyle: React.CSSProperties = {
     boxShadow: '0 8px 32px rgba(71,109,107,0.07), inset 0 1px 0 rgba(255,255,255,0.80)',
 };
 
+// ── Wiggle animation style (iPhone-style) ────────────────────────────────────
+
+const wiggleKeyframes = `
+@keyframes wiggle {
+    0%, 100% { transform: rotate(-0.5deg); }
+    50% { transform: rotate(0.5deg); }
+}
+`;
+
 // ── Sortable Wrapper ─────────────────────────────────────────────────────────
 
 function SortableBlock({
     id,
     isEditing,
     isHidden,
-    label,
-    icon: Icon,
     onToggleVisibility,
     children,
 }: {
     id: string;
     isEditing: boolean;
     isHidden: boolean;
-    label: string;
-    icon: React.ElementType;
     onToggleVisibility: () => void;
     children: React.ReactNode;
 }) {
@@ -125,53 +130,51 @@ function SortableBlock({
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform),
         transition,
-        opacity: isDragging ? 0.6 : isHidden ? 0.4 : 1,
+        opacity: isDragging ? 0.7 : isHidden ? 0.35 : 1,
         zIndex: isDragging ? 50 : undefined,
         position: 'relative' as const,
+        animation: isEditing && !isDragging ? 'wiggle 0.3s ease-in-out infinite' : undefined,
+        animationDelay: `${Math.random() * 0.2}s`,
     };
 
     if (isHidden && !isEditing) return null;
 
     return (
         <div ref={setNodeRef} style={style} {...attributes}>
+            {/* Drag handle — top-right corner grip (iPhone style) */}
             {isEditing && (
-                <div className="absolute -top-2 -left-2 -right-2 -bottom-2 border-2 border-dashed border-unbox-green/30 rounded-3xl pointer-events-none z-0" />
+                <div
+                    {...listeners}
+                    className="absolute -top-2 -right-2 z-30 w-9 h-9 rounded-xl bg-unbox-green text-white shadow-lg flex items-center justify-center cursor-grab active:cursor-grabbing active:scale-110 transition-transform touch-none hover:bg-unbox-dark"
+                    title="Перетащить"
+                >
+                    <GripVertical size={16} />
+                </div>
             )}
-            <div className="relative z-10">
-                {isEditing && (
-                    <div className="flex items-center gap-2 mb-2 px-1">
-                        <button
-                            {...listeners}
-                            className="p-1 cursor-grab active:cursor-grabbing text-unbox-grey hover:text-unbox-dark transition-colors touch-none"
-                            title="Перетащить"
-                        >
-                            <GripVertical size={18} />
-                        </button>
-                        <span className="text-xs font-semibold text-unbox-grey uppercase tracking-wider flex items-center gap-1.5">
-                            <Icon size={13} />
-                            {label}
-                        </span>
-                        <button
-                            onClick={onToggleVisibility}
-                            className={`ml-auto p-1 rounded-md transition-colors ${
-                                isHidden
-                                    ? 'text-red-400 hover:text-red-600 hover:bg-red-50'
-                                    : 'text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50'
-                            }`}
-                            title={isHidden ? 'Показать блок' : 'Скрыть блок'}
-                        >
-                            {isHidden ? <EyeOff size={15} /> : <Eye size={15} />}
-                        </button>
-                    </div>
-                )}
-                {isHidden && isEditing ? (
-                    <div className="p-6 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 flex items-center justify-center text-sm text-unbox-grey">
-                        Блок скрыт
-                    </div>
-                ) : (
-                    children
-                )}
-            </div>
+
+            {/* Hide/show button — top-left corner */}
+            {isEditing && (
+                <button
+                    onClick={onToggleVisibility}
+                    className={`absolute -top-2 -left-2 z-30 w-7 h-7 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                        isHidden
+                            ? 'bg-red-500 text-white hover:bg-red-600'
+                            : 'bg-white text-unbox-grey border border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'
+                    }`}
+                    title={isHidden ? 'Показать блок' : 'Скрыть блок'}
+                >
+                    {isHidden ? <Plus size={14} className="rotate-45" /> : <X size={14} />}
+                </button>
+            )}
+
+            {isHidden && isEditing ? (
+                <div className="p-8 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-100/50 flex items-center justify-center text-sm text-unbox-grey font-medium">
+                    <EyeOff size={16} className="mr-2 opacity-50" />
+                    Блок скрыт
+                </div>
+            ) : (
+                children
+            )}
         </div>
     );
 }
@@ -447,8 +450,6 @@ export function DashboardOverview() {
 
     // ── Layout Logic ─────────────────────────────────────────────────────────
     // Group blocks into rows: side-by-side pairs for non-fullWidth, full rows for fullWidth
-    const visibleOrder = blockOrder.filter(id => isEditing || !hiddenBlocks.has(id));
-
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex items-center justify-between">
@@ -482,10 +483,13 @@ export function DashboardOverview() {
             </div>
 
             {isEditing && (
-                <div className="px-4 py-2.5 rounded-xl bg-unbox-light/40 border border-unbox-green/20 text-xs text-unbox-dark flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <GripVertical size={14} className="text-unbox-green shrink-0" />
-                    Перетаскивайте блоки за иконку <span className="font-semibold">⠿</span> чтобы изменить порядок. Нажмите <Eye size={12} className="inline" /> чтобы скрыть/показать блок.
-                </div>
+                <>
+                    <style>{wiggleKeyframes}</style>
+                    <div className="px-4 py-2.5 rounded-xl bg-unbox-green/10 border border-unbox-green/20 text-xs text-unbox-dark flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <GripVertical size={14} className="text-unbox-green shrink-0" />
+                        Тяни за зелёную ручку <span className="inline-flex w-5 h-5 bg-unbox-green rounded-md items-center justify-center"><GripVertical size={10} className="text-white" /></span> чтобы переместить блок. Нажми <X size={12} className="inline" /> чтобы скрыть.
+                    </div>
+                </>
             )}
 
             <DndContext
@@ -511,8 +515,6 @@ export function DashboardOverview() {
                                         id={blockId}
                                         isEditing={isEditing}
                                         isHidden={isHidden}
-                                        label={config.label}
-                                        icon={config.icon}
                                         onToggleVisibility={() => toggleVisibility(blockId)}
                                     >
                                         {renderBlock(blockId)}
