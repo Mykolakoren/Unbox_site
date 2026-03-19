@@ -19,18 +19,30 @@ def get_balance(
     session: Session = Depends(get_session),
     current_user: User = Depends(require_cashbox),
 ):
-    """Текущий баланс кассы (только наличные)."""
-    cash_in = session.exec(
-        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
-        .where(CashboxTransaction.type == "income")
-        .where(CashboxTransaction.payment_method == "cash")
-    ).one()
-    cash_out = session.exec(
-        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
-        .where(CashboxTransaction.type == "expense")
-        .where(CashboxTransaction.payment_method == "cash")
-    ).one()
-    return {"balance": round(float(cash_in) - float(cash_out), 2)}
+    """Балансы кассы по каждому счёту."""
+    methods = ["cash", "card_tbc", "card_bog"]
+    balances = {}
+    total = 0.0
+    for method in methods:
+        inc = session.exec(
+            select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+            .where(CashboxTransaction.type == "income")
+            .where(CashboxTransaction.payment_method == method)
+        ).one()
+        exp = session.exec(
+            select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+            .where(CashboxTransaction.type == "expense")
+            .where(CashboxTransaction.payment_method == method)
+        ).one()
+        bal = round(float(inc) - float(exp), 2)
+        balances[method] = bal
+        total += bal
+    return {
+        "balance": round(total, 2),
+        "cash": balances["cash"],
+        "card_tbc": balances["card_tbc"],
+        "card_bog": balances["card_bog"],
+    }
 
 
 @router.get("/transactions", response_model=List[CashboxTransactionRead])

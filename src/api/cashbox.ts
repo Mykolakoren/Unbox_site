@@ -69,8 +69,15 @@ export interface CashboxAnalytics {
 
 // ── API ──────────────────────────────────────────────────────────────────────
 
+export interface CashboxBalances {
+    balance: number;
+    cash: number;
+    card_tbc: number;  // snake_case from backend
+    card_bog: number;
+}
+
 export const cashboxApi = {
-    getBalance: async (): Promise<{ balance: number }> => {
+    getBalance: async (): Promise<CashboxBalances> => {
         const { data } = await api.get('/cashbox/balance');
         return data;
     },

@@ -111,7 +111,7 @@ export function AdminUserDetails() {
 
 
 
-    const handleAddFunds = (amount: number, method: 'cash' | 'tbc' | 'bog') => {
+    const handleAddFunds = async (amount: number, method: 'cash' | 'tbc' | 'bog') => {
         updateUserById(user.email, { balance: user.balance + amount });
 
         addTransaction({
@@ -123,6 +123,17 @@ export function AdminUserDetails() {
             adminName: currentUser?.name || 'Admin',
             description: 'Пополнение баланса'
         });
+
+        // Auto-create cashbox income
+        const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
+        try {
+            await api.post('/cashbox/transactions', {
+                type: 'income',
+                amount,
+                payment_method: methodMap[method] || 'cash',
+                description: `Пополнение баланса: ${user.name}`,
+            });
+        } catch { /* cashbox may not be accessible for this admin */ }
 
         toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
     };

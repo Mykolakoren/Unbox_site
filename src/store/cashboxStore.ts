@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
     cashboxApi,
     type CashboxTransaction,
+    type CashboxBalances,
     type ExpenseCategory,
     type ShiftReport,
     type CashboxAnalytics,
@@ -9,6 +10,7 @@ import {
 
 interface CashboxStore {
     balance: number;
+    balances: CashboxBalances;
     transactions: CashboxTransaction[];
     categories: ExpenseCategory[];
     shiftReports: ShiftReport[];
@@ -30,6 +32,7 @@ interface CashboxStore {
 
 export const useCashboxStore = create<CashboxStore>((set, get) => ({
     balance: 0,
+    balances: { balance: 0, cash: 0, card_tbc: 0, card_bog: 0 },
     transactions: [],
     categories: [],
     shiftReports: [],
@@ -37,8 +40,8 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
     isLoading: false,
 
     fetchBalance: async () => {
-        const { balance } = await cashboxApi.getBalance();
-        set({ balance });
+        const data = await cashboxApi.getBalance();
+        set({ balance: data.balance, balances: data });
     },
 
     fetchTransactions: async (params) => {

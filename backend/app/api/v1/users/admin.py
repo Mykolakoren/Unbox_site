@@ -402,6 +402,27 @@ def topup_subscription(
     user.comment_history = comment_history
     user.updated_at = datetime.utcnow()
     session.add(user)
+
+    # Auto-create cashbox income transaction
+    if amount > 0:
+        from app.models.cashbox_transaction import CashboxTransaction as CashboxTx
+        # Map payment_method to cashbox account
+        account_map = {"cash": "cash", "card": "card_tbc", "transfer": "card_bog"}
+        cashbox_method = account or account_map.get(payment_method, "cash")
+        branch = payload.get("branch", None)
+        cashbox_tx = CashboxTx(
+            type="income",
+            amount=amount,
+            currency="GEL",
+            payment_method=cashbox_method,
+            description=f"Абонемент: {user.name} +{hours}ч" + (f" ({note})" if note else ""),
+            branch=branch,
+            date=datetime.utcnow(),
+            admin_id=str(current_user.id),
+            admin_name=current_user.name or "",
+        )
+        session.add(cashbox_tx)
+
     session.commit()
     session.refresh(user)
     return user
