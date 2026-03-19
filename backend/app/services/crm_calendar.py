@@ -20,7 +20,7 @@ from googleapiclient.errors import HttpError
 
 _CRM_SA_FILE = os.environ.get(
     "CRM_GOOGLE_SERVICE_ACCOUNT_FILE",
-    "/Users/mykola/Downloads/psycrm-calendar-2a1f3b4eceee.json"
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "psycrm-calendar.json")
 )
 _SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
