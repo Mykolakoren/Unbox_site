@@ -18,10 +18,16 @@ export function CrmAccessToggle() {
             .finally(() => setLoading(false));
     }, []);
 
-    const handleToggle = async () => {
-        if (!access) return;
+    const handleNavigate = () => {
+        if (!access || access.accessStatus !== 'active') return;
+        navigate('/crm');
+    };
 
-        // If active — navigate to CRM
+    const handleToggle = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!access || applying) return;
+
+        // If active — turn off (just navigate away, don't revoke)
         if (access.accessStatus === 'active') {
             navigate('/crm');
             return;
@@ -30,7 +36,7 @@ export function CrmAccessToggle() {
         // If pending — do nothing
         if (access.accessStatus === 'pending') return;
 
-        // Owner and senior_admin get auto-approved — apply then navigate
+        // Apply for access
         const isPrivileged = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
         setApplying(true);
         try {
@@ -65,67 +71,75 @@ export function CrmAccessToggle() {
     const isRejected = access.accessStatus === 'rejected';
 
     return (
-        <button
-            onClick={handleToggle}
-            disabled={isPending || applying}
-            className={`
-                w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-                ${isActive
-                    ? 'bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/20'
-                    : isPending
-                        ? 'bg-amber-50 text-amber-600 cursor-not-allowed'
-                        : 'bg-gray-50 text-unbox-grey hover:bg-gray-100 hover:text-unbox-dark'
-                }
-            `}
-        >
-            <BriefcaseMedical size={18} className="flex-shrink-0" />
-
-            <div className="flex-1 text-left min-w-0">
-                <div className="truncate">
-                    {isActive ? 'Мой CRM' : 'Режим CRM'}
+        <div className="flex items-center gap-2">
+            {/* CRM button */}
+            <button
+                onClick={isActive ? handleNavigate : undefined}
+                className={`
+                    flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                    ${isActive
+                        ? 'bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/20 cursor-pointer'
+                        : isPending
+                            ? 'bg-amber-50 text-amber-600 cursor-default'
+                            : 'bg-gray-50 text-unbox-grey cursor-default'
+                    }
+                `}
+            >
+                <BriefcaseMedical size={18} className="flex-shrink-0" />
+                <div className="text-left min-w-0">
+                    <div className="truncate leading-tight">
+                        {isActive ? 'Мой CRM' : 'Режим CRM'}
+                    </div>
+                    {isActive && !access.permanent && access.daysRemaining !== null && (
+                        <div className="text-[10px] opacity-70 flex items-center gap-1">
+                            <Clock size={10} />
+                            {access.daysRemaining} {getDaysLabel(access.daysRemaining)}
+                        </div>
+                    )}
+                    {isPending && (
+                        <div className="text-[10px] opacity-70 flex items-center gap-1">
+                            <AlertCircle size={10} />
+                            На рассмотрении
+                        </div>
+                    )}
+                    {isExpired && (
+                        <div className="text-[10px] text-red-400 flex items-center gap-1">
+                            <AlertCircle size={10} />
+                            Истёк
+                        </div>
+                    )}
+                    {isRejected && (
+                        <div className="text-[10px] text-red-400 flex items-center gap-1">
+                            <AlertCircle size={10} />
+                            Отклонено
+                        </div>
+                    )}
                 </div>
-                {isActive && !access.permanent && access.daysRemaining !== null && (
-                    <div className="text-[10px] opacity-70 flex items-center gap-1">
-                        <Clock size={10} />
-                        {access.daysRemaining} {getDaysLabel(access.daysRemaining)}
-                    </div>
-                )}
-                {isPending && (
-                    <div className="text-[10px] opacity-70 flex items-center gap-1">
-                        <AlertCircle size={10} />
-                        На рассмотрении
-                    </div>
-                )}
-                {isExpired && (
-                    <div className="text-[10px] text-red-400 flex items-center gap-1">
-                        <AlertCircle size={10} />
-                        Доступ истёк
-                    </div>
-                )}
-                {isRejected && (
-                    <div className="text-[10px] text-red-400 flex items-center gap-1">
-                        <AlertCircle size={10} />
-                        Отклонено
-                    </div>
-                )}
-            </div>
+            </button>
 
-            {/* Toggle switch visual */}
-            <div className={`
-                w-9 h-5 rounded-full flex items-center transition-all flex-shrink-0
-                ${isActive ? 'bg-unbox-green justify-end' : isPending ? 'bg-amber-300 justify-center' : 'bg-gray-300 justify-start'}
-            `}>
-                {applying ? (
-                    <Loader2 size={12} className="text-white animate-spin mx-auto" />
-                ) : isPending ? (
-                    <Clock size={12} className="text-white mx-auto" />
-                ) : (
-                    <div className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm mx-0.5 transition-all
-                        ${isActive ? 'scale-100' : 'scale-90'}
-                    `} />
-                )}
-            </div>
-        </button>
+            {/* Toggle switch — separate element */}
+            <button
+                onClick={handleToggle}
+                disabled={isPending || applying}
+                className="flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={isActive ? 'Открыть CRM' : isPending ? 'Ожидает одобрения' : 'Запросить доступ'}
+            >
+                <div className={`
+                    w-10 h-[22px] rounded-full flex items-center transition-all px-0.5
+                    ${isActive ? 'bg-unbox-green justify-end' : isPending ? 'bg-amber-300 justify-center' : 'bg-gray-300 justify-start'}
+                `}>
+                    {applying ? (
+                        <Loader2 size={12} className="text-white animate-spin mx-auto" />
+                    ) : isPending ? (
+                        <Clock size={12} className="text-white mx-auto" />
+                    ) : (
+                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-all
+                            ${isActive ? 'scale-100' : 'scale-90'}
+                        `} />
+                    )}
+                </div>
+            </button>
+        </div>
     );
 }
 
