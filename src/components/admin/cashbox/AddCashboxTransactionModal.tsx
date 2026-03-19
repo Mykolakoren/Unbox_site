@@ -17,7 +17,7 @@ const PAYMENT_METHODS = [
     { id: 'card_bog', label: 'Карта BOG', icon: '🏛️' },
 ] as const;
 
-const BRANCHES = ['Uni', 'One'];
+const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
 
 function flattenCategories(cats: ExpenseCategory[]): { id: string; name: string; depth: number }[] {
     const result: { id: string; name: string; depth: number }[] = [];

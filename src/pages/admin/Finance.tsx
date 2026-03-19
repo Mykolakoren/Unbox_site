@@ -21,7 +21,7 @@ type Tab = 'transactions' | 'categories' | 'shifts';
 type PeriodMode = 'week' | 'month' | 'custom';
 type TxType = 'all' | 'income' | 'expense';
 
-const BRANCHES = ['Uni', 'One'];
+const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
 
 const TABS: { id: Tab; label: string }[] = [
     { id: 'transactions', label: 'Транзакции' },
