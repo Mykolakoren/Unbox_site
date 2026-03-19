@@ -10,7 +10,8 @@ interface Props {
 }
 
 export function EndShiftModal({ isOpen, onClose }: Props) {
-    const { balance, endShift } = useCashboxStore();
+    const { balances, endShift } = useCashboxStore();
+    const cashBalance = balances.cash;
     const [actualBalance, setActualBalance] = useState('');
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
@@ -26,7 +27,7 @@ export function EndShiftModal({ isOpen, onClose }: Props) {
 
     const actualValue = parseFloat(actualBalance);
     const hasAmount = !isNaN(actualValue) && actualValue >= 0;
-    const discrepancy = hasAmount ? Math.round((actualValue - balance) * 100) / 100 : null;
+    const discrepancy = hasAmount ? Math.round((actualValue - cashBalance) * 100) / 100 : null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -72,10 +73,10 @@ export function EndShiftModal({ isOpen, onClose }: Props) {
                 <p className="text-sm text-unbox-grey mb-5">Пересчитайте наличные в кассе</p>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Expected balance */}
+                    {/* Expected cash balance */}
                     <div className="bg-gray-50 rounded-xl px-4 py-3">
-                        <div className="text-xs text-gray-500 mb-0.5">Ожидаемый баланс (система)</div>
-                        <div className="text-xl font-bold text-unbox-dark">{balance.toFixed(2)} ₾</div>
+                        <div className="text-xs text-gray-500 mb-0.5">Ожидаемый остаток наличных</div>
+                        <div className="text-xl font-bold text-unbox-dark">{cashBalance.toFixed(2)} ₾</div>
                     </div>
 
                     {/* Actual balance */}
