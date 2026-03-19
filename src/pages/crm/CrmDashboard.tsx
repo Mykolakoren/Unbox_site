@@ -191,12 +191,14 @@ export function CrmDashboard() {
                             />
                             <YAxis fontSize={12} tickLine={false} axisLine={false} />
                             <Tooltip
-                                formatter={(value: number, name: string) => [
-                                    `${value.toFixed(0)} ₾`,
+                                formatter={(value: any, name: any) => [
+                                    `${Number(value).toFixed(0)} ₾`,
                                     name === 'received' ? 'Получено' : name === 'expected' ? 'Ожидалось' : 'Сессий',
                                 ]}
-                                labelFormatter={(label: string) => {
-                                    const [y, m] = label.split('-');
+                                labelFormatter={(label: any) => {
+                                    const parts = String(label).split('-');
+                                    if (parts.length < 2) return String(label);
+                                    const [y, m] = parts;
                                     const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
                                     return `${months[parseInt(m, 10) - 1]} ${y}`;
                                 }}
