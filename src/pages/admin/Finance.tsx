@@ -104,25 +104,25 @@ export function AdminFinance() {
     return (
         <div className="space-y-5">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-unbox-dark">Финансы</h1>
-                    <p className="text-sm text-unbox-grey mt-0.5">Управление кассой и расходами</p>
+                    <h1 className="text-xl sm:text-2xl font-bold text-unbox-dark">Финансы</h1>
+                    <p className="text-xs sm:text-sm text-unbox-grey mt-0.5">Управление кассой и расходами</p>
                 </div>
                 <div className="flex gap-2">
                     <button
                         onClick={() => setShowEndShift(true)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                        className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                     >
-                        <Clock size={15} />
-                        Закрыть смену
+                        <Clock size={14} />
+                        <span className="hidden sm:inline">Закрыть</span> смену
                     </button>
                     <button
                         onClick={() => setShowAddTx(true)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors"
+                        className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-unbox-green text-white text-xs sm:text-sm font-medium hover:bg-unbox-green/90 transition-colors"
                     >
-                        <Plus size={15} />
-                        Новая операция
+                        <Plus size={14} />
+                        <span className="hidden sm:inline">Новая</span> операция
                     </button>
                 </div>
             </div>

@@ -26,10 +26,11 @@ export function BalanceCard({ filteredTransactions, periodLabel }: Props) {
         };
     }, [filteredTransactions]);
 
+    const b = balances || { balance: 0, cash: 0, card_tbc: 0, card_bog: 0 };
     const accounts = [
-        { key: 'cash', label: 'Наличные', value: balances.cash, icon: Banknote, color: 'text-green-700', bg: 'bg-green-50' },
-        { key: 'tbc', label: 'Карта TBC', value: balances.card_tbc, icon: CreditCard, color: 'text-blue-700', bg: 'bg-blue-50' },
-        { key: 'bog', label: 'Карта BOG', value: balances.card_bog, icon: Landmark, color: 'text-purple-700', bg: 'bg-purple-50' },
+        { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote, color: 'text-green-700', bg: 'bg-green-50' },
+        { key: 'tbc', label: 'Карта TBC', value: b.card_tbc ?? 0, icon: CreditCard, color: 'text-blue-700', bg: 'bg-blue-50' },
+        { key: 'bog', label: 'Карта BOG', value: b.card_bog ?? 0, icon: Landmark, color: 'text-purple-700', bg: 'bg-purple-50' },
     ];
 
     return (
@@ -62,9 +63,9 @@ export function BalanceCard({ filteredTransactions, periodLabel }: Props) {
                         <div className="text-[11px] text-unbox-grey font-medium">Итого</div>
                         <div className={clsx(
                             "text-lg font-bold",
-                            balances.balance < 0 ? "text-red-600" : "text-unbox-dark"
+                            (b.balance ?? 0) < 0 ? "text-red-600" : "text-unbox-dark"
                         )}>
-                            {balances.balance.toFixed(2)} <span className="text-xs font-normal text-unbox-grey">₾</span>
+                            {(b.balance ?? 0).toFixed(2)} <span className="text-xs font-normal text-unbox-grey">₾</span>
                         </div>
                     </div>
                 </div>
