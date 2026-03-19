@@ -266,31 +266,70 @@ function CrmQuickBookModal({
     );
 }
 
-// ─── Link Client to Existing Booking Modal ────────────────────────────────────
+// ─── Link Client to Existing Booking Modal (multi-slot) ───────────────────────
+interface SlotAssignment {
+    hour: number; // start minute of the slot (e.g., 840 for 14:00)
+    label: string; // e.g., "14:00 – 15:00"
+    clientId: string | null;
+    price: number;
+    existingSessionId?: string;
+}
+
 function LinkBookingModal({
     booking,
     crmClients,
-    existingSession,
+    existingSessions,
     onClose,
-    onSave,
+    onSaveMulti,
 }: {
     booking: BookingHistoryItem;
     crmClients: CrmClient[];
-    existingSession?: { id: string; clientId: string } | null;
+    existingSessions: { id: string; clientId: string; date: string | Date; durationMinutes?: number }[];
     onClose: () => void;
-    onSave: (clientId: string | null, price: number) => Promise<void>;
+    onSaveMulti: (assignments: SlotAssignment[]) => Promise<void>;
 }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const [selectedClientId, setSelectedClientId] = useState(existingSession?.clientId || '');
-    const [price, setPrice] = useState('');
+    const duration = booking.duration || 60;
+    const numSlots = Math.max(1, Math.floor(duration / 60));
+    const startMin = booking.startTime ? timeToMin(booking.startTime) : 0;
+
+    // Build initial slot assignments from existing sessions
+    const [slots, setSlots] = useState<SlotAssignment[]>(() => {
+        const result: SlotAssignment[] = [];
+        for (let i = 0; i < numSlots; i++) {
+            const slotStart = startMin + i * 60;
+            const h1 = Math.floor(slotStart / 60);
+            const m1 = slotStart % 60;
+            const h2 = Math.floor((slotStart + 60) / 60);
+            const m2 = (slotStart + 60) % 60;
+            const label = `${String(h1).padStart(2, '0')}:${String(m1).padStart(2, '0')} – ${String(h2).padStart(2, '0')}:${String(m2).padStart(2, '0')}`;
+
+            // Find existing session for this hour
+            const existing = existingSessions.find(s => {
+                try {
+                    const d = s.date instanceof Date ? s.date : new Date(String(s.date));
+                    const sMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+                    return Math.abs(sMin - slotStart) < 30;
+                } catch { return false; }
+            });
+
+            result.push({
+                hour: slotStart,
+                label,
+                clientId: existing?.clientId || null,
+                price: 0,
+                existingSessionId: existing?.id,
+            });
+        }
+        return result;
+    });
+
+    const [activeSlotIdx, setActiveSlotIdx] = useState(0);
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
 
-    const selectedClient = crmClients.find(c => c.id === selectedClientId);
-
-    useEffect(() => {
-        if (selectedClient && !price) setPrice(String(selectedClient.basePrice || ''));
-    }, [selectedClientId]);
+    const activeSlot = slots[activeSlotIdx];
+    const activeClient = crmClients.find(c => c.id === activeSlot?.clientId);
 
     const filteredClients = useMemo(() =>
         crmClients.filter(c =>
@@ -301,10 +340,16 @@ function LinkBookingModal({
         [crmClients, search]
     );
 
+    const updateSlot = (idx: number, clientId: string | null, price?: number) => {
+        setSlots(prev => prev.map((s, i) =>
+            i === idx ? { ...s, clientId, price: price ?? s.price } : s
+        ));
+    };
+
     const handleSave = async () => {
         setSaving(true);
         try {
-            await onSave(selectedClientId || null, Number(price) || 0);
+            await onSaveMulti(slots);
             onClose();
         } catch {
         } finally {
@@ -312,7 +357,6 @@ function LinkBookingModal({
         }
     };
 
-    // Format booking date safely
     const bookingDateStr = (() => {
         try {
             const d = booking.date instanceof Date
@@ -322,10 +366,12 @@ function LinkBookingModal({
         } catch { return ''; }
     })();
 
+    const assignedCount = slots.filter(s => s.clientId).length;
+
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200"
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200 max-h-[90vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -333,11 +379,10 @@ function LinkBookingModal({
                     <div>
                         <h3 className="font-bold text-base flex items-center gap-2">
                             <Link2 size={15} className="text-unbox-green" />
-                            {existingSession ? 'Изменить клиента сессии' : 'Привязать клиента к брони'}
+                            Распределить клиентов
                         </h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                            {resource?.name || 'Кабинет'} · {bookingDateStr} {booking.startTime || ''}
-                            {booking.duration ? ` · ${booking.duration} мин` : ''}
+                            {resource?.name || 'Кабинет'} · {bookingDateStr} · {duration} мин ({numSlots} {numSlots === 1 ? 'сессия' : numSlots < 5 ? 'сессии' : 'сессий'})
                         </p>
                     </div>
                     <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
@@ -345,7 +390,40 @@ function LinkBookingModal({
                     </button>
                 </div>
 
-                <div className="p-5 space-y-3">
+                <div className="p-5 space-y-4">
+                    {/* Slot tabs */}
+                    {numSlots > 1 && (
+                        <div className="flex gap-1.5">
+                            {slots.map((slot, idx) => {
+                                const client = crmClients.find(c => c.id === slot.clientId);
+                                return (
+                                    <button
+                                        key={idx}
+                                        onClick={() => { setActiveSlotIdx(idx); setSearch(''); }}
+                                        className={clsx(
+                                            'flex-1 py-2 px-1.5 rounded-xl text-xs font-medium transition-all border-2 text-center',
+                                            activeSlotIdx === idx
+                                                ? 'border-unbox-green bg-unbox-green/5 text-unbox-dark'
+                                                : slot.clientId
+                                                    ? 'border-green-200 bg-green-50 text-green-700'
+                                                    : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300'
+                                        )}
+                                    >
+                                        <div className="font-bold">{slot.label.split(' – ')[0]}</div>
+                                        <div className="text-[10px] mt-0.5 truncate">
+                                            {client ? client.name : '—'}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Active slot label */}
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Слот {activeSlot.label}
+                    </div>
+
                     {/* Search */}
                     <div className="relative">
                         <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -358,56 +436,70 @@ function LinkBookingModal({
                     </div>
 
                     {/* Client list */}
-                    <div className="max-h-44 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
-                        {/* No client option (to unlink) */}
-                        {existingSession && (
+                    <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
+                        {/* Unlink option */}
+                        {activeSlot.clientId && (
                             <button
-                                onClick={() => setSelectedClientId('')}
-                                className={clsx(
-                                    'w-full text-left px-3 py-2 text-sm border-b border-gray-100 transition-colors italic',
-                                    !selectedClientId ? 'bg-gray-100 text-gray-600 font-medium not-italic' : 'text-gray-400 hover:bg-white'
-                                )}
+                                onClick={() => updateSlot(activeSlotIdx, null)}
+                                className="w-full text-left px-3 py-2 text-sm border-b border-gray-100 text-gray-400 hover:bg-white italic transition-colors"
                             >
                                 Открепить клиента
                             </button>
                         )}
-                        {filteredClients.slice(0, 8).map(client => (
-                            <button
-                                key={client.id}
-                                onClick={() => setSelectedClientId(client.id)}
-                                className={clsx(
-                                    'w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0',
-                                    selectedClientId === client.id
-                                        ? 'bg-unbox-green/10 text-unbox-dark'
-                                        : 'hover:bg-white'
-                                )}
-                            >
-                                <div className={clsx(
-                                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                                    selectedClientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
-                                )}>
-                                    {client.name[0].toUpperCase()}
-                                </div>
-                                <span className="text-sm font-medium truncate">{client.name}</span>
-                                {selectedClientId === client.id && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}
-                            </button>
-                        ))}
+                        {filteredClients.slice(0, 8).map(client => {
+                            const isSelected = activeSlot.clientId === client.id;
+                            // Check if this client is already assigned to another slot
+                            const assignedToOther = slots.some((s, i) => i !== activeSlotIdx && s.clientId === client.id);
+                            return (
+                                <button
+                                    key={client.id}
+                                    onClick={() => {
+                                        updateSlot(activeSlotIdx, client.id, client.basePrice || 0);
+                                        // Auto-advance to next empty slot
+                                        if (numSlots > 1) {
+                                            const nextEmpty = slots.findIndex((s, i) => i > activeSlotIdx && !s.clientId);
+                                            if (nextEmpty >= 0) setTimeout(() => setActiveSlotIdx(nextEmpty), 150);
+                                        }
+                                    }}
+                                    className={clsx(
+                                        'w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0',
+                                        isSelected ? 'bg-unbox-green/10 text-unbox-dark' :
+                                            assignedToOther ? 'bg-blue-50/50 text-blue-600' : 'hover:bg-white'
+                                    )}
+                                >
+                                    <div className={clsx(
+                                        'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
+                                        isSelected ? 'bg-unbox-green text-white' :
+                                            assignedToOther ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-600'
+                                    )}>
+                                        {client.name[0].toUpperCase()}
+                                    </div>
+                                    <span className="text-sm font-medium truncate">{client.name}</span>
+                                    {isSelected && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}
+                                    {assignedToOther && !isSelected && (
+                                        <span className="ml-auto text-[10px] text-blue-500 shrink-0">
+                                            {slots.find((s, i) => i !== activeSlotIdx && s.clientId === client.id)?.label.split(' – ')[0]}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
                         {filteredClients.length === 0 && (
                             <div className="p-3 text-center text-xs text-gray-400">Клиенты не найдены</div>
                         )}
                     </div>
 
-                    {/* Price */}
-                    {selectedClient && (
+                    {/* Price for active client */}
+                    {activeClient && (
                         <div>
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Стоимость сессии ({selectedClient.currency || 'GEL'})
+                                Стоимость ({activeClient.currency || 'GEL'})
                             </div>
                             <input
                                 type="number"
-                                value={price}
-                                onChange={e => setPrice(e.target.value)}
-                                placeholder={String(selectedClient.basePrice || 0)}
+                                value={activeSlot.price || ''}
+                                onChange={e => updateSlot(activeSlotIdx, activeSlot.clientId, Number(e.target.value) || 0)}
+                                placeholder={String(activeClient.basePrice || 0)}
                                 className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
                             />
                         </div>
@@ -421,13 +513,11 @@ function LinkBookingModal({
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={saving || (!selectedClientId && !existingSession)}
+                        disabled={saving || assignedCount === 0}
                         className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        {existingSession
-                            ? (selectedClientId ? 'Сохранить' : 'Открепить')
-                            : 'Привязать клиента'}
+                        Сохранить ({assignedCount}/{numSlots})
                     </button>
                 </div>
             </div>
@@ -508,10 +598,16 @@ export function CrmChessboardView() {
         return map;
     }, [bookingsOnDate]);
 
-    // Session lookup by bookingId
-    const sessionByBookingId = useMemo(() => {
-        const map = new Map<string, typeof sessions[0]>();
-        sessions.forEach(s => { if (s.bookingId) map.set(s.bookingId, s); });
+    // Session lookup by bookingId (one booking can have multiple hourly sessions)
+    const sessionsByBookingId = useMemo(() => {
+        const map = new Map<string, (typeof sessions[0])[]>();
+        sessions.forEach(s => {
+            if (s.bookingId) {
+                const arr = map.get(s.bookingId) || [];
+                arr.push(s);
+                map.set(s.bookingId, arr);
+            }
+        });
         return map;
     }, [sessions]);
 
@@ -678,50 +774,48 @@ export function CrmChessboardView() {
         setBookSlot(null);
     };
 
-    // Handle linking/unlinking client to existing booking
-    const handleLinkSave = async (clientId: string | null, price: number) => {
-        if (!linkBooking) return;
-        const existingSession = sessionByBookingId.get(linkBooking.id);
-
-        // Format date safely
-        const rawDate = linkBooking.date as any;
+    // Handle saving multi-slot client assignments for a booking
+    const handleMultiSlotSave = async (
+        booking: BookingHistoryItem,
+        slotAssignments: { hour: number; clientId: string | null; price: number; existingSessionId?: string }[]
+    ) => {
+        const rawDate = booking.date as any;
         let dateStr: string;
         if (rawDate instanceof Date) {
             dateStr = format(rawDate, 'yyyy-MM-dd');
         } else {
             dateStr = String(rawDate).replace(' 12:00', '').split('T')[0].split(' ')[0];
         }
-        const timeStr = linkBooking.startTime && /^\d{2}:\d{2}/.test(linkBooking.startTime)
-            ? linkBooking.startTime : '00:00';
-        const sessionDate = `${dateStr}T${timeStr}:00`;
 
-        if (existingSession) {
-            if (clientId) {
-                // Update: change client / price
-                await updateSession(existingSession.id, {
-                    clientId,
-                    price: price || undefined,
+        for (const slot of slotAssignments) {
+            const h = Math.floor(slot.hour / 60);
+            const m = slot.hour % 60;
+            const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            const sessionDate = `${dateStr}T${timeStr}:00`;
+
+            if (slot.existingSessionId) {
+                if (slot.clientId) {
+                    await updateSession(slot.existingSessionId, {
+                        clientId: slot.clientId,
+                        price: slot.price || undefined,
+                        date: sessionDate,
+                    });
+                } else {
+                    await deleteSession(slot.existingSessionId);
+                }
+            } else if (slot.clientId) {
+                await createSession({
+                    clientId: slot.clientId,
                     date: sessionDate,
+                    durationMinutes: 60,
+                    price: slot.price || undefined,
+                    bookingId: booking.id,
+                    isBooked: true,
                 });
-                toast.success('Клиент обновлён');
-            } else {
-                // Unlink: delete the CRM session (the booking itself stays)
-                await deleteSession(existingSession.id);
-                toast.success('Клиент откреплён');
             }
-        } else if (clientId) {
-            // Create new session linked to this booking
-            await createSession({
-                clientId,
-                date: sessionDate,
-                durationMinutes: linkBooking.duration || 60,
-                price: price || undefined,
-                bookingId: linkBooking.id,
-                isBooked: true,
-            });
-            toast.success('Клиент привязан');
         }
 
+        toast.success('Сессии сохранены');
         await fetchSessions();
         setLinkBooking(null);
     };
@@ -847,8 +941,10 @@ export function CrmChessboardView() {
                                     {cells.map((cell) => {
                                         if (cell.type === 'booking') {
                                             const { booking, colspan, isMine } = cell;
-                                            const linkedSession = sessionByBookingId.get(booking.id);
-                                            const linkedClient = linkedSession ? clientById.get(linkedSession.clientId) : undefined;
+                                            const linkedSessions = sessionsByBookingId.get(booking.id) || [];
+                                            // For single-hour bookings, show the first linked client; for multi-hour, show count
+                                            const firstSession = linkedSessions[0];
+                                            const linkedClient = firstSession ? clientById.get(firstSession.clientId) : undefined;
 
                                             return (
                                                 <td
@@ -868,7 +964,9 @@ export function CrmChessboardView() {
                                                     >
                                                         <span className="truncate flex-1">
                                                             {isMine
-                                                                ? (linkedClient ? linkedClient.name : '✓ Моё')
+                                                                ? (linkedSessions.length > 1
+                                                                    ? `${linkedSessions.length} клиентов`
+                                                                    : linkedClient ? linkedClient.name : '✓ Моё')
                                                                 : 'Занято'}
                                                         </span>
                                                         {isMine && (
@@ -956,9 +1054,9 @@ export function CrmChessboardView() {
                 <LinkBookingModal
                     booking={linkBooking}
                     crmClients={clients.filter(c => c.isActive)}
-                    existingSession={sessionByBookingId.get(linkBooking.id) ?? null}
+                    existingSessions={sessionsByBookingId.get(linkBooking.id) || []}
                     onClose={() => setLinkBooking(null)}
-                    onSave={handleLinkSave}
+                    onSaveMulti={(assignments) => handleMultiSlotSave(linkBooking, assignments)}
                 />
             )}
         </div>
