@@ -89,8 +89,11 @@ export function CrmDashboard() {
         try {
             const result = await crmApi.syncFromCalendar(false);
             setSyncResult(result);
-            if (result.created > 0) fetchDashboard();
-            toast.success(`Синхронизировано: ${result.created} новых сессий`);
+            if (result.created > 0 || result.autoCreatedClients > 0) fetchDashboard();
+            const parts: string[] = [];
+            if (result.autoCreatedClients > 0) parts.push(`${result.autoCreatedClients} клиентов создано`);
+            if (result.created > 0) parts.push(`${result.created} сессий импортировано`);
+            toast.success(parts.length > 0 ? parts.join(', ') : 'Синхронизация завершена — ничего нового');
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Ошибка синхронизации');
         } finally {
@@ -334,13 +337,16 @@ export function CrmDashboard() {
                         <div className="text-green-600 space-y-0.5">
                             <div>Всего событий в календаре: <b>{syncResult.totalEvents}</b></div>
                             <div>Совпало с клиентами: <b>{syncResult.matched}</b></div>
-                            <div>Создано новых сессий: <b>{syncResult.created}</b></div>
+                            {syncResult.autoCreatedClients > 0 && (
+                                <div className="text-blue-600">Автосозданных клиентов: <b>{syncResult.autoCreatedClients}</b></div>
+                            )}
+                            <div>Создано сессий: <b>{syncResult.created}</b></div>
                             {syncResult.updated > 0 && <div>Обновлено (перенос): <b>{syncResult.updated}</b></div>}
                             {syncResult.unmatched > 0 && (
                                 <div className="text-orange-600">
                                     Не распознано: <b>{syncResult.unmatched}</b>
                                     {syncResult.unmatchedSummaries.length > 0 && (
-                                        <span className="ml-1 text-xs">({syncResult.unmatchedSummaries.slice(0, 3).join(', ')}…)</span>
+                                        <span className="ml-1 text-xs">({syncResult.unmatchedSummaries.slice(0, 3).join(', ')}...)</span>
                                     )}
                                 </div>
                             )}

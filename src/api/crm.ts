@@ -101,6 +101,7 @@ export interface CrmSyncResult {
     unmatched: number;
     created: number;
     updated: number;
+    autoCreatedClients: number;
     unmatchedSummaries: string[];
 }
 
