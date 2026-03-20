@@ -286,7 +286,7 @@ export function ConfirmationStep() {
                                                     <strong>Пополните баланс</strong> — обратитесь к администратору центра для пополнения
                                                 </span>
                                             </div>
-                                            {!(effectiveUser.creditLimit > 0) && (
+                                            {!((effectiveUser.creditLimit || 0) > 0) && (
                                                 <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
                                                     <span className="text-base mt-0.5">🔑</span>
                                                     <span>
