@@ -81,9 +81,13 @@ def merge_clients(
             reassigned["sessions"] += 1
 
         for p in session.exec(select(TherapistPayment).where(TherapistPayment.client_id == sid, TherapistPayment.specialist_id == uid)).all():
-            p.client_id = data.target_id
-            session.add(p)
-            reassigned["payments"] += 1
+            if p.amount and float(p.amount) > 0:
+                p.client_id = data.target_id
+                session.add(p)
+                reassigned["payments"] += 1
+            else:
+                # Delete garbage 0-amount payments instead of merging them
+                session.delete(p)
 
         for n in session.exec(select(TherapistNote).where(TherapistNote.client_id == sid, TherapistNote.specialist_id == uid)).all():
             n.client_id = data.target_id
