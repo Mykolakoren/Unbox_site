@@ -432,7 +432,10 @@ function WeekCalendar({
                                                     background: effectiveStatus === 'COMPLETED' ? '#22c55e' : effectiveStatus.startsWith('CANCELLED') ? '#f97316' : '#476D6B',
                                                 }} />
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-medium text-unbox-dark">{client?.name || 'Клиент'}</div>
+                                                    <div
+                                                        className="text-sm font-medium text-unbox-dark hover:text-unbox-green cursor-pointer transition-colors"
+                                                        onClick={(e) => { e.stopPropagation(); if (session.clientId) navigate(`/crm/clients/${session.clientId}`); }}
+                                                    >{client?.name || 'Клиент'}</div>
                                                     <div className="text-xs text-unbox-grey">{session.durationMinutes} мин · {STATUS_LABELS[effectiveStatus]}</div>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 shrink-0">
@@ -549,7 +552,10 @@ function DayGroup({
                                     </div>
                                     <div className="w-px h-10 bg-unbox-light shrink-0" />
                                     <div className="flex-1 min-w-0">
-                                        <div className="font-medium text-unbox-dark truncate">
+                                        <div
+                                            className="font-medium text-unbox-dark truncate hover:text-unbox-green cursor-pointer transition-colors"
+                                            onClick={(e) => { e.stopPropagation(); if (session.clientId) navigate(`/crm/clients/${session.clientId}`); }}
+                                        >
                                             {client?.name || 'Неизвестный клиент'}
                                         </div>
                                         <div className="flex items-center gap-2 mt-1 flex-wrap">
