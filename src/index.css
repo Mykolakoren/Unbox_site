@@ -90,35 +90,48 @@
 }
 
 .scrollbar-visible::-webkit-scrollbar {
-  height: 12px;
+  height: 14px;
   -webkit-appearance: none;
+  display: block !important;
 }
 
 .scrollbar-visible::-webkit-scrollbar-track {
-  background: rgba(212, 226, 225, 0.4);
+  background: rgba(212, 226, 225, 0.6);
   border-radius: 8px;
-  margin: 0 8px;
+  margin: 0 4px;
 }
 
 .scrollbar-visible::-webkit-scrollbar-thumb {
-  background: rgba(71, 109, 107, 0.45);
+  background: rgba(71, 109, 107, 0.6);
   border-radius: 8px;
-  border: 2px solid rgba(212, 226, 225, 0.4);
-  min-width: 40px;
+  border: 2px solid rgba(212, 226, 225, 0.5);
+  min-width: 60px;
 }
 
 .scrollbar-visible::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 109, 107, 0.65);
-}
-
-.scrollbar-visible::-webkit-scrollbar-thumb:active {
   background: rgba(71, 109, 107, 0.8);
 }
 
-/* Firefox scrollbar */
-@supports (scrollbar-width: thin) {
+.scrollbar-visible::-webkit-scrollbar-thumb:active {
+  background: rgba(71, 109, 107, 0.95);
+}
+
+/* Firefox scrollbar — use auto width for better visibility */
+@supports (scrollbar-width: auto) {
   .scrollbar-visible {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(71, 109, 107, 0.45) rgba(212, 226, 225, 0.4);
+    scrollbar-width: auto;
+    scrollbar-color: rgba(71, 109, 107, 0.6) rgba(212, 226, 225, 0.6);
+  }
+}
+
+/* Mobile: even bigger scrollbar for touch */
+@media (max-width: 768px) {
+  .scrollbar-visible::-webkit-scrollbar {
+    height: 18px;
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb {
+    background: rgba(71, 109, 107, 0.7);
+    border: 3px solid rgba(212, 226, 225, 0.5);
+    min-width: 80px;
   }
 }

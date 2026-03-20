@@ -47,12 +47,13 @@ def crm_dashboard(
         )
     ).one()
 
-    payments_this_month = session.exec(
-        select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+    month_payments = session.exec(
+        select(TherapistPayment).where(
             TherapistPayment.specialist_id == uid,
             TherapistPayment.date >= month_start,
         )
-    ).one()
+    ).all()
+    payments_this_month = sum(float(p.amount or 0) for p in month_payments)
 
     upcoming = session.exec(
         select(TherapySession).where(
@@ -86,13 +87,14 @@ def crm_dashboard(
         else:
             m_end = m_start.replace(month=m_start.month + 1)
 
-        received = session.exec(
-            select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+        m_payments = session.exec(
+            select(TherapistPayment).where(
                 TherapistPayment.specialist_id == uid,
                 TherapistPayment.date >= m_start,
                 TherapistPayment.date < m_end,
             )
-        ).one()
+        ).all()
+        received = sum(float(p.amount or 0) for p in m_payments)
 
         m_sessions = session.exec(
             select(TherapySession).where(
@@ -170,11 +172,12 @@ def crm_dashboard(
         d["total_debt"] = round(d["total_debt"], 2)
 
     # Avg check & hourly rate
-    total_payments_all = session.exec(
-        select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+    all_payments = session.exec(
+        select(TherapistPayment).where(
             TherapistPayment.specialist_id == uid,
         )
-    ).one()
+    ).all()
+    total_payments_all = sum(float(p.amount or 0) for p in all_payments)
 
     completed_sessions = session.exec(
         select(TherapySession).where(
@@ -184,9 +187,9 @@ def crm_dashboard(
         )
     ).all()
 
-    avg_check = round(float(total_payments_all) / max(len(completed_sessions), 1), 2)
+    avg_check = round(total_payments_all / max(len(completed_sessions), 1), 2)
     total_hours = sum(s.duration_minutes or 60 for s in completed_sessions) / 60
-    avg_hourly_rate = round(float(total_payments_all) / max(total_hours, 1), 2)
+    avg_hourly_rate = round(total_payments_all / max(total_hours, 1), 2)
 
     total_active_debt = sum(d["total_debt"] for d in debt_by_client)
 

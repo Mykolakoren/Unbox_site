@@ -372,7 +372,7 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
                             <h3 className="font-semibold text-gray-900">{res.name}</h3>
                             <p className="text-sm text-gray-500">{res.capacity} чел. • {res.hourlyRate} ₾/ч</p>
                         </div>
-                        <div className="flex-1 overflow-x-auto no-scrollbar pb-2 md:pb-0 relative">
+                        <div className="flex-1 overflow-x-auto scrollbar-visible pb-2 md:pb-0 relative">
                             <div className="flex gap-1 min-w-max relative custom-slots-container">
                                 {/* Base Time Slots Layer */}
                                 {timeSlots.map((time, index) => {

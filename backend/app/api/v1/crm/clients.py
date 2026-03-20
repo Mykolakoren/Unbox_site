@@ -150,14 +150,14 @@ def list_clients(
         unpaid = [s for s in sessions_all if not s.is_paid]
         c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)
 
-        # Total paid (from payments table)
-        total_paid_row = session.exec(
-            select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+        # Total paid (from payments table) — sum in Python to avoid ORM type issues
+        client_payments = session.exec(
+            select(TherapistPayment).where(
                 TherapistPayment.specialist_id == uid,
                 TherapistPayment.client_id == str(c.id),
             )
-        ).one()
-        c_dict["totalPaid"] = float(total_paid_row)
+        ).all()
+        c_dict["totalPaid"] = sum(float(p.amount or 0) for p in client_payments)
 
         result.append(c_dict)
 
@@ -202,14 +202,14 @@ def get_client_balance(
 
     debt = sum((s.price if s.price is not None else base) for s in unpaid_sessions)
 
-    # Total paid
-    total_paid_row = session.exec(
-        select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+    # Total paid — fetch all payments and sum in Python to avoid ORM type-cast issues
+    payments = session.exec(
+        select(TherapistPayment).where(
             TherapistPayment.specialist_id == uid,
-            TherapistPayment.client_id == client_id,
+            TherapistPayment.client_id == str(client_id),
         )
-    ).one()
-    total_paid = float(total_paid_row)
+    ).all()
+    total_paid = sum(float(p.amount or 0) for p in payments)
 
     # Total expected (all non-cancelled sessions)
     all_sessions = session.exec(
