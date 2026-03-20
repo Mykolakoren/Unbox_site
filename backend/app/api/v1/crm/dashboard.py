@@ -162,6 +162,9 @@ def crm_dashboard(
     for us in unpaid_sessions_all:
         cid = us.client_id
         client = session.get(TherapistClient, cid)
+        # Skip inactive clients — their debt doesn't count in dashboard totals
+        if client and not client.is_active:
+            continue
         price = us.price if us.price is not None else (client.base_price if client else 0)
         if cid not in debt_map:
             debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0, "unpaid_sessions_count": 0}
