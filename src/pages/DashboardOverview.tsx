@@ -26,7 +26,7 @@ import {
     arrayMove,
     SortableContext,
     sortableKeyboardCoordinates,
-    verticalListSortingStrategy,
+    rectSortingStrategy,
     useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -131,15 +131,20 @@ function SortableBlock({
 
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform),
-        transition: transition || 'transform 200ms ease',
-        opacity: isDragging ? 0.5 : 1,
+        transition: transition || 'transform 250ms cubic-bezier(0.25, 1, 0.5, 1)',
+        opacity: isDragging ? 0.4 : 1,
         zIndex: isDragging ? 50 : undefined,
         position: 'relative' as const,
         animation: isEditing && !isDragging ? `dash-wiggle 0.4s ease-in-out infinite` : undefined,
     };
 
     return (
-        <div ref={setNodeRef} style={style} {...attributes}>
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={blockSize === 'full' ? 'lg:col-span-2' : ''}
+            {...attributes}
+        >
             {/* Drag handle — top-right corner */}
             {isEditing && (
                 <div
@@ -154,13 +159,13 @@ function SortableBlock({
             {isEditing && (
                 <button
                     onClick={(e) => { e.stopPropagation(); onToggleSize(); }}
-                    className="absolute -bottom-2.5 -right-2.5 z-30 w-8 h-8 rounded-xl bg-white text-unbox-grey shadow-lg border border-gray-200 flex items-center justify-center hover:bg-unbox-green hover:text-white hover:border-unbox-green transition-all"
-                    title={blockSize === 'full' ? 'Уменьшить' : 'Развернуть на всю ширину'}
+                    className="absolute -bottom-2 -right-2 z-30 w-8 h-8 rounded-xl bg-white text-unbox-grey shadow-lg border border-gray-200 flex items-center justify-center hover:bg-unbox-green hover:text-white hover:border-unbox-green transition-all"
+                    title={blockSize === 'full' ? 'Сделать половину' : 'На всю ширину'}
                 >
                     {blockSize === 'full' ? (
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                             <rect x="1" y="1" width="5" height="12" rx="1" />
-                            <rect x="8" y="1" width="5" height="12" rx="1" strokeDasharray="2 2" />
+                            <rect x="8" y="1" width="5" height="12" rx="1" strokeDasharray="2 2" opacity="0.4" />
                         </svg>
                     ) : (
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -555,24 +560,20 @@ export function DashboardOverview() {
                 onDragEnd={handleDragEnd}
                 onDragCancel={() => setActiveId(null)}
             >
-                <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
+                <SortableContext items={visibleOrder} strategy={rectSortingStrategy}>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {visibleOrder.map(blockId => {
                             const size = blockSizes[blockId] || 'half';
                             return (
-                                <div
+                                <SortableBlock
                                     key={blockId}
-                                    className={size === 'full' ? 'lg:col-span-2' : ''}
+                                    id={blockId}
+                                    isEditing={isEditing}
+                                    blockSize={size}
+                                    onToggleSize={() => toggleBlockSize(blockId)}
                                 >
-                                    <SortableBlock
-                                        id={blockId}
-                                        isEditing={isEditing}
-                                        blockSize={size}
-                                        onToggleSize={() => toggleBlockSize(blockId)}
-                                    >
-                                        {renderBlock(blockId)}
-                                    </SortableBlock>
-                                </div>
+                                    {renderBlock(blockId)}
+                                </SortableBlock>
                             );
                         })}
                     </div>
