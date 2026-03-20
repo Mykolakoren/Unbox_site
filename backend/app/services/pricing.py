@@ -88,63 +88,52 @@ class PricingService:
         if self._apply_subscription(user, breakdown, resource, format_type):
             return breakdown
 
-        # B. Personal Discount (Priority 2) — overrides all standard discounts
-        if user.pricing_system == "personal" and user.personal_discount_percent > 0:
-            pct = user.personal_discount_percent
-            discount_val = breakdown.base_price * (pct / 100.0)
-            breakdown.discount_percent = pct
-            breakdown.discount_amount = discount_val
-            breakdown.final_price = max(0, breakdown.base_price - discount_val)
-            breakdown.applied_rule = "PERSONAL_DISCOUNT"
-            return breakdown
+        # B. Collect ALL discount candidates, then apply the MAX one
+        # Rule: discounts do NOT stack — only the highest one wins.
 
-        # C. Compare Standard Discounts
-        # We need to find the BEST discount among: Weekly, Duration, Hot
-        
-        # 1. Hot Booking
+        personal_percent = 0
+        if user.pricing_system == "personal" and user.personal_discount_percent > 0:
+            personal_percent = user.personal_discount_percent
+
+        # Standard discounts
         hot_percent = 0
         if self._is_hot_booking(start_time):
             hot_percent = self.PRICING_CONFIG["hot_booking"]["percent"]
-            
-        # 2. Duration (Consecutive)
+
         duration_percent = 0
         for tier in self.PRICING_CONFIG["duration"]:
             if tier["min"] <= booked_hours < tier["max"]:
                 duration_percent = tier["percent"]
                 break
-                
-        # 3. Weekly Progressive
+
         weekly_percent = 0
         weekly_hours = self._get_weekly_accumulated_hours(user, start_time)
-        print(f"DEBUG: Weekly Hours for {user.email}: {weekly_hours} + Current {booked_hours}")
         total_weekly = weekly_hours + booked_hours
-        
         for tier in self.PRICING_CONFIG["weekly_progressive"]:
             if tier["min"] <= total_weekly < tier["max"]:
                 weekly_percent = tier["percent"]
                 break
-                
-        # Apply Best Discount
-        best_percent = max(hot_percent, duration_percent, weekly_percent)
-        
+
+        # Apply the BEST (max) discount — no stacking
+        best_percent = max(personal_percent, hot_percent, duration_percent, weekly_percent)
+
         if best_percent > 0:
             discount_val = breakdown.base_price * (best_percent / 100.0)
             breakdown.discount_percent = best_percent
             breakdown.discount_amount = discount_val
             breakdown.final_price = max(0, breakdown.base_price - discount_val)
-            
-            # Label
-            if best_percent == weekly_percent:
+
+            # Label by which discount won
+            if best_percent == personal_percent:
+                breakdown.applied_rule = "PERSONAL_DISCOUNT"
+            elif best_percent == weekly_percent:
                 breakdown.applied_rule = "WEEKLY_PROGRESSIVE"
             elif best_percent == duration_percent:
                 breakdown.applied_rule = "CONSECUTIVE_HOURS"
             else:
                 breakdown.applied_rule = "HOT_BOOKING"
-                # Hot booking implies non-refundable usually, but if other discount matched same percent?
-                # Sticking to simplified logic. 
-                if best_percent == hot_percent: 
-                    breakdown.is_non_refundable = True
-                    breakdown.is_non_reschedulable = True
+                breakdown.is_non_refundable = True
+                breakdown.is_non_reschedulable = True
 
         return breakdown
 

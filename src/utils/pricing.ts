@@ -101,46 +101,44 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
     const isSubscription = params.paymentMethod === 'subscription';
 
     if (!isSubscription) {
-        // Check for Personal Pricing System
-        if (params.pricingSystem === 'personal' && params.personalDiscountPercent && params.personalDiscountPercent > 0) {
-            discountAmount = totalBasePrice * (params.personalDiscountPercent / 100);
-            discountType = 'personal';
-        } else {
-            // Standard Pricing System (Duration, Weekly, Hot)
-            const hours = totalMinutes / 60;
-            const totalWeeklyHours = (params.accumulatedWeeklyHours || 0) + hours;
+        // Collect ALL discount candidates, apply the MAX one (no stacking)
+        const personalPercent = (params.pricingSystem === 'personal' && params.personalDiscountPercent && params.personalDiscountPercent > 0)
+            ? params.personalDiscountPercent : 0;
 
-            // A. Weekly Progressive
-            let weeklyPercent = 0;
-            const weeklyTiers = PRICING_CONFIG.discounts.weekly_progressive;
-            const matchWeekly = weeklyTiers.find(t => totalWeeklyHours >= t.min && totalWeeklyHours < t.max);
-            if (matchWeekly) weeklyPercent = matchWeekly.percent;
+        const hours = totalMinutes / 60;
+        const totalWeeklyHours = (params.accumulatedWeeklyHours || 0) + hours;
 
-            // B. Duration (Consecutive)
-            let durationPercent = 0;
-            const durationTiers = PRICING_CONFIG.discounts.duration;
-            const matchDuration = durationTiers.find(t => hours >= t.min && hours < t.max);
-            if (matchDuration) durationPercent = matchDuration.percent;
+        // Weekly Progressive
+        let weeklyPercent = 0;
+        const weeklyTiers = PRICING_CONFIG.discounts.weekly_progressive;
+        const matchWeekly = weeklyTiers.find(t => totalWeeklyHours >= t.min && totalWeeklyHours < t.max);
+        if (matchWeekly) weeklyPercent = matchWeekly.percent;
 
-            // C. Hot Booking
-            let hotPercent = 0;
-            const now = new Date();
-            const diffHours = differenceInMinutes(params.startTime, now) / 60;
-            if (diffHours >= 0 && diffHours <= PRICING_CONFIG.discounts.hot_booking.hours_before) {
-                hotPercent = PRICING_CONFIG.discounts.hot_booking.percent;
-            }
+        // Duration (Consecutive)
+        let durationPercent = 0;
+        const durationTiers = PRICING_CONFIG.discounts.duration;
+        const matchDuration = durationTiers.find(t => hours >= t.min && hours < t.max);
+        if (matchDuration) durationPercent = matchDuration.percent;
 
-            // Apply Best Discount (Max)
-            const maxPercent = Math.max(weeklyPercent, durationPercent, hotPercent);
+        // Hot Booking
+        let hotPercent = 0;
+        const now = new Date();
+        const diffHours = differenceInMinutes(params.startTime, now) / 60;
+        if (diffHours >= 0 && diffHours <= PRICING_CONFIG.discounts.hot_booking.hours_before) {
+            hotPercent = PRICING_CONFIG.discounts.hot_booking.percent;
+        }
 
-            if (maxPercent > 0) {
-                discountAmount = totalBasePrice * (maxPercent / 100);
+        // Apply BEST discount (max of all — no stacking)
+        const maxPercent = Math.max(personalPercent, weeklyPercent, durationPercent, hotPercent);
 
-                // Determine Type for UI Label
-                if (maxPercent === durationPercent) discountType = 'duration';
-                else if (maxPercent === weeklyPercent) discountType = 'loyalty';
-                else discountType = 'hot';
-            }
+        if (maxPercent > 0) {
+            discountAmount = totalBasePrice * (maxPercent / 100);
+
+            // Determine Type for UI Label
+            if (maxPercent === personalPercent && personalPercent > 0) discountType = 'personal';
+            else if (maxPercent === durationPercent) discountType = 'duration';
+            else if (maxPercent === weeklyPercent) discountType = 'loyalty';
+            else discountType = 'hot';
         }
     }
 
