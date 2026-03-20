@@ -425,4 +425,15 @@ export const crmApi = {
         const response = await api.post(`/crm/access-requests/${userId}/reject`, { reason });
         return response.data;
     },
+
+    // Payment Accounts
+    getPaymentAccounts: async (): Promise<{ id: string; label: string }[]> => {
+        const response = await api.get('/crm/payment-accounts');
+        return response.data;
+    },
+
+    updatePaymentAccounts: async (accounts: { id: string; label: string }[]): Promise<{ id: string; label: string }[]> => {
+        const response = await api.put('/crm/payment-accounts', accounts);
+        return response.data;
+    },
 };

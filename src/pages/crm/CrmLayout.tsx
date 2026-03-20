@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
+import { useCrmStore } from '../../store/crmStore';
 import clsx from 'clsx';
 
 const CRM_TABS = [
@@ -24,6 +25,7 @@ const CRM_TABS = [
     { icon: BookOpen,        label: 'Бронирования',  path: '/crm/bookings' },
     { icon: Wallet,          label: 'Финансы',       path: '/crm/finances' },
     { icon: StickyNote,      label: 'Заметки',       path: '/crm/notes' },
+    { icon: Settings,        label: 'Настройки',     path: '/crm/settings' },
 ];
 
 function CrmTopTabs() {
@@ -62,6 +64,7 @@ function CrmTopTabs() {
 
 export function CrmLayout() {
     const { currentUser } = useUserStore();
+    const { fetchPaymentAccounts } = useCrmStore();
     const navigate = useNavigate();
     const hasToken = Boolean(localStorage.getItem('token'));
     const [accessStatus, setAccessStatus] = useState<CrmAccessStatus | null>(null);
@@ -70,6 +73,11 @@ export function CrmLayout() {
     useEffect(() => {
         if (!hasToken) navigate('/login');
     }, [hasToken, navigate]);
+
+    // Load specialist's payment accounts
+    useEffect(() => {
+        fetchPaymentAccounts();
+    }, [fetchPaymentAccounts]);
 
     // Check CRM access via API
     useEffect(() => {
@@ -108,7 +116,7 @@ export function CrmLayout() {
 
     // Sidebar shows only general items — CRM sections are in the top tabs
     const sidebarNavItems = [
-        { icon: Settings, label: 'Настройки', path: '/dashboard/profile' },
+        { icon: Settings, label: 'Настройки', path: '/crm/settings' },
     ];
 
     const customBottomContent = (

@@ -1,10 +1,11 @@
 """CRM Dashboard — stats + settings for specialist."""
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Body
 from sqlmodel import Session, select, func
 from app.api import deps
 from app.models.user import User
+from app.models.specialist import Specialist
 from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import TherapySession
 from app.models.therapist_payment import TherapistPayment
@@ -239,3 +240,54 @@ def update_crm_settings(
     session.add(current_user)
     session.commit()
     return {"ok": True, "calendar_id": crm_data.get("calendar_id")}
+
+
+# ── Payment Accounts ─────────────────────────────────────────────
+
+DEFAULT_ACCOUNTS = [
+    {"id": "cash", "label": "Наличные"},
+    {"id": "tbc", "label": "TBC"},
+    {"id": "bog", "label": "BOG"},
+]
+
+
+@router.get("/payment-accounts")
+def get_payment_accounts(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Get specialist's payment accounts list."""
+    spec = session.exec(
+        select(Specialist).where(Specialist.user_id == current_user.id)
+    ).first()
+    if spec and spec.payment_accounts:
+        return spec.payment_accounts
+    return DEFAULT_ACCOUNTS
+
+
+@router.put("/payment-accounts")
+def update_payment_accounts(
+    accounts: List[dict] = Body(...),
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Replace specialist's payment accounts list."""
+    spec = session.exec(
+        select(Specialist).where(Specialist.user_id == current_user.id)
+    ).first()
+    if not spec:
+        from uuid import uuid4
+        spec = Specialist(
+            id=uuid4(),
+            user_id=current_user.id,
+            first_name=current_user.name.split()[0] if current_user.name else "",
+            last_name=" ".join(current_user.name.split()[1:]) if current_user.name else "",
+            payment_accounts=accounts,
+        )
+        session.add(spec)
+    else:
+        spec.payment_accounts = accounts
+        session.add(spec)
+    session.commit()
+    session.refresh(spec)
+    return spec.payment_accounts

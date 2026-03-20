@@ -23,6 +23,15 @@ class SpecialistBase(SQLModel):
     # Category for public catalog filtering
     # Values: psychology | psychiatry | narcology | coaching | education
     category: Optional[str] = Field(default=None)
+    # Custom payment accounts for Psy CRM
+    payment_accounts: List[dict] = Field(
+        default_factory=lambda: [
+            {"id": "cash", "label": "Наличные"},
+            {"id": "tbc", "label": "TBC"},
+            {"id": "bog", "label": "BOG"},
+        ],
+        sa_column=Column(JSON)
+    )
 
 class Specialist(SpecialistBase, table=True):
     __tablename__ = "specialists" # type: ignore
@@ -47,6 +56,7 @@ class SpecialistUpdate(SQLModel):
     base_price_gel: Optional[int] = None
     is_verified: Optional[bool] = None
     category: Optional[str] = None
+    payment_accounts: Optional[List[dict]] = None
 
 class SpecialistRead(SpecialistBase):
     id: UUID

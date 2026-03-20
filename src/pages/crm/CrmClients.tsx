@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import type { CrmClientCreate, CrmClient } from '../../api/crm';
 import { crmApi } from '../../api/crm';
+import { AccountSelect } from '../../components/crm/AccountSelect';
 import { toast } from 'sonner';
 
 type ViewMode = 'table' | 'cards';
@@ -780,20 +781,7 @@ function ClientForm({
                 </div>
                 <div>
                     <label className="text-sm font-medium text-unbox-dark mb-1 block">Счёт по умолчанию</label>
-                    <select
-                        value={defaultAccount}
-                        onChange={(e) => setDefaultAccount(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                    >
-                        <option value="cash">Наличные</option>
-                        <option value="tbc">TBC</option>
-                        <option value="bog">BOG</option>
-                        <option value="paypal">PayPal</option>
-                        <option value="usdt">USDT</option>
-                        <option value="p24">Приват24</option>
-                        <option value="mono">Mono</option>
-                        <option value="ru_bank">RU Банк</option>
-                    </select>
+                    <AccountSelect value={defaultAccount} onChange={setDefaultAccount} />
                 </div>
             </div>
 

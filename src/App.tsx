@@ -37,6 +37,7 @@ import { CrmSessions } from './pages/crm/CrmSessions';
 import { CrmBookings } from './pages/crm/CrmBookings';
 import { CrmFinances } from './pages/crm/CrmFinances';
 import { CrmNotes } from './pages/crm/CrmNotes';
+import { CrmSettings } from './pages/crm/CrmSettings';
 
 // Admin CRM
 import { AdminCrm } from './pages/admin/AdminCrm';
@@ -185,6 +186,7 @@ function App() {
           <Route path="bookings" element={<CrmBookings />} />
           <Route path="finances" element={<CrmFinances />} />
           <Route path="notes" element={<CrmNotes />} />
+          <Route path="settings" element={<CrmSettings />} />
         </Route>
 
         <Route path="/admin" element={<AdminLayout />}>

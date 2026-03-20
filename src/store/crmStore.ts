@@ -8,6 +8,11 @@ import type {
     CrmDashboard, CrmSpecialist,
 } from '../api/crm';
 
+export interface PaymentAccount {
+    id: string;
+    label: string;
+}
+
 interface CrmStore {
     // State
     clients: CrmClient[];
@@ -15,6 +20,7 @@ interface CrmStore {
     payments: CrmPayment[];
     notes: CrmNote[];
     dashboard: CrmDashboard | null;
+    paymentAccounts: PaymentAccount[];
     loading: boolean;
     error: string | null;
 
@@ -48,6 +54,10 @@ interface CrmStore {
 
     // Dashboard
     fetchDashboard: () => Promise<void>;
+
+    // Payment Accounts
+    fetchPaymentAccounts: () => Promise<void>;
+    updatePaymentAccounts: (accounts: PaymentAccount[]) => Promise<void>;
 }
 
 export const useCrmStore = create<CrmStore>((set, get) => ({
@@ -56,6 +66,11 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     payments: [],
     notes: [],
     dashboard: null,
+    paymentAccounts: [
+        { id: 'cash', label: 'Наличные' },
+        { id: 'tbc', label: 'TBC' },
+        { id: 'bog', label: 'BOG' },
+    ],
     loading: false,
     error: null,
 
@@ -220,5 +235,21 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
         } catch (e: any) {
             set({ error: e.message, loading: false });
         }
+    },
+
+    // ── Payment Accounts ──────────────────────────────────────────────────
+
+    fetchPaymentAccounts: async () => {
+        try {
+            const accounts = await crmApi.getPaymentAccounts();
+            if (accounts && accounts.length > 0) {
+                set({ paymentAccounts: accounts });
+            }
+        } catch { /* use defaults */ }
+    },
+
+    updatePaymentAccounts: async (accounts) => {
+        const updated = await crmApi.updatePaymentAccounts(accounts);
+        set({ paymentAccounts: updated });
     },
 }));

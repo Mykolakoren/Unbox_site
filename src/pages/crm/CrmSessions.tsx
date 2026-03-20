@@ -21,6 +21,7 @@ import {
     startOfWeek, endOfWeek, addWeeks, subWeeks, eachDayOfInterval, isToday as isTodayFn,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { AccountSelect } from '../../components/crm/AccountSelect';
 import { toast } from 'sonner';
 import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient } from '../../api/crm';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
@@ -889,20 +890,11 @@ function SessionEditPanel({
                         Оплачено
                     </label>
                     {isPaid && !session.isPaid && (
-                        <select
+                        <AccountSelect
                             value={account}
-                            onChange={(e) => setAccount(e.target.value)}
+                            onChange={setAccount}
                             className="px-2 py-1 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
-                        >
-                            <option value="cash">Наличные</option>
-                            <option value="tbc">TBC</option>
-                            <option value="bog">BOG</option>
-                            <option value="paypal">PayPal</option>
-                            <option value="usdt">USDT</option>
-                            <option value="p24">Приват24</option>
-                            <option value="mono">Mono</option>
-                        <option value="ru_bank">RU Банк</option>
-                        </select>
+                        />
                     )}
                 </div>
                 <div className="flex items-center gap-2">

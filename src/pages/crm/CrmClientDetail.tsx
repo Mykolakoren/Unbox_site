@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
+import { AccountSelect } from '../../components/crm/AccountSelect';
 import type { CrmClient, CrmSession, CrmNote, CrmPayment } from '../../api/crm';
 import {
     ArrowLeft, Phone, Mail, Tag, Wallet, Calendar, StickyNote,
@@ -29,7 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 export function CrmClientDetail() {
     const { clientId } = useParams<{ clientId: string }>();
     const navigate = useNavigate();
-    const { updateSession, createNote, deleteNote } = useCrmStore();
+    const { updateSession, createNote, deleteNote, paymentAccounts } = useCrmStore();
 
     const [client, setClient] = useState<CrmClient | null>(null);
     const [sessions, setSessions] = useState<CrmSession[]>([]);
@@ -112,8 +113,7 @@ export function CrmClientDetail() {
         try {
             const result = await crmApi.quickPaySession(sessionId, account);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: true } : s));
-            const accountLabels: Record<string, string> = { cash: 'Наличные', tbc: 'TBC', bog: 'BOG', paypal: 'PayPal', usdt: 'USDT', p24: 'P24', mono: 'Mono', ru_bank: 'RU Банк' };
-            const accLabel = result.account ? accountLabels[result.account] || result.account : '';
+            const accLabel = result.account ? (paymentAccounts.find(a => a.id === result.account)?.label || result.account) : '';
             toast.success(`Оплачено: ${result.amount} ${result.currency}${accLabel ? ` · ${accLabel}` : ''}`);
             loadData();
         } catch (e: any) {
@@ -426,20 +426,10 @@ export function CrmClientDetail() {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-unbox-dark mb-1">Счёт по умолчанию</label>
-                            <select
+                            <AccountSelect
                                 value={editForm.defaultAccount}
-                                onChange={e => setEditForm(f => ({ ...f, defaultAccount: e.target.value }))}
-                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                            >
-                                <option value="cash">Наличные</option>
-                                <option value="tbc">TBC</option>
-                                <option value="bog">BOG</option>
-                                <option value="paypal">PayPal</option>
-                                <option value="usdt">USDT</option>
-                                <option value="p24">P24</option>
-                                <option value="mono">Mono</option>
-                                <option value="ru_bank">RU Банк</option>
-                            </select>
+                                onChange={(v) => setEditForm(f => ({ ...f, defaultAccount: v }))}
+                            />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-unbox-dark mb-1">
@@ -745,20 +735,11 @@ export function CrmClientDetail() {
                                                                     </div>
                                                                     <div className="flex-1">
                                                                         <label className="text-[10px] text-gray-400 uppercase font-medium">Счёт</label>
-                                                                        <select
+                                                                        <AccountSelect
                                                                             value={editSessionAccount}
-                                                                            onChange={e => setEditSessionAccount(e.target.value)}
+                                                                            onChange={setEditSessionAccount}
                                                                             className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-unbox-green bg-white"
-                                                                        >
-                                                                            <option value="cash">Наличные</option>
-                                                                            <option value="tbc">TBC</option>
-                                                                            <option value="bog">BOG</option>
-                                                                            <option value="paypal">PayPal</option>
-                                                                            <option value="usdt">USDT</option>
-                                                                            <option value="p24">P24</option>
-                                                                            <option value="mono">Mono</option>
-                                <option value="ru_bank">RU Банк</option>
-                                                                        </select>
+                                                                        />
                                                                     </div>
                                                                     <button
                                                                         onClick={() => {
@@ -850,7 +831,7 @@ export function CrmClientDetail() {
                                                 <div className="font-medium text-gray-900">
                                                     {p.amount} {p.currency}
                                                 </div>
-                                                <div className="text-xs text-gray-500">{p.account}</div>
+                                                <div className="text-xs text-gray-500">{paymentAccounts.find(a => a.id === p.account)?.label || p.account}</div>
                                             </div>
                                             <div className="text-xs text-gray-400">
                                                 {format(parseISO(p.date || p.createdAt), 'dd.MM.yyyy', { locale: ru })}
