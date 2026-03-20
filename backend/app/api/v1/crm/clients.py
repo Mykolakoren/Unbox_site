@@ -190,13 +190,13 @@ def get_client_balance(
     uid = str(current_user.id)
     base = client.base_price or 0
 
-    # Unpaid non-cancelled sessions
+    # Unpaid COMPLETED sessions only (future PLANNED sessions are not debt)
     unpaid_sessions = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.client_id == client_id,
             TherapySession.is_paid == False,
-            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            TherapySession.status == "COMPLETED",
         )
     ).all()
 

@@ -78,8 +78,9 @@ export function CrmClientDetail() {
 
     const stats = useMemo(() => {
         const completed = sessions.filter(s => s.status === 'COMPLETED').length;
+        // Debt = only COMPLETED unpaid sessions (future PLANNED sessions are not debt yet)
         const unpaid = sessions.filter(
-            s => !s.isPaid && s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST'
+            s => !s.isPaid && s.status === 'COMPLETED'
         );
         const debt = unpaid.reduce((sum, s) => sum + (s.price ?? client?.basePrice ?? 0), 0);
         const totalPaid = balance?.total_paid ?? 0;

@@ -146,12 +146,12 @@ def crm_dashboard(
                 "last_session_date": last_session.isoformat() if last_session else None,
             })
 
-    # Debt by client
+    # Debt by client — only COMPLETED unpaid sessions (future PLANNED are not debt)
     unpaid_sessions_all = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.is_paid == False,
-            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            TherapySession.status == "COMPLETED",
         )
     ).all()
 
