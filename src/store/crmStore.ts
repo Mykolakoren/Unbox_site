@@ -25,7 +25,7 @@ interface CrmStore {
     fetchSpecialists: () => Promise<void>;
 
     // Clients
-    fetchClients: (activeOnly?: boolean) => Promise<void>;
+    fetchClients: (activeOnly?: boolean, withStats?: boolean) => Promise<void>;
     createClient: (data: CrmClientCreate) => Promise<CrmClient>;
     updateClient: (id: string, data: CrmClientUpdate) => Promise<CrmClient>;
     deleteClient: (id: string, permanent?: boolean) => Promise<void>;
@@ -76,10 +76,10 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
 
     // ── Clients ──────────────────────────────────────────────────────────────
 
-    fetchClients: async (activeOnly = false) => {
+    fetchClients: async (activeOnly = false, withStats = false) => {
         set({ loading: true, error: null });
         try {
-            const clients = await crmApi.getClients(activeOnly, get().viewAsSpecialistId ?? undefined);
+            const clients = await crmApi.getClients(activeOnly, get().viewAsSpecialistId ?? undefined, withStats);
             set({ clients, loading: false });
         } catch (e: any) {
             set({ error: e.message, loading: false });

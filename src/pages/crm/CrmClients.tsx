@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { useUserStore } from '../../store/userStore';
@@ -16,9 +16,18 @@ import {
     Pencil,
     Tag,
     Send,
+    LayoutGrid,
+    LayoutList,
+    ArrowUpDown,
 } from 'lucide-react';
-import type { CrmClientCreate } from '../../api/crm';
+import type { CrmClientCreate, CrmClient } from '../../api/crm';
 import { toast } from 'sonner';
+
+type ViewMode = 'table' | 'cards';
+type SortField = 'name' | 'basePrice' | 'sessionCount' | 'unpaidSum' | 'totalPaid';
+type SortDir = 'asc' | 'desc';
+
+const VIEW_KEY = 'crm_clients_view';
 
 export function CrmClients() {
     const { clients, fetchClients, createClient, updateClient, deleteClient, loading } =
@@ -29,24 +38,77 @@ export function CrmClients() {
     const [showInactive, setShowInactive] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [viewMode, setViewMode] = useState<ViewMode>(() => {
+        return (localStorage.getItem(VIEW_KEY) as ViewMode) || 'table';
+    });
+    const [sortField, setSortField] = useState<SortField>('name');
+    const [sortDir, setSortDir] = useState<SortDir>('asc');
 
     const editingClient = editingId ? clients.find((c) => c.id === editingId) ?? null : null;
 
     useEffect(() => {
-        fetchClients();
+        fetchClients(false, true);
     }, [fetchClients]);
 
-    const filtered = clients.filter((c) => {
-        if (!showInactive && !c.isActive) return false;
-        if (!search) return true;
-        const q = search.toLowerCase();
-        return (
-            c.name.toLowerCase().includes(q) ||
-            c.phone?.toLowerCase().includes(q) ||
-            c.email?.toLowerCase().includes(q) ||
-            c.aliasCode?.includes(q)
-        );
-    });
+    const toggleSort = (field: SortField) => {
+        if (sortField === field) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortDir(field === 'name' ? 'asc' : 'desc');
+        }
+    };
+
+    const filtered = useMemo(() => {
+        let result = clients.filter((c) => {
+            if (!showInactive && !c.isActive) return false;
+            if (!search) return true;
+            const q = search.toLowerCase();
+            return (
+                c.name.toLowerCase().includes(q) ||
+                c.phone?.toLowerCase().includes(q) ||
+                c.email?.toLowerCase().includes(q) ||
+                c.aliasCode?.includes(q)
+            );
+        });
+
+        // Sort
+        result = [...result].sort((a, b) => {
+            const dir = sortDir === 'asc' ? 1 : -1;
+            switch (sortField) {
+                case 'name':
+                    return dir * a.name.localeCompare(b.name);
+                case 'basePrice':
+                    return dir * ((a.basePrice || 0) - (b.basePrice || 0));
+                case 'sessionCount':
+                    return dir * (((a as any).sessionCount || 0) - ((b as any).sessionCount || 0));
+                case 'unpaidSum':
+                    return dir * (((a as any).unpaidSum || 0) - ((b as any).unpaidSum || 0));
+                case 'totalPaid':
+                    return dir * (((a as any).totalPaid || 0) - ((b as any).totalPaid || 0));
+                default:
+                    return 0;
+            }
+        });
+
+        return result;
+    }, [clients, search, showInactive, sortField, sortDir]);
+
+    const handleToggleActive = async (client: CrmClient) => {
+        if (client.isActive) {
+            await deleteClient(client.id);
+            toast.success(`${client.name} деактивирован`);
+        } else {
+            await updateClient(client.id, { isActive: true });
+            toast.success(`${client.name} восстановлен`);
+        }
+        fetchClients(false, true);
+    };
+
+    const setView = (mode: ViewMode) => {
+        setViewMode(mode);
+        localStorage.setItem(VIEW_KEY, mode);
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -59,13 +121,32 @@ export function CrmClients() {
                         {clients.length}
                     </p>
                 </div>
-                <button
-                    onClick={() => setShowForm(true)}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
-                >
-                    <Plus className="w-4 h-4" />
-                    Добавить клиента
-                </button>
+                <div className="flex items-center gap-2">
+                    {/* View toggle */}
+                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                        <button
+                            onClick={() => setView('table')}
+                            className={`p-1.5 rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-unbox-green' : 'text-gray-400 hover:text-gray-600'}`}
+                            title="Таблица"
+                        >
+                            <LayoutList size={18} />
+                        </button>
+                        <button
+                            onClick={() => setView('cards')}
+                            className={`p-1.5 rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-unbox-green' : 'text-gray-400 hover:text-gray-600'}`}
+                            title="Карточки"
+                        >
+                            <LayoutGrid size={18} />
+                        </button>
+                    </div>
+                    <button
+                        onClick={() => setShowForm(true)}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Добавить клиента
+                    </button>
+                </div>
             </div>
 
             {/* Filters */}
@@ -98,6 +179,7 @@ export function CrmClients() {
                         await createClient(data);
                         setShowForm(false);
                         toast.success('Клиент создан');
+                        fetchClients(false, true);
                     }}
                     onCancel={() => setShowForm(false)}
                 />
@@ -121,6 +203,7 @@ export function CrmClients() {
                         await updateClient(editingClient.id, data);
                         setEditingId(null);
                         toast.success('Клиент обновлён');
+                        fetchClients(false, true);
                     }}
                     onCancel={() => setEditingId(null)}
                 />
@@ -139,7 +222,117 @@ export function CrmClients() {
                         {search ? 'Попробуйте изменить поисковый запрос' : 'Добавьте первого клиента'}
                     </p>
                 </div>
+            ) : viewMode === 'table' ? (
+                /* ═══ TABLE VIEW (PsyCRM style) ═══ */
+                <div className="bg-white rounded-2xl border border-unbox-light shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-unbox-grey uppercase bg-gray-50/80 border-b border-gray-200">
+                                <tr>
+                                    <th className="px-3 py-3.5 w-8"></th>
+                                    <SortHeader field="name" current={sortField} dir={sortDir} onSort={toggleSort}>Имя</SortHeader>
+                                    <th className="px-4 py-3.5 font-medium hidden md:table-cell">Контакты</th>
+                                    <SortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</SortHeader>
+                                    <SortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort} className="hidden lg:table-cell">LTV</SortHeader>
+                                    <SortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</SortHeader>
+                                    <th className="px-4 py-3.5 font-medium text-right">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((client) => {
+                                    const c = client as any;
+                                    return (
+                                        <tr
+                                            key={client.id}
+                                            className={`border-b border-gray-50 hover:bg-unbox-light/20 transition-colors cursor-pointer ${!client.isActive ? 'opacity-50' : ''}`}
+                                            onClick={() => navigate(`/crm/clients/${client.id}`)}
+                                        >
+                                            {/* Active indicator */}
+                                            <td className="px-3 py-3.5 text-center" onClick={e => e.stopPropagation()}>
+                                                <button
+                                                    onClick={() => handleToggleActive(client)}
+                                                    className={`w-3 h-3 rounded-full transition-all hover:scale-125 ${
+                                                        client.isActive
+                                                            ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.5)]'
+                                                            : 'bg-gray-300'
+                                                    }`}
+                                                    title={client.isActive ? 'Деактивировать' : 'Активировать'}
+                                                />
+                                            </td>
+                                            {/* Name */}
+                                            <td className="px-4 py-3.5 font-medium text-unbox-dark whitespace-nowrap">
+                                                <div className="flex items-center gap-2.5">
+                                                    <span className="hover:text-unbox-green transition-colors">
+                                                        {client.name}
+                                                    </span>
+                                                    {client.aliasCode && (
+                                                        <span className="text-[10px] text-gray-400 font-normal">
+                                                            #{client.aliasCode}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            {/* Contacts */}
+                                            <td className="px-4 py-3.5 text-unbox-grey hidden md:table-cell">
+                                                <div className="flex flex-col gap-0.5 text-xs">
+                                                    {client.telegram && <span className="flex items-center gap-1"><Send className="w-3 h-3" />{client.telegram}</span>}
+                                                    {client.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{client.phone}</span>}
+                                                    {!client.telegram && !client.phone && <span className="text-gray-400">&mdash;</span>}
+                                                </div>
+                                            </td>
+                                            {/* Rate */}
+                                            <td className="px-4 py-3.5 text-unbox-dark">
+                                                {client.basePrice || 0} {client.currency}
+                                            </td>
+                                            {/* LTV */}
+                                            <td className="px-4 py-3.5 text-unbox-dark font-medium hidden lg:table-cell">
+                                                {c.sessionCount > 0
+                                                    ? <span>{(c.totalCost || 0).toLocaleString()} {client.currency}</span>
+                                                    : <span className="text-gray-400">0</span>
+                                                }
+                                            </td>
+                                            {/* Debt */}
+                                            <td className="px-4 py-3.5">
+                                                {(c.unpaidSum || 0) > 0 ? (
+                                                    <span className="inline-flex items-center px-2 py-0.5 bg-red-50 text-red-700 text-xs font-medium rounded-full">
+                                                        {(c.unpaidSum || 0).toLocaleString()} {client.currency}
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center px-2 py-0.5 bg-green-50 text-green-700 text-xs font-medium rounded-full">
+                                                        Оплачено
+                                                    </span>
+                                                )}
+                                            </td>
+                                            {/* Actions */}
+                                            <td className="px-4 py-3.5 text-right" onClick={e => e.stopPropagation()}>
+                                                <div className="flex items-center justify-end gap-1">
+                                                    <button
+                                                        onClick={() => {
+                                                            setShowForm(false);
+                                                            setEditingId(editingId === client.id ? null : client.id);
+                                                        }}
+                                                        className="p-1.5 rounded-lg hover:bg-unbox-light/50 text-unbox-grey hover:text-unbox-green transition-colors"
+                                                        title="Редактировать"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => navigate(`/crm/clients/${client.id}`)}
+                                                        className="text-xs font-medium text-unbox-green hover:text-unbox-dark transition-colors"
+                                                    >
+                                                        Открыть
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             ) : (
+                /* ═══ CARD VIEW ═══ */
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filtered.map((client) => (
                         <div
@@ -153,14 +346,21 @@ export function CrmClients() {
                         >
                             <div className="flex items-start justify-between mb-3">
                                 <div className="flex items-center gap-3">
-                                    <div
-                                        className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${
-                                            client.isActive
-                                                ? 'bg-gradient-to-br from-unbox-green to-unbox-dark'
-                                                : 'bg-gray-300'
-                                        }`}
-                                    >
-                                        {client.name[0].toUpperCase()}
+                                    <div className="relative">
+                                        <div
+                                            className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${
+                                                client.isActive
+                                                    ? 'bg-gradient-to-br from-unbox-green to-unbox-dark'
+                                                    : 'bg-gray-300'
+                                            }`}
+                                        >
+                                            {client.name[0].toUpperCase()}
+                                        </div>
+                                        <div
+                                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                                                client.isActive ? 'bg-green-400' : 'bg-gray-300'
+                                            }`}
+                                        />
                                     </div>
                                     <div>
                                         <div className="font-semibold text-unbox-dark">
@@ -258,6 +458,42 @@ export function CrmClients() {
                 </div>
             )}
         </div>
+    );
+}
+
+// ── Sort Header ──────────────────────────────────────────────────────────────
+
+function SortHeader({
+    field,
+    current,
+    dir,
+    onSort,
+    children,
+    className = '',
+}: {
+    field: SortField;
+    current: SortField;
+    dir: SortDir;
+    onSort: (f: SortField) => void;
+    children: React.ReactNode;
+    className?: string;
+}) {
+    const isActive = current === field;
+    return (
+        <th
+            className={`px-4 py-3.5 font-medium cursor-pointer select-none hover:bg-gray-100/50 transition-colors ${className}`}
+            onClick={() => onSort(field)}
+        >
+            <div className="flex items-center gap-1">
+                {children}
+                <ArrowUpDown size={12} className={isActive ? 'text-unbox-green' : 'text-gray-300'} />
+                {isActive && (
+                    <span className="text-[10px] text-unbox-green">
+                        {dir === 'asc' ? '\u2191' : '\u2193'}
+                    </span>
+                )}
+            </div>
+        </th>
     );
 }
 
@@ -394,10 +630,10 @@ function ClientForm({
                         onChange={(e) => setCurrency(e.target.value)}
                         className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
                     >
-                        <option value="GEL">GEL (₾)</option>
+                        <option value="GEL">GEL ({'\u20BE'})</option>
                         <option value="USD">USD ($)</option>
-                        <option value="EUR">EUR (€)</option>
-                        <option value="RUB">RUB (₽)</option>
+                        <option value="EUR">EUR ({'\u20AC'})</option>
+                        <option value="RUB">RUB ({'\u20BD'})</option>
                     </select>
                 </div>
             </div>

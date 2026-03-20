@@ -219,9 +219,9 @@ export const crmApi = {
     },
 
     // Clients
-    getClients: async (activeOnly = false, specialistId?: string): Promise<CrmClient[]> => {
+    getClients: async (activeOnly = false, specialistId?: string, withStats = false): Promise<CrmClient[]> => {
         const response = await api.get('/crm/clients', {
-            params: { active_only: activeOnly, specialist_id: specialistId },
+            params: { active_only: activeOnly, specialist_id: specialistId, with_stats: withStats },
         });
         return response.data;
     },

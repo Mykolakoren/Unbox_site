@@ -1,10 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import {
     Wallet, Plus, AlertCircle, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
-    GripVertical, Settings2, X, RotateCw, EyeOff,
+    GripVertical, Settings2, X, RotateCw, Check,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
@@ -16,9 +16,11 @@ import {
     closestCenter,
     KeyboardSensor,
     PointerSensor,
+    TouchSensor,
     useSensor,
     useSensors,
     type DragEndEvent,
+    DragOverlay,
 } from '@dnd-kit/core';
 import {
     arrayMove,
@@ -57,7 +59,6 @@ function loadLayout(): BlockId[] {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
             const parsed = JSON.parse(saved) as BlockId[];
-            // Validate: add any missing blocks at the end
             const valid = parsed.filter(id => ALL_BLOCKS.some(b => b.id === id));
             ALL_BLOCKS.forEach(b => {
                 if (!valid.includes(b.id)) valid.push(b.id);
@@ -94,28 +95,25 @@ const glassStyle: React.CSSProperties = {
     boxShadow: '0 8px 32px rgba(71,109,107,0.07), inset 0 1px 0 rgba(255,255,255,0.80)',
 };
 
-// ── Wiggle animation style (iPhone-style) ────────────────────────────────────
+// ── Wiggle animation ─────────────────────────────────────────────────────────
 
-const wiggleKeyframes = `
-@keyframes wiggle {
-    0%, 100% { transform: rotate(-0.5deg); }
-    50% { transform: rotate(0.5deg); }
+const wiggleCSS = `
+@keyframes dash-wiggle {
+    0%, 100% { transform: rotate(-0.4deg) scale(1); }
+    25% { transform: rotate(0.4deg) scale(1.002); }
+    75% { transform: rotate(-0.3deg) scale(0.998); }
 }
 `;
 
-// ── Sortable Wrapper ─────────────────────────────────────────────────────────
+// ── Sortable Block ───────────────────────────────────────────────────────────
 
 function SortableBlock({
     id,
     isEditing,
-    isHidden,
-    onToggleVisibility,
     children,
 }: {
     id: string;
     isEditing: boolean;
-    isHidden: boolean;
-    onToggleVisibility: () => void;
     children: React.ReactNode;
 }) {
     const {
@@ -129,52 +127,100 @@ function SortableBlock({
 
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.7 : isHidden ? 0.35 : 1,
+        transition: transition || 'transform 200ms ease',
+        opacity: isDragging ? 0.5 : 1,
         zIndex: isDragging ? 50 : undefined,
         position: 'relative' as const,
-        animation: isEditing && !isDragging ? 'wiggle 0.3s ease-in-out infinite' : undefined,
-        animationDelay: `${Math.random() * 0.2}s`,
+        animation: isEditing && !isDragging ? `dash-wiggle 0.4s ease-in-out infinite` : undefined,
     };
-
-    if (isHidden && !isEditing) return null;
 
     return (
         <div ref={setNodeRef} style={style} {...attributes}>
-            {/* Drag handle — top-right corner grip (iPhone style) */}
+            {/* Drag handle — top-right corner */}
             {isEditing && (
                 <div
                     {...listeners}
-                    className="absolute -top-2 -right-2 z-30 w-9 h-9 rounded-xl bg-unbox-green text-white shadow-lg flex items-center justify-center cursor-grab active:cursor-grabbing active:scale-110 transition-transform touch-none hover:bg-unbox-dark"
+                    className="absolute -top-2.5 -right-2.5 z-30 w-10 h-10 rounded-2xl bg-unbox-green text-white shadow-lg flex items-center justify-center cursor-grab active:cursor-grabbing active:scale-110 transition-all touch-none hover:bg-unbox-dark hover:shadow-xl"
                     title="Перетащить"
                 >
-                    <GripVertical size={16} />
+                    <GripVertical size={18} />
                 </div>
             )}
+            {children}
+        </div>
+    );
+}
 
-            {/* Hide/show button — top-left corner */}
-            {isEditing && (
-                <button
-                    onClick={onToggleVisibility}
-                    className={`absolute -top-2 -left-2 z-30 w-7 h-7 rounded-full shadow-lg flex items-center justify-center transition-all ${
-                        isHidden
-                            ? 'bg-red-500 text-white hover:bg-red-600'
-                            : 'bg-white text-unbox-grey border border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'
-                    }`}
-                    title={isHidden ? 'Показать блок' : 'Скрыть блок'}
-                >
-                    {isHidden ? <Plus size={14} className="rotate-45" /> : <X size={14} />}
+// ── Settings Panel (checkbox list) ───────────────────────────────────────────
+
+function SettingsPanel({
+    hiddenBlocks,
+    onToggle,
+    onReset,
+    onClose,
+}: {
+    hiddenBlocks: Set<BlockId>;
+    onToggle: (id: BlockId) => void;
+    onReset: () => void;
+    onClose: () => void;
+}) {
+    const panelRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        function handleClick(e: MouseEvent) {
+            if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+                onClose();
+            }
+        }
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [onClose]);
+
+    return (
+        <div
+            ref={panelRef}
+            className="absolute right-0 top-full mt-2 z-50 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <span className="text-sm font-bold text-unbox-dark">Виджеты</span>
+                <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
+                    <X size={14} className="text-unbox-grey" />
                 </button>
-            )}
-
-            {isHidden && isEditing ? (
-                <div className="p-8 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-100/50 flex items-center justify-center text-sm text-unbox-grey font-medium">
-                    <EyeOff size={16} className="mr-2 opacity-50" />
-                    Блок скрыт
-                </div>
-            ) : (
-                children
-            )}
+            </div>
+            <div className="py-1">
+                {ALL_BLOCKS.map(block => {
+                    const Icon = block.icon;
+                    const isVisible = !hiddenBlocks.has(block.id);
+                    return (
+                        <button
+                            key={block.id}
+                            onClick={() => onToggle(block.id)}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-left"
+                        >
+                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                                isVisible
+                                    ? 'bg-unbox-green border-unbox-green'
+                                    : 'border-gray-300 bg-white'
+                            }`}>
+                                {isVisible && <Check size={12} className="text-white" />}
+                            </div>
+                            <Icon size={16} className={isVisible ? 'text-unbox-green' : 'text-gray-400'} />
+                            <span className={`text-sm ${isVisible ? 'text-unbox-dark font-medium' : 'text-gray-400'}`}>
+                                {block.label}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+            <div className="px-4 py-2.5 border-t border-gray-100">
+                <button
+                    onClick={onReset}
+                    className="flex items-center gap-2 text-xs text-unbox-grey hover:text-unbox-dark transition-colors w-full"
+                >
+                    <RotateCw size={12} />
+                    Сбросить к настройкам по умолчанию
+                </button>
+            </div>
         </div>
     );
 }
@@ -187,13 +233,17 @@ export function DashboardOverview() {
     const [blockOrder, setBlockOrder] = useState<BlockId[]>(loadLayout);
     const [hiddenBlocks, setHiddenBlocks] = useState<Set<BlockId>>(loadHidden);
     const [isEditing, setIsEditing] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [activeId, setActiveId] = useState<string | null>(null);
 
     const sensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
     );
 
     const handleDragEnd = useCallback((event: DragEndEvent) => {
+        setActiveId(null);
         const { active, over } = event;
         if (over && active.id !== over.id) {
             setBlockOrder(prev => {
@@ -277,11 +327,11 @@ export function DashboardOverview() {
                                     {isNegative ? 'Текущая задолженность' : 'Текущий баланс'}
                                 </div>
                                 <div className={`text-4xl font-bold ${isNegative ? 'text-red-500' : 'text-green-600'}`}>
-                                    {currentUser.balance.toFixed(2)} ₾
+                                    {currentUser.balance.toFixed(2)} {'\u20BE'}
                                 </div>
                                 {isNegative && (
                                     <div className="text-xs text-red-400 mt-1 font-medium">
-                                        Кредитный лимит: {currentUser.creditLimit} ₾
+                                        Кредитный лимит: {currentUser.creditLimit} {'\u20BE'}
                                     </div>
                                 )}
                             </div>
@@ -294,7 +344,7 @@ export function DashboardOverview() {
                                 <div className="flex justify-between text-xs font-medium">
                                     <span className="text-unbox-grey">Использовано кредита</span>
                                     <span className={availableCredit < 50 ? 'text-red-500' : 'text-unbox-dark'}>
-                                        Доступно: {availableCredit.toFixed(2)} ₾
+                                        Доступно: {availableCredit.toFixed(2)} {'\u20BE'}
                                     </span>
                                 </div>
                                 <div className="w-full bg-unbox-light/50 rounded-full h-2 overflow-hidden">
@@ -366,11 +416,11 @@ export function DashboardOverview() {
                                                 </div>
                                                 <div className="min-w-0">
                                                     <div className="font-medium text-sm truncate">
-                                                        {resource?.name || 'Кабинет'} · {formatBookingDate(b.date)}
+                                                        {resource?.name || 'Кабинет'} &middot; {formatBookingDate(b.date)}
                                                     </div>
                                                     <div className="text-xs text-unbox-grey flex items-center gap-1">
                                                         <Clock size={12} />
-                                                        {b.startTime || '—'} · {b.duration ? `${b.duration / 60}ч` : '—'}
+                                                        {b.startTime || '\u2014'} &middot; {b.duration ? `${b.duration / 60}ч` : '\u2014'}
                                                     </div>
                                                 </div>
                                             </div>
@@ -379,7 +429,7 @@ export function DashboardOverview() {
                                                     {status.label}
                                                 </span>
                                                 <span className="font-semibold text-sm w-16 text-right">
-                                                    {b.finalPrice?.toFixed(0) ?? '—'} ₾
+                                                    {b.finalPrice?.toFixed(0) ?? '\u2014'} {'\u20BE'}
                                                 </span>
                                             </div>
                                         </div>
@@ -448,75 +498,106 @@ export function DashboardOverview() {
         }
     };
 
-    // ── Layout Logic ─────────────────────────────────────────────────────────
-    // Group blocks into rows: side-by-side pairs for non-fullWidth, full rows for fullWidth
+    // Visible block order for rendering
+    const visibleOrder = isEditing ? blockOrder : blockOrder.filter(id => !hiddenBlocks.has(id));
+
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {isEditing && <style>{wiggleCSS}</style>}
+
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold mb-1">Обзор</h1>
                     <p className="text-unbox-grey text-sm">Сводка вашего аккаунта и быстрые действия</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="relative flex items-center gap-2">
                     {isEditing && (
                         <button
                             onClick={resetLayout}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 rounded-xl border border-white/60 transition-colors"
-                            title="Сбросить к настройкам по умолчанию"
                         >
                             <RotateCw size={13} />
                             Сбросить
                         </button>
                     )}
+                    {/* Settings gear — opens checkbox panel */}
                     <button
-                        onClick={() => setIsEditing(!isEditing)}
+                        onClick={() => {
+                            if (isEditing) {
+                                setIsEditing(false);
+                                setShowSettings(false);
+                            } else {
+                                setShowSettings(!showSettings);
+                            }
+                        }}
                         className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
                             isEditing
                                 ? 'bg-unbox-green text-white border-unbox-green shadow-md'
-                                : 'text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 border-white/60'
+                                : showSettings
+                                    ? 'bg-unbox-dark text-white border-unbox-dark'
+                                    : 'text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 border-white/60'
                         }`}
                     >
-                        {isEditing ? <X size={13} /> : <Settings2 size={13} />}
+                        {isEditing ? <Check size={13} /> : <Settings2 size={13} />}
                         {isEditing ? 'Готово' : 'Настроить'}
                     </button>
+
+                    {/* Settings dropdown */}
+                    {showSettings && !isEditing && (
+                        <SettingsPanel
+                            hiddenBlocks={hiddenBlocks}
+                            onToggle={toggleVisibility}
+                            onReset={() => {
+                                resetLayout();
+                                setShowSettings(false);
+                            }}
+                            onClose={() => setShowSettings(false)}
+                        />
+                    )}
                 </div>
             </div>
 
+            {/* Edit mode hint */}
+            {showSettings && !isEditing && (
+                <button
+                    onClick={() => {
+                        setIsEditing(true);
+                        setShowSettings(false);
+                    }}
+                    className="w-full px-4 py-3 rounded-xl bg-unbox-green/5 border border-unbox-green/20 text-sm text-unbox-dark flex items-center justify-center gap-2 hover:bg-unbox-green/10 transition-colors"
+                >
+                    <GripVertical size={16} className="text-unbox-green" />
+                    <span>Перетащить и изменить порядок блоков</span>
+                </button>
+            )}
+
             {isEditing && (
-                <>
-                    <style>{wiggleKeyframes}</style>
-                    <div className="px-4 py-2.5 rounded-xl bg-unbox-green/10 border border-unbox-green/20 text-xs text-unbox-dark flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <GripVertical size={14} className="text-unbox-green shrink-0" />
-                        Тяни за зелёную ручку <span className="inline-flex w-5 h-5 bg-unbox-green rounded-md items-center justify-center"><GripVertical size={10} className="text-white" /></span> чтобы переместить блок. Нажми <X size={12} className="inline" /> чтобы скрыть.
-                    </div>
-                </>
+                <div className="px-4 py-2.5 rounded-xl bg-unbox-green/10 border border-unbox-green/20 text-xs text-unbox-dark flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <GripVertical size={14} className="text-unbox-green shrink-0" />
+                    Перетаскивай блоки за зелёную ручку
+                    <span className="inline-flex w-5 h-5 bg-unbox-green rounded-lg items-center justify-center ml-0.5">
+                        <GripVertical size={10} className="text-white" />
+                    </span>
+                </div>
             )}
 
             <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
+                onDragStart={e => setActiveId(String(e.active.id))}
                 onDragEnd={handleDragEnd}
+                onDragCancel={() => setActiveId(null)}
             >
-                <SortableContext items={blockOrder} strategy={verticalListSortingStrategy}>
+                <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {blockOrder.map(blockId => {
+                        {visibleOrder.map(blockId => {
                             const config = ALL_BLOCKS.find(b => b.id === blockId)!;
-                            const isHidden = hiddenBlocks.has(blockId);
-
-                            // Skip hidden blocks in non-edit mode
-                            if (isHidden && !isEditing) return null;
-
                             return (
                                 <div
                                     key={blockId}
                                     className={config.fullWidth ? 'lg:col-span-2' : ''}
                                 >
-                                    <SortableBlock
-                                        id={blockId}
-                                        isEditing={isEditing}
-                                        isHidden={isHidden}
-                                        onToggleVisibility={() => toggleVisibility(blockId)}
-                                    >
+                                    <SortableBlock id={blockId} isEditing={isEditing}>
                                         {renderBlock(blockId)}
                                     </SortableBlock>
                                 </div>
@@ -524,6 +605,14 @@ export function DashboardOverview() {
                         })}
                     </div>
                 </SortableContext>
+
+                <DragOverlay>
+                    {activeId ? (
+                        <div className="opacity-90 scale-105 rotate-2 shadow-2xl rounded-2xl">
+                            {renderBlock(activeId as BlockId)}
+                        </div>
+                    ) : null}
+                </DragOverlay>
             </DndContext>
         </div>
     );

@@ -20,13 +20,51 @@ def list_clients(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
     active_only: bool = Query(False),
+    with_stats: bool = Query(False),
 ):
     uid = str(current_user.id)
     stmt = select(TherapistClient).where(TherapistClient.specialist_id == uid)
     if active_only:
         stmt = stmt.where(TherapistClient.is_active == True)
     stmt = stmt.order_by(TherapistClient.name)
-    return session.exec(stmt).all()
+    clients = session.exec(stmt).all()
+
+    if not with_stats:
+        return clients
+
+    # Enrich with stats: sessionCount, totalPaid, unpaidSum
+    result = []
+    for c in clients:
+        c_dict = TherapistClientRead.model_validate(c).model_dump()
+        base = c.base_price or 0
+
+        # Session count (non-cancelled)
+        sessions_all = session.exec(
+            select(TherapySession).where(
+                TherapySession.specialist_id == uid,
+                TherapySession.client_id == str(c.id),
+                TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            )
+        ).all()
+        c_dict["sessionCount"] = len(sessions_all)
+        c_dict["totalCost"] = sum((s.price if s.price is not None else base) for s in sessions_all)
+
+        # Unpaid sum
+        unpaid = [s for s in sessions_all if not s.is_paid]
+        c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)
+
+        # Total paid (from payments table)
+        total_paid_row = session.exec(
+            select(func.coalesce(func.sum(TherapistPayment.amount), 0)).where(
+                TherapistPayment.specialist_id == uid,
+                TherapistPayment.client_id == str(c.id),
+            )
+        ).one()
+        c_dict["totalPaid"] = float(total_paid_row)
+
+        result.append(c_dict)
+
+    return result
 
 
 @router.get("/clients/{client_id}", response_model=TherapistClientRead)
