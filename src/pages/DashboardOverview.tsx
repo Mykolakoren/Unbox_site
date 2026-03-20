@@ -1,10 +1,10 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import {
     Wallet, Plus, AlertCircle, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
-    GripVertical, Settings2, X, RotateCw, Check,
+    GripVertical, Settings2, RotateCw, Check,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
@@ -110,10 +110,14 @@ const wiggleCSS = `
 function SortableBlock({
     id,
     isEditing,
+    blockSize,
+    onToggleSize,
     children,
 }: {
     id: string;
     isEditing: boolean;
+    blockSize: BlockSize;
+    onToggleSize: () => void;
     children: React.ReactNode;
 }) {
     const {
@@ -146,83 +150,45 @@ function SortableBlock({
                     <GripVertical size={18} />
                 </div>
             )}
+            {/* Resize toggle — bottom-right corner */}
+            {isEditing && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onToggleSize(); }}
+                    className="absolute -bottom-2.5 -right-2.5 z-30 w-8 h-8 rounded-xl bg-white text-unbox-grey shadow-lg border border-gray-200 flex items-center justify-center hover:bg-unbox-green hover:text-white hover:border-unbox-green transition-all"
+                    title={blockSize === 'full' ? 'Уменьшить' : 'Развернуть на всю ширину'}
+                >
+                    {blockSize === 'full' ? (
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <rect x="1" y="1" width="5" height="12" rx="1" />
+                            <rect x="8" y="1" width="5" height="12" rx="1" strokeDasharray="2 2" />
+                        </svg>
+                    ) : (
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <rect x="1" y="1" width="12" height="12" rx="1" />
+                        </svg>
+                    )}
+                </button>
+            )}
             {children}
         </div>
     );
 }
 
-// ── Settings Panel (checkbox list) ───────────────────────────────────────────
+// ── Size storage ─────────────────────────────────────────────────────────────
 
-function SettingsPanel({
-    hiddenBlocks,
-    onToggle,
-    onReset,
-    onClose,
-}: {
-    hiddenBlocks: Set<BlockId>;
-    onToggle: (id: BlockId) => void;
-    onReset: () => void;
-    onClose: () => void;
-}) {
-    const panelRef = useRef<HTMLDivElement>(null);
+const SIZE_KEY = 'dashboard_sizes';
+type BlockSize = 'half' | 'full';
 
-    useEffect(() => {
-        function handleClick(e: MouseEvent) {
-            if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-                onClose();
-            }
-        }
-        document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
-    }, [onClose]);
+function loadSizes(): Record<BlockId, BlockSize> {
+    try {
+        const saved = localStorage.getItem(SIZE_KEY);
+        if (saved) return JSON.parse(saved);
+    } catch { /* fallback */ }
+    return Object.fromEntries(ALL_BLOCKS.map(b => [b.id, b.fullWidth ? 'full' : 'half'])) as Record<BlockId, BlockSize>;
+}
 
-    return (
-        <div
-            ref={panelRef}
-            className="absolute right-0 top-full mt-2 z-50 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
-        >
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <span className="text-sm font-bold text-unbox-dark">Виджеты</span>
-                <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
-                    <X size={14} className="text-unbox-grey" />
-                </button>
-            </div>
-            <div className="py-1">
-                {ALL_BLOCKS.map(block => {
-                    const Icon = block.icon;
-                    const isVisible = !hiddenBlocks.has(block.id);
-                    return (
-                        <button
-                            key={block.id}
-                            onClick={() => onToggle(block.id)}
-                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-left"
-                        >
-                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                                isVisible
-                                    ? 'bg-unbox-green border-unbox-green'
-                                    : 'border-gray-300 bg-white'
-                            }`}>
-                                {isVisible && <Check size={12} className="text-white" />}
-                            </div>
-                            <Icon size={16} className={isVisible ? 'text-unbox-green' : 'text-gray-400'} />
-                            <span className={`text-sm ${isVisible ? 'text-unbox-dark font-medium' : 'text-gray-400'}`}>
-                                {block.label}
-                            </span>
-                        </button>
-                    );
-                })}
-            </div>
-            <div className="px-4 py-2.5 border-t border-gray-100">
-                <button
-                    onClick={onReset}
-                    className="flex items-center gap-2 text-xs text-unbox-grey hover:text-unbox-dark transition-colors w-full"
-                >
-                    <RotateCw size={12} />
-                    Сбросить к настройкам по умолчанию
-                </button>
-            </div>
-        </div>
-    );
+function saveSizes(sizes: Record<BlockId, BlockSize>) {
+    localStorage.setItem(SIZE_KEY, JSON.stringify(sizes));
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -232,8 +198,8 @@ export function DashboardOverview() {
     const navigate = useNavigate();
     const [blockOrder, setBlockOrder] = useState<BlockId[]>(loadLayout);
     const [hiddenBlocks, setHiddenBlocks] = useState<Set<BlockId>>(loadHidden);
+    const [blockSizes, setBlockSizes] = useState<Record<BlockId, BlockSize>>(loadSizes);
     const [isEditing, setIsEditing] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
     const [activeId, setActiveId] = useState<string | null>(null);
 
     const sensors = useSensors(
@@ -266,11 +232,22 @@ export function DashboardOverview() {
         });
     }, []);
 
+    const toggleBlockSize = useCallback((id: BlockId) => {
+        setBlockSizes(prev => {
+            const next = { ...prev, [id]: prev[id] === 'full' ? 'half' as BlockSize : 'full' as BlockSize };
+            saveSizes(next);
+            return next;
+        });
+    }, []);
+
     const resetLayout = useCallback(() => {
+        const defaultSizes = Object.fromEntries(ALL_BLOCKS.map(b => [b.id, b.fullWidth ? 'full' : 'half'])) as Record<BlockId, BlockSize>;
         setBlockOrder([...DEFAULT_ORDER]);
         setHiddenBlocks(new Set());
+        setBlockSizes(defaultSizes);
         saveLayout([...DEFAULT_ORDER]);
         saveHidden(new Set());
+        saveSizes(defaultSizes);
     }, []);
 
     if (!currentUser) return null;
@@ -510,74 +487,64 @@ export function DashboardOverview() {
                     <h1 className="text-2xl font-bold mb-1">Обзор</h1>
                     <p className="text-unbox-grey text-sm">Сводка вашего аккаунта и быстрые действия</p>
                 </div>
-                <div className="relative flex items-center gap-2">
-                    {isEditing && (
-                        <button
-                            onClick={resetLayout}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 rounded-xl border border-white/60 transition-colors"
-                        >
-                            <RotateCw size={13} />
-                            Сбросить
-                        </button>
-                    )}
-                    {/* Settings gear — opens checkbox panel */}
-                    <button
-                        onClick={() => {
-                            if (isEditing) {
-                                setIsEditing(false);
-                                setShowSettings(false);
-                            } else {
-                                setShowSettings(!showSettings);
-                            }
-                        }}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
-                            isEditing
-                                ? 'bg-unbox-green text-white border-unbox-green shadow-md'
-                                : showSettings
-                                    ? 'bg-unbox-dark text-white border-unbox-dark'
-                                    : 'text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 border-white/60'
-                        }`}
-                    >
-                        {isEditing ? <Check size={13} /> : <Settings2 size={13} />}
-                        {isEditing ? 'Готово' : 'Настроить'}
-                    </button>
-
-                    {/* Settings dropdown */}
-                    {showSettings && !isEditing && (
-                        <SettingsPanel
-                            hiddenBlocks={hiddenBlocks}
-                            onToggle={toggleVisibility}
-                            onReset={() => {
-                                resetLayout();
-                                setShowSettings(false);
-                            }}
-                            onClose={() => setShowSettings(false)}
-                        />
-                    )}
-                </div>
+                <button
+                    onClick={() => setIsEditing(!isEditing)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
+                        isEditing
+                            ? 'bg-unbox-green text-white border-unbox-green shadow-md'
+                            : 'text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 border-white/60'
+                    }`}
+                >
+                    {isEditing ? <Check size={13} /> : <Settings2 size={13} />}
+                    {isEditing ? 'Готово' : 'Настроить'}
+                </button>
             </div>
 
-            {/* Edit mode hint */}
-            {showSettings && !isEditing && (
-                <button
-                    onClick={() => {
-                        setIsEditing(true);
-                        setShowSettings(false);
-                    }}
-                    className="w-full px-4 py-3 rounded-xl bg-unbox-green/5 border border-unbox-green/20 text-sm text-unbox-dark flex items-center justify-center gap-2 hover:bg-unbox-green/10 transition-colors"
-                >
-                    <GripVertical size={16} className="text-unbox-green" />
-                    <span>Перетащить и изменить порядок блоков</span>
-                </button>
-            )}
-
+            {/* Inline settings toolbar — widget visibility + reset */}
             {isEditing && (
-                <div className="px-4 py-2.5 rounded-xl bg-unbox-green/10 border border-unbox-green/20 text-xs text-unbox-dark flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <GripVertical size={14} className="text-unbox-green shrink-0" />
-                    Перетаскивай блоки за зелёную ручку
-                    <span className="inline-flex w-5 h-5 bg-unbox-green rounded-lg items-center justify-center ml-0.5">
-                        <GripVertical size={10} className="text-white" />
-                    </span>
+                <div className="flex flex-wrap items-center gap-2 px-4 py-3 rounded-2xl bg-white/60 border border-white/80 shadow-sm animate-in fade-in slide-in-from-top-2 duration-200"
+                     style={{ backdropFilter: 'blur(12px)' }}
+                >
+                    <span className="text-xs font-semibold text-unbox-dark mr-1">Виджеты:</span>
+                    {ALL_BLOCKS.map(block => {
+                        const Icon = block.icon;
+                        const isVisible = !hiddenBlocks.has(block.id);
+                        return (
+                            <button
+                                key={block.id}
+                                onClick={() => toggleVisibility(block.id)}
+                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                    isVisible
+                                        ? 'bg-unbox-green/10 text-unbox-green border border-unbox-green/30'
+                                        : 'bg-gray-100 text-gray-400 border border-gray-200 line-through'
+                                }`}
+                            >
+                                <div className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
+                                    isVisible ? 'bg-unbox-green' : 'bg-gray-300'
+                                }`}>
+                                    {isVisible && <Check size={10} className="text-white" />}
+                                </div>
+                                <Icon size={13} />
+                                <span className="hidden sm:inline">{block.label}</span>
+                            </button>
+                        );
+                    })}
+                    <div className="flex-1" />
+                    <button
+                        onClick={resetLayout}
+                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-unbox-grey hover:text-unbox-dark bg-white/80 hover:bg-white rounded-lg border border-gray-200 transition-colors"
+                    >
+                        <RotateCw size={11} />
+                        Сброс
+                    </button>
+                    <div className="w-full mt-1 flex items-center gap-1.5 text-[11px] text-unbox-grey">
+                        <GripVertical size={12} className="text-unbox-green shrink-0" />
+                        Перетаскивай за зелёную ручку
+                        <span className="inline-flex w-4 h-4 bg-unbox-green rounded items-center justify-center">
+                            <GripVertical size={8} className="text-white" />
+                        </span>
+                        · Меняй размер кнопкой в правом нижнем углу
+                    </div>
                 </div>
             )}
 
@@ -591,13 +558,18 @@ export function DashboardOverview() {
                 <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {visibleOrder.map(blockId => {
-                            const config = ALL_BLOCKS.find(b => b.id === blockId)!;
+                            const size = blockSizes[blockId] || 'half';
                             return (
                                 <div
                                     key={blockId}
-                                    className={config.fullWidth ? 'lg:col-span-2' : ''}
+                                    className={size === 'full' ? 'lg:col-span-2' : ''}
                                 >
-                                    <SortableBlock id={blockId} isEditing={isEditing}>
+                                    <SortableBlock
+                                        id={blockId}
+                                        isEditing={isEditing}
+                                        blockSize={size}
+                                        onToggleSize={() => toggleBlockSize(blockId)}
+                                    >
                                         {renderBlock(blockId)}
                                     </SortableBlock>
                                 </div>
