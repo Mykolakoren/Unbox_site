@@ -224,22 +224,25 @@ export function ConfirmationStep() {
 
                 const projectedBalance = effectiveUser.balance - netPrice;
                 if (projectedBalance < -(effectiveUser.creditLimit || 0)) {
+                    const shortfall = Math.abs(projectedBalance + (effectiveUser.creditLimit || 0));
+                    const hasSubscription = isSubscriptionEligible;
+
                     toast.custom((t) => (
-                        <div className="w-full bg-white rounded-2xl shadow-xl border-l-4 border-red-500 overflow-hidden relative">
-                            <div className="p-4">
+                        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border-l-4 border-red-500 overflow-hidden relative">
+                            <div className="p-5">
                                 <div className="flex items-start gap-4">
                                     <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h3 className="text-sm font-bold text-unbox-dark mb-1">
-                                            Недостаточно средств
+                                            Недостаточно средств для бронирования
                                         </h3>
                                         <p className="text-sm text-unbox-grey leading-relaxed mb-3">
-                                            Сумма бронирования превышает доступный лимит.
+                                            Для завершения бронирования не хватает <span className="font-bold text-red-600">{shortfall.toFixed(1)} ₾</span>.
                                         </p>
 
-                                        <div className="bg-unbox-light/30 rounded-lg p-3 space-y-2 text-xs">
+                                        <div className="bg-unbox-light/30 rounded-lg p-3 space-y-2 text-xs mb-3">
                                             <div className="flex justify-between">
                                                 <span className="text-unbox-grey">Ваш баланс:</span>
                                                 <span className={effectiveUser.balance < 0 ? "text-red-600 font-medium" : "text-unbox-dark font-medium"}>
@@ -260,20 +263,52 @@ export function ConfirmationStep() {
                                                 </span>
                                             </div>
                                         </div>
+
+                                        {/* Actionable guidance */}
+                                        <div className="space-y-2 text-xs">
+                                            <p className="font-semibold text-unbox-dark">Что можно сделать:</p>
+                                            {hasSubscription && (
+                                                <button
+                                                    onClick={() => {
+                                                        state.setPaymentMethod('subscription');
+                                                        toast.dismiss(t);
+                                                        toast.success('Способ оплаты изменён на абонемент');
+                                                    }}
+                                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 transition-colors text-left"
+                                                >
+                                                    <span className="text-base">✨</span>
+                                                    <span><strong>Списать с абонемента</strong> — у вас есть активный абонемент</span>
+                                                </button>
+                                            )}
+                                            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700">
+                                                <span className="text-base mt-0.5">💬</span>
+                                                <span>
+                                                    <strong>Пополните баланс</strong> — обратитесь к администратору центра для пополнения
+                                                </span>
+                                            </div>
+                                            {!(effectiveUser.creditLimit > 0) && (
+                                                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
+                                                    <span className="text-base mt-0.5">🔑</span>
+                                                    <span>
+                                                        <strong>Кредитный лимит</strong> — администратор может установить вам кредитный лимит для бронирования в долг
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                    <button
-                                        onClick={() => toast.dismiss(t)}
-                                        className="text-unbox-grey hover:text-unbox-grey transition-colors"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-                                    </button>
                                 </div>
                             </div>
-                            <div className="bg-red-50 px-4 py-2 border-t border-red-100 flex justify-between items-center">
-                                <span className="text-xs text-red-600 font-medium">Не хватает: {Math.abs(projectedBalance + (effectiveUser.creditLimit || 0)).toFixed(1)} ₾</span>
+                            <div className="bg-red-50 px-4 py-3 border-t border-red-100 flex justify-between items-center">
+                                <span className="text-xs text-red-600 font-medium">Не хватает: {shortfall.toFixed(1)} ₾</span>
+                                <button
+                                    onClick={() => toast.dismiss(t)}
+                                    className="px-4 py-1.5 text-xs font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
+                                >
+                                    Понятно
+                                </button>
                             </div>
                         </div>
-                    ), { duration: 5000 });
+                    ), { duration: Infinity });
                     return;
                 }
             }
