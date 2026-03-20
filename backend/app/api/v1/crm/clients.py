@@ -154,14 +154,9 @@ def list_clients(
         unpaid = [s for s in sessions_all if not s.is_paid]
         c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)
 
-        # Total paid (from payments table) — sum in Python to avoid ORM type issues
-        client_payments = session.exec(
-            select(TherapistPayment).where(
-                TherapistPayment.specialist_id == uid,
-                TherapistPayment.client_id == str(c.id),
-            )
-        ).all()
-        c_dict["totalPaid"] = sum(float(p.amount or 0) for p in client_payments)
+        # LTV = sum of completed+paid sessions (more reliable than payments table after merges)
+        paid_sessions = [s for s in sessions_all if s.is_paid and s.status == "COMPLETED"]
+        c_dict["totalPaid"] = sum((s.price if s.price is not None else base) for s in paid_sessions)
 
         result.append(c_dict)
 
@@ -206,14 +201,17 @@ def get_client_balance(
 
     debt = sum((s.price if s.price is not None else base) for s in unpaid_sessions)
 
-    # Total paid — sum in Python to avoid ORM type-cast issues
-    client_payments = session.exec(
-        select(TherapistPayment).where(
-            TherapistPayment.specialist_id == uid,
-            TherapistPayment.client_id == str(client_id),
+    # LTV = sum of completed+paid sessions (price or base_price fallback)
+    # This is more reliable than summing payments, especially after merges
+    paid_sessions = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.client_id == str(client_id),
+            TherapySession.status == "COMPLETED",
+            TherapySession.is_paid == True,
         )
     ).all()
-    total_paid = sum(float(p.amount or 0) for p in client_payments)
+    total_paid = sum((s.price if s.price is not None else base) for s in paid_sessions)
 
     # Total expected (all non-cancelled sessions)
     all_sessions = session.exec(
