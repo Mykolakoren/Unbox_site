@@ -83,43 +83,42 @@
   }
 }
 
-/* Custom visible scrollbar for schedule grids */
+/* Custom always-visible scrollbar for schedule grids */
 .scrollbar-visible {
-  overflow-x: auto;
+  overflow-x: scroll !important;
   -webkit-overflow-scrolling: touch;
 }
 
 .scrollbar-visible::-webkit-scrollbar {
-  height: 10px;
+  height: 12px;
+  -webkit-appearance: none;
 }
 
 .scrollbar-visible::-webkit-scrollbar-track {
-  background: rgba(212, 226, 225, 0.3);
+  background: rgba(212, 226, 225, 0.4);
   border-radius: 8px;
   margin: 0 8px;
 }
 
 .scrollbar-visible::-webkit-scrollbar-thumb {
-  background: rgba(71, 109, 107, 0.35);
+  background: rgba(71, 109, 107, 0.45);
   border-radius: 8px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  border: 2px solid rgba(212, 226, 225, 0.4);
+  min-width: 40px;
 }
 
 .scrollbar-visible::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 109, 107, 0.55);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  background: rgba(71, 109, 107, 0.65);
 }
 
 .scrollbar-visible::-webkit-scrollbar-thumb:active {
-  background: rgba(71, 109, 107, 0.7);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  background: rgba(71, 109, 107, 0.8);
 }
 
 /* Firefox scrollbar */
-.scrollbar-visible {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(71, 109, 107, 0.35) rgba(212, 226, 225, 0.3);
+@supports (scrollbar-width: thin) {
+  .scrollbar-visible {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(71, 109, 107, 0.45) rgba(212, 226, 225, 0.4);
+  }
 }
