@@ -657,6 +657,7 @@ function ClientForm({
     const [aliasCode, setAliasCode] = useState(initial?.aliasCode ?? '');
     const [basePrice, setBasePrice] = useState(String(initial?.basePrice ?? ''));
     const [currency, setCurrency] = useState(initial?.currency ?? 'GEL');
+    const [defaultAccount, setDefaultAccount] = useState(initial?.defaultAccount ?? 'cash');
     const [tagsInput, setTagsInput] = useState((initial?.tags ?? []).join(', '));
     const [saving, setSaving] = useState(false);
 
@@ -677,6 +678,7 @@ function ClientForm({
                 aliasCode: aliasCode || undefined,
                 basePrice: basePrice ? Number(basePrice) : undefined,
                 currency,
+                defaultAccount,
                 tags: tags.length ? tags : undefined,
             });
         } catch (err: any) {
@@ -774,6 +776,22 @@ function ClientForm({
                         <option value="USD">USD ($)</option>
                         <option value="EUR">EUR ({'\u20AC'})</option>
                         <option value="RUB">RUB ({'\u20BD'})</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="text-sm font-medium text-unbox-dark mb-1 block">Счёт по умолчанию</label>
+                    <select
+                        value={defaultAccount}
+                        onChange={(e) => setDefaultAccount(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                    >
+                        <option value="cash">Наличные</option>
+                        <option value="tbc">TBC</option>
+                        <option value="bog">BOG</option>
+                        <option value="paypal">PayPal</option>
+                        <option value="usdt">USDT</option>
+                        <option value="p24">Приват24</option>
+                        <option value="mono">Mono</option>
                     </select>
                 </div>
             </div>
