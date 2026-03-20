@@ -20,7 +20,6 @@ import {
     LayoutList,
     ArrowUpDown,
     Merge,
-    ChevronDown,
 } from 'lucide-react';
 import type { CrmClientCreate, CrmClient } from '../../api/crm';
 import { crmApi } from '../../api/crm';
