@@ -4,9 +4,9 @@ import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
 import type { CrmClient, CrmSession, CrmNote, CrmPayment } from '../../api/crm';
 import {
-    ArrowLeft, Phone, Mail, Hash, Tag, Wallet, Calendar, StickyNote,
-    Plus, Trash2, Check, X, Loader2, Banknote, Pencil, Send,
-    CheckCheck, RefreshCw, FileText, Users, DollarSign,
+    ArrowLeft, Phone, Mail, Tag, Wallet, Calendar, StickyNote,
+    Plus, Trash2, Check, X, Loader2, Pencil, Send,
+    CheckCheck, RefreshCw, FileText,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
