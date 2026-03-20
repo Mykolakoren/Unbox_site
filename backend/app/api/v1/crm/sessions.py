@@ -174,3 +174,78 @@ def quick_pay_session(
 
     session.commit()
     return {"ok": True, "amount": price, "currency": client.currency}
+
+
+@router.post("/sessions/{session_id}/unmark-paid")
+def unmark_paid_session(
+    session_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Unmark a session as paid and optionally remove the related payment."""
+    ts = session.get(TherapySession, session_id)
+    if not ts or ts.specialist_id != str(current_user.id):
+        raise HTTPException(404, "Session not found")
+    if not ts.is_paid:
+        raise HTTPException(400, "Session is not paid")
+
+    ts.is_paid = False
+    ts.updated_at = datetime.utcnow()
+    session.add(ts)
+
+    # Remove related payment if exists
+    payment = session.exec(
+        select(TherapistPayment).where(
+            TherapistPayment.session_id == session_id,
+            TherapistPayment.specialist_id == str(current_user.id),
+        )
+    ).first()
+    if payment:
+        session.delete(payment)
+
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/clients/{client_id}/mark-all-paid")
+def mark_all_sessions_paid(
+    client_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Mark all unpaid non-cancelled sessions as paid, creating payment records."""
+    client = session.get(TherapistClient, client_id)
+    if not client or client.specialist_id != str(current_user.id):
+        raise HTTPException(404, "Client not found")
+
+    uid = str(current_user.id)
+    unpaid = session.exec(
+        select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.client_id == client_id,
+            TherapySession.is_paid == False,
+            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+        )
+    ).all()
+
+    count = 0
+    for ts in unpaid:
+        price = ts.price if ts.price is not None else client.base_price
+        payment = TherapistPayment(
+            client_id=client.id,
+            specialist_id=uid,
+            amount=price,
+            currency=client.currency,
+            account=client.default_account,
+            date=ts.date,
+            session_id=ts.id,
+        )
+        session.add(payment)
+        ts.is_paid = True
+        ts.updated_at = datetime.utcnow()
+        session.add(ts)
+        count += 1
+
+    if count > 0:
+        session.commit()
+    return {"ok": True, "marked": count}

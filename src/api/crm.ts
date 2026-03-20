@@ -231,6 +231,11 @@ export const crmApi = {
         return response.data;
     },
 
+    getClientBalance: async (id: string): Promise<{ total_paid: number; total_expected: number; debt: number; prepayment: number; unpaid_sessions_count: number }> => {
+        const response = await api.get(`/crm/clients/${id}/balance`);
+        return response.data;
+    },
+
     createClient: async (data: CrmClientCreate): Promise<CrmClient> => {
         const response = await api.post('/crm/clients', data);
         return response.data;
@@ -286,6 +291,16 @@ export const crmApi = {
 
     quickPaySession: async (id: string): Promise<{ ok: boolean; amount: number; currency: string }> => {
         const response = await api.post(`/crm/sessions/${id}/quick-pay`);
+        return response.data;
+    },
+
+    unmarkPaidSession: async (id: string): Promise<{ ok: boolean }> => {
+        const response = await api.post(`/crm/sessions/${id}/unmark-paid`);
+        return response.data;
+    },
+
+    markAllPaid: async (clientId: string): Promise<{ ok: boolean; marked: number }> => {
+        const response = await api.post(`/crm/clients/${clientId}/mark-all-paid`);
         return response.data;
     },
 

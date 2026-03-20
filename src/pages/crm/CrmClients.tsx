@@ -234,7 +234,7 @@ export function CrmClients() {
                 /* ═══ TABLE VIEW (PsyCRM style) ═══ */
                 <div className="bg-white rounded-2xl border border-unbox-light shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
+                        <table className="w-full text-sm text-left" style={{ tableLayout: 'auto' }}>
                             <thead className="text-xs text-unbox-grey uppercase bg-gray-50/80 border-b border-gray-200">
                                 <tr>
                                     <th className="px-3 py-3.5 w-8"></th>
@@ -306,10 +306,12 @@ export function CrmClients() {
                                                     <span className="inline-flex items-center px-2 py-0.5 bg-red-50 text-red-700 text-xs font-medium rounded-full">
                                                         {(c.unpaidSum || 0).toLocaleString()} {client.currency}
                                                     </span>
-                                                ) : (
+                                                ) : (c.sessionCount || 0) > 0 ? (
                                                     <span className="inline-flex items-center px-2 py-0.5 bg-green-50 text-green-700 text-xs font-medium rounded-full">
                                                         Оплачено
                                                     </span>
+                                                ) : (
+                                                    <span className="text-gray-300">&mdash;</span>
                                                 )}
                                             </td>
                                             {/* Last session */}
