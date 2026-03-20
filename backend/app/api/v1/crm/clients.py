@@ -150,8 +150,8 @@ def list_clients(
         else:
             c_dict["lastSessionDate"] = None
 
-        # Unpaid sum
-        unpaid = [s for s in sessions_all if not s.is_paid]
+        # Unpaid sum — only COMPLETED sessions count as debt
+        unpaid = [s for s in sessions_all if not s.is_paid and s.status == "COMPLETED"]
         c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)
 
         # LTV = sum of completed+paid sessions (more reliable than payments table after merges)
