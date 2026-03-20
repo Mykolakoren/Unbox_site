@@ -20,6 +20,7 @@ import { UserBookingsTab } from '../../components/admin/UserBookingsTab';
 import { UserLoyaltyCard } from '../../components/admin/UserLoyaltyCard';
 import { UserComments } from '../../components/admin/UserComments';
 import { ClientTimeline } from '../../components/admin/ClientTimeline';
+import { UserBonuses } from '../../components/admin/UserBonuses';
 
 import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
@@ -729,6 +730,7 @@ export function AdminUserDetails() {
 
                     {/* Comments & Notes */}
                     <UserComments email={user.email} />
+                    <UserBonuses user={user} currentUser={currentUser!} />
                 </div>
 
                 {/* Middle Column: Finances & Subscription & Tabs */}

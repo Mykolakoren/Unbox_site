@@ -56,6 +56,12 @@ export const PERMISSION_GROUPS = [
         ],
     },
     {
+        group: 'Бонусы',
+        permissions: [
+            { id: 'bonuses.grant',  label: 'Начисление бонусов клиентам (через одобрение)',  seniorAdmin: true },
+        ],
+    },
+    {
         group: 'Специалисты',
         permissions: [
             { id: 'specialists.verify',  label: 'Верификация заявок специалистов',                 seniorAdmin: true },
@@ -90,6 +96,8 @@ const ROLE_INHERITED: Record<string, string[]> = {
         // Контент
         'content.edit_locations', 'content.edit_rooms', 'content.add_locations', 'content.add_rooms',
         'content.delete', 'content.set_hours', 'content.edit_pricing',
+        // Бонусы
+        'bonuses.grant',
         // Специалисты
         'specialists.verify',
     ],
@@ -107,6 +115,8 @@ const ROLE_INHERITED: Record<string, string[]> = {
         // Контент
         'content.edit_locations', 'content.edit_rooms', 'content.add_locations', 'content.add_rooms',
         'content.set_hours', 'content.edit_pricing',
+        // Бонусы
+        'bonuses.grant',
         // Специалисты
         'specialists.verify',
     ],

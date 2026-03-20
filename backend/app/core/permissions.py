@@ -26,6 +26,8 @@ SENIOR_ADMIN_GRANTABLE = {
     "content.set_hours", "content.edit_pricing",
     # Специалисты
     "specialists.verify",
+    # Бонусы
+    "bonuses.grant",
     # Система
     "admin.access", "admin.dashboard", "admin.accept_requests",
 }

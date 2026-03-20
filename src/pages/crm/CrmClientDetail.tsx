@@ -39,6 +39,8 @@ export function CrmClientDetail() {
     const [loading, setLoading] = useState(true);
     const [showNoteForm, setShowNoteForm] = useState(false);
     const [editingSession, setEditingSession] = useState<string | null>(null);
+    const [editSessionPrice, setEditSessionPrice] = useState('');
+    const [editSessionAccount, setEditSessionAccount] = useState('');
     const [sessionNoteId, setSessionNoteId] = useState<string | null>(null);
     const [sessionNoteText, setSessionNoteText] = useState('');
     const [sessionNoteTags, setSessionNoteTags] = useState('');
@@ -46,7 +48,7 @@ export function CrmClientDetail() {
     const [markingAll, setMarkingAll] = useState(false);
     const [editingProfile, setEditingProfile] = useState(false);
     const [editForm, setEditForm] = useState({
-        name: '', phone: '', email: '', telegram: '', aliasCode: '', basePrice: '', currency: 'GEL', tags: '',
+        name: '', phone: '', email: '', telegram: '', aliasCode: '', basePrice: '', currency: 'GEL', defaultAccount: 'cash', tags: '',
     });
 
     const loadData = useCallback(async () => {
@@ -105,11 +107,13 @@ export function CrmClientDetail() {
 
     // ── Handlers ─────────────────────────────────────────────────────────────
 
-    const handleQuickPay = async (sessionId: string) => {
+    const handleQuickPay = async (sessionId: string, account?: string) => {
         try {
-            const result = await crmApi.quickPaySession(sessionId);
+            const result = await crmApi.quickPaySession(sessionId, account);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: true } : s));
-            toast.success(`Оплачено: ${result.amount} ${result.currency}`);
+            const accountLabels: Record<string, string> = { cash: 'Наличные', tbc: 'TBC', bog: 'BOG', paypal: 'PayPal', usdt: 'USDT', p24: 'P24', mono: 'Mono' };
+            const accLabel = result.account ? accountLabels[result.account] || result.account : '';
+            toast.success(`Оплачено: ${result.amount} ${result.currency}${accLabel ? ` · ${accLabel}` : ''}`);
             loadData();
         } catch (e: any) {
             toast.error(e.message || 'Ошибка');
@@ -192,6 +196,7 @@ export function CrmClientDetail() {
             aliasCode: client.aliasCode || '',
             basePrice: String(client.basePrice || ''),
             currency: client.currency || 'GEL',
+            defaultAccount: client.defaultAccount || 'cash',
             tags: (client.tags || []).join(', '),
         });
         setEditingProfile(true);
@@ -209,6 +214,7 @@ export function CrmClientDetail() {
                 aliasCode: editForm.aliasCode || undefined,
                 basePrice: editForm.basePrice ? Number(editForm.basePrice) : undefined,
                 currency: editForm.currency,
+                defaultAccount: editForm.defaultAccount,
                 tags: tags.length ? tags : [],
             });
             setClient(updated);
@@ -416,6 +422,22 @@ export function CrmClientDetail() {
                                     <option value="RUB">RUB</option>
                                 </select>
                             </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Счёт по умолчанию</label>
+                            <select
+                                value={editForm.defaultAccount}
+                                onChange={e => setEditForm(f => ({ ...f, defaultAccount: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                            >
+                                <option value="cash">Наличные</option>
+                                <option value="tbc">TBC</option>
+                                <option value="bog">BOG</option>
+                                <option value="paypal">PayPal</option>
+                                <option value="usdt">USDT</option>
+                                <option value="p24">P24</option>
+                                <option value="mono">Mono</option>
+                            </select>
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-unbox-dark mb-1">
@@ -665,7 +687,7 @@ export function CrmClientDetail() {
                                                                         </button>
                                                                     ) : (
                                                                         <button
-                                                                            onClick={() => handleQuickPay(session.id)}
+                                                                            onClick={() => handleQuickPay(session.id, isEditing ? editSessionAccount : undefined)}
                                                                             className="text-xs px-2 py-1 bg-unbox-green text-white rounded-lg hover:bg-unbox-dark transition-colors font-medium flex items-center gap-1"
                                                                         >
                                                                             <Check className="w-3 h-3" />
@@ -673,7 +695,15 @@ export function CrmClientDetail() {
                                                                         </button>
                                                                     )}
                                                                     <button
-                                                                        onClick={() => setEditingSession(isEditing ? null : session.id)}
+                                                                        onClick={() => {
+                                                                            if (isEditing) {
+                                                                                setEditingSession(null);
+                                                                            } else {
+                                                                                setEditingSession(session.id);
+                                                                                setEditSessionPrice(String(session.price ?? client.basePrice));
+                                                                                setEditSessionAccount(client.defaultAccount || 'cash');
+                                                                            }
+                                                                        }}
                                                                         className={`p-1 rounded-lg transition-colors ${isEditing ? 'bg-unbox-light text-unbox-green' : 'text-gray-400 hover:text-unbox-green hover:bg-unbox-light/50'}`}
                                                                     >
                                                                         <Pencil className="w-3 h-3" />
@@ -681,22 +711,66 @@ export function CrmClientDetail() {
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        {/* Quick status change */}
+                                                        {/* Session edit panel */}
                                                         {isEditing && (
-                                                            <div className="mt-2 flex flex-wrap gap-1.5" onClick={e => e.stopPropagation()}>
-                                                                {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                                                            <div className="mt-2 space-y-2 bg-gray-50 rounded-xl p-3 border border-gray-200" onClick={e => e.stopPropagation()}>
+                                                                {/* Price + Account */}
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="flex-1">
+                                                                        <label className="text-[10px] text-gray-400 uppercase font-medium">Сумма</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            step="0.01"
+                                                                            value={editSessionPrice}
+                                                                            onChange={e => setEditSessionPrice(e.target.value)}
+                                                                            className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-unbox-green bg-white"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex-1">
+                                                                        <label className="text-[10px] text-gray-400 uppercase font-medium">Счёт</label>
+                                                                        <select
+                                                                            value={editSessionAccount}
+                                                                            onChange={e => setEditSessionAccount(e.target.value)}
+                                                                            className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-unbox-green bg-white"
+                                                                        >
+                                                                            <option value="cash">Наличные</option>
+                                                                            <option value="tbc">TBC</option>
+                                                                            <option value="bog">BOG</option>
+                                                                            <option value="paypal">PayPal</option>
+                                                                            <option value="usdt">USDT</option>
+                                                                            <option value="p24">P24</option>
+                                                                            <option value="mono">Mono</option>
+                                                                        </select>
+                                                                    </div>
                                                                     <button
-                                                                        key={key}
-                                                                        onClick={() => handleUpdateSession(session.id, { status: key as CrmSession['status'] })}
-                                                                        className={`px-2 py-0.5 text-xs rounded-lg border transition-colors ${
-                                                                            session.status === key
-                                                                                ? 'bg-unbox-green text-white border-unbox-green'
-                                                                                : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
-                                                                        }`}
+                                                                        onClick={() => {
+                                                                            const newPrice = parseFloat(editSessionPrice);
+                                                                            if (!isNaN(newPrice) && newPrice >= 0) {
+                                                                                handleUpdateSession(session.id, { price: newPrice });
+                                                                            }
+                                                                        }}
+                                                                        className="mt-3.5 px-2.5 py-1.5 bg-unbox-green text-white text-xs rounded-lg hover:bg-unbox-dark transition-colors font-medium flex items-center gap-1"
                                                                     >
-                                                                        {label}
+                                                                        <Check className="w-3 h-3" />
+                                                                        OK
                                                                     </button>
-                                                                ))}
+                                                                </div>
+                                                                {/* Status buttons */}
+                                                                <div className="flex flex-wrap gap-1.5 pt-1 border-t border-gray-200">
+                                                                    {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                                                                        <button
+                                                                            key={key}
+                                                                            onClick={() => handleUpdateSession(session.id, { status: key as CrmSession['status'] })}
+                                                                            className={`px-2 py-0.5 text-xs rounded-lg border transition-colors ${
+                                                                                session.status === key
+                                                                                    ? 'bg-unbox-green text-white border-unbox-green'
+                                                                                    : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                                                                            }`}
+                                                                        >
+                                                                            {label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
                                                             </div>
                                                         )}
                                                     </td>

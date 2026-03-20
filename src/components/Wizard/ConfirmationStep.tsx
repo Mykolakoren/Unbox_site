@@ -288,22 +288,9 @@ export function ConfirmationStep() {
                                             >
                                                 <span className="text-base mt-0.5">💬</span>
                                                 <span>
-                                                    <strong>Пополните баланс</strong> — <span className="underline">обратитесь к администратору</span> центра для пополнения
+                                                    <strong>Связаться с администратором</strong> — для пополнения баланса или установления кредитного лимита
                                                 </span>
                                             </a>
-                                            {!((effectiveUser.creditLimit || 0) > 0) && (
-                                                <a
-                                                    href="https://t.me/UnboxCenter"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors cursor-pointer no-underline"
-                                                >
-                                                    <span className="text-base mt-0.5">🔑</span>
-                                                    <span>
-                                                        <strong>Кредитный лимит</strong> — <span className="underline">обратитесь к администратору</span>, чтобы установить кредитный лимит для бронирования в долг
-                                                    </span>
-                                                </a>
-                                            )}
                                         </div>
                                     </div>
                                 </div>

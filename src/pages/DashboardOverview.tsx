@@ -1,16 +1,17 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import {
     Wallet, Plus, AlertCircle, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
-    GripVertical, Settings2, RotateCw, Check,
+    GripVertical, Settings2, RotateCw, Check, Gift,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
 import { RESOURCES } from '../utils/data';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { bonusesApi, type Bonus } from '../api/bonuses';
 import {
     DndContext,
     closestCenter,
@@ -33,7 +34,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 // ── Block Definitions ────────────────────────────────────────────────────────
 
-type BlockId = 'balance' | 'discount' | 'quickActions' | 'bookings' | 'payments';
+type BlockId = 'bonuses' | 'balance' | 'discount' | 'quickActions' | 'bookings' | 'payments';
 
 interface BlockConfig {
     id: BlockId;
@@ -43,6 +44,7 @@ interface BlockConfig {
 }
 
 const ALL_BLOCKS: BlockConfig[] = [
+    { id: 'bonuses', label: 'Бонусы', icon: Gift, fullWidth: false },
     { id: 'balance', label: 'Баланс', icon: Wallet, fullWidth: false },
     { id: 'discount', label: 'Прогресс скидки', icon: TrendingUp, fullWidth: false },
     { id: 'quickActions', label: 'Быстрые действия', icon: Plus, fullWidth: true },
@@ -50,7 +52,7 @@ const ALL_BLOCKS: BlockConfig[] = [
     { id: 'payments', label: 'История платежей', icon: Receipt, fullWidth: true },
 ];
 
-const DEFAULT_ORDER: BlockId[] = ['balance', 'discount', 'quickActions', 'bookings', 'payments'];
+const DEFAULT_ORDER: BlockId[] = ['bonuses', 'balance', 'discount', 'quickActions', 'bookings', 'payments'];
 const STORAGE_KEY = 'dashboard_layout';
 const HIDDEN_KEY = 'dashboard_hidden';
 
@@ -206,6 +208,11 @@ export function DashboardOverview() {
     const [blockSizes, setBlockSizes] = useState<Record<BlockId, BlockSize>>(loadSizes);
     const [isEditing, setIsEditing] = useState(false);
     const [activeId, setActiveId] = useState<string | null>(null);
+    const [bonuses, setBonuses] = useState<Bonus[]>([]);
+
+    useEffect(() => {
+        bonusesApi.getMyBonuses().then(setBonuses).catch(() => {});
+    }, []);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -298,8 +305,69 @@ export function DashboardOverview() {
 
     // ── Block Renderers ──────────────────────────────────────────────────────
 
+    const activeBonuses = bonuses.filter(b => b.status === 'active');
+    const totalBonusHours = activeBonuses.reduce((sum, b) => sum + (b.quantity || 0), 0);
+
     const renderBlock = (blockId: BlockId) => {
         switch (blockId) {
+            case 'bonuses':
+                if (activeBonuses.length === 0) {
+                    return (
+                        <div className="p-6 rounded-2xl relative overflow-hidden" style={glassStyle}>
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center">
+                                    <Gift size={20} className="text-gray-300" />
+                                </div>
+                                <div>
+                                    <div className="text-sm font-medium text-unbox-grey">Бонусы</div>
+                                    <div className="text-xs text-gray-400">Нет активных бонусов</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+                return (
+                    <div className="p-6 rounded-2xl relative overflow-hidden" style={glassStyle}>
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-amber-100/40 to-transparent rounded-bl-full" />
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <div className="text-sm text-unbox-grey font-medium mb-1 flex items-center gap-1.5">
+                                    <Gift size={14} className="text-amber-500" />
+                                    Ваши бонусы
+                                </div>
+                                <div className="text-3xl font-bold text-amber-600">
+                                    {totalBonusHours} {totalBonusHours === 1 ? 'час' : totalBonusHours < 5 ? 'часа' : 'часов'}
+                                </div>
+                                <div className="text-xs text-unbox-grey mt-0.5">
+                                    бесплатной аренды
+                                </div>
+                            </div>
+                            <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
+                                <Gift size={24} className="text-amber-500" />
+                            </div>
+                        </div>
+                        <div className="space-y-1.5">
+                            {activeBonuses.map(b => (
+                                <div key={b.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-amber-50/60">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-medium text-amber-800 truncate">
+                                            {b.description || 'Бонусный час'}
+                                        </div>
+                                        {b.expiresAt && (
+                                            <div className="text-[11px] text-amber-600/70">
+                                                до {format(new Date(b.expiresAt), 'd MMM yyyy', { locale: ru })}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="text-sm font-bold text-amber-600 flex-shrink-0 ml-2">
+                                        {b.quantity}ч
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+
             case 'balance':
                 return (
                     <div className="p-6 rounded-2xl relative overflow-hidden" style={glassStyle}>

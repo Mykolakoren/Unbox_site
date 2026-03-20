@@ -1,7 +1,7 @@
 """CRM Sessions — therapy session CRUD + quick-pay."""
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlmodel import Session, select
 from app.api import deps
 from app.models.user import User
@@ -141,10 +141,11 @@ def delete_session(
 @router.post("/sessions/{session_id}/quick-pay")
 def quick_pay_session(
     session_id: str,
+    payload: dict = Body(default={}),
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
-    """Mark session as paid and create a payment record using client defaults."""
+    """Mark session as paid and create a payment record. Optionally override account."""
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
         raise HTTPException(404, "Session not found")
@@ -156,13 +157,14 @@ def quick_pay_session(
         raise HTTPException(404, "Client not found")
 
     price = ts.price if ts.price is not None else client.base_price
+    account = payload.get("account") or client.default_account
 
     payment = TherapistPayment(
         client_id=client.id,
         specialist_id=str(current_user.id),
         amount=price,
         currency=client.currency,
-        account=client.default_account,
+        account=account,
         date=ts.date,
         session_id=ts.id,
     )
@@ -173,7 +175,7 @@ def quick_pay_session(
     session.add(ts)
 
     session.commit()
-    return {"ok": True, "amount": price, "currency": client.currency}
+    return {"ok": True, "amount": price, "currency": client.currency, "account": account}
 
 
 @router.post("/sessions/{session_id}/unmark-paid")

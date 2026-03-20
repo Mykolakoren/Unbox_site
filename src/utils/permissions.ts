@@ -19,6 +19,7 @@ const SENIOR_ADMIN_EXTRA_PERMISSIONS: string[] = [
     'subscriptions.set_discount',
     'finance.manage_cashbox',
     'content.add_locations', 'content.add_rooms', 'content.edit_pricing',
+    'bonuses.grant',
     'admin.assign_roles', 'admin.accept_requests',
 ];
 

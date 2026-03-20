@@ -308,8 +308,8 @@ export const crmApi = {
         return response.data;
     },
 
-    quickPaySession: async (id: string): Promise<{ ok: boolean; amount: number; currency: string }> => {
-        const response = await api.post(`/crm/sessions/${id}/quick-pay`);
+    quickPaySession: async (id: string, account?: string): Promise<{ ok: boolean; amount: number; currency: string; account?: string }> => {
+        const response = await api.post(`/crm/sessions/${id}/quick-pay`, account ? { account } : {});
         return response.data;
     },
 
