@@ -87,8 +87,18 @@ class PricingService:
         # A. Subscription (Priority 1)
         if self._apply_subscription(user, breakdown, resource, format_type):
             return breakdown
-            
-        # B. Compare Standard Discounts
+
+        # B. Personal Discount (Priority 2) — overrides all standard discounts
+        if user.pricing_system == "personal" and user.personal_discount_percent > 0:
+            pct = user.personal_discount_percent
+            discount_val = breakdown.base_price * (pct / 100.0)
+            breakdown.discount_percent = pct
+            breakdown.discount_amount = discount_val
+            breakdown.final_price = max(0, breakdown.base_price - discount_val)
+            breakdown.applied_rule = "PERSONAL_DISCOUNT"
+            return breakdown
+
+        # C. Compare Standard Discounts
         # We need to find the BEST discount among: Weekly, Duration, Hot
         
         # 1. Hot Booking
