@@ -552,7 +552,22 @@ export function CrmClientDetail() {
                                                 {format(parseISO(s.date), 'dd MMM yyyy, HH:mm', { locale: ru })}
                                             </span>
                                             {!s.isBooked && (
-                                                <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded">Нет брони</span>
+                                                <button
+                                                    onClick={() => navigate('/dashboard/bookings', {
+                                                        state: {
+                                                            crmMode: {
+                                                                sessionId: s.id,
+                                                                clientId: client.id,
+                                                                clientName: client.name,
+                                                                date: s.date,
+                                                                duration: s.durationMinutes,
+                                                            },
+                                                        },
+                                                    })}
+                                                    className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100 hover:text-red-700 transition-colors cursor-pointer"
+                                                >
+                                                    Нет брони
+                                                </button>
                                             )}
                                         </div>
                                         <span className="text-sm font-medium text-gray-600">
