@@ -202,13 +202,14 @@ def get_client_balance(
 
     debt = sum((s.price if s.price is not None else base) for s in unpaid_sessions)
 
-    # Total paid — use raw SQL to avoid ORM type-cast issues with UUID vs VARCHAR
-    from sqlalchemy import text
-    raw_result = session.exec(
-        text("SELECT COALESCE(SUM(amount), 0) FROM therapist_payments WHERE specialist_id = :sid AND client_id = :cid"),
-        params={"sid": uid, "cid": str(client_id)},
-    ).one()
-    total_paid = float(raw_result)
+    # Total paid — sum in Python to avoid ORM type-cast issues
+    client_payments = session.exec(
+        select(TherapistPayment).where(
+            TherapistPayment.specialist_id == uid,
+            TherapistPayment.client_id == str(client_id),
+        )
+    ).all()
+    total_paid = sum(float(p.amount or 0) for p in client_payments)
 
     # Total expected (all non-cancelled sessions)
     all_sessions = session.exec(
