@@ -417,7 +417,7 @@ export function AdminCrm() {
                                             'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
                                             isSelected ? 'bg-white/20 text-white' : 'bg-unbox-dark text-white'
                                         )}>
-                                            {admin.name[0].toUpperCase()}
+                                            {admin.name?.[0]?.toUpperCase() ?? '?'}
                                         </div>
                                         <div className="min-w-0">
                                             <div className="truncate">{admin.name}</div>
@@ -470,7 +470,7 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
                 <div className="flex items-center gap-1.5">
                     <GripVertical size={14} className="text-gray-300 group-hover:text-gray-400 shrink-0 cursor-grab active:cursor-grabbing" />
                     <div className="w-7 h-7 rounded-full bg-unbox-light/70 flex items-center justify-center text-xs font-bold text-unbox-grey shrink-0">
-                        {user.name[0].toUpperCase()}
+                        {user.name?.[0]?.toUpperCase() ?? '?'}
                     </div>
                     <div className="min-w-0 flex-1">
                         <div className="text-xs font-semibold text-unbox-dark truncate group-hover:text-unbox-green transition-colors">
@@ -502,7 +502,7 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
                     {responsible ? (
                         <>
                             <div className="w-4 h-4 rounded-full bg-unbox-green flex items-center justify-center text-[8px] font-bold text-white shrink-0">
-                                {responsible.name[0].toUpperCase()}
+                                {responsible.name?.[0]?.toUpperCase() ?? '?'}
                             </div>
                             <span className="text-[10px] font-medium text-unbox-dark truncate flex-1">
                                 {responsible.name}
@@ -524,7 +524,7 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
                     {attracted ? (
                         <>
                             <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center text-[8px] font-bold text-white shrink-0">
-                                {attracted.name[0].toUpperCase()}
+                                {attracted.name?.[0]?.toUpperCase() ?? '?'}
                             </div>
                             <span className="text-[10px] font-medium text-unbox-dark truncate flex-1">
                                 {attracted.name}

@@ -461,7 +461,7 @@ export function AdminUserDetails() {
                                     {user.avatarUrl ? (
                                         <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
                                     ) : (
-                                        user.name.charAt(0).toUpperCase()
+                                        (user.name || '?').charAt(0).toUpperCase()
                                     )}
                                 </div>
                                 <label className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity">
@@ -563,7 +563,7 @@ export function AdminUserDetails() {
                                     'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
                                     responsibleAdmin ? 'bg-unbox-green text-white' : 'bg-unbox-light text-unbox-grey'
                                 )}>
-                                    {responsibleAdmin ? responsibleAdmin.name[0].toUpperCase() : <UserCircle size={14} />}
+                                    {responsibleAdmin ? (responsibleAdmin.name?.[0]?.toUpperCase() ?? '?') : <UserCircle size={14} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="text-[10px] text-unbox-grey">Ответственный</div>
@@ -583,7 +583,7 @@ export function AdminUserDetails() {
                                     'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
                                     attractedAdmin ? 'bg-amber-400 text-white' : 'bg-unbox-light text-unbox-grey'
                                 )}>
-                                    {attractedAdmin ? attractedAdmin.name[0].toUpperCase() : <UserCircle size={14} />}
+                                    {attractedAdmin ? (attractedAdmin.name?.[0]?.toUpperCase() ?? '?') : <UserCircle size={14} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="text-[10px] text-unbox-grey">Привлёк клиента</div>
@@ -703,7 +703,7 @@ export function AdminUserDetails() {
                                                     'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
                                                     isSelected ? 'bg-white/20 text-white' : `${avatarBg} text-white`
                                                 )}>
-                                                    {admin.name[0].toUpperCase()}
+                                                    {admin.name?.[0]?.toUpperCase() ?? '?'}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
                                                     <div className="truncate">{admin.name}</div>

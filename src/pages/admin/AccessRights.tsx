@@ -86,7 +86,7 @@ export function AdminAccessRights() {
                         {selectedUser ? (
                             <>
                                 <div className="w-8 h-8 rounded-lg bg-unbox-dark text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                                    {selectedUser.name[0].toUpperCase()}
+                                    {selectedUser.name?.[0]?.toUpperCase() ?? '?'}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="text-sm font-semibold text-unbox-dark truncate">{selectedUser.name}</div>
@@ -136,7 +136,7 @@ export function AdminAccessRights() {
                                             )}
                                         >
                                             <div className="w-7 h-7 rounded-lg bg-unbox-dark text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                                {user.name[0].toUpperCase()}
+                                                {user.name?.[0]?.toUpperCase() ?? '?'}
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="text-sm font-medium text-unbox-dark truncate">{user.name}</div>

@@ -218,7 +218,7 @@ function CrmQuickBookModal({
                                         'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
                                         selectedClientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
                                     )}>
-                                        {client.name[0].toUpperCase()}
+                                        {client.name?.[0]?.toUpperCase() ?? '?'}
                                     </div>
                                     <span className="text-sm font-medium truncate">{client.name}</span>
                                     {selectedClientId === client.id && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}
@@ -472,7 +472,7 @@ function LinkBookingModal({
                                         isSelected ? 'bg-unbox-green text-white' :
                                             assignedToOther ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-600'
                                     )}>
-                                        {client.name[0].toUpperCase()}
+                                        {client.name?.[0]?.toUpperCase() ?? '?'}
                                     </div>
                                     <span className="text-sm font-medium truncate">{client.name}</span>
                                     {isSelected && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}

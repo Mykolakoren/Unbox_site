@@ -184,7 +184,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                         'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
                                         selectedClientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
                                     )}>
-                                        {client.name[0].toUpperCase()}
+                                        {client.name?.[0]?.toUpperCase() ?? '?'}
                                     </div>
                                     <div className="min-w-0">
                                         <div className="font-medium text-sm truncate">{client.name}</div>
@@ -321,7 +321,7 @@ function BookingCard({ booking, linkedClient, linkedSessionId, onLink }: Booking
                 <div className="flex items-center justify-between bg-unbox-light/40 rounded-xl px-3 py-2">
                     <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-unbox-green text-white flex items-center justify-center text-xs font-bold shrink-0">
-                            {linkedClient.name[0].toUpperCase()}
+                            {linkedClient.name?.[0]?.toUpperCase() ?? '?'}
                         </div>
                         <div>
                             <div className="text-sm font-semibold text-gray-900">{linkedClient.name}</div>

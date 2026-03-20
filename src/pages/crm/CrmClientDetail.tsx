@@ -275,7 +275,7 @@ export function CrmClientDetail() {
                         <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white shrink-0 ${
                             client.isActive ? 'bg-gradient-to-br from-unbox-green to-unbox-dark' : 'bg-gray-300'
                         }`}>
-                            {client.name[0].toUpperCase()}
+                            {client.name?.[0]?.toUpperCase() ?? '?'}
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold text-unbox-dark flex items-center gap-2 flex-wrap">

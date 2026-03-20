@@ -134,7 +134,7 @@ export function AdminLayout() {
                                 className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors"
                             >
                                 <div className="w-7 h-7 rounded-lg bg-unbox-green/80 text-white flex items-center justify-center text-xs font-bold">
-                                    {currentUser?.name[0].toUpperCase() ?? 'A'}
+                                    {currentUser?.name?.[0]?.toUpperCase() ?? 'A'}
                                 </div>
                                 <span className="hidden md:block text-sm text-white/80 font-medium max-w-[100px] truncate">
                                     {currentUser?.name}

@@ -491,7 +491,7 @@ export function CrmClients() {
                                                         : 'bg-gray-300'
                                                 }`}
                                             >
-                                                {client.name[0].toUpperCase()}
+                                                {client.name?.[0]?.toUpperCase() ?? '?'}
                                             </div>
                                         )}
                                         {!mergeMode && (

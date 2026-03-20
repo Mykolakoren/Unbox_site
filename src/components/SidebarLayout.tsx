@@ -67,7 +67,7 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                     {currentUser && (
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-unbox-dark text-white flex items-center justify-center font-bold shadow-md">
-                                {currentUser.name[0].toUpperCase()}
+                                {currentUser.name?.[0]?.toUpperCase() ?? '?'}
                             </div>
                             <div className="overflow-hidden">
                                 <div className="font-bold text-sm truncate">{currentUser.name}</div>
