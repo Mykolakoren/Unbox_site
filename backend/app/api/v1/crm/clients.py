@@ -2,6 +2,7 @@
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlmodel import Session, select, func
 from app.api import deps
 from app.models.user import User
@@ -13,6 +14,95 @@ from app.models.therapist_payment import TherapistPayment
 from app.models.therapist_note import TherapistNote
 
 router = APIRouter()
+
+
+class MergeClientsRequest(BaseModel):
+    target_id: str
+    source_ids: List[str]
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    telegram: Optional[str] = None
+
+
+@router.post("/clients/merge")
+def merge_clients(
+    data: MergeClientsRequest,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Merge source clients into target client. Reassign all sessions, payments, notes."""
+    uid = str(current_user.id)
+
+    # Validate target
+    target = session.get(TherapistClient, data.target_id)
+    if not target or target.specialist_id != uid:
+        raise HTTPException(404, "Target client not found")
+
+    if not data.source_ids:
+        raise HTTPException(400, "No source clients to merge")
+
+    if data.target_id in data.source_ids:
+        raise HTTPException(400, "Target cannot be in source list")
+
+    # Validate all source clients
+    sources = []
+    for sid in data.source_ids:
+        src = session.get(TherapistClient, sid)
+        if not src or src.specialist_id != uid:
+            raise HTTPException(404, f"Source client {sid} not found")
+        sources.append(src)
+
+    # Update target fields if provided
+    if data.name:
+        target.name = data.name
+    if data.phone is not None:
+        target.phone = data.phone or None
+    if data.email is not None:
+        target.email = data.email or None
+    if data.telegram is not None:
+        target.telegram = data.telegram or None
+
+    # Merge tags from all sources
+    all_tags = set(target.tags or [])
+    for src in sources:
+        all_tags.update(src.tags or [])
+    target.tags = list(all_tags) if all_tags else []
+
+    target.updated_at = datetime.utcnow()
+    session.add(target)
+
+    # Reassign all related records from source clients to target
+    reassigned = {"sessions": 0, "payments": 0, "notes": 0}
+    for sid in data.source_ids:
+        for s in session.exec(select(TherapySession).where(TherapySession.client_id == sid, TherapySession.specialist_id == uid)).all():
+            s.client_id = data.target_id
+            session.add(s)
+            reassigned["sessions"] += 1
+
+        for p in session.exec(select(TherapistPayment).where(TherapistPayment.client_id == sid, TherapistPayment.specialist_id == uid)).all():
+            p.client_id = data.target_id
+            session.add(p)
+            reassigned["payments"] += 1
+
+        for n in session.exec(select(TherapistNote).where(TherapistNote.client_id == sid, TherapistNote.specialist_id == uid)).all():
+            n.client_id = data.target_id
+            session.add(n)
+            reassigned["notes"] += 1
+
+    # Delete source clients
+    for src in sources:
+        session.delete(src)
+
+    session.commit()
+    session.refresh(target)
+
+    return {
+        "ok": True,
+        "target_id": data.target_id,
+        "merged_count": len(data.source_ids),
+        "reassigned": reassigned,
+    }
 
 
 @router.get("/clients", response_model=List[TherapistClientRead])

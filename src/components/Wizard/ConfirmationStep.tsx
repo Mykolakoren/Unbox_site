@@ -280,19 +280,29 @@ export function ConfirmationStep() {
                                                     <span><strong>Списать с абонемента</strong> — у вас есть активный абонемент</span>
                                                 </button>
                                             )}
-                                            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700">
+                                            <a
+                                                href="https://t.me/UnboxCenter"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer no-underline"
+                                            >
                                                 <span className="text-base mt-0.5">💬</span>
                                                 <span>
-                                                    <strong>Пополните баланс</strong> — обратитесь к администратору центра для пополнения
+                                                    <strong>Пополните баланс</strong> — <span className="underline">обратитесь к администратору</span> центра для пополнения
                                                 </span>
-                                            </div>
+                                            </a>
                                             {!((effectiveUser.creditLimit || 0) > 0) && (
-                                                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
+                                                <a
+                                                    href="https://t.me/UnboxCenter"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors cursor-pointer no-underline"
+                                                >
                                                     <span className="text-base mt-0.5">🔑</span>
                                                     <span>
-                                                        <strong>Кредитный лимит</strong> — администратор может установить вам кредитный лимит для бронирования в долг
+                                                        <strong>Кредитный лимит</strong> — <span className="underline">обратитесь к администратору</span>, чтобы установить кредитный лимит для бронирования в долг
                                                     </span>
-                                                </div>
+                                                </a>
                                             )}
                                         </div>
                                     </div>

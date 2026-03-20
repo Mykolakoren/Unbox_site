@@ -17,10 +17,10 @@
     },
     {
       "name": "finance-web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "-p", "3001"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd '/Users/mykola/Desktop/Projects/учет финансов/apps/web' && npm run dev -- -p 3001"],
       "port": 3001,
-      "cwd": "/Users/mykola/Desktop/Projects/учет финансов/apps/web"
+      "autoPort": false
     }
   ]
 }

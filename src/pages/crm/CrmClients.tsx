@@ -19,8 +19,11 @@ import {
     LayoutGrid,
     LayoutList,
     ArrowUpDown,
+    Merge,
+    ChevronDown,
 } from 'lucide-react';
 import type { CrmClientCreate, CrmClient } from '../../api/crm';
+import { crmApi } from '../../api/crm';
 import { toast } from 'sonner';
 
 type ViewMode = 'table' | 'cards';
@@ -43,6 +46,9 @@ export function CrmClients() {
     });
     const [sortField, setSortField] = useState<SortField>('lastSessionDate');
     const [sortDir, setSortDir] = useState<SortDir>('desc');
+    const [mergeMode, setMergeMode] = useState(false);
+    const [mergeSelected, setMergeSelected] = useState<string[]>([]);
+    const [showMergeDialog, setShowMergeDialog] = useState(false);
 
     const editingClient = editingId ? clients.find((c) => c.id === editingId) ?? null : null;
 
@@ -148,6 +154,25 @@ export function CrmClients() {
                         </button>
                     </div>
                     <button
+                        onClick={() => {
+                            if (mergeMode) {
+                                setMergeMode(false);
+                                setMergeSelected([]);
+                            } else {
+                                setMergeMode(true);
+                                setMergeSelected([]);
+                            }
+                        }}
+                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-sm transition-colors ${
+                            mergeMode
+                                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                : 'bg-white border border-unbox-light text-unbox-grey hover:text-unbox-dark hover:border-unbox-green/30'
+                        }`}
+                    >
+                        <Merge className="w-4 h-4" />
+                        {mergeMode ? 'Отмена' : 'Объединить'}
+                    </button>
+                    <button
                         onClick={() => setShowForm(true)}
                         className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
                     >
@@ -217,6 +242,62 @@ export function CrmClients() {
                 />
             )}
 
+            {/* Merge selection bar */}
+            {mergeMode && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                        <Merge className="w-5 h-5 text-amber-600" />
+                        <div>
+                            <p className="text-sm font-medium text-amber-800">
+                                Режим объединения
+                            </p>
+                            <p className="text-xs text-amber-600">
+                                Выберите 2+ клиентов для объединения. Все сессии, платежи и заметки будут перенесены в одну карточку.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-amber-700">
+                            {mergeSelected.length} выбрано
+                        </span>
+                        <button
+                            disabled={mergeSelected.length < 2}
+                            onClick={() => setShowMergeDialog(true)}
+                            className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-xl hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Объединить
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Merge Dialog */}
+            {showMergeDialog && (
+                <MergeDialog
+                    clients={clients.filter(c => mergeSelected.includes(c.id))}
+                    onConfirm={async (targetId, overrides) => {
+                        const sourceIds = mergeSelected.filter(id => id !== targetId);
+                        try {
+                            const result = await crmApi.mergeClients({
+                                targetId,
+                                sourceIds,
+                                ...overrides,
+                            });
+                            toast.success(
+                                `Объединено ${result.mergedCount} клиентов. Перенесено: ${result.reassigned.sessions} сессий, ${result.reassigned.payments} платежей, ${result.reassigned.notes} заметок`
+                            );
+                            setShowMergeDialog(false);
+                            setMergeMode(false);
+                            setMergeSelected([]);
+                            fetchClients(false, true);
+                        } catch (err: any) {
+                            toast.error(err?.response?.data?.detail || 'Ошибка объединения');
+                        }
+                    }}
+                    onCancel={() => setShowMergeDialog(false)}
+                />
+            )}
+
             {/* Client List */}
             {loading && !clients.length ? (
                 <div className="flex items-center justify-center h-40">
@@ -237,6 +318,7 @@ export function CrmClients() {
                         <table className="w-full text-sm text-left" style={{ tableLayout: 'auto' }}>
                             <thead className="text-xs text-unbox-grey uppercase bg-gray-50/80 border-b border-gray-200">
                                 <tr>
+                                    {mergeMode && <th className="px-3 py-3.5 w-10"></th>}
                                     <th className="px-3 py-3.5 w-8"></th>
                                     <SortHeader field="name" current={sortField} dir={sortDir} onSort={toggleSort}>Имя</SortHeader>
                                     <th className="px-4 py-3.5 font-medium hidden md:table-cell">Контакты</th>
@@ -253,9 +335,30 @@ export function CrmClients() {
                                     return (
                                         <tr
                                             key={client.id}
-                                            className={`border-b border-gray-50 hover:bg-unbox-light/20 transition-colors cursor-pointer ${!client.isActive ? 'opacity-50' : ''}`}
-                                            onClick={() => navigate(`/crm/clients/${client.id}`)}
+                                            className={`border-b border-gray-50 hover:bg-unbox-light/20 transition-colors cursor-pointer ${!client.isActive ? 'opacity-50' : ''} ${mergeMode && mergeSelected.includes(client.id) ? 'bg-amber-50/50' : ''}`}
+                                            onClick={() => {
+                                                if (mergeMode) {
+                                                    setMergeSelected(prev =>
+                                                        prev.includes(client.id)
+                                                            ? prev.filter(id => id !== client.id)
+                                                            : [...prev, client.id]
+                                                    );
+                                                } else {
+                                                    navigate(`/crm/clients/${client.id}`);
+                                                }
+                                            }}
                                         >
+                                            {/* Merge checkbox */}
+                                            {mergeMode && (
+                                                <td className="px-3 py-3.5 text-center">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={mergeSelected.includes(client.id)}
+                                                        onChange={() => {}}
+                                                        className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                                    />
+                                                </td>
+                                            )}
                                             {/* Active indicator */}
                                             <td className="px-3 py-3.5 text-center" onClick={e => e.stopPropagation()}>
                                                 <button
@@ -358,27 +461,47 @@ export function CrmClients() {
                             className={`bg-white rounded-2xl border shadow-sm p-5 transition-all hover:shadow-md cursor-pointer ${
                                 !client.isActive
                                     ? 'border-unbox-light opacity-60'
+                                    : mergeMode && mergeSelected.includes(client.id)
+                                    ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-200'
                                     : 'border-unbox-light'
                             }`}
-                            onClick={() => navigate(`/crm/clients/${client.id}`)}
+                            onClick={() => {
+                                if (mergeMode) {
+                                    setMergeSelected(prev =>
+                                        prev.includes(client.id)
+                                            ? prev.filter(id => id !== client.id)
+                                            : [...prev, client.id]
+                                    );
+                                } else {
+                                    navigate(`/crm/clients/${client.id}`);
+                                }
+                            }}
                         >
                             <div className="flex items-start justify-between mb-3">
                                 <div className="flex items-center gap-3">
                                     <div className="relative">
-                                        <div
-                                            className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${
-                                                client.isActive
-                                                    ? 'bg-gradient-to-br from-unbox-green to-unbox-dark'
-                                                    : 'bg-gray-300'
-                                            }`}
-                                        >
-                                            {client.name[0].toUpperCase()}
-                                        </div>
-                                        <div
-                                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-                                                client.isActive ? 'bg-green-400' : 'bg-gray-300'
-                                            }`}
-                                        />
+                                        {mergeMode && mergeSelected.includes(client.id) ? (
+                                            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-500 text-white">
+                                                <Check className="w-5 h-5" />
+                                            </div>
+                                        ) : (
+                                            <div
+                                                className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${
+                                                    client.isActive
+                                                        ? 'bg-gradient-to-br from-unbox-green to-unbox-dark'
+                                                        : 'bg-gray-300'
+                                                }`}
+                                            >
+                                                {client.name[0].toUpperCase()}
+                                            </div>
+                                        )}
+                                        {!mergeMode && (
+                                            <div
+                                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                                                    client.isActive ? 'bg-green-400' : 'bg-gray-300'
+                                                }`}
+                                            />
+                                        )}
                                     </div>
                                     <div>
                                         <div className="font-semibold text-unbox-dark">
@@ -767,5 +890,263 @@ function ClientMenu({
                 </>
             )}
         </div>
+    );
+}
+
+// ── Merge Dialog ──────────────────────────────────────────────────────────────
+
+function MergeDialog({
+    clients,
+    onConfirm,
+    onCancel,
+}: {
+    clients: CrmClient[];
+    onConfirm: (targetId: string, overrides: { name?: string; phone?: string; email?: string; telegram?: string }) => Promise<void>;
+    onCancel: () => void;
+}) {
+    const [targetId, setTargetId] = useState(clients[0]?.id ?? '');
+    const [nameSource, setNameSource] = useState(clients[0]?.id ?? '');
+    const [phoneSource, setPhoneSource] = useState('');
+    const [emailSource, setEmailSource] = useState('');
+    const [telegramSource, setTelegramSource] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    // Collect unique phone/email/telegram options from all clients
+    const allPhones = clients.map(c => c.phone).filter(Boolean) as string[];
+    const allEmails = clients.map(c => c.email).filter(Boolean) as string[];
+    const allTelegrams = clients.map(c => c.telegram).filter(Boolean) as string[];
+
+    const selectedName = clients.find(c => c.id === nameSource)?.name ?? clients[0]?.name ?? '';
+
+    const handleConfirm = async () => {
+        setSaving(true);
+        try {
+            await onConfirm(targetId, {
+                name: selectedName,
+                phone: phoneSource || undefined,
+                email: emailSource || undefined,
+                telegram: telegramSource || undefined,
+            });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="fixed inset-0 bg-black/40 z-40 animate-in fade-in" onClick={onCancel} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
+                    {/* Header */}
+                    <div className="p-6 border-b border-gray-100">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                                    <Merge className="w-5 h-5 text-amber-600" />
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold text-unbox-dark">Объединить клиентов</h2>
+                                    <p className="text-xs text-unbox-grey">{clients.length} карточек → 1</p>
+                                </div>
+                            </div>
+                            <button onClick={onCancel} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                                <X className="w-5 h-5 text-unbox-grey" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="p-6 space-y-5">
+                        {/* Target client (base card) */}
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-2">
+                                Основная карточка
+                            </label>
+                            <p className="text-xs text-unbox-grey mb-2">
+                                Все данные будут перенесены в эту карточку. Остальные карточки будут удалены.
+                            </p>
+                            <div className="space-y-1.5">
+                                {clients.map(c => (
+                                    <label
+                                        key={c.id}
+                                        className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                                            targetId === c.id
+                                                ? 'border-amber-400 bg-amber-50'
+                                                : 'border-gray-100 hover:border-gray-200'
+                                        }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="target"
+                                            checked={targetId === c.id}
+                                            onChange={() => setTargetId(c.id)}
+                                            className="text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-sm text-unbox-dark truncate">{c.name}</div>
+                                            <div className="text-xs text-unbox-grey truncate">
+                                                {[c.phone, c.telegram, c.email].filter(Boolean).join(' · ') || 'Нет контактов'}
+                                            </div>
+                                        </div>
+                                        {(c as any).sessionCount > 0 && (
+                                            <span className="text-[10px] text-unbox-grey bg-gray-100 px-2 py-0.5 rounded-full">
+                                                {(c as any).sessionCount} сессий
+                                            </span>
+                                        )}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Choose name */}
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-2">
+                                Имя в карточке
+                            </label>
+                            <div className="space-y-1.5">
+                                {clients.map(c => (
+                                    <label
+                                        key={c.id}
+                                        className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${
+                                            nameSource === c.id
+                                                ? 'border-unbox-green bg-unbox-green/5'
+                                                : 'border-gray-100 hover:border-gray-200'
+                                        }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="nameSource"
+                                            checked={nameSource === c.id}
+                                            onChange={() => setNameSource(c.id)}
+                                            className="text-unbox-green focus:ring-unbox-green"
+                                        />
+                                        <span className="text-sm">{c.name}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Choose phone */}
+                        {allPhones.length > 0 && (
+                            <div>
+                                <label className="block text-sm font-medium text-unbox-dark mb-2">
+                                    Телефон
+                                </label>
+                                <div className="space-y-1.5">
+                                    {[...new Set(allPhones)].map(phone => (
+                                        <label
+                                            key={phone}
+                                            className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${
+                                                phoneSource === phone
+                                                    ? 'border-unbox-green bg-unbox-green/5'
+                                                    : 'border-gray-100 hover:border-gray-200'
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="phoneSource"
+                                                checked={phoneSource === phone}
+                                                onChange={() => setPhoneSource(phone)}
+                                                className="text-unbox-green focus:ring-unbox-green"
+                                            />
+                                            <Phone className="w-3.5 h-3.5 text-unbox-grey" />
+                                            <span className="text-sm">{phone}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Choose email */}
+                        {allEmails.length > 0 && (
+                            <div>
+                                <label className="block text-sm font-medium text-unbox-dark mb-2">
+                                    Email
+                                </label>
+                                <div className="space-y-1.5">
+                                    {[...new Set(allEmails)].map(email => (
+                                        <label
+                                            key={email}
+                                            className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${
+                                                emailSource === email
+                                                    ? 'border-unbox-green bg-unbox-green/5'
+                                                    : 'border-gray-100 hover:border-gray-200'
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="emailSource"
+                                                checked={emailSource === email}
+                                                onChange={() => setEmailSource(email)}
+                                                className="text-unbox-green focus:ring-unbox-green"
+                                            />
+                                            <Mail className="w-3.5 h-3.5 text-unbox-grey" />
+                                            <span className="text-sm">{email}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Choose telegram */}
+                        {allTelegrams.length > 0 && (
+                            <div>
+                                <label className="block text-sm font-medium text-unbox-dark mb-2">
+                                    Telegram
+                                </label>
+                                <div className="space-y-1.5">
+                                    {[...new Set(allTelegrams)].map(tg => (
+                                        <label
+                                            key={tg}
+                                            className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${
+                                                telegramSource === tg
+                                                    ? 'border-unbox-green bg-unbox-green/5'
+                                                    : 'border-gray-100 hover:border-gray-200'
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="telegramSource"
+                                                checked={telegramSource === tg}
+                                                onChange={() => setTelegramSource(tg)}
+                                                className="text-unbox-green focus:ring-unbox-green"
+                                            />
+                                            <Send className="w-3.5 h-3.5 text-unbox-grey" />
+                                            <span className="text-sm">{tg}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Warning */}
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                            <p className="text-xs text-red-700">
+                                <strong>Внимание:</strong> {clients.length - 1} карточ{clients.length - 1 === 1 ? 'ка' : clients.length - 1 < 5 ? 'ки' : 'ек'} будут удалены.
+                                Все сессии, платежи и заметки будут перенесены в выбранную основную карточку.
+                                Это действие необратимо.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
+                        <button
+                            onClick={onCancel}
+                            className="px-4 py-2.5 text-sm text-unbox-grey hover:bg-gray-100 rounded-xl transition-colors"
+                        >
+                            Отмена
+                        </button>
+                        <button
+                            onClick={handleConfirm}
+                            disabled={saving}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-xl hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                        >
+                            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />}
+                            Объединить
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </>
     );
 }

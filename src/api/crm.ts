@@ -250,6 +250,25 @@ export const crmApi = {
         await api.delete(`/crm/clients/${id}`, { params: permanent ? { permanent: true } : {} });
     },
 
+    mergeClients: async (data: {
+        targetId: string;
+        sourceIds: string[];
+        name?: string;
+        phone?: string;
+        email?: string;
+        telegram?: string;
+    }): Promise<{ ok: boolean; targetId: string; mergedCount: number; reassigned: { sessions: number; payments: number; notes: number } }> => {
+        const response = await api.post('/crm/clients/merge', {
+            target_id: data.targetId,
+            source_ids: data.sourceIds,
+            name: data.name,
+            phone: data.phone,
+            email: data.email,
+            telegram: data.telegram,
+        });
+        return response.data;
+    },
+
     // Sessions
     getSessions: async (params?: {
         clientId?: string;
