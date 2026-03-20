@@ -444,7 +444,7 @@ export function AdminChessboardView() {
             </div>
 
             {/* ── Grid ── */}
-            <div className="overflow-x-auto rounded-xl border border-unbox-light shadow-sm bg-white">
+            <div className="overflow-x-auto scrollbar-visible rounded-xl border border-unbox-light shadow-sm bg-white">
                 <table
                     className="border-collapse text-xs"
                     style={{ minWidth: `${130 + TIME_SLOTS.length * 44}px` }}

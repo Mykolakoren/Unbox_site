@@ -82,3 +82,44 @@
     @apply bg-unbox-light text-unbox-dark antialiased;
   }
 }
+
+/* Custom visible scrollbar for schedule grids */
+.scrollbar-visible {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrollbar-visible::-webkit-scrollbar {
+  height: 10px;
+}
+
+.scrollbar-visible::-webkit-scrollbar-track {
+  background: rgba(212, 226, 225, 0.3);
+  border-radius: 8px;
+  margin: 0 8px;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb {
+  background: rgba(71, 109, 107, 0.35);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 109, 107, 0.55);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb:active {
+  background: rgba(71, 109, 107, 0.7);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Firefox scrollbar */
+.scrollbar-visible {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(71, 109, 107, 0.35) rgba(212, 226, 225, 0.3);
+}

@@ -912,7 +912,7 @@ export function CrmChessboardView() {
             )}
 
             {/* Grid */}
-            <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
+            <div className="overflow-x-auto scrollbar-visible rounded-2xl border border-gray-100 bg-white">
                 <table className="border-collapse" style={{ minWidth: `${180 + TIME_SLOTS.length * SLOT_W}px` }}>
                     <thead>
                         <tr>

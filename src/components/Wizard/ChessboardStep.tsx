@@ -505,7 +505,7 @@ export function ChessboardStep() {
 
 
             {/* The Grid - Refactored to Horizontal Layout */}
-            <div className="border border-white/30 rounded-2xl overflow-x-auto bg-white/40 backdrop-blur-sm shadow-sm isolate">
+            <div className="border border-white/30 rounded-2xl overflow-x-auto scrollbar-visible bg-white/40 backdrop-blur-sm shadow-sm isolate">
                 <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
                     <thead className="text-unbox-dark font-medium border-b border-unbox-light/60"
                         style={{ background: 'rgba(212,226,225,0.45)' }}>
