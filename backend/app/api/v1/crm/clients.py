@@ -189,8 +189,6 @@ def get_client_balance(
 
     uid = str(current_user.id)
     base = client.base_price or 0
-    import logging
-    logger = logging.getLogger(__name__)
 
     # Unpaid COMPLETED sessions only (future PLANNED sessions are not debt)
     unpaid_sessions = session.exec(
@@ -204,14 +202,13 @@ def get_client_balance(
 
     debt = sum((s.price if s.price is not None else base) for s in unpaid_sessions)
 
-    # Total paid — use raw SQL to avoid any ORM type-cast issues
+    # Total paid — use raw SQL to avoid ORM type-cast issues with UUID vs VARCHAR
     from sqlalchemy import text
     raw_result = session.exec(
         text("SELECT COALESCE(SUM(amount), 0) FROM therapist_payments WHERE specialist_id = :sid AND client_id = :cid"),
         params={"sid": uid, "cid": str(client_id)},
     ).one()
     total_paid = float(raw_result)
-    logger.warning(f"BALANCE DEBUG: uid={uid}, client_id={client_id}, total_paid={total_paid}")
 
     # Total expected (all non-cancelled sessions)
     all_sessions = session.exec(

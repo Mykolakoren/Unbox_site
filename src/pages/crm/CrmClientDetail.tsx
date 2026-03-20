@@ -83,7 +83,7 @@ export function CrmClientDetail() {
             s => !s.isPaid && s.status === 'COMPLETED'
         );
         const debt = unpaid.reduce((sum, s) => sum + (s.price ?? client?.basePrice ?? 0), 0);
-        const totalPaid = balance?.total_paid ?? 0;
+        const totalPaid = balance?.totalPaid ?? 0;
         return { completed, unpaidCount: unpaid.length, debt, totalPaid };
     }, [sessions, client, balance]);
 
