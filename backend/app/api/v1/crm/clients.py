@@ -49,6 +49,13 @@ def list_clients(
         c_dict["sessionCount"] = len(sessions_all)
         c_dict["totalCost"] = sum((s.price if s.price is not None else base) for s in sessions_all)
 
+        # Last session date
+        if sessions_all:
+            last_date = max(s.date for s in sessions_all)
+            c_dict["lastSessionDate"] = last_date.isoformat() if last_date else None
+        else:
+            c_dict["lastSessionDate"] = None
+
         # Unpaid sum
         unpaid = [s for s in sessions_all if not s.is_paid]
         c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)

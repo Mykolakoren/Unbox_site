@@ -24,7 +24,7 @@ import type { CrmClientCreate, CrmClient } from '../../api/crm';
 import { toast } from 'sonner';
 
 type ViewMode = 'table' | 'cards';
-type SortField = 'name' | 'basePrice' | 'sessionCount' | 'unpaidSum' | 'totalPaid';
+type SortField = 'name' | 'basePrice' | 'sessionCount' | 'unpaidSum' | 'totalPaid' | 'lastSessionDate';
 type SortDir = 'asc' | 'desc';
 
 const VIEW_KEY = 'crm_clients_view';
@@ -41,8 +41,8 @@ export function CrmClients() {
     const [viewMode, setViewMode] = useState<ViewMode>(() => {
         return (localStorage.getItem(VIEW_KEY) as ViewMode) || 'table';
     });
-    const [sortField, setSortField] = useState<SortField>('name');
-    const [sortDir, setSortDir] = useState<SortDir>('asc');
+    const [sortField, setSortField] = useState<SortField>('lastSessionDate');
+    const [sortDir, setSortDir] = useState<SortDir>('desc');
 
     const editingClient = editingId ? clients.find((c) => c.id === editingId) ?? null : null;
 
@@ -86,6 +86,14 @@ export function CrmClients() {
                     return dir * (((a as any).unpaidSum || 0) - ((b as any).unpaidSum || 0));
                 case 'totalPaid':
                     return dir * (((a as any).totalPaid || 0) - ((b as any).totalPaid || 0));
+                case 'lastSessionDate': {
+                    const da = (a as any).lastSessionDate || '';
+                    const db = (b as any).lastSessionDate || '';
+                    if (!da && !db) return 0;
+                    if (!da) return 1; // no sessions → bottom
+                    if (!db) return -1;
+                    return dir * da.localeCompare(db);
+                }
                 default:
                     return 0;
             }
@@ -235,6 +243,7 @@ export function CrmClients() {
                                     <SortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</SortHeader>
                                     <SortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort} className="hidden lg:table-cell">LTV</SortHeader>
                                     <SortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</SortHeader>
+                                    <SortHeader field="lastSessionDate" current={sortField} dir={sortDir} onSort={toggleSort} className="hidden xl:table-cell">Посл. сессия</SortHeader>
                                     <th className="px-4 py-3.5 font-medium text-right">Действия</th>
                                 </tr>
                             </thead>
@@ -302,6 +311,13 @@ export function CrmClients() {
                                                         Оплачено
                                                     </span>
                                                 )}
+                                            </td>
+                                            {/* Last session */}
+                                            <td className="px-4 py-3.5 text-unbox-grey text-xs hidden xl:table-cell">
+                                                {c.lastSessionDate
+                                                    ? new Date(c.lastSessionDate).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+                                                    : <span className="text-gray-300">&mdash;</span>
+                                                }
                                             </td>
                                             {/* Actions */}
                                             <td className="px-4 py-3.5 text-right" onClick={e => e.stopPropagation()}>
