@@ -792,6 +792,7 @@ function ClientForm({
                         <option value="usdt">USDT</option>
                         <option value="p24">Приват24</option>
                         <option value="mono">Mono</option>
+                        <option value="ru_bank">RU Банк</option>
                     </select>
                 </div>
             </div>

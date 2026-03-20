@@ -112,7 +112,7 @@ export function CrmClientDetail() {
         try {
             const result = await crmApi.quickPaySession(sessionId, account);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: true } : s));
-            const accountLabels: Record<string, string> = { cash: 'Наличные', tbc: 'TBC', bog: 'BOG', paypal: 'PayPal', usdt: 'USDT', p24: 'P24', mono: 'Mono' };
+            const accountLabels: Record<string, string> = { cash: 'Наличные', tbc: 'TBC', bog: 'BOG', paypal: 'PayPal', usdt: 'USDT', p24: 'P24', mono: 'Mono', ru_bank: 'RU Банк' };
             const accLabel = result.account ? accountLabels[result.account] || result.account : '';
             toast.success(`Оплачено: ${result.amount} ${result.currency}${accLabel ? ` · ${accLabel}` : ''}`);
             loadData();
@@ -438,6 +438,7 @@ export function CrmClientDetail() {
                                 <option value="usdt">USDT</option>
                                 <option value="p24">P24</option>
                                 <option value="mono">Mono</option>
+                                <option value="ru_bank">RU Банк</option>
                             </select>
                         </div>
                         <div className="md:col-span-2">
@@ -756,6 +757,7 @@ export function CrmClientDetail() {
                                                                             <option value="usdt">USDT</option>
                                                                             <option value="p24">P24</option>
                                                                             <option value="mono">Mono</option>
+                                <option value="ru_bank">RU Банк</option>
                                                                         </select>
                                                                     </div>
                                                                     <button
