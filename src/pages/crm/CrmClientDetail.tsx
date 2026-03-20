@@ -44,6 +44,10 @@ export function CrmClientDetail() {
     const [sessionNoteTags, setSessionNoteTags] = useState('');
     const [savingSessionNote, setSavingSessionNote] = useState(false);
     const [markingAll, setMarkingAll] = useState(false);
+    const [editingProfile, setEditingProfile] = useState(false);
+    const [editForm, setEditForm] = useState({
+        name: '', phone: '', email: '', telegram: '', aliasCode: '', basePrice: '', currency: 'GEL', tags: '',
+    });
 
     const loadData = useCallback(async () => {
         if (!clientId) return;
@@ -178,6 +182,43 @@ export function CrmClientDetail() {
         }
     };
 
+    const openEditProfile = () => {
+        if (!client) return;
+        setEditForm({
+            name: client.name,
+            phone: client.phone || '',
+            email: client.email || '',
+            telegram: client.telegram || '',
+            aliasCode: client.aliasCode || '',
+            basePrice: String(client.basePrice || ''),
+            currency: client.currency || 'GEL',
+            tags: (client.tags || []).join(', '),
+        });
+        setEditingProfile(true);
+    };
+
+    const handleSaveProfile = async () => {
+        if (!clientId || !editForm.name.trim()) return;
+        try {
+            const tags = editForm.tags.split(',').map(t => t.trim()).filter(Boolean);
+            const updated = await crmApi.updateClient(clientId, {
+                name: editForm.name.trim(),
+                phone: editForm.phone || undefined,
+                email: editForm.email || undefined,
+                telegram: editForm.telegram || undefined,
+                aliasCode: editForm.aliasCode || undefined,
+                basePrice: editForm.basePrice ? Number(editForm.basePrice) : undefined,
+                currency: editForm.currency,
+                tags: tags.length ? tags : [],
+            });
+            setClient(updated);
+            setEditingProfile(false);
+            toast.success('Профиль обновлён');
+        } catch (e: any) {
+            toast.error(e.message || 'Ошибка сохранения');
+        }
+    };
+
     const handleDeleteNote = async (noteId: string) => {
         try {
             await deleteNote(noteId);
@@ -274,11 +315,11 @@ export function CrmClientDetail() {
                             </button>
                         )}
                         <button
-                            onClick={() => navigate('/crm/clients')}
+                            onClick={openEditProfile}
                             className="flex items-center gap-2 px-4 py-2 text-sm text-unbox-grey border border-unbox-light rounded-xl hover:bg-unbox-light/30 transition-colors"
                         >
                             <Pencil className="w-4 h-4" />
-                            Изменить профиль
+                            Редактировать профиль
                         </button>
                         <button
                             onClick={() => navigate('/crm/sessions')}
@@ -290,6 +331,123 @@ export function CrmClientDetail() {
                     </div>
                 </div>
             </div>
+
+            {/* ═══ Edit Profile Form ═══ */}
+            {editingProfile && (
+                <div className="bg-white rounded-2xl border border-unbox-green/30 shadow-sm p-6 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-unbox-dark flex items-center gap-2">
+                            <Pencil className="w-5 h-5 text-unbox-green" />
+                            Редактировать профиль
+                        </h3>
+                        <button onClick={() => setEditingProfile(false)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                            <X className="w-5 h-5 text-unbox-grey" />
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Имя <span className="text-red-500">*</span></label>
+                            <input
+                                type="text"
+                                value={editForm.name}
+                                onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Телефон</label>
+                            <input
+                                type="text"
+                                value={editForm.phone}
+                                onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                placeholder="+995..."
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Email</label>
+                            <input
+                                type="email"
+                                value={editForm.email}
+                                onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Telegram</label>
+                            <input
+                                type="text"
+                                value={editForm.telegram}
+                                onChange={e => setEditForm(f => ({ ...f, telegram: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                placeholder="@username"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Код клиента</label>
+                            <input
+                                type="text"
+                                value={editForm.aliasCode}
+                                onChange={e => setEditForm(f => ({ ...f, aliasCode: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                placeholder="4-значный код"
+                                maxLength={4}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">Ставка за сессию</label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="number"
+                                    value={editForm.basePrice}
+                                    onChange={e => setEditForm(f => ({ ...f, basePrice: e.target.value }))}
+                                    className="flex-1 px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                    placeholder="0"
+                                />
+                                <select
+                                    value={editForm.currency}
+                                    onChange={e => setEditForm(f => ({ ...f, currency: e.target.value }))}
+                                    className="px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                >
+                                    <option value="GEL">GEL</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                    <option value="RUB">RUB</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-unbox-dark mb-1">
+                                <span className="flex items-center gap-1"><Tag className="w-3.5 h-3.5" /> Теги</span>
+                            </label>
+                            <input
+                                type="text"
+                                value={editForm.tags}
+                                onChange={e => setEditForm(f => ({ ...f, tags: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
+                                placeholder="через запятую: тревога, пары, онлайн"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
+                        <button
+                            onClick={() => setEditingProfile(false)}
+                            className="px-4 py-2 text-sm text-unbox-grey hover:bg-gray-100 rounded-xl transition-colors"
+                        >
+                            Отмена
+                        </button>
+                        <button
+                            onClick={handleSaveProfile}
+                            disabled={!editForm.name.trim()}
+                            className="flex items-center gap-2 px-5 py-2 bg-unbox-green text-white text-sm font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-50 transition-colors"
+                        >
+                            <Check className="w-4 h-4" />
+                            Сохранить
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* ═══ Two-Column Layout ═══ */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
