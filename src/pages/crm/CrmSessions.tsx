@@ -360,7 +360,7 @@ function WeekCalendar({
     navigate: ReturnType<typeof useNavigate>;
     onAddSession: (dateStr: string) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    quickPaySession: (id: string) => Promise<{ amount: number; currency: string }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
 }) {
     const weekStart = startOfWeek(weekAnchor, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(weekAnchor, { weekStartsOn: 1 });
@@ -468,7 +468,9 @@ function WeekCalendar({
                                                 <SessionEditPanel
                                                     session={session}
                                                     clientCurrency={client?.currency}
+                                                    clientDefaultAccount={client?.defaultAccount}
                                                     onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
+                                                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                                                     onCancel={() => setEditingId(null)}
                                                 />
                                             )}
@@ -506,7 +508,7 @@ function DayGroup({
     setEditingId: (id: string | null) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string) => Promise<void>;
-    quickPaySession: (id: string) => Promise<{ amount: number; currency: string }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookRoom?: (day: string) => void;
 }) {
     const navigate = useNavigate();
@@ -649,11 +651,13 @@ function DayGroup({
                                     <SessionEditPanel
                                         session={session}
                                         clientCurrency={client?.currency}
+                                        clientDefaultAccount={client?.defaultAccount}
                                         onSave={async (data) => {
                                             await updateSession(session.id, data);
                                             setEditingId(null);
                                             toast.success('Сессия обновлена');
                                         }}
+                                        onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                                         onCancel={() => setEditingId(null)}
                                     />
                                 )}
@@ -768,12 +772,16 @@ function MiniStat({ label, value, color }: { label: string; value: number | stri
 function SessionEditPanel({
     session,
     clientCurrency,
+    clientDefaultAccount,
     onSave,
+    onQuickPay,
     onCancel,
 }: {
     session: import('../../api/crm').CrmSession;
     clientCurrency?: string;
+    clientDefaultAccount?: string;
     onSave: (data: CrmSessionUpdate) => Promise<void>;
+    onQuickPay?: (account: string) => Promise<void>;
     onCancel: () => void;
 }) {
     const [date, setDate] = useState(format(parseISO(session.date), "yyyy-MM-dd'T'HH:mm"));
@@ -781,19 +789,31 @@ function SessionEditPanel({
     const [status, setStatus] = useState(getEffectiveStatus(session));
     const [price, setPrice] = useState(String(session.price ?? ''));
     const [isPaid, setIsPaid] = useState(session.isPaid);
+    const [account, setAccount] = useState(clientDefaultAccount || 'cash');
     const [saving, setSaving] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
         try {
-            await onSave({
-                date: new Date(date).toISOString(),
-                durationMinutes: Number(duration),
-                status,
-                price: price ? Number(price) : undefined,
-                isPaid,
-            });
+            // If marking as paid and it wasn't paid before, use quickPay with account
+            if (isPaid && !session.isPaid && onQuickPay) {
+                await onSave({
+                    date: new Date(date).toISOString(),
+                    durationMinutes: Number(duration),
+                    status,
+                    price: price ? Number(price) : undefined,
+                });
+                await onQuickPay(account);
+            } else {
+                await onSave({
+                    date: new Date(date).toISOString(),
+                    durationMinutes: Number(duration),
+                    status,
+                    price: price ? Number(price) : undefined,
+                    isPaid,
+                });
+            }
         } catch (err: any) {
             toast.error(err.message || 'Ошибка');
         } finally {
@@ -857,16 +877,33 @@ function SessionEditPanel({
                 </div>
             </div>
 
-            <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-xs text-unbox-dark cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={isPaid}
-                        onChange={(e) => setIsPaid(e.target.checked)}
-                        className="rounded"
-                    />
-                    Оплачено
-                </label>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-xs text-unbox-dark cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={isPaid}
+                            onChange={(e) => setIsPaid(e.target.checked)}
+                            className="rounded"
+                        />
+                        Оплачено
+                    </label>
+                    {isPaid && !session.isPaid && (
+                        <select
+                            value={account}
+                            onChange={(e) => setAccount(e.target.value)}
+                            className="px-2 py-1 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                        >
+                            <option value="cash">Наличные</option>
+                            <option value="tbc">TBC</option>
+                            <option value="bog">BOG</option>
+                            <option value="paypal">PayPal</option>
+                            <option value="usdt">USDT</option>
+                            <option value="p24">Приват24</option>
+                            <option value="mono">Mono</option>
+                        </select>
+                    )}
+                </div>
                 <div className="flex items-center gap-2">
                     <button
                         type="button"

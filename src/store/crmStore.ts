@@ -35,7 +35,7 @@ interface CrmStore {
     createSession: (data: CrmSessionCreate) => Promise<CrmSession>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string) => Promise<void>;
-    quickPaySession: (id: string) => Promise<{ amount: number; currency: string }>;
+    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
 
     // Payments
     fetchPayments: (params?: { clientId?: string; dateFrom?: string; dateTo?: string }) => Promise<void>;
@@ -149,8 +149,8 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
         set((s) => ({ sessions: s.sessions.filter((sess) => sess.id !== id) }));
     },
 
-    quickPaySession: async (id) => {
-        const result = await crmApi.quickPaySession(id);
+    quickPaySession: async (id, account?) => {
+        const result = await crmApi.quickPaySession(id, account);
         set((s) => ({
             sessions: s.sessions.map((sess) =>
                 sess.id === id ? { ...sess, isPaid: true } : sess
