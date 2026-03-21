@@ -153,10 +153,13 @@ def delete_transaction(
     if not tx:
         raise HTTPException(404, "Транзакция не найдена")
 
-    today = date.today()
-    tx_date = tx.date.date() if isinstance(tx.date, datetime) else tx.date
-    if tx_date != today:
-        raise HTTPException(403, "Можно удалять только сегодняшние транзакции")
+    # Admin can delete any transaction; senior_admin/owner always allowed
+    # Regular admin can only delete transactions from the last 7 days
+    if current_user.role not in ("owner", "senior_admin"):
+        tx_date = tx.date.date() if isinstance(tx.date, datetime) else tx.date
+        days_ago = (date.today() - tx_date).days
+        if days_ago > 7:
+            raise HTTPException(403, "Можно удалять транзакции не старше 7 дней")
 
     session.delete(tx)
     session.commit()

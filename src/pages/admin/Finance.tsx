@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
 import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth,
-    addWeeks, addMonths, format,
+    startOfDay, endOfDay, addDays, addWeeks, addMonths, format,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useCashboxStore } from '../../store/cashboxStore';
@@ -18,7 +18,7 @@ import type { CashboxTransaction } from '../../api/cashbox';
 import clsx from 'clsx';
 
 type Tab = 'transactions' | 'categories' | 'shifts';
-type PeriodMode = 'week' | 'month' | 'custom';
+type PeriodMode = 'day' | 'week' | 'month' | 'custom';
 type TxType = 'all' | 'income' | 'expense';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
@@ -31,6 +31,17 @@ const TABS: { id: Tab; label: string }[] = [
 
 function getPeriodRange(mode: PeriodMode, offset: number): { from: Date; to: Date; label: string } {
     const now = new Date();
+    if (mode === 'day') {
+        const base = addDays(now, offset);
+        const start = startOfDay(base);
+        const end = endOfDay(base);
+        const label = offset === 0
+            ? 'Сегодня'
+            : offset === -1
+            ? 'Вчера'
+            : format(base, 'd MMMM', { locale: ru });
+        return { from: start, to: end, label };
+    }
     if (mode === 'week') {
         const start = startOfWeek(addWeeks(now, offset), { locale: ru });
         const end = endOfWeek(addWeeks(now, offset), { locale: ru });
@@ -132,7 +143,7 @@ export function AdminFinance() {
                 <div className="flex flex-wrap items-center gap-3">
                     {/* Period mode buttons */}
                     <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                        {(['week', 'month', 'custom'] as PeriodMode[]).map(m => (
+                        {(['day', 'week', 'month', 'custom'] as PeriodMode[]).map(m => (
                             <button
                                 key={m}
                                 onClick={() => { setPeriodMode(m); setPeriodOffset(0); }}
@@ -141,7 +152,7 @@ export function AdminFinance() {
                                     periodMode === m ? 'bg-white shadow text-unbox-dark' : 'text-gray-500 hover:text-gray-700',
                                 )}
                             >
-                                {m === 'week' ? 'Неделя' : m === 'month' ? 'Месяц' : 'Диапазон'}
+                                {m === 'day' ? 'День' : m === 'week' ? 'Неделя' : m === 'month' ? 'Месяц' : 'Диапазон'}
                             </button>
                         ))}
                     </div>

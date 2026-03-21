@@ -91,7 +91,10 @@ export function CashboxTransactionTable({ filteredTransactions }: Props) {
                         const formattedDate = format(d, 'd MMM yyyy', { locale: ru });
                         const formattedTime = format(d, 'HH:mm');
                         const isIncome = tx.type === 'income';
-                        const canDelete = tx.date?.slice(0, 10) === today;
+                        // Allow delete for recent transactions (backend enforces 7-day limit for admins)
+                        const txDate = tx.date?.slice(0, 10) || '';
+                        const daysAgo = Math.floor((Date.now() - new Date(txDate).getTime()) / 86400000);
+                        const canDelete = daysAgo <= 7;
 
                         return (
                             <tr key={tx.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
