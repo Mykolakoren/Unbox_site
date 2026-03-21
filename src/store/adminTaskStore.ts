@@ -41,7 +41,9 @@ export const useAdminTaskStore = create<AdminTaskState>()((set, get) => ({
             set((state) => ({ tasks: [...state.tasks, task] }));
             return task;
         } catch (e: any) {
-            console.error('Failed to create task:', e);
+            console.error('Failed to create task:', e?.response?.data || e?.message || e);
+            const { toast } = await import('sonner');
+            toast.error(`Ошибка создания: ${e?.response?.data?.detail || e?.message || 'Неизвестная ошибка'}`);
             return null;
         }
     },
