@@ -39,14 +39,19 @@ def crm_dashboard(
         )
     ).one()
 
-    unpaid_count = session.exec(
-        select(func.count()).where(
+    # Unpaid count — only for active clients, only COMPLETED sessions
+    unpaid_all = session.exec(
+        select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.is_paid == False,
-            TherapySession.date <= now,
-            TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            TherapySession.status == "COMPLETED",
         )
-    ).one()
+    ).all()
+    unpaid_count = 0
+    for us in unpaid_all:
+        client = session.get(TherapistClient, us.client_id)
+        if client and client.is_active:
+            unpaid_count += 1
 
     month_payments = session.exec(
         select(TherapistPayment).where(

@@ -343,10 +343,10 @@ export function AdminChessboardView() {
 
     // ── Booking block style ───────────────────────────────────────────────────
     const getBookingStyle = (b: BookingHistoryItem) => {
-        if (b.status === 'completed')  return 'bg-gray-100 text-gray-500 border-gray-200';
-        if (b.status === 're-rented')  return 'bg-orange-100 text-orange-700 border-orange-200';
-        if (b.isReRentListed)          return 'bg-amber-50 text-amber-700 border-amber-300 border-dashed';
-        return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+        if (b.status === 'completed')  return 'bg-gray-200 text-gray-600 border-gray-300';
+        if (b.status === 're-rented')  return 'bg-orange-200 text-orange-800 border-orange-400';
+        if (b.isReRentListed)          return 'bg-amber-100 text-amber-800 border-amber-400 border-dashed';
+        return 'bg-emerald-100 text-emerald-900 border-emerald-400';
     };
 
     // ── Popup status label ────────────────────────────────────────────────────
@@ -633,12 +633,12 @@ export function AdminChessboardView() {
             </div>
 
             {/* ── Legend ── */}
-            <div className="flex flex-wrap gap-4 text-xs text-unbox-grey pt-1">
-                <LegendItem color="bg-emerald-100 border-emerald-200" label="Активное бронирование" />
-                <LegendItem color="bg-amber-50 border-amber-300 border-dashed" label="На переаренде" />
-                <LegendItem color="bg-orange-100 border-orange-200" label="Пересдано" />
-                <LegendItem color="bg-gray-100 border-gray-200" label="Завершено" />
-                <LegendItem color="bg-gray-50 border-gray-100" label="Прошедшее время" />
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-gray-700 pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-gray-100">
+                <LegendItem color="bg-emerald-200 border-emerald-500" label="Активное бронирование" />
+                <LegendItem color="bg-amber-100 border-amber-500 border-dashed" label="На переаренде" />
+                <LegendItem color="bg-orange-200 border-orange-500" label="Пересдано" />
+                <LegendItem color="bg-gray-200 border-gray-400" label="Завершено" />
+                <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
             </div>
 
             {/* ── Admin Quick Booking Modal ── */}
@@ -732,9 +732,9 @@ export function AdminChessboardView() {
 // ─── Small helpers ────────────────────────────────────────────────────────────
 function LegendItem({ color, label }: { color: string; label: string }) {
     return (
-        <div className="flex items-center gap-1.5">
-            <span className={clsx('w-3 h-3 rounded border inline-block flex-shrink-0', color)} />
-            {label}
+        <div className="flex items-center gap-2">
+            <span className={clsx('w-4 h-4 rounded border-2 inline-block flex-shrink-0', color)} />
+            <span>{label}</span>
         </div>
     );
 }
