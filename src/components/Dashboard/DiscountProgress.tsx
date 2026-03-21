@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useUserStore } from '../../store/userStore';
 import { usersApi } from '../../api/users';
-import { Zap, TrendingUp, ChevronRight } from 'lucide-react';
+import { Zap, TrendingUp, ChevronRight, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export function DiscountProgress() {
+    const { currentUser } = useUserStore();
     const [data, setData] = useState<{
         accumulatedHours: number;
         totalSaved: number;
@@ -15,11 +17,8 @@ export function DiscountProgress() {
 
     useEffect(() => {
         usersApi.getDiscountProgress().then((res) => {
-            console.log("DEBUG Discount Data:", res);
             setData(res as any);
-        }).catch(err => {
-            console.error("DEBUG Discount Error:", err);
-        });
+        }).catch(() => {});
     }, []);
 
     if (!data) return (
@@ -33,13 +32,19 @@ export function DiscountProgress() {
         </div>
     );
 
-    // Robust calculation with defaults
-    const currentDiscount = data.currentDiscount || 0;
+    const progressiveDiscount = data.currentDiscount || 0;
     const totalSaved = data.totalSaved || 0;
     const accumulatedHours = data.accumulatedHours || 0;
     const nextTierHours = data.nextTierHours || 0;
     const nextTierDiscount = data.nextTierDiscount || 0;
     const progressPercent = data.progressPercent || 0;
+
+    const personalDiscount = (currentUser?.pricingSystem === 'personal' && currentUser?.personalDiscountPercent)
+        ? currentUser.personalDiscountPercent : 0;
+
+    // Which discount is active (the bigger one wins)
+    const activeDiscount = Math.max(progressiveDiscount, personalDiscount);
+    const isPersonalWinning = personalDiscount > 0 && personalDiscount >= progressiveDiscount;
 
     return (
         <div className="p-6 rounded-2xl relative overflow-hidden group"
@@ -53,16 +58,16 @@ export function DiscountProgress() {
             {/* Background Gradient Accent */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-unbox-light rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110 duration-700" />
 
-            <div className="flex justify-between items-start mb-6 relative z-10">
+            <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
                     <h3 className="text-sm font-medium text-unbox-grey mb-1 flex items-center">
                         <Zap size={14} className="mr-1 text-unbox-green fill-unbox-green" />
-                        Ваш прогресс скидки
+                        Ваша скидка
                     </h3>
                     <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-unbox-dark">{currentDiscount}%</span>
+                        <span className="text-3xl font-bold text-unbox-dark">{activeDiscount}%</span>
                         <span className="text-xs font-medium text-unbox-green bg-unbox-light px-2 py-0.5 rounded-full">
-                            активная скидка
+                            {isPersonalWinning ? 'персональная' : 'за объём'}
                         </span>
                     </div>
                 </div>
@@ -74,7 +79,45 @@ export function DiscountProgress() {
                 </div>
             </div>
 
-            <div className="space-y-4 relative z-10">
+            {/* Personal discount info */}
+            {personalDiscount > 0 && (
+                <div className={`flex items-center gap-2 mb-4 p-2.5 rounded-xl relative z-10 ${
+                    isPersonalWinning
+                        ? 'bg-violet-50 border border-violet-200'
+                        : 'bg-gray-50 border border-gray-150'
+                }`}>
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        isPersonalWinning ? 'bg-violet-100' : 'bg-gray-100'
+                    }`}>
+                        <UserCheck size={14} className={isPersonalWinning ? 'text-violet-600' : 'text-gray-400'} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <div className={`font-bold ${
+                            isPersonalWinning ? 'text-sm text-violet-700' : 'text-xs text-gray-400'
+                        }`}>
+                            Персональная скидка: {personalDiscount}%
+                        </div>
+                        {!isPersonalWinning && (
+                            <div className="text-[10px] text-gray-400">
+                                Прогрессивная скидка выгоднее
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Progressive discount section */}
+            <div className={`space-y-3 relative z-10 ${
+                personalDiscount > 0 && isPersonalWinning ? 'opacity-60' : ''
+            }`}>
+                {personalDiscount > 0 && (
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-unbox-grey">
+                        <TrendingUp size={12} />
+                        Прогрессивная скидка: {progressiveDiscount}%
+                        {isPersonalWinning && <span className="text-gray-400 ml-1">(не активна)</span>}
+                    </div>
+                )}
+
                 <div className="flex justify-between text-xs font-medium">
                     <span className="text-unbox-grey">
                         Накоплено: <span className="text-unbox-dark font-bold">{accumulatedHours}ч</span>
@@ -85,9 +128,8 @@ export function DiscountProgress() {
                 </div>
 
                 <div className="relative h-3 w-full rounded-full overflow-hidden" style={{ background: 'rgba(212,226,225,0.60)' }}>
-                    {/* Markers */}
-                    <div className="absolute left-[31%] top-0 bottom-0 w-px bg-white/50 z-20" /> {/* 5h marker */}
-                    <div className="absolute left-[69%] top-0 bottom-0 w-px bg-white/50 z-20" /> {/* 11h marker */}
+                    <div className="absolute left-[31%] top-0 bottom-0 w-px bg-white/50 z-20" />
+                    <div className="absolute left-[69%] top-0 bottom-0 w-px bg-white/50 z-20" />
 
                     <motion.div
                         initial={{ width: 0 }}
@@ -97,28 +139,30 @@ export function DiscountProgress() {
                     />
                 </div>
 
-                <div className="flex justify-between items-center p-3 rounded-xl mt-2"
-                    style={{
-                        background: 'rgba(212,226,225,0.40)',
-                        backdropFilter: 'blur(12px)',
-                        WebkitBackdropFilter: 'blur(12px)',
-                        border: '1px solid rgba(255,255,255,0.60)',
-                    }}>
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm"
-                            style={{ background: 'rgba(255,255,255,0.70)', border: '1px solid rgba(255,255,255,0.80)' }}>
-                            <TrendingUp size={16} className="text-unbox-dark" />
+                {(!personalDiscount || !isPersonalWinning) && (
+                    <div className="flex justify-between items-center p-3 rounded-xl mt-1"
+                        style={{
+                            background: 'rgba(212,226,225,0.40)',
+                            backdropFilter: 'blur(12px)',
+                            WebkitBackdropFilter: 'blur(12px)',
+                            border: '1px solid rgba(255,255,255,0.60)',
+                        }}>
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm"
+                                style={{ background: 'rgba(255,255,255,0.70)', border: '1px solid rgba(255,255,255,0.80)' }}>
+                                <TrendingUp size={16} className="text-unbox-dark" />
+                            </div>
+                            <div>
+                                <div className="text-[10px] text-unbox-grey font-bold uppercase tracking-wider">Следующий уровень</div>
+                                <div className="text-sm font-bold text-unbox-dark">Скидка {nextTierDiscount}%</div>
+                            </div>
                         </div>
-                        <div>
-                            <div className="text-[10px] text-unbox-grey font-bold uppercase tracking-wider">Следующий уровень</div>
-                            <div className="text-sm font-bold text-unbox-dark">Скидка {nextTierDiscount}%</div>
+                        <div className="flex items-center text-[11px] font-bold text-unbox-green">
+                            Нужно еще {Math.max(0, nextTierHours - accumulatedHours).toFixed(1)}ч
+                            <ChevronRight size={14} className="ml-0.5" />
                         </div>
                     </div>
-                    <div className="flex items-center text-[11px] font-bold text-unbox-green">
-                        Нужно еще {Math.max(0, nextTierHours - accumulatedHours).toFixed(1)}ч
-                        <ChevronRight size={14} className="ml-0.5" />
-                    </div>
-                </div>
+                )}
             </div>
         </div>
     );
