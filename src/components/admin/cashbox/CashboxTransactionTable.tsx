@@ -3,6 +3,7 @@ import { Banknote, CreditCard, Landmark, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useCashboxStore } from '../../../store/cashboxStore';
+import { useUserStore } from '../../../store/userStore';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import type { CashboxTransaction } from '../../../api/cashbox';
@@ -37,7 +38,9 @@ interface Props {
 
 export function CashboxTransactionTable({ filteredTransactions }: Props) {
     const { isLoading, deleteTransaction } = useCashboxStore();
+    const { currentUser } = useUserStore();
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const isSeniorOrOwner = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
 
     const handleDelete = async (id: string) => {
         setDeletingId(id);
@@ -45,7 +48,9 @@ export function CashboxTransactionTable({ filteredTransactions }: Props) {
             await deleteTransaction(id);
             toast.success('Операция удалена');
         } catch {
-            toast.error('Не удалось удалить (только сегодняшние операции)');
+            toast.error(isSeniorOrOwner
+                ? 'Не удалось удалить операцию'
+                : 'Удаление прошлых операций требует подтверждения старшего администратора');
         } finally {
             setDeletingId(null);
         }
@@ -91,10 +96,9 @@ export function CashboxTransactionTable({ filteredTransactions }: Props) {
                         const formattedDate = format(d, 'd MMM yyyy', { locale: ru });
                         const formattedTime = format(d, 'HH:mm');
                         const isIncome = tx.type === 'income';
-                        // Allow delete for recent transactions (backend enforces 7-day limit for admins)
-                        const txDate = tx.date?.slice(0, 10) || '';
-                        const daysAgo = Math.floor((Date.now() - new Date(txDate).getTime()) / 86400000);
-                        const canDelete = daysAgo <= 7;
+                        // Senior/owner can delete any; admin only today's
+                        const isToday = tx.date?.slice(0, 10) === today;
+                        const canDelete = isSeniorOrOwner || isToday;
 
                         return (
                             <tr key={tx.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
