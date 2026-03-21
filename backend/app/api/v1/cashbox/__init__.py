@@ -14,9 +14,12 @@ router = APIRouter()
 # ── Shared dependencies ──────────────────────────────────────────────────────
 
 def require_cashbox(current_user: User = Depends(deps.require_admin)) -> User:
-    """Require finance.manage_cashbox permission."""
-    if not deps.has_permission(current_user, "finance.manage_cashbox"):
-        raise HTTPException(403, "Нет права finance.manage_cashbox")
+    """Require finance access — admin can view & create transactions, senior+ manages all."""
+    has_manage = deps.has_permission(current_user, "finance.manage_cashbox")
+    has_reports = deps.has_permission(current_user, "finance.view_reports")
+    has_topup = deps.has_permission(current_user, "finance.topup_balance")
+    if not (has_manage or has_reports or has_topup):
+        raise HTTPException(403, "Нет доступа к финансам")
     return current_user
 
 
