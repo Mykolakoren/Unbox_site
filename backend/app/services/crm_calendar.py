@@ -229,8 +229,10 @@ def sync_from_calendar(
                     client_id = cid
                     break
 
+        # Use Tbilisi timezone (UTC+4) for status comparison
+        now_local = datetime.now()
         session_status = "CANCELLED_CLIENT" if event_status == "cancelled" else (
-            "COMPLETED" if start_dt < datetime.utcnow() else "PLANNED"
+            "COMPLETED" if start_dt < now_local else "PLANNED"
         )
 
         entry = {
@@ -287,8 +289,10 @@ def sync_client_history(
             duration = max(30, int((end_dt - start_dt).total_seconds() / 60))
 
         event_status = ev.get("status", "confirmed")
+        # Use Tbilisi timezone (UTC+4) for status comparison
+        now_local = datetime.now()
         session_status = "CANCELLED_CLIENT" if event_status == "cancelled" else (
-            "COMPLETED" if start_dt < datetime.utcnow() else "PLANNED"
+            "COMPLETED" if start_dt < now_local else "PLANNED"
         )
 
         sessions.append({
