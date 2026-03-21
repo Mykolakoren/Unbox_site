@@ -130,7 +130,7 @@ def create_transaction(
         category_id=payload.category_id,
         description=payload.description,
         branch=payload.branch,
-        date=payload.date or datetime.utcnow(),
+        date=payload.date or datetime.now(),  # local server time (Tbilisi UTC+4)
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",
     )

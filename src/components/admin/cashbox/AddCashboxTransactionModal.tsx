@@ -67,7 +67,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
         }
         setSaving(true);
         try {
-            const dateValue = txDate ? new Date(txDate).toISOString() : undefined;
+            // Send local time as-is (no UTC conversion) — backend stores it verbatim
+            const dateValue = txDate || undefined;
             if (type === 'transfer') {
                 // Transfer = expense from source + income to target
                 const fromLabel = ACCOUNTS.find(a => a.id === paymentMethod)?.label || paymentMethod;
