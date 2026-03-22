@@ -628,7 +628,7 @@ function DayGroup({
     return (
         <div>
             <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-unbox-grey capitalize">
+                <div className="text-sm font-semibold text-unbox-dark capitalize bg-white/80 backdrop-blur-sm px-3 py-1 rounded-lg shadow-sm">
                     {format(parseISO(day), 'EEEE, d MMMM', { locale: ru })}
                 </div>
                 {onBookRoom && (
