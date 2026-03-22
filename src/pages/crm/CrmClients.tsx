@@ -20,6 +20,7 @@ import {
     LayoutList,
     ArrowUpDown,
     Merge,
+    Trash2,
 } from 'lucide-react';
 import type { CrmClientCreate, CrmClient } from '../../api/crm';
 import { crmApi } from '../../api/crm';
@@ -436,6 +437,22 @@ export function CrmClients() {
                                                         title="Редактировать"
                                                     >
                                                         <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!confirm(`Удалить клиента "${client.name}"? Все сессии, платежи и заметки будут удалены.`)) return;
+                                                            try {
+                                                                await deleteClient(client.id, true);
+                                                                toast.success(`${client.name} удалён`);
+                                                                fetchClients(false, true);
+                                                            } catch (err: any) {
+                                                                toast.error(err?.response?.data?.detail || 'Ошибка удаления');
+                                                            }
+                                                        }}
+                                                        className="p-1.5 rounded-lg hover:bg-red-50 text-unbox-grey hover:text-red-500 transition-colors"
+                                                        title="Удалить"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
                                                     </button>
                                                     <button
                                                         onClick={() => navigate(`/crm/clients/${client.id}`)}
