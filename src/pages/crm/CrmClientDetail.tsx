@@ -744,24 +744,25 @@ export function CrmClientDetail() {
                                                     <td className="px-5 py-3 text-gray-800 font-medium">
                                                         <div className="flex items-center justify-between gap-2">
                                                             <span>{sessionPrice} {client.currency}</span>
-                                                            {!isCancelled && (
-                                                                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                                                                    {session.isPaid ? (
-                                                                        <button
-                                                                            onClick={() => handleUnmarkPaid(session.id)}
-                                                                            className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors font-medium"
-                                                                            title="Нажми чтобы отменить оплату"
-                                                                        >
-                                                                            Оплачено
-                                                                        </button>
-                                                                    ) : (
-                                                                        <button
-                                                                            onClick={() => handleQuickPay(session.id, isEditing ? editSessionAccount : undefined)}
-                                                                            className="text-xs px-2 py-1 bg-unbox-green text-white rounded-lg hover:bg-unbox-dark transition-colors font-medium flex items-center gap-1"
-                                                                        >
-                                                                            <Check className="w-3 h-3" />
-                                                                            Оплатить
-                                                                        </button>
+                                                            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                                                    {!isCancelled && (
+                                                                        session.isPaid ? (
+                                                                            <button
+                                                                                onClick={() => handleUnmarkPaid(session.id)}
+                                                                                className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors font-medium"
+                                                                                title="Нажми чтобы отменить оплату"
+                                                                            >
+                                                                                Оплачено
+                                                                            </button>
+                                                                        ) : (
+                                                                            <button
+                                                                                onClick={() => handleQuickPay(session.id, isEditing ? editSessionAccount : undefined)}
+                                                                                className="text-xs px-2 py-1 bg-unbox-green text-white rounded-lg hover:bg-unbox-dark transition-colors font-medium flex items-center gap-1"
+                                                                            >
+                                                                                <Check className="w-3 h-3" />
+                                                                                Оплатить
+                                                                            </button>
+                                                                        )
                                                                     )}
                                                                     <button
                                                                         onClick={() => {
@@ -778,7 +779,6 @@ export function CrmClientDetail() {
                                                                         <Pencil className="w-3 h-3" />
                                                                     </button>
                                                                 </div>
-                                                            )}
                                                         </div>
                                                         {/* Session edit panel */}
                                                         {isEditing && (
@@ -831,6 +831,20 @@ export function CrmClientDetail() {
                                                                             {label}
                                                                         </button>
                                                                     ))}
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            if (!confirm('Удалить эту сессию?')) return;
+                                                                            try {
+                                                                                await crmApi.deleteSession(session.id);
+                                                                                toast.success('Сессия удалена');
+                                                                                fetchSessions(clientId!);
+                                                                                fetchBalance();
+                                                                            } catch { toast.error('Ошибка удаления'); }
+                                                                        }}
+                                                                        className="px-2 py-0.5 text-xs rounded-lg border border-red-200 bg-white text-red-500 hover:bg-red-50 transition-colors ml-auto"
+                                                                    >
+                                                                        🗑 Удалить
+                                                                    </button>
                                                                 </div>
                                                             </div>
                                                         )}
