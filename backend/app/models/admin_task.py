@@ -13,7 +13,9 @@ class AdminTaskBase(SQLModel):
     priority: str = Field(default="MEDIUM")  # LOW, MEDIUM, HIGH
     assignee_id: Optional[str] = Field(default=None, index=True)
     assignee_name: Optional[str] = Field(default=None)
+    participants: List[dict] = Field(default_factory=list, sa_column=Column(JSON))  # [{id, name}]
     deadline: Optional[datetime] = Field(default=None)
+    start_date: Optional[datetime] = Field(default=None)
     labels: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     checklist: List[dict] = Field(default_factory=list, sa_column=Column(JSON))
     sort_order: int = Field(default=0)
@@ -36,7 +38,9 @@ class AdminTaskCreate(SQLModel):
     priority: str = "MEDIUM"
     assignee_id: Optional[str] = None
     assignee_name: Optional[str] = None
+    participants: List[dict] = []
     deadline: Optional[datetime] = None
+    start_date: Optional[datetime] = None
     labels: List[str] = []
     checklist: List[dict] = []
     sort_order: int = 0
@@ -49,7 +53,9 @@ class AdminTaskUpdate(SQLModel):
     priority: Optional[str] = None
     assignee_id: Optional[str] = None
     assignee_name: Optional[str] = None
+    participants: Optional[List[dict]] = None
     deadline: Optional[datetime] = None
+    start_date: Optional[datetime] = None
     labels: Optional[List[str]] = None
     checklist: Optional[List[dict]] = None
     sort_order: Optional[int] = None

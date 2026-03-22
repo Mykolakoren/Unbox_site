@@ -8,7 +8,9 @@ export interface AdminTask {
     priority: 'LOW' | 'MEDIUM' | 'HIGH';
     assigneeId?: string;
     assigneeName?: string;
+    participants: { id: string; name: string }[];
     deadline?: string;
+    startDate?: string;
     labels: string[];
     checklist: ChecklistItem[];
     sortOrder: number;
@@ -40,7 +42,9 @@ export interface CreateTaskPayload {
     priority?: string;
     assigneeId?: string;
     assigneeName?: string;
+    participants?: { id: string; name: string }[];
     deadline?: string;
+    startDate?: string;
     labels?: string[];
     checklist?: ChecklistItem[];
     sortOrder?: number;
@@ -53,7 +57,9 @@ export interface UpdateTaskPayload {
     priority?: string;
     assigneeId?: string;
     assigneeName?: string;
+    participants?: { id: string; name: string }[];
     deadline?: string | null;
+    startDate?: string | null;
     labels?: string[];
     checklist?: ChecklistItem[];
     sortOrder?: number;

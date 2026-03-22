@@ -4,7 +4,7 @@ import type { AdminTask } from '../../api/adminTasks';
 import { adminTasksApi, type AdminTaskComment, type ChecklistItem } from '../../api/adminTasks';
 import { useUserStore } from '../../store/userStore';
 import {
-    GripVertical, User, Clock, Trash2, Plus, Search,
+    GripVertical, User, Users, Clock, Trash2, Plus, Search,
     X, MessageSquare, CheckSquare, Square, Tag, Send, Loader2,
     Archive,
 } from 'lucide-react';
@@ -286,11 +286,19 @@ function TaskCardView({ task, onEdit, onDelete, dragListeners, isDragging }: {
             )}
 
             <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-gray-50">
-                {task.assigneeName ? (
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 bg-gray-50 px-2 py-1 rounded-md">
-                        <User size={11} /><span className="truncate max-w-[100px]">{task.assigneeName}</span>
-                    </div>
-                ) : <div />}
+                <div className="flex items-center gap-1 flex-wrap">
+                    {task.assigneeName && (
+                        <div className="flex items-center gap-1 text-[11px] font-medium text-gray-500 bg-gray-50 px-2 py-1 rounded-md">
+                            <User size={11} /><span className="truncate max-w-[80px]">{task.assigneeName}</span>
+                        </div>
+                    )}
+                    {(task.participants?.length > 0) && (
+                        <div className="flex items-center gap-1 text-[11px] font-medium text-blue-500 bg-blue-50 px-2 py-1 rounded-md">
+                            <Users size={11} />+{task.participants.length}
+                        </div>
+                    )}
+                    {!task.assigneeName && !(task.participants?.length > 0) && <div />}
+                </div>
                 {task.deadline && (() => {
                     const d = new Date(task.deadline);
                     let color = 'text-gray-400';
@@ -318,7 +326,9 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
     const [priority, setPriority] = useState(task.priority);
     const [assigneeId, setAssigneeId] = useState(task.assigneeId || '');
     const [assigneeName, setAssigneeName] = useState(task.assigneeName || '');
-    const [deadline, setDeadline] = useState(task.deadline ? format(new Date(task.deadline), "yyyy-MM-dd'T'HH:mm") : '');
+    const [participants, setParticipants] = useState<{ id: string; name: string }[]>(task.participants || []);
+    const [startDate, setStartDate] = useState(task.startDate ? format(new Date(task.startDate), "yyyy-MM-dd") : '');
+    const [deadline, setDeadline] = useState(task.deadline ? format(new Date(task.deadline), "yyyy-MM-dd") : '');
     const [labels, setLabels] = useState<string[]>(task.labels || []);
     const [checklist, setChecklist] = useState<ChecklistItem[]>(task.checklist || []);
     const [newCheckItem, setNewCheckItem] = useState('');
@@ -338,7 +348,8 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
         if (!title.trim()) { toast.error('Введите название'); return; }
         setSaving(true);
         await onSave({ title: title.trim(), description, status, priority, assigneeId: assigneeId || undefined, assigneeName: assigneeName || undefined,
-            deadline: deadline ? new Date(deadline).toISOString() : null, labels, checklist });
+            participants, startDate: startDate ? new Date(startDate + 'T00:00:00').toISOString() : null,
+            deadline: deadline ? new Date(deadline + 'T23:59:59').toISOString() : null, labels, checklist });
         setSaving(false);
     };
 
@@ -391,10 +402,47 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                             </select>
                         </div>
                     </div>
+                    {/* Participants */}
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1">Дедлайн</label>
-                        <input type="datetime-local" value={deadline} onChange={e => setDeadline(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none" />
+                        <label className="block text-xs font-semibold text-gray-500 mb-1"><Users size={12} className="inline mr-1" />Участники</label>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                            {participants.map(p => (
+                                <span key={p.id} className="inline-flex items-center gap-1 text-xs font-medium bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
+                                    {p.name}
+                                    <button onClick={() => setParticipants(prev => prev.filter(x => x.id !== p.id))} className="text-blue-400 hover:text-red-500"><X size={12} /></button>
+                                </span>
+                            ))}
+                        </div>
+                        <select
+                            value=""
+                            onChange={e => {
+                                const val = e.target.value;
+                                if (!val) return;
+                                const admin = admins.find(a => String((a as any).id || a.email) === val);
+                                if (admin && !participants.find(p => p.id === val)) {
+                                    setParticipants(prev => [...prev, { id: val, name: admin.name }]);
+                                }
+                            }}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none"
+                        >
+                            <option value="">+ Добавить участника</option>
+                            {admins.filter(a => !participants.find(p => p.id === String((a as any).id || a.email))).map(a => (
+                                <option key={a.email} value={String((a as any).id || a.email)}>{a.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    {/* Date range */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">Начало</label>
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">Дедлайн</label>
+                            <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none" />
+                        </div>
                     </div>
                     <div>
                         <label className="block text-xs font-semibold text-gray-500 mb-2"><Tag size={12} className="inline mr-1" />Метки</label>
