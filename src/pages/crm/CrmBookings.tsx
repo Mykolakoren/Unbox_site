@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
 import { type CrmClient } from '../../api/crm';
@@ -78,20 +78,30 @@ const BOOKING_STATUS_COLORS: Record<string, string> = {
 type FilterType = 'all' | 'linked' | 'unlinked' | 'upcoming' | 'past';
 
 // ─── Модал привязки сессии ────────────────────────────────────────────────────
+interface SlotEntry {
+    clientId: string;
+    duration: number;
+    price: string;
+    notes: string;
+}
+
 interface LinkSessionModalProps {
     booking: BookingHistoryItem;
     clients: CrmClient[];
     existingSessionClientId?: string;
     onClose: () => void;
-    onConfirm: (clientId: string, price: number, notes: string) => Promise<void>;
+    onConfirm: (clientId: string, price: number, notes: string, duration?: number) => Promise<void>;
 }
 
 function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, onConfirm }: LinkSessionModalProps) {
-    const [selectedClientId, setSelectedClientId] = useState(existingSessionClientId || '');
-    const [price, setPrice] = useState('');
-    const [notes, setNotes] = useState('');
+    const totalDuration = booking.duration || 60;
+    const [slots, setSlots] = useState<SlotEntry[]>([
+        { clientId: existingSessionClientId || '', duration: totalDuration, price: '', notes: '' }
+    ]);
+    const [activeSlot, setActiveSlot] = useState(0);
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
+    const [splitMode, setSplitMode] = useState(false);
 
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const { dateStr: bookingDate, dateObj: bookingDateObj } = getSafeBookingDate(booking);
@@ -105,36 +115,81 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
         [clients, search]
     );
 
-    const selectedClient = clients.find(c => c.id === selectedClientId);
+    const currentSlot = slots[activeSlot];
+    const selectedClient = clients.find(c => c.id === currentSlot?.clientId);
+    const usedMinutes = slots.reduce((s, sl) => s + sl.duration, 0);
+    const remainingMinutes = totalDuration - usedMinutes;
 
     // Pre-fill price from selected client
     useEffect(() => {
-        if (selectedClient && !price) {
-            setPrice(String(selectedClient.basePrice || ''));
+        if (selectedClient && !currentSlot?.price) {
+            updateSlot(activeSlot, { price: String(selectedClient.basePrice || '') });
         }
-    }, [selectedClientId]);
+    }, [currentSlot?.clientId]);
+
+    const updateSlot = (idx: number, patch: Partial<SlotEntry>) => {
+        setSlots(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
+    };
+
+    const addSlot = () => {
+        if (remainingMinutes <= 0) {
+            toast.error('Всё время брони уже распределено');
+            return;
+        }
+        setSlots(prev => [...prev, { clientId: '', duration: remainingMinutes, price: '', notes: '' }]);
+        setActiveSlot(slots.length);
+        setSearch('');
+    };
+
+    const removeSlot = (idx: number) => {
+        if (slots.length <= 1) return;
+        const removed = slots[idx];
+        const newSlots = slots.filter((_, i) => i !== idx);
+        // Give removed time to last slot
+        if (newSlots.length > 0) {
+            newSlots[newSlots.length - 1].duration += removed.duration;
+        }
+        setSlots(newSlots);
+        setActiveSlot(Math.min(activeSlot, newSlots.length - 1));
+    };
 
     const handleSubmit = async () => {
-        if (!selectedClientId) {
-            toast.error('Выберите клиента');
-            return;
+        for (const sl of slots) {
+            if (!sl.clientId) { toast.error('Выберите клиента для каждого слота'); return; }
+            if (sl.duration <= 0) { toast.error('Длительность должна быть > 0'); return; }
         }
         setSaving(true);
         try {
-            await onConfirm(selectedClientId, Number(price) || 0, notes);
+            for (const sl of slots) {
+                await onConfirm(sl.clientId, Number(sl.price) || 0, sl.notes, sl.duration);
+            }
             onClose();
         } catch {
-            toast.error('Ошибка при создании сессии');
+            toast.error('Ошибка при создании сессий');
         } finally {
             setSaving(false);
         }
     };
 
+    // Calculate start times for each slot
+    const slotStartTimes = useMemo(() => {
+        const base = booking.startTime || '00:00';
+        const [bh, bm] = base.split(':').map(Number);
+        let offset = 0;
+        return slots.map(sl => {
+            const totalMin = bh * 60 + bm + offset;
+            offset += sl.duration;
+            const h = Math.floor(totalMin / 60);
+            const m = totalMin % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        });
+    }, [slots, booking.startTime]);
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95 fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-200">
                 {/* Header */}
-                <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10 rounded-t-2xl">
                     <div>
                         <h3 className="font-bold text-base flex items-center gap-2">
                             <Link2 size={16} className="text-unbox-green" />
@@ -151,99 +206,202 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                 </div>
 
                 <div className="p-5 space-y-4">
-                    {/* Client picker */}
-                    <div>
-                        <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-2">
-                            Клиент *
-                        </label>
-                        <div className="relative mb-2">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                value={search}
-                                onChange={e => setSearch(e.target.value)}
-                                placeholder="Поиск по имени, телефону..."
-                                className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green focus:ring-2 focus:ring-unbox-green/10"
-                            />
+                    {/* Split mode toggle */}
+                    {!existingSessionClientId && (
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-gray-700">Разделить на слоты</span>
+                            <button
+                                onClick={() => {
+                                    if (!splitMode) {
+                                        setSplitMode(true);
+                                    } else {
+                                        setSplitMode(false);
+                                        setSlots([slots[0]]);
+                                        setActiveSlot(0);
+                                        updateSlot(0, { duration: totalDuration });
+                                    }
+                                }}
+                                className={clsx(
+                                    'relative w-10 h-5 rounded-full transition-colors',
+                                    splitMode ? 'bg-unbox-green' : 'bg-gray-300'
+                                )}
+                            >
+                                <span className={clsx(
+                                    'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                                    splitMode ? 'translate-x-5' : 'translate-x-0.5'
+                                )} />
+                            </button>
                         </div>
-                        <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
-                            {filteredClients.length === 0 ? (
-                                <div className="p-4 text-center text-sm text-gray-400">Клиенты не найдены</div>
-                            ) : filteredClients.map(client => (
-                                <button
-                                    key={client.id}
-                                    onClick={() => setSelectedClientId(client.id)}
-                                    className={clsx(
-                                        'w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors border-b border-gray-100 last:border-0',
-                                        selectedClientId === client.id
-                                            ? 'bg-unbox-green/10 text-unbox-dark'
-                                            : 'hover:bg-white'
-                                    )}
-                                >
-                                    <div className={clsx(
-                                        'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                                        selectedClientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
-                                    )}>
-                                        {client.name?.[0]?.toUpperCase() ?? '?'}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="font-medium text-sm truncate">{client.name}</div>
-                                        {client.aliasCode && (
-                                            <div className="text-[10px] text-gray-400 font-mono">{client.aliasCode}</div>
+                    )}
+
+                    {/* Slot tabs (if split mode) */}
+                    {splitMode && slots.length > 0 && (
+                        <div className="flex gap-1.5 flex-wrap">
+                            {slots.map((sl, idx) => {
+                                const c = clients.find(cc => cc.id === sl.clientId);
+                                return (
+                                    <button
+                                        key={idx}
+                                        onClick={() => { setActiveSlot(idx); setSearch(''); }}
+                                        className={clsx(
+                                            'px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5',
+                                            activeSlot === idx
+                                                ? 'border-unbox-green bg-unbox-green/10 text-unbox-dark'
+                                                : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                         )}
-                                    </div>
-                                    {selectedClientId === client.id && (
-                                        <UserCheck size={14} className="ml-auto text-unbox-green shrink-0" />
-                                    )}
+                                    >
+                                        <span className="font-bold">{slotStartTimes[idx]}</span>
+                                        <span>·</span>
+                                        <span>{sl.duration} мин</span>
+                                        {c && <span className="truncate max-w-[80px]">· {c.name}</span>}
+                                        {slots.length > 1 && (
+                                            <span
+                                                onClick={e => { e.stopPropagation(); removeSlot(idx); }}
+                                                className="ml-1 text-red-400 hover:text-red-600"
+                                            >×</span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                            {remainingMinutes > 0 && (
+                                <button
+                                    onClick={addSlot}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-gray-400 hover:border-unbox-green hover:text-unbox-green transition-colors"
+                                >
+                                    + Слот
                                 </button>
-                            ))}
+                            )}
                         </div>
-                    </div>
+                    )}
 
-                    {/* Price */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                                Стоимость ({selectedClient?.currency || 'GEL'})
-                            </label>
-                            <input
-                                type="number"
-                                value={price}
-                                onChange={e => setPrice(e.target.value)}
-                                placeholder={selectedClient ? String(selectedClient.basePrice) : '0'}
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                                Длит. (мин)
-                            </label>
-                            <input
-                                type="number"
-                                value={booking.duration || ''}
-                                disabled
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-100 bg-gray-50 text-gray-500"
-                            />
-                        </div>
-                    </div>
+                    {/* Active slot editor */}
+                    {currentSlot && (
+                        <>
+                            {/* Client picker */}
+                            <div>
+                                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-2">
+                                    Клиент {splitMode ? `(Слот ${activeSlot + 1})` : ''} *
+                                </label>
+                                <div className="relative mb-2">
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        value={search}
+                                        onChange={e => setSearch(e.target.value)}
+                                        placeholder="Поиск по имени, телефону..."
+                                        className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green focus:ring-2 focus:ring-unbox-green/10"
+                                    />
+                                </div>
+                                <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
+                                    {filteredClients.length === 0 ? (
+                                        <div className="p-4 text-center text-sm text-gray-400">Клиенты не найдены</div>
+                                    ) : filteredClients.map(client => (
+                                        <button
+                                            key={client.id}
+                                            onClick={() => updateSlot(activeSlot, { clientId: client.id })}
+                                            className={clsx(
+                                                'w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors border-b border-gray-100 last:border-0',
+                                                currentSlot.clientId === client.id
+                                                    ? 'bg-unbox-green/10 text-unbox-dark'
+                                                    : 'hover:bg-white'
+                                            )}
+                                        >
+                                            <div className={clsx(
+                                                'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
+                                                currentSlot.clientId === client.id ? 'bg-unbox-green text-white' : 'bg-gray-200 text-gray-600'
+                                            )}>
+                                                {client.name?.[0]?.toUpperCase() ?? '?'}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="font-medium text-sm truncate">{client.name}</div>
+                                                {client.aliasCode && (
+                                                    <div className="text-[10px] text-gray-400 font-mono">{client.aliasCode}</div>
+                                                )}
+                                            </div>
+                                            {currentSlot.clientId === client.id && (
+                                                <UserCheck size={14} className="ml-auto text-unbox-green shrink-0" />
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
 
-                    {/* Notes */}
-                    <div>
-                        <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                            Заметка к сессии
-                        </label>
-                        <textarea
-                            value={notes}
-                            onChange={e => setNotes(e.target.value)}
-                            placeholder="Тема сессии, подготовка..."
-                            rows={2}
-                            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green resize-none"
-                        />
-                    </div>
+                            {/* Price & Duration */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
+                                        Стоимость ({selectedClient?.currency || 'GEL'})
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={currentSlot.price}
+                                        onChange={e => updateSlot(activeSlot, { price: e.target.value })}
+                                        placeholder={selectedClient ? String(selectedClient.basePrice) : '0'}
+                                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
+                                        Длит. (мин)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={currentSlot.duration}
+                                        onChange={e => {
+                                            const v = Math.max(15, Math.min(Number(e.target.value) || 15, totalDuration));
+                                            updateSlot(activeSlot, { duration: v });
+                                        }}
+                                        disabled={!splitMode}
+                                        className={clsx(
+                                            'w-full px-3 py-2 text-sm rounded-xl border',
+                                            splitMode
+                                                ? 'border-gray-200 focus:outline-none focus:border-unbox-green'
+                                                : 'border-gray-100 bg-gray-50 text-gray-500'
+                                        )}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Notes */}
+                            <div>
+                                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
+                                    Заметка к сессии
+                                </label>
+                                <textarea
+                                    value={currentSlot.notes}
+                                    onChange={e => updateSlot(activeSlot, { notes: e.target.value })}
+                                    placeholder="Тема сессии, подготовка..."
+                                    rows={2}
+                                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-unbox-green resize-none"
+                                />
+                            </div>
+                        </>
+                    )}
+
+                    {/* Summary for split mode */}
+                    {splitMode && slots.length > 1 && (
+                        <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
+                            <div className="text-xs font-semibold text-gray-500 uppercase">Итого слотов: {slots.length}</div>
+                            {slots.map((sl, idx) => {
+                                const c = clients.find(cc => cc.id === sl.clientId);
+                                return (
+                                    <div key={idx} className="flex justify-between text-xs text-gray-600">
+                                        <span>{slotStartTimes[idx]} — {c?.name || '(не выбран)'}</span>
+                                        <span>{sl.duration} мин · {sl.price || '0'} {c?.currency || 'GEL'}</span>
+                                    </div>
+                                );
+                            })}
+                            {remainingMinutes !== 0 && (
+                                <div className={clsx('text-xs font-medium', remainingMinutes > 0 ? 'text-amber-600' : 'text-red-600')}>
+                                    {remainingMinutes > 0 ? `⚠ Не распределено: ${remainingMinutes} мин` : `⚠ Превышение: ${Math.abs(remainingMinutes)} мин`}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer */}
-                <div className="flex gap-3 p-5 pt-0">
+                <div className="flex gap-3 p-5 pt-0 sticky bottom-0 bg-white rounded-b-2xl">
                     <button
                         onClick={onClose}
                         className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
@@ -252,11 +410,11 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                     </button>
                     <button
                         onClick={handleSubmit}
-                        disabled={saving || !selectedClientId}
+                        disabled={saving || slots.some(s => !s.clientId) || (splitMode && remainingMinutes < 0)}
                         className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        {existingSessionClientId ? 'Сохранить' : 'Создать сессию'}
+                        {existingSessionClientId ? 'Сохранить' : splitMode && slots.length > 1 ? `Создать ${slots.length} сессии` : 'Создать сессию'}
                     </button>
                 </div>
             </div>
@@ -432,41 +590,52 @@ export function CrmBookings() {
     }), [myBookings, sessionByBookingId, now]);
 
     const handleOpenModal = (booking: BookingHistoryItem, existingSessionId?: string, existingClientId?: string) => {
+        slotOffsetRef.current = 0; // Reset offset for new modal
         setModalBooking(booking);
         setModalExistingSessionId(existingSessionId);
         setModalExistingClientId(existingClientId);
     };
 
-    const handleLinkSession = async (clientId: string, price: number, notes: string) => {
+    // Track cumulative offset for split slots
+    const slotOffsetRef = useRef(0);
+
+    const handleLinkSession = async (clientId: string, price: number, notes: string, slotDuration?: number) => {
         if (!modalBooking) return;
 
         const { dateStr: bookingDate } = getSafeBookingDate(modalBooking);
         const timeStr = modalBooking.startTime && /^\d{2}:\d{2}/.test(modalBooking.startTime)
             ? modalBooking.startTime
             : '00:00';
-        const sessionDate = `${bookingDate || new Date().toISOString().split('T')[0]}T${timeStr}:00`;
+
+        // Calculate offset time for split slots
+        const [bh, bm] = timeStr.split(':').map(Number);
+        const totalMin = bh * 60 + bm + slotOffsetRef.current;
+        const h = Math.floor(totalMin / 60);
+        const m = totalMin % 60;
+        const offsetTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        const sessionDate = `${bookingDate || new Date().toISOString().split('T')[0]}T${offsetTime}:00`;
+        const dur = slotDuration || modalBooking.duration || 60;
 
         if (modalExistingSessionId) {
-            // Update existing session
             await useCrmStore.getState().updateSession(modalExistingSessionId, {
                 date: sessionDate,
-                durationMinutes: modalBooking.duration || 60,
+                durationMinutes: dur,
                 price: price || undefined,
                 notes: notes || undefined,
             });
             toast.success('Сессия обновлена');
         } else {
-            // Create new session
             await useCrmStore.getState().createSession({
                 clientId,
                 date: sessionDate,
-                durationMinutes: modalBooking.duration || 60,
+                durationMinutes: dur,
                 price: price || undefined,
                 notes: notes || undefined,
                 bookingId: modalBooking.id,
                 isBooked: true,
             });
-            toast.success('Сессия создана и привязана к бронированию');
+            // Accumulate offset for next slot in split mode
+            slotOffsetRef.current += dur;
         }
 
         // Refresh sessions
