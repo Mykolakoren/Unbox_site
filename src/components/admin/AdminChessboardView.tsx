@@ -700,29 +700,42 @@ export function AdminChessboardView() {
                         />
                     </div>
 
-                    {/* Actions (only for active bookings) */}
-                    {selectedBooking.status === 'confirmed' && (
-                        <div className="px-3 pb-3 grid grid-cols-3 gap-1.5">
-                            <button
-                                onClick={() => handleEditPrice(selectedBooking)}
-                                className="py-1.5 text-xs font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark transition-colors"
-                            >
-                                Цена
-                            </button>
-                            <button
-                                onClick={() => handleToggleReRent(selectedBooking)}
-                                className="py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
-                            >
-                                {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
-                            </button>
-                            <button
-                                onClick={() => handleCancel(selectedBooking.id)}
-                                className="py-1.5 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
-                            >
-                                Отмена
-                            </button>
-                        </div>
-                    )}
+                    {/* Actions */}
+                    {selectedBooking.status === 'confirmed' && (() => {
+                        const [bh, bm] = (selectedBooking.startTime || '00:00').split(':').map(Number);
+                        const bookEnd = new Date(selectedBooking.date);
+                        bookEnd.setHours(bh, bm + (selectedBooking.duration || 60), 0, 0);
+                        const isPastB = bookEnd < new Date();
+
+                        return isPastB ? (
+                            <div className="px-3 pb-3">
+                                <div className="py-1.5 text-xs font-medium rounded-lg bg-gray-50 text-gray-500 text-center border border-gray-200">
+                                    ☑️ Завершено
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="px-3 pb-3 grid grid-cols-3 gap-1.5">
+                                <button
+                                    onClick={() => handleEditPrice(selectedBooking)}
+                                    className="py-1.5 text-xs font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark transition-colors"
+                                >
+                                    Цена
+                                </button>
+                                <button
+                                    onClick={() => handleToggleReRent(selectedBooking)}
+                                    className="py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
+                                >
+                                    {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
+                                </button>
+                                <button
+                                    onClick={() => handleCancel(selectedBooking.id)}
+                                    className="py-1.5 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                                >
+                                    Отмена
+                                </button>
+                            </div>
+                        );
+                    })()}
                 </div>
             )}
         </div>

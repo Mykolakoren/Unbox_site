@@ -1035,19 +1035,33 @@ function BookingsChessboard({
                                 Убрать с переаренды
                             </button>
                         </div>
-                    ) : (
-                        <div className="flex flex-col gap-2 pt-1">
-                            <div className="text-[11px] text-unbox-grey text-center italic">
-                                Менее 24ч до начала — бесплатная отмена недоступна
+                    ) : (() => {
+                        // Check if booking is in the past
+                        const [bh, bm] = (activeBooking.startTime || '00:00').split(':').map(Number);
+                        const bookStart = new Date(activeBooking.date);
+                        bookStart.setHours(bh, bm + (activeBooking.duration || 60), 0, 0);
+                        const isPastBooking = bookStart < new Date();
+
+                        return isPastBooking ? (
+                            <div className="pt-1">
+                                <div className="bg-gray-50 rounded-xl p-2.5 text-xs text-center text-gray-500 border border-gray-200 font-medium">
+                                    ☑️ Бронирование завершено
+                                </div>
                             </div>
-                            <button
-                                onClick={() => { setActiveBooking(null); onReRent(activeBooking.id); }}
-                                className="w-full py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
-                            >
-                                ♻️ Выставить на переаренду
-                            </button>
-                        </div>
-                    )}
+                        ) : (
+                            <div className="flex flex-col gap-2 pt-1">
+                                <div className="text-[11px] text-unbox-grey text-center italic">
+                                    Менее 24ч до начала — бесплатная отмена недоступна
+                                </div>
+                                <button
+                                    onClick={() => { setActiveBooking(null); onReRent(activeBooking.id); }}
+                                    className="w-full py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
+                                >
+                                    ♻️ Выставить на переаренду
+                                </button>
+                            </div>
+                        );
+                    })()}
                 </div>
             )}
 
