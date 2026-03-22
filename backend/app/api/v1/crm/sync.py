@@ -237,9 +237,11 @@ def sync_client_history(
         sessions_data = _sync_client(
             calendar_id=calendar_id,
             client_id=client_id,
-            alias_code=client.alias_code,
+            alias_code=client.alias_code or "",
             years_back=effective_years_back,
             months_forward=months_forward,
+            extra_alias_codes=getattr(client, 'merged_alias_codes', None) or [],
+            client_name=client.name,
         )
     except Exception as e:
         raise HTTPException(500, f"Google Calendar error: {e}")

@@ -21,6 +21,7 @@ class TherapistClientBase(SQLModel):
     is_active: bool = Field(default=True, index=True)
     pipeline_status: str = Field(default="ACTIVE", index=True)  # LEAD, ACTIVE, VIP, SLEEPING, INACTIVE
     tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    merged_alias_codes: List[str] = Field(default_factory=list, sa_column=Column(JSON))  # alias codes from merged clients
     notes_text: Optional[str] = None  # Quick notes field
 
 

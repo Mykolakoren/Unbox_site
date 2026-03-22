@@ -69,6 +69,15 @@ def merge_clients(
         all_tags.update(src.tags or [])
     target.tags = list(all_tags) if all_tags else []
 
+    # Preserve alias codes from merged clients for sync
+    merged_codes = set(target.merged_alias_codes or [])
+    if target.alias_code:
+        merged_codes.add(target.alias_code)
+    for src in sources:
+        if src.alias_code:
+            merged_codes.add(src.alias_code)
+    target.merged_alias_codes = list(merged_codes)
+
     target.updated_at = datetime.utcnow()
     session.add(target)
 

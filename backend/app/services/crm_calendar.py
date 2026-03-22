@@ -263,10 +263,12 @@ def sync_client_history(
     alias_code: str,
     years_back: float = 5,
     months_forward: int = 3,
+    extra_alias_codes: list = None,
+    client_name: str = None,
 ) -> list:
     """
-    Fetch all events for a specific client by alias code.
-    Returns list of session dicts ready for DB insert.
+    Fetch events for a specific client by alias codes and/or name.
+    Supports merged clients with multiple alias codes.
     """
     now = datetime.now(timezone.utc)
     time_min = now - timedelta(days=int(years_back * 365))
@@ -274,10 +276,40 @@ def sync_client_history(
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)
 
+    # Build set of all alias codes to match
+    all_codes = set()
+    if alias_code:
+        all_codes.add(alias_code)
+    if extra_alias_codes:
+        all_codes.update(extra_alias_codes)
+
+    # Normalize client name for fuzzy matching
+    name_lower = client_name.strip().lower() if client_name else None
+    # Remove @ prefix for matching
+    if name_lower and name_lower.startswith('@'):
+        name_lower = name_lower[1:]
+
     sessions = []
     for ev in events:
         summary = ev.get("summary", "")
-        if _extract_alias_code(summary) != alias_code:
+        event_code = _extract_alias_code(summary)
+
+        # Match by alias code first
+        matched = event_code in all_codes if event_code and all_codes else False
+
+        # If no alias match and we have a name, try name matching
+        if not matched and name_lower and summary:
+            clean = re.sub(r"#\d{4}", "", summary).strip().lower()
+            # Only match if the summary looks like a client name (not a meeting/event)
+            # Skip entries with common non-client keywords
+            skip_keywords = ['встреча', 'созвон', 'стрижка', 'ремонт', 'партнер', 'neo school',
+                             'cancelled', 'online session', 'telemed', 'бип', 'актёрск',
+                             'стратсессия', 'информация', 'супервизия', 'отвезти', 'заполнить',
+                             'нова подія', 'rust', 'http']
+            if not any(kw in clean for kw in skip_keywords):
+                matched = name_lower in clean or clean in name_lower
+
+        if not matched:
             continue
 
         start_dt = _parse_event_dt(ev.get("start", {}))
