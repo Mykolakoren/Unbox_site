@@ -156,19 +156,26 @@ def quick_pay_session(
     if not client:
         raise HTTPException(404, "Client not found")
 
-    price = ts.price if ts.price is not None else client.base_price
+    price = ts.price if ts.price is not None else client.base_price or 0
     account = payload.get("account") or client.default_account
 
-    payment = TherapistPayment(
-        client_id=client.id,
-        specialist_id=str(current_user.id),
-        amount=price,
-        currency=client.currency,
-        account=account,
-        date=ts.date,
-        session_id=ts.id,
-    )
-    session.add(payment)
+    # Update session price if it was NULL (use client's current base_price)
+    if ts.price is None and client.base_price:
+        ts.price = client.base_price
+        price = client.base_price
+
+    # Create payment record only if amount > 0
+    if price and price > 0:
+        payment = TherapistPayment(
+            client_id=client.id,
+            specialist_id=str(current_user.id),
+            amount=price,
+            currency=client.currency,
+            account=account,
+            date=ts.date,
+            session_id=ts.id,
+        )
+        session.add(payment)
 
     ts.is_paid = True
     ts.updated_at = datetime.utcnow()
@@ -232,17 +239,23 @@ def mark_all_sessions_paid(
 
     count = 0
     for ts in unpaid:
-        price = ts.price if ts.price is not None else client.base_price
-        payment = TherapistPayment(
-            client_id=client.id,
-            specialist_id=uid,
-            amount=price,
-            currency=client.currency,
-            account=client.default_account,
-            date=ts.date,
-            session_id=ts.id,
-        )
-        session.add(payment)
+        price = ts.price if ts.price is not None else client.base_price or 0
+        # Fill session price from client base_price if NULL
+        if ts.price is None and client.base_price:
+            ts.price = client.base_price
+            price = client.base_price
+        # Create payment only if amount > 0
+        if price and price > 0:
+            payment = TherapistPayment(
+                client_id=client.id,
+                specialist_id=uid,
+                amount=price,
+                currency=client.currency,
+                account=client.default_account,
+                date=ts.date,
+                session_id=ts.id,
+            )
+            session.add(payment)
         ts.is_paid = True
         ts.updated_at = datetime.utcnow()
         session.add(ts)
