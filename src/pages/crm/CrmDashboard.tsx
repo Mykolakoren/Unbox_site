@@ -9,10 +9,6 @@ import {
     Clock,
     ChevronRight,
     Loader2,
-    RefreshCw,
-    Settings,
-    Check,
-    X,
     Wallet,
     BarChart3,
     UserX,
@@ -23,7 +19,7 @@ import {
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { crmApi, type CrmSyncResult } from '../../api/crm';
+import { crmApi } from '../../api/crm';
 import { toast } from 'sonner';
 
 const STATUS_COLORS: Record<string, string> = {
