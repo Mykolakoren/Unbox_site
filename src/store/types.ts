@@ -90,7 +90,7 @@ export interface Task {
 export interface BookingHistoryItem extends BookingState {
     id: string;
     userId: string;
-    status: 'confirmed' | 'cancelled' | 'completed' | 're-rented' | 'rescheduled' | 'no_show';
+    status: 'confirmed' | 'cancelled' | 'completed' | 're-rented' | 'rescheduled' | 'no_show' | 'pending_approval';
     createdAt: string;
     finalPrice: number;
     paymentSource?: 'subscription' | 'deposit' | 'credit';

@@ -50,7 +50,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
     addBooking: async (bookingData) => {
         const state = get();
         const currentUser = state.currentUser;
-        if (!currentUser) return;
+        if (!currentUser) return null;
 
         try {
             const newBooking = await bookingsApi.createBooking({
@@ -63,6 +63,8 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             // Fetch updated user to reflect balance/subscription changes from backend
             await get().fetchCurrentUser();
+
+            return newBooking;
 
         } catch (error) {
             console.error("Failed to create booking", error);

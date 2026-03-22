@@ -94,4 +94,20 @@ export const bookingsApi = {
         const response = await api.patch<any>(`/bookings/${bookingId}/re-rent`);
         return mapToFrontend(response.data);
     },
+
+    // Hot booking approval
+    getPendingApprovals: async (): Promise<BookingHistoryItem[]> => {
+        const response = await api.get<any[]>('/bookings/pending-approval');
+        return response.data.map(mapToFrontend);
+    },
+
+    approveBooking: async (bookingId: string): Promise<BookingHistoryItem> => {
+        const response = await api.post<any>(`/bookings/${bookingId}/approve`);
+        return mapToFrontend(response.data);
+    },
+
+    rejectBooking: async (bookingId: string): Promise<BookingHistoryItem> => {
+        const response = await api.post<any>(`/bookings/${bookingId}/reject`);
+        return mapToFrontend(response.data);
+    },
 };

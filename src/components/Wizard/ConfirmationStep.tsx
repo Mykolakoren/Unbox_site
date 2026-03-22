@@ -397,14 +397,24 @@ export function ConfirmationStep() {
 
                 setConfirmed(true);
                 shouldResetOnUnmount.current = true;
-                toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
 
-                // Navigate after showing success screen; reset happens in useEffect cleanup on unmount
-                // Pass the booking date so the chessboard opens on the correct day
+                // Check if booking is pending approval (hot booking) by checking store
+                const latestBookings = useUserStore.getState().bookings;
+                const isPending = latestBookings.some(b =>
+                    b.status === 'pending_approval' || (b as any).status === 'pendingApproval'
+                );
+
+                if (isPending) {
+                    toast.info('🕐 Запрос на горячую бронь отправлен администратору. Вы получите уведомление.');
+                } else {
+                    toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
+                }
+
+                // Navigate after showing success screen
                 const bookingDate = state.date instanceof Date ? state.date.toISOString() : new Date(state.date).toISOString();
                 setTimeout(() => {
                     navigate('/dashboard/bookings', { state: { targetDate: bookingDate } });
-                }, 2000);
+                }, isPending ? 3000 : 2000);
             } else {
                 toast.error("Ошибка создания бронирования: не удалось сформировать данные.");
             }

@@ -399,6 +399,29 @@ def create_booking(
         booking_in.discount_percent = quote.discount_percent
         booking_in.hours_deducted = quote.hours_deducted
 
+        # ── Hot Booking Approval Gate ──
+        # If booking is within 12 hours AND user is NOT admin/owner → require admin approval
+        HOT_BOOKING_THRESHOLD_HOURS = 12
+        is_admin_or_above = current_user.role in ("admin", "senior_admin", "owner")
+        is_hot = quote.applied_rule == "HOT_BOOKING"
+
+        if is_hot and not is_admin_or_above:
+            # Don't deduct balance — set status to pending_approval
+            # Revert balance deduction that happened above
+            if booking_in.payment_method != "subscription":
+                booking_owner.balance += quote.final_price  # undo deduction
+            else:
+                # Undo subscription deduction
+                if booking_owner.subscription:
+                    new_sub = booking_owner.subscription.copy()
+                    rem = new_sub.get("remaining_hours", 0)
+                    used = new_sub.get("used_hours", 0)
+                    new_sub["remaining_hours"] = float(rem) + quote.hours_deducted
+                    new_sub["used_hours"] = max(0, float(used) - quote.hours_deducted)
+                    booking_owner.subscription = new_sub
+
+            booking_in.status = "pending_approval"
+
         session.add(booking_owner)
 
         booking_data = booking_in.dict()
@@ -408,7 +431,6 @@ def create_booking(
             del booking_data["target_user_id"]
 
         booking = Booking(**booking_data)
-        # hours_deducted already set from quote via booking_data (line 252)
 
         session.add(booking)
         session.commit()
@@ -815,6 +837,116 @@ def toggle_re_rent(
         )
 
     booking.is_re_rent_listed = not booking.is_re_rent_listed
+    booking.updated_at = datetime.utcnow()
+
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+
+    return enrich_booking_status(booking)
+
+
+# ─── Hot Booking Approval ────────────────────────────────────────────────────
+
+@router.get("/pending-approval", response_model=List[BookingRead])
+def list_pending_approvals(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """List all bookings pending admin approval (hot bookings)."""
+    pending = session.exec(
+        select(Booking).where(Booking.status == "pending_approval")
+        .order_by(Booking.created_at.desc())
+    ).all()
+    return [enrich_booking_status(b) for b in pending]
+
+
+@router.post("/{booking_id}/approve", response_model=BookingRead)
+def approve_booking(
+    booking_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Admin approves a pending hot booking — deduct payment and confirm."""
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status != "pending_approval":
+        raise HTTPException(status_code=400, detail="Booking is not pending approval")
+
+    # Check availability again
+    is_available, reason = check_availability(
+        session=session,
+        resource_id=booking.resource_id,
+        date=booking.date,
+        start_time=booking.start_time,
+        duration=booking.duration,
+        exclude_booking_id=str(booking.id),
+    )
+    if not is_available:
+        raise HTTPException(status_code=400, detail=f"Slot no longer available: {reason}")
+
+    # Deduct payment now
+    b_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
+    if b_owner:
+        if booking.payment_method == "subscription":
+            if b_owner.subscription:
+                new_sub = b_owner.subscription.copy()
+                rem = new_sub.get("remaining_hours", 0)
+                used = new_sub.get("used_hours", 0)
+                new_sub["remaining_hours"] = max(0, float(rem) - (booking.hours_deducted or 0))
+                new_sub["used_hours"] = float(used) + (booking.hours_deducted or 0)
+                b_owner.subscription = new_sub
+        else:
+            b_owner.balance -= booking.final_price
+        session.add(b_owner)
+
+    booking.status = "confirmed"
+    booking.updated_at = datetime.utcnow()
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+
+    # GCal sync
+    try:
+        event_id = gcal_service.create_event(booking)
+        if event_id:
+            booking.gcal_event_id = event_id
+            session.add(booking)
+            session.commit()
+            session.refresh(booking)
+    except Exception:
+        pass
+
+    return enrich_booking_status(booking)
+
+
+@router.post("/{booking_id}/reject", response_model=BookingRead)
+def reject_booking(
+    booking_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Admin rejects a pending hot booking."""
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status != "pending_approval":
+        raise HTTPException(status_code=400, detail="Booking is not pending approval")
+
+    booking.status = "cancelled"
+    booking.cancellation_reason = f"Rejected by admin: {current_user.name}"
+    booking.cancelled_by = f"admin:{current_user.email}"
     booking.updated_at = datetime.utcnow()
 
     session.add(booking)
