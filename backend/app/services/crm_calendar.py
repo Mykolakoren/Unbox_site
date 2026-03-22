@@ -261,15 +261,16 @@ def sync_client_history(
     calendar_id: str,
     client_id: str,
     alias_code: str,
-    years_back: int = 5,
+    years_back: float = 5,
+    months_forward: int = 3,
 ) -> list:
     """
     Fetch all events for a specific client by alias code.
     Returns list of session dicts ready for DB insert.
     """
     now = datetime.now(timezone.utc)
-    time_min = now - timedelta(days=years_back * 365)
-    time_max = now + timedelta(days=365)
+    time_min = now - timedelta(days=int(years_back * 365))
+    time_max = now + timedelta(days=months_forward * 30)
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)
 

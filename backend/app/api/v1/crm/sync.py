@@ -212,8 +212,10 @@ def sync_client_history(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
     years_back: int = Query(5),
+    months_back: int = Query(None, description="Override: months back from now"),
+    months_forward: int = Query(3, description="Months forward from now"),
 ):
-    """Import full session history for a specific client from Google Calendar."""
+    """Import session history for a specific client from Google Calendar."""
     from app.services.crm_calendar import sync_client_history as _sync_client
 
     client = session.get(TherapistClient, client_id)
@@ -226,12 +228,18 @@ def sync_client_history(
     if not calendar_id:
         raise HTTPException(400, "Google Calendar not configured.")
 
+    # Convert months_back to years_back if provided
+    effective_years_back = years_back
+    if months_back is not None:
+        effective_years_back = max(1, months_back) / 12.0  # fractional years
+
     try:
         sessions_data = _sync_client(
             calendar_id=calendar_id,
             client_id=client_id,
             alias_code=client.alias_code,
-            years_back=years_back,
+            years_back=effective_years_back,
+            months_forward=months_forward,
         )
     except Exception as e:
         raise HTTPException(500, f"Google Calendar error: {e}")

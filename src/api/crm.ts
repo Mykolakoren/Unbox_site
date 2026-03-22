@@ -390,8 +390,11 @@ export const crmApi = {
         return response.data;
     },
 
-    syncClientHistory: async (clientId: string): Promise<{ totalFound: number; created: number }> => {
-        const response = await api.post(`/crm/clients/${clientId}/sync-history`);
+    syncClientHistory: async (clientId: string, monthsBack?: number, monthsForward?: number): Promise<{ totalFound: number; created: number }> => {
+        const params: Record<string, number> = {};
+        if (monthsBack !== undefined) params.months_back = monthsBack;
+        if (monthsForward !== undefined) params.months_forward = monthsForward;
+        const response = await api.post(`/crm/clients/${clientId}/sync-history`, null, { params });
         return response.data;
     },
 

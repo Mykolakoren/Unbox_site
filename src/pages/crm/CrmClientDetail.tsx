@@ -47,6 +47,10 @@ export function CrmClientDetail() {
     const [sessionNoteTags, setSessionNoteTags] = useState('');
     const [savingSessionNote, setSavingSessionNote] = useState(false);
     const [markingAll, setMarkingAll] = useState(false);
+    const [showSyncPicker, setShowSyncPicker] = useState(false);
+    const [syncMonthsBack, setSyncMonthsBack] = useState(1);
+    const [syncMonthsForward, setSyncMonthsForward] = useState(1);
+    const [syncing, setSyncing] = useState(false);
     const [editingProfile, setEditingProfile] = useState(false);
     const [editForm, setEditForm] = useState({
         name: '', phone: '', email: '', telegram: '', aliasCode: '', basePrice: '', currency: 'GEL', defaultAccount: 'cash', tags: '',
@@ -582,23 +586,75 @@ export function CrmClientDetail() {
                                 <Calendar className="w-5 h-5 text-gray-400" />
                                 История сессий
                             </h2>
-                            <button
-                                onClick={async () => {
-                                    try {
-                                        const r = await crmApi.autoCompleteSessions();
-                                        if (r.autoCompleted > 0) {
-                                            toast.success(`Завершено автоматически: ${r.autoCompleted}`);
-                                            loadData();
-                                        } else {
-                                            toast.info('Нет сессий для автозавершения');
-                                        }
-                                    } catch { toast.error('Ошибка'); }
-                                }}
-                                className="flex items-center gap-1.5 text-sm text-unbox-grey hover:text-unbox-dark font-medium transition-colors"
-                            >
-                                <RefreshCw className="w-4 h-4" />
-                                Синхронизировать историю
-                            </button>
+                            <div className="relative">
+                                <button
+                                    onClick={() => setShowSyncPicker(!showSyncPicker)}
+                                    disabled={syncing}
+                                    className="flex items-center gap-1.5 text-sm text-unbox-grey hover:text-unbox-dark font-medium transition-colors"
+                                >
+                                    {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                    Синхронизировать историю
+                                </button>
+                                {showSyncPicker && (
+                                    <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl border border-unbox-light shadow-xl z-50 p-4 space-y-3 animate-in fade-in slide-in-from-top-2">
+                                        <div className="text-sm font-medium text-unbox-dark">Период синхронизации</div>
+                                        <div>
+                                            <label className="text-xs text-gray-500 mb-1 block">Назад</label>
+                                            <select
+                                                value={syncMonthsBack}
+                                                onChange={e => setSyncMonthsBack(Number(e.target.value))}
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                            >
+                                                <option value={1}>1 месяц</option>
+                                                <option value={3}>3 месяца</option>
+                                                <option value={6}>6 месяцев</option>
+                                                <option value={12}>1 год</option>
+                                                <option value={24}>2 года</option>
+                                                <option value={60}>5 лет</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-500 mb-1 block">Вперёд</label>
+                                            <select
+                                                value={syncMonthsForward}
+                                                onChange={e => setSyncMonthsForward(Number(e.target.value))}
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                            >
+                                                <option value={1}>1 месяц</option>
+                                                <option value={3}>3 месяца</option>
+                                                <option value={6}>6 месяцев</option>
+                                                <option value={12}>1 год</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setShowSyncPicker(false)}
+                                                className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
+                                            >
+                                                Отмена
+                                            </button>
+                                            <button
+                                                onClick={async () => {
+                                                    setSyncing(true);
+                                                    setShowSyncPicker(false);
+                                                    try {
+                                                        const r = await crmApi.syncClientHistory(clientId!, syncMonthsBack, syncMonthsForward);
+                                                        toast.success(`Найдено: ${r.totalFound}, создано: ${r.created}`);
+                                                        loadData();
+                                                    } catch (err: any) {
+                                                        toast.error(err?.response?.data?.detail || 'Ошибка синхронизации');
+                                                    } finally {
+                                                        setSyncing(false);
+                                                    }
+                                                }}
+                                                className="flex-1 px-3 py-2 text-sm bg-unbox-green text-white rounded-lg hover:bg-unbox-dark font-medium"
+                                            >
+                                                Синхронизировать
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {pastSessions.length === 0 ? (
