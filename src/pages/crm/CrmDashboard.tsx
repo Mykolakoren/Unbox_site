@@ -43,12 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
 export function CrmDashboard() {
     const { dashboard, fetchDashboard, loading } = useCrmStore();
     const navigate = useNavigate();
-    const [calendarId, setCalendarId] = useState<string>('');
     const [calendarIdSaved, setCalendarIdSaved] = useState<string | null>(null);
-    const [showCalendarSettings, setShowCalendarSettings] = useState(false);
-    const [syncing, setSyncing] = useState(false);
-    const [syncResult, setSyncResult] = useState<CrmSyncResult | null>(null);
-    const [savingSettings, setSavingSettings] = useState(false);
 
     useEffect(() => {
         // Auto-complete past PLANNED sessions, then load dashboard
@@ -61,45 +56,8 @@ export function CrmDashboard() {
         });
         crmApi.getSettings().then((s) => {
             setCalendarIdSaved(s.calendarId);
-            setCalendarId(s.calendarId ?? '');
         }).catch(() => {});
     }, [fetchDashboard]);
-
-    const handleSaveCalendarId = async () => {
-        setSavingSettings(true);
-        try {
-            await crmApi.updateSettings(calendarId || null);
-            setCalendarIdSaved(calendarId || null);
-            toast.success('Календарь сохранён');
-            setShowCalendarSettings(false);
-        } catch {
-            toast.error('Ошибка сохранения');
-        } finally {
-            setSavingSettings(false);
-        }
-    };
-
-    const handleSync = async () => {
-        if (!calendarIdSaved) {
-            setShowCalendarSettings(true);
-            return;
-        }
-        setSyncing(true);
-        setSyncResult(null);
-        try {
-            const result = await crmApi.syncFromCalendar(false);
-            setSyncResult(result);
-            if (result.created > 0 || result.autoCreatedClients > 0) fetchDashboard();
-            const parts: string[] = [];
-            if (result.autoCreatedClients > 0) parts.push(`${result.autoCreatedClients} клиентов создано`);
-            if (result.created > 0) parts.push(`${result.created} сессий импортировано`);
-            toast.success(parts.length > 0 ? parts.join(', ') : 'Синхронизация завершена — ничего нового');
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка синхронизации');
-        } finally {
-            setSyncing(false);
-        }
-    };
 
     if (loading && !dashboard) {
         return (
