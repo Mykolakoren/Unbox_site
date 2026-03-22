@@ -182,6 +182,17 @@ def sync_from_calendar(
                 updated += 1
             continue
 
+        # Also check by client_id + date to prevent duplicates
+        existing_by_date = session.exec(
+            select(TherapySession).where(
+                TherapySession.client_id == entry["client_id"],
+                TherapySession.specialist_id == uid,
+                TherapySession.date == entry["date"],
+            )
+        ).first()
+        if existing_by_date:
+            continue
+
         ts = TherapySession(
             client_id=entry["client_id"],
             specialist_id=uid,
@@ -249,6 +260,7 @@ def sync_client_history(
     uid = str(current_user.id)
     created = 0
     for entry in sessions_data:
+        # Check by google_event_id
         existing = session.exec(
             select(TherapySession).where(
                 TherapySession.google_event_id == entry["google_event_id"],
@@ -256,6 +268,16 @@ def sync_client_history(
             )
         ).first()
         if existing:
+            continue
+        # Also check by client_id + date to prevent duplicates from name matching
+        existing_by_date = session.exec(
+            select(TherapySession).where(
+                TherapySession.client_id == entry["client_id"],
+                TherapySession.specialist_id == uid,
+                TherapySession.date == entry["date"],
+            )
+        ).first()
+        if existing_by_date:
             continue
         ts = TherapySession(**entry, specialist_id=uid)
         session.add(ts)
