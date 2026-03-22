@@ -15,6 +15,7 @@ import {
     ChevronDown,
     LayoutGrid,
     List,
+    RefreshCw,
 } from 'lucide-react';
 import {
     format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
@@ -23,6 +24,7 @@ import {
 import { ru } from 'date-fns/locale';
 import { AccountSelect } from '../../components/crm/AccountSelect';
 import { toast } from 'sonner';
+import { crmApi } from '../../api/crm';
 import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient } from '../../api/crm';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 
@@ -64,6 +66,11 @@ export function CrmSessions() {
     const [showForm, setShowForm] = useState(false);
     const [prefillDate, setPrefillDate] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [showSyncModal, setShowSyncModal] = useState(false);
+    const [syncing, setSyncing] = useState(false);
+    const [syncMonthsBack, setSyncMonthsBack] = useState(0); // 0 = current month only
+    const [syncMonthsForward, setSyncMonthsForward] = useState(1);
+    const [syncResult, setSyncResult] = useState<any>(null);
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
@@ -136,6 +143,23 @@ export function CrmSessions() {
         return { total, completed, unpaid, revenue };
     }, [sessions, monthStart, monthEnd]);
 
+    const handleSync = async (dryRun = false) => {
+        setSyncing(true);
+        setSyncResult(null);
+        try {
+            const result = await crmApi.syncFromCalendar(dryRun, syncMonthsBack, syncMonthsForward);
+            setSyncResult(result);
+            if (!dryRun) {
+                toast.success(`Синхронизировано: ${result.created || 0} новых, ${result.updated || 0} обновлённых`);
+                fetchSessions({ dateFrom, dateTo });
+            }
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Ошибка синхронизации');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Header */}
@@ -174,6 +198,13 @@ export function CrmSessions() {
                             Шахматка
                         </button>
                     </div>
+                    <button
+                        onClick={() => setShowSyncModal(true)}
+                        className="flex items-center gap-2 px-3 py-2.5 border border-unbox-light text-unbox-dark rounded-xl font-medium text-sm hover:bg-unbox-light/50 transition-colors"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        <span className="hidden sm:inline">Синхронизация</span>
+                    </button>
                     <button
                         onClick={() => { setPrefillDate(null); setShowForm(true); }}
                         className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
@@ -340,6 +371,87 @@ export function CrmSessions() {
                     )}
                 </div>
             ))}
+
+            {/* Sync Modal */}
+            {showSyncModal && (
+                <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowSyncModal(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 space-y-5">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-bold text-unbox-dark flex items-center gap-2">
+                                    <RefreshCw className="w-5 h-5 text-unbox-green" />
+                                    Синхронизация с Google Calendar
+                                </h3>
+                                <button onClick={() => setShowSyncModal(false)} className="text-gray-400 hover:text-gray-600">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Период назад (месяцев)</label>
+                                    <select
+                                        value={syncMonthsBack}
+                                        onChange={e => setSyncMonthsBack(Number(e.target.value))}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    >
+                                        <option value={0}>Только текущий месяц</option>
+                                        <option value={1}>1 месяц назад</option>
+                                        <option value={3}>3 месяца назад</option>
+                                        <option value={6}>6 месяцев назад</option>
+                                        <option value={12}>1 год назад</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Период вперёд (месяцев)</label>
+                                    <select
+                                        value={syncMonthsForward}
+                                        onChange={e => setSyncMonthsForward(Number(e.target.value))}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    >
+                                        <option value={1}>1 месяц вперёд</option>
+                                        <option value={2}>2 месяца вперёд</option>
+                                        <option value={3}>3 месяца вперёд</option>
+                                        <option value={6}>6 месяцев вперёд</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {syncResult && (
+                                <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1">
+                                    <div className="font-medium text-unbox-dark mb-2">Результат:</div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Всего событий</span><span className="font-medium">{syncResult.totalEvents ?? 0}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Сопоставлено</span><span className="font-medium">{syncResult.matched ?? 0}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Создано новых</span><span className="font-medium text-green-600">{syncResult.created ?? 0}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Обновлено</span><span className="font-medium">{syncResult.updated ?? 0}</span></div>
+                                    {(syncResult.autoCreatedClients ?? 0) > 0 && (
+                                        <div className="flex justify-between"><span className="text-gray-500">Новых клиентов</span><span className="font-medium text-blue-600">{syncResult.autoCreatedClients}</span></div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => handleSync(true)}
+                                    disabled={syncing}
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-unbox-light text-unbox-dark rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                                >
+                                    {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                    Предпросмотр
+                                </button>
+                                <button
+                                    onClick={() => handleSync(false)}
+                                    disabled={syncing}
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl text-sm font-medium hover:bg-unbox-dark disabled:opacity-50 transition-colors"
+                                >
+                                    {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                    Синхронизировать
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

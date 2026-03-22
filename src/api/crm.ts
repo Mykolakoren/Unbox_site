@@ -383,9 +383,9 @@ export const crmApi = {
     },
 
     // Google Calendar Sync
-    syncFromCalendar: async (dryRun = false): Promise<CrmSyncResult> => {
+    syncFromCalendar: async (dryRun = false, monthsBack = 1, monthsForward = 1): Promise<CrmSyncResult> => {
         const response = await api.post('/crm/sync/calendar', null, {
-            params: { dry_run: dryRun },
+            params: { dry_run: dryRun, months_back: monthsBack, months_forward: monthsForward },
         });
         return response.data;
     },

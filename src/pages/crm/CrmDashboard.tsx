@@ -268,101 +268,22 @@ export function CrmDashboard() {
                 </div>
             )}
 
-            {/* Google Calendar Sync */}
-            <div className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5">
-                <div className="flex items-center justify-between mb-3">
+            {/* Google Calendar — compact info (sync moved to Sessions tab) */}
+            {calendarIdSaved && (
+                <div className="bg-white rounded-2xl border border-unbox-light shadow-sm p-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <Calendar className="w-5 h-5 text-unbox-grey" />
-                        <h2 className="font-bold">Синхронизация с Google Calendar</h2>
-                        {calendarIdSaved && (
-                            <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Настроен</span>
-                        )}
+                        <Calendar className="w-5 h-5 text-unbox-green" />
+                        <span className="text-sm font-medium text-unbox-dark">Google Calendar подключён</span>
+                        <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Активен</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setShowCalendarSettings(!showCalendarSettings)}
-                            className="p-1.5 hover:bg-unbox-light/50 rounded-lg text-unbox-grey transition-colors"
-                            title="Настройки календаря"
-                        >
-                            <Settings className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={handleSync}
-                            disabled={syncing}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-unbox-green text-white text-sm font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors"
-                        >
-                            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                            Синхронизировать
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => navigate('/crm/sessions')}
+                        className="text-xs text-unbox-green hover:underline"
+                    >
+                        Синхронизация →
+                    </button>
                 </div>
-
-                {showCalendarSettings && (
-                    <div className="mb-4 p-4 bg-unbox-light/30 rounded-xl space-y-3 animate-in fade-in slide-in-from-top-2">
-                        <p className="text-sm text-unbox-grey">
-                            Укажи ID своего Google Calendar. Найти можно в настройках календаря → «Интеграция с другими приложениями».
-                            Сервис-аккаунт <code className="text-xs bg-white px-1 py-0.5 rounded">psycrm-bot@psycrm-calendar.iam.gserviceaccount.com</code> уже имеет доступ к твоему календарю.
-                        </p>
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={calendarId}
-                                onChange={(e) => setCalendarId(e.target.value)}
-                                placeholder="koren.nikolas@gmail.com или ID@group.calendar.google.com"
-                                className="flex-1 px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                            />
-                            <button
-                                onClick={handleSaveCalendarId}
-                                disabled={savingSettings}
-                                className="flex items-center gap-1 px-3 py-2 bg-unbox-green text-white text-sm rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors"
-                            >
-                                {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                                Сохранить
-                            </button>
-                            <button
-                                onClick={() => setShowCalendarSettings(false)}
-                                className="p-2 hover:bg-unbox-light/50 rounded-xl text-unbox-grey"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {syncResult && (
-                    <div className="p-3 bg-green-50 rounded-xl text-sm animate-in fade-in">
-                        <div className="flex items-center gap-2 font-medium text-green-700 mb-1">
-                            <Check className="w-4 h-4" /> Синхронизация завершена
-                        </div>
-                        <div className="text-green-600 space-y-0.5">
-                            <div>Всего событий в календаре: <b>{syncResult.totalEvents}</b></div>
-                            <div>Совпало с клиентами: <b>{syncResult.matched}</b></div>
-                            {syncResult.autoCreatedClients > 0 && (
-                                <div className="text-blue-600">Автосозданных клиентов: <b>{syncResult.autoCreatedClients}</b></div>
-                            )}
-                            <div>Создано сессий: <b>{syncResult.created}</b></div>
-                            {syncResult.updated > 0 && <div>Обновлено (перенос): <b>{syncResult.updated}</b></div>}
-                            {syncResult.unmatched > 0 && (
-                                <div className="text-orange-600">
-                                    Не распознано: <b>{syncResult.unmatched}</b>
-                                    {syncResult.unmatchedSummaries.length > 0 && (
-                                        <span className="ml-1 text-xs">({syncResult.unmatchedSummaries.slice(0, 3).join(', ')}...)</span>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {!calendarIdSaved && !showCalendarSettings && (
-                    <p className="text-sm text-unbox-grey">
-                        Настрой ID календаря чтобы импортировать сессии из Google Calendar.
-                        <button onClick={() => setShowCalendarSettings(true)} className="ml-1 text-unbox-green hover:underline">
-                            Настроить →
-                        </button>
-                    </p>
-                )}
-            </div>
+            )}
 
             {/* Upcoming Sessions */}
             <div className="bg-white rounded-2xl border border-unbox-light shadow-sm">
