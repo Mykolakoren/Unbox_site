@@ -119,7 +119,9 @@ export function CrmDashboard() {
                 <StatCard
                     icon={AlertCircle}
                     label="Общий долг"
-                    value={`${(dashboard?.totalActiveDebt ?? 0).toFixed(0)} ₾`}
+                    value={dashboard?.debtByCurrency && Object.keys(dashboard.debtByCurrency).length > 0
+                        ? Object.entries(dashboard.debtByCurrency as Record<string, number>).map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+                        : '0'}
                     color={(dashboard?.totalActiveDebt ?? 0) > 0 ? 'red' : 'gray'}
                     onClick={() => navigate('/crm/finances')}
                 />
@@ -215,7 +217,7 @@ export function CrmDashboard() {
                                     <span className="font-medium text-sm text-unbox-dark">{d.clientName}</span>
                                     <span className="text-xs text-unbox-grey ml-2">{d.unpaidSessionsCount} сессий</span>
                                 </div>
-                                <span className="font-bold text-sm text-red-600">{d.totalDebt.toFixed(0)} ₾</span>
+                                <span className="font-bold text-sm text-red-600">{d.totalDebt.toFixed(0)} {d.currency || 'GEL'}</span>
                             </div>
                         ))}
                     </div>

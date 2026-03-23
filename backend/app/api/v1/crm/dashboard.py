@@ -171,8 +171,9 @@ def crm_dashboard(
         if client and not client.is_active:
             continue
         price = us.price if us.price is not None else (client.base_price if client else 0)
+        currency = client.currency if client else "GEL"
         if cid not in debt_map:
-            debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0, "unpaid_sessions_count": 0}
+            debt_map[cid] = {"client_id": cid, "client_name": client.name if client else "?", "total_debt": 0, "unpaid_sessions_count": 0, "currency": currency}
         debt_map[cid]["total_debt"] += price
         debt_map[cid]["unpaid_sessions_count"] += 1
 
@@ -200,6 +201,13 @@ def crm_dashboard(
     total_hours = sum(s.duration_minutes or 60 for s in completed_sessions) / 60
     avg_hourly_rate = round(total_payments_all / max(total_hours, 1), 2)
 
+    # Group debt by currency
+    debt_by_currency: dict = {}
+    for d in debt_by_client:
+        cur = d.get("currency", "GEL")
+        debt_by_currency[cur] = debt_by_currency.get(cur, 0) + d["total_debt"]
+    debt_by_currency = {k: round(v, 2) for k, v in debt_by_currency.items() if v > 0}
+
     total_active_debt = sum(d["total_debt"] for d in debt_by_client)
 
     return {
@@ -215,6 +223,7 @@ def crm_dashboard(
         "avg_check": avg_check,
         "avg_hourly_rate": avg_hourly_rate,
         "total_active_debt": round(total_active_debt, 2),
+        "debt_by_currency": debt_by_currency,
     }
 
 

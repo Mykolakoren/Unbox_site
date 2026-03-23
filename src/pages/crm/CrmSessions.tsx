@@ -42,9 +42,15 @@ const STATUS_LABELS: Record<string, string> = {
     CANCELLED_THERAPIST: 'Отмена (терапевт)',
 };
 
+/** Parse session date as UTC (API returns UTC without 'Z' suffix) */
+function parseSessionDate(dateStr: string): Date {
+    if (/Z$/.test(dateStr) || /[+-]\d{2}:\d{2}$/.test(dateStr)) return parseISO(dateStr);
+    return parseISO(dateStr + 'Z');
+}
+
 /** Сессия уже прошла по времени */
 function isPastSession(session: CrmSession): boolean {
-    return new Date(session.date) < new Date();
+    return parseSessionDate(session.date) < new Date();
 }
 
 /** Эффективный статус: PLANNED + в прошлом → COMPLETED */
@@ -62,7 +68,7 @@ export function CrmSessions() {
     const [view, setView] = useState<ViewMode>('list');
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [weekAnchor, setWeekAnchor] = useState(new Date());
-    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [statusFilter, setStatusFilter] = useState<string>('COMPLETED');
     const [showForm, setShowForm] = useState(false);
     const [prefillDate, setPrefillDate] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -99,36 +105,40 @@ export function CrmSessions() {
         return map;
     }, [clients]);
 
-    // Upcoming groups: days >= today, sorted ascending, limited to today + next day with sessions
+    // Upcoming groups: days >= today, sorted ascending
+    // In "all" mode show all upcoming; otherwise limit to today + next day
     const upcomingGroups = useMemo(() => {
         const groups: Record<string, typeof sessions> = {};
         sessions.forEach((s) => {
-            const day = format(parseISO(s.date), 'yyyy-MM-dd');
+            const day = format(parseSessionDate(s.date), 'yyyy-MM-dd');
             if (day >= todayStr) {
                 if (!groups[day]) groups[day] = [];
                 groups[day].push(s);
             }
         });
         const sorted = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-        return sorted.slice(0, 2);
-    }, [sessions, todayStr]);
+        return statusFilter === 'all' ? sorted : sorted.slice(0, 2);
+    }, [sessions, todayStr, statusFilter]);
 
-    // Past groups: days < today within selected month, sorted newest first
+    // Past groups: days < today within selected month
+    // In "all" mode sort ascending (oldest at bottom when scrolling down); otherwise newest first
     const pastGroups = useMemo(() => {
         const groups: Record<string, typeof sessions> = {};
         sessions.forEach((s) => {
-            const day = format(parseISO(s.date), 'yyyy-MM-dd');
+            const day = format(parseSessionDate(s.date), 'yyyy-MM-dd');
             if (day < todayStr && day >= monthStart && day <= monthEnd) {
                 if (!groups[day]) groups[day] = [];
                 groups[day].push(s);
             }
         });
-        return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
-    }, [sessions, todayStr, monthStart, monthEnd]);
+        return statusFilter === 'all'
+            ? Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
+            : Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
+    }, [sessions, todayStr, monthStart, monthEnd, statusFilter]);
 
     const stats = useMemo(() => {
         const monthSessions = sessions.filter((s) => {
-            const day = format(parseISO(s.date), 'yyyy-MM-dd');
+            const day = format(parseSessionDate(s.date), 'yyyy-MM-dd');
             return day >= monthStart && day <= monthEnd;
         });
         const total = monthSessions.length;
@@ -485,7 +495,7 @@ function WeekCalendar({
             {days.map(day => {
                 const dayStr = format(day, 'yyyy-MM-dd');
                 const daySessions = sessions.filter(s => {
-                    const sDay = format(parseISO(s.date), 'yyyy-MM-dd');
+                    const sDay = format(parseSessionDate(s.date), 'yyyy-MM-dd');
                     return sDay === dayStr;
                 }).sort((a, b) => a.date.localeCompare(b.date));
 
@@ -533,7 +543,7 @@ function WeekCalendar({
                             <div className="divide-y divide-unbox-light/50">
                                 {daySessions.map(session => {
                                     const client = clientMap.get(session.clientId);
-                                    const dt = parseISO(session.date);
+                                    const dt = parseSessionDate(session.date);
                                     const isEditing = editingId === session.id;
                                     const effectiveStatus = getEffectiveStatus(session);
                                     const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
@@ -646,7 +656,7 @@ function DayGroup({
                     .sort((a, b) => b.date.localeCompare(a.date))
                     .map((session) => {
                         const client = clientMap.get(session.clientId);
-                        const dt = parseISO(session.date);
+                        const dt = parseSessionDate(session.date);
                         const isEditing = editingId === session.id;
                         const effectiveStatus = getEffectiveStatus(session);
                         const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
@@ -897,7 +907,7 @@ function SessionEditPanel({
     onQuickPay?: (account: string) => Promise<void>;
     onCancel: () => void;
 }) {
-    const [date, setDate] = useState(format(parseISO(session.date), "yyyy-MM-dd'T'HH:mm"));
+    const [date, setDate] = useState(format(parseSessionDate(session.date), "yyyy-MM-dd'T'HH:mm"));
     const [duration, setDuration] = useState(String(session.durationMinutes));
     const [status, setStatus] = useState(getEffectiveStatus(session));
     const [price, setPrice] = useState(String(session.price ?? ''));
