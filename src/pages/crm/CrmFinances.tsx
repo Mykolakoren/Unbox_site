@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
     Wallet, ChevronLeft, ChevronRight, Loader2,
@@ -39,6 +40,7 @@ function formatPeriodLabel(date: Date, period: Period): string {
 }
 
 export function CrmFinances() {
+    const navigate = useNavigate();
     const {
         payments, sessions, clients,
         fetchPayments, fetchSessions, fetchClients,
@@ -238,9 +240,13 @@ export function CrmFinances() {
                     </div>
                     <div className="divide-y divide-gray-50">
                         {debtByClient.map(({ client, count, total }) => (
-                            <div key={client.id} className="flex items-center justify-between px-5 py-3.5">
+                            <div
+                                key={client.id}
+                                className="flex items-center justify-between px-5 py-3.5 hover:bg-orange-50/30 cursor-pointer transition-colors"
+                                onClick={() => navigate(`/crm/clients/${client.id}`)}
+                            >
                                 <div>
-                                    <div className="font-medium text-unbox-dark">{client.name}</div>
+                                    <div className="font-medium text-unbox-dark hover:text-unbox-green transition-colors">{client.name}</div>
                                     <div className="text-sm text-unbox-grey">{count} неоплаченных сессий</div>
                                 </div>
                                 <div className="text-lg font-bold text-orange-600">{total} {client.currency}</div>
