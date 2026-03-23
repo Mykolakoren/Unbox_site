@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
+import { totalInGel } from '../../utils/currency';
 import {
     Users,
     Calendar,
@@ -97,8 +98,11 @@ export function CrmDashboard() {
                     icon={TrendingUp}
                     label="Доход за месяц"
                     value={dashboard?.revenueByCurrency && Object.keys(dashboard.revenueByCurrency).length > 0
-                        ? Object.entries(dashboard.revenueByCurrency as Record<string, number>).map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+                        ? `≈ ${totalInGel(dashboard.revenueByCurrency).toFixed(0)} ₾`
                         : `${(dashboard?.revenueThisMonth ?? 0).toFixed(0)} ₾`}
+                    subtitle={dashboard?.revenueByCurrency && Object.keys(dashboard.revenueByCurrency).length > 1
+                        ? Object.entries(dashboard.revenueByCurrency as Record<string, number>).map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+                        : undefined}
                     color="emerald"
                     onClick={() => navigate('/crm/finances')}
                 />
@@ -122,8 +126,11 @@ export function CrmDashboard() {
                     icon={AlertCircle}
                     label="Общий долг"
                     value={dashboard?.debtByCurrency && Object.keys(dashboard.debtByCurrency).length > 0
-                        ? Object.entries(dashboard.debtByCurrency as Record<string, number>).map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+                        ? `≈ ${totalInGel(dashboard.debtByCurrency).toFixed(0)} ₾`
                         : '0'}
+                    subtitle={dashboard?.debtByCurrency && Object.keys(dashboard.debtByCurrency).length > 1
+                        ? Object.entries(dashboard.debtByCurrency as Record<string, number>).map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+                        : undefined}
                     color={(dashboard?.totalActiveDebt ?? 0) > 0 ? 'red' : 'gray'}
                     onClick={() => navigate('/crm/finances')}
                 />
@@ -379,12 +386,14 @@ function StatCard({
     icon: Icon,
     label,
     value,
+    subtitle,
     color,
     onClick,
 }: {
     icon: React.ElementType;
     label: string;
     value: number | string;
+    subtitle?: string;
     color: string;
     onClick?: () => void;
 }) {
@@ -407,6 +416,7 @@ function StatCard({
                 <Icon className={`w-5 h-5 ${c.icon}`} />
             </div>
             <div className={`text-2xl font-bold ${c.text}`}>{value}</div>
+            {subtitle && <div className="text-xs text-unbox-grey mt-0.5 leading-snug">{subtitle}</div>}
             <div className="text-sm text-unbox-grey mt-0.5">{label}</div>
         </div>
     );

@@ -155,9 +155,15 @@ export function CrmSessions() {
             const price = (s.price != null && s.price > 0) ? s.price : (client?.basePrice || 0);
             revByCur[cur] = (revByCur[cur] || 0) + price;
         });
-        const revenueLabel = Object.entries(revByCur).filter(([, v]) => v > 0)
-            .map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ') || '0';
-        return { total, completed, unpaid, revenueLabel };
+        const entries = Object.entries(revByCur).filter(([, v]) => v > 0);
+        const revenueLabel = entries.length > 0
+            ? entries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+            : '0';
+        // GEL equivalent
+        const RATES: Record<string, number> = { GEL: 1, USD: 2.7, EUR: 2.95, RUB: 0.03 };
+        const gelTotal = entries.reduce((s, [cur, val]) => s + val * (RATES[cur] || 1), 0);
+        const revenueGel = entries.length > 1 ? `≈ ${gelTotal.toFixed(0)} ₾` : '';
+        return { total, completed, unpaid, revenueLabel, revenueGel };
     }, [sessions, monthStart, monthEnd, clientMap]);
 
     const handleSync = async (dryRun = false) => {
@@ -309,7 +315,7 @@ export function CrmSessions() {
                     <MiniStat label="Всего" value={stats.total} />
                     <MiniStat label="Завершено" value={stats.completed} />
                     <MiniStat label="Неоплачено" value={stats.unpaid} color={stats.unpaid > 0 ? 'red' : undefined} />
-                    <MiniStat label="Оплачено" value={stats.revenueLabel} color="green" />
+                    <MiniStat label={stats.revenueGel ? `Оплачено (${stats.revenueGel})` : 'Оплачено'} value={stats.revenueLabel} color="green" />
                 </div>
             )}
 
