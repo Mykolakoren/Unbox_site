@@ -91,7 +91,7 @@ export function CrmDashboard() {
                     label="Неоплаченных"
                     value={dashboard?.unpaidSessions ?? 0}
                     color={dashboard?.unpaidSessions ? 'red' : 'gray'}
-                    onClick={() => navigate('/crm/sessions')}
+                    onClick={() => navigate('/crm/finances')}
                 />
                 <StatCard
                     icon={TrendingUp}
