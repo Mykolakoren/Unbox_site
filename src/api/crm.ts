@@ -161,6 +161,7 @@ export interface DebtByClient {
     clientName: string;
     totalDebt: number;
     unpaidSessionsCount: number;
+    currency?: string;
 }
 
 export interface CrmDashboard {
@@ -183,6 +184,7 @@ export interface CrmDashboard {
     avgCheck?: number;
     avgHourlyRate?: number;
     totalActiveDebt?: number;
+    debtByCurrency?: Record<string, number>;
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────
