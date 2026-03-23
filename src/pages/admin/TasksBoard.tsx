@@ -114,7 +114,7 @@ export function AdminTasksBoard() {
 
     const activeTask = activeId ? tasks.find(t => t.id === activeId) : null;
     const hasFilters = !!searchQuery || !!filterPriority || !!filterAssignee;
-    const emptyNewTask: AdminTask = { id: '', title: '', description: '', status: 'TODO', priority: 'MEDIUM', labels: [], checklist: [], sortOrder: 0, createdBy: '', createdByName: '', createdAt: '', updatedAt: '' } as AdminTask;
+    const emptyNewTask = { id: '', title: '', description: '', status: 'TODO', priority: 'MEDIUM', labels: [], checklist: [], participants: [], sortOrder: 0, createdBy: '', createdByName: '', createdAt: '', updatedAt: '' } as AdminTask;
 
     return (
         <div className="h-full flex flex-col">

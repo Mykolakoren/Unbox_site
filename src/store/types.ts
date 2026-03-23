@@ -145,7 +145,7 @@ export interface BookingSlice {
     bookings: BookingHistoryItem[];
     fetchBookings: () => Promise<void>;
     fetchAllBookings: () => Promise<void>; // Admin only
-    addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<void>;
+    addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<BookingHistoryItem | null>;
     addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<void>;
     cancelBooking: (id: string, isFreeReschedule?: boolean, reason?: string, adminUser?: User) => void;
     rescheduleBooking: (oldId: string, newBooking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;

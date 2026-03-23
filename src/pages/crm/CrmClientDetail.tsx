@@ -837,8 +837,8 @@ export function CrmClientDetail() {
                                                                             try {
                                                                                 await crmApi.deleteSession(session.id);
                                                                                 toast.success('Сессия удалена');
-                                                                                fetchSessions(clientId!);
-                                                                                fetchBalance();
+                                                                                setSessions(prev => prev.filter(ss => ss.id !== session.id));
+                                                                                crmApi.getClientBalance(clientId!).then(setBalance).catch(() => {});
                                                                             } catch { toast.error('Ошибка удаления'); }
                                                                         }}
                                                                         className="px-2 py-0.5 text-xs rounded-lg border border-red-200 bg-white text-red-500 hover:bg-red-50 transition-colors ml-auto"

@@ -118,7 +118,7 @@ def merge_clients(
     }
 
 
-@router.get("/clients", response_model=List[TherapistClientRead])
+@router.get("/clients")
 def list_clients(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
