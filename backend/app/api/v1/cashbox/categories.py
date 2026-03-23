@@ -39,6 +39,7 @@ def create_category(
         name=payload.name,
         parent_id=payload.parent_id,
         icon=payload.icon,
+        category_type=payload.category_type or "expense",
     )
     session.add(cat)
     session.commit()
@@ -78,7 +79,7 @@ def update_category(
     if not cat:
         raise HTTPException(404, "Категория не найдена")
 
-    for field in ("name", "icon", "is_active"):
+    for field in ("name", "icon", "is_active", "category_type"):
         if field in payload:
             setattr(cat, field, payload[field])
 

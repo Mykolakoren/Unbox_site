@@ -13,6 +13,7 @@ class ExpenseCategoryBase(SQLModel):
     parent_id: Optional[str] = Field(default=None)
     icon: Optional[str] = Field(default=None)
     is_active: bool = Field(default=True)
+    category_type: str = Field(default="expense")  # income | expense | both
 
 
 class ExpenseCategory(ExpenseCategoryBase, table=True):
@@ -26,6 +27,7 @@ class ExpenseCategoryCreate(SQLModel):
     name: str
     parent_id: Optional[str] = None
     icon: Optional[str] = None
+    category_type: Optional[str] = "expense"  # income | expense | both
 
 
 class ExpenseCategoryRead(ExpenseCategoryBase):

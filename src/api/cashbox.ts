@@ -36,6 +36,7 @@ export interface ExpenseCategory {
     parentId?: string;
     icon?: string;
     isActive: boolean;
+    categoryType?: 'income' | 'expense' | 'both';
     createdAt: string;
     children: ExpenseCategory[];
 }

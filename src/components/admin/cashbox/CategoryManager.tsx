@@ -1,18 +1,26 @@
 import { useState } from 'react';
-import { Plus, ChevronDown, ChevronRight, Pencil, Check, X, Trash2 } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Pencil, Check, X, Trash2, ArrowDownLeft, ArrowUpRight, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
+
+const TYPE_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+    income: { label: 'Приход', color: 'bg-green-100 text-green-700 border-green-200', icon: ArrowDownLeft },
+    expense: { label: 'Расход', color: 'bg-red-100 text-red-700 border-red-200', icon: ArrowUpRight },
+    both: { label: 'Оба', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: Repeat },
+};
 
 export function CategoryManager() {
     const { categories, createCategory, updateCategory, deleteCategory } = useCashboxStore();
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [addingTo, setAddingTo] = useState<string | null>(null);
     const [newName, setNewName] = useState('');
+    const [newType, setNewType] = useState<'income' | 'expense' | 'both'>('expense');
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editName, setEditName] = useState('');
     const [showAddRoot, setShowAddRoot] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
 
     const toggleExpand = (id: string) => {
         setExpanded(prev => {
@@ -25,7 +33,7 @@ export function CategoryManager() {
     const handleAdd = async (parentId?: string) => {
         if (!newName.trim()) return;
         try {
-            await createCategory({ name: newName.trim(), parent_id: parentId });
+            await createCategory({ name: newName.trim(), parent_id: parentId, category_type: newType } as any);
             toast.success('Категория создана');
             setNewName('');
             setAddingTo(null);
@@ -42,6 +50,15 @@ export function CategoryManager() {
             await updateCategory(id, { name: editName.trim() });
             toast.success('Переименовано');
             setEditingId(null);
+        } catch {
+            toast.error('Ошибка обновления');
+        }
+    };
+
+    const handleChangeType = async (cat: ExpenseCategory, newCatType: 'income' | 'expense' | 'both') => {
+        try {
+            await updateCategory(cat.id, { category_type: newCatType } as any);
+            toast.success(`Тип изменён на «${TYPE_LABELS[newCatType].label}»`);
         } catch {
             toast.error('Ошибка обновления');
         }
@@ -68,12 +85,18 @@ export function CategoryManager() {
         }
     };
 
+    const filteredCategories = filterType === 'all'
+        ? categories
+        : categories.filter(c => c.categoryType === filterType || c.categoryType === 'both');
+
     const renderCategory = (cat: ExpenseCategory, depth = 0) => {
         const hasChildren = cat.children && cat.children.length > 0;
         const isExpanded = expanded.has(cat.id);
         const isEditing = editingId === cat.id;
         const isAddingSub = addingTo === cat.id;
         const isConfirmingDelete = confirmDeleteId === cat.id;
+        const catType = cat.categoryType || 'expense';
+        const typeInfo = TYPE_LABELS[catType] || TYPE_LABELS.expense;
 
         return (
             <div key={cat.id}>
@@ -117,9 +140,23 @@ export function CategoryManager() {
                         </div>
                     ) : (
                         <>
+                            <span className="text-sm mr-0.5">{cat.icon}</span>
                             <span className={`text-sm flex-1 ${depth === 0 ? 'font-medium text-gray-800' : 'text-gray-600'}`}>
                                 {cat.name}
                             </span>
+
+                            {/* Type badge */}
+                            <select
+                                value={catType}
+                                onChange={e => handleChangeType(cat, e.target.value as any)}
+                                className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border cursor-pointer appearance-none text-center ${typeInfo.color}`}
+                                title="Тип категории"
+                            >
+                                <option value="income">📥 Приход</option>
+                                <option value="expense">📤 Расход</option>
+                                <option value="both">🔄 Оба</option>
+                            </select>
+
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                     onClick={() => { setEditingId(cat.id); setEditName(cat.name); }}
@@ -178,7 +215,22 @@ export function CategoryManager() {
     return (
         <div className="space-y-3">
             <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-400">Наведите на категорию для редактирования</p>
+                <div className="flex items-center gap-2">
+                    <p className="text-xs text-gray-400 mr-2">Фильтр:</p>
+                    {(['all', 'income', 'expense'] as const).map(t => (
+                        <button
+                            key={t}
+                            onClick={() => setFilterType(t)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                filterType === t
+                                    ? 'bg-unbox-green text-white'
+                                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            }`}
+                        >
+                            {t === 'all' ? 'Все' : t === 'income' ? '📥 Приход' : '📤 Расход'}
+                        </button>
+                    ))}
+                </div>
                 <button
                     onClick={() => { setShowAddRoot(true); setNewName(''); }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-unbox-green text-white text-xs font-medium hover:bg-unbox-green/90 transition-colors"
@@ -189,16 +241,25 @@ export function CategoryManager() {
             </div>
 
             <div className="bg-gray-50/80 rounded-2xl border border-gray-100 overflow-hidden">
-                {categories.length === 0 && !showAddRoot ? (
+                {filteredCategories.length === 0 && !showAddRoot ? (
                     <div className="text-center py-10 text-gray-400 text-sm">Категорий пока нет</div>
                 ) : (
                     <div className="py-2 px-2 divide-y divide-gray-100/50">
-                        {categories.map(cat => renderCategory(cat))}
+                        {filteredCategories.map(cat => renderCategory(cat))}
                     </div>
                 )}
 
                 {showAddRoot && (
                     <div className="flex items-center gap-1.5 px-4 py-3 border-t border-gray-200">
+                        <select
+                            value={newType}
+                            onChange={e => setNewType(e.target.value as any)}
+                            className="px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-unbox-green"
+                        >
+                            <option value="income">📥 Приход</option>
+                            <option value="expense">📤 Расход</option>
+                            <option value="both">🔄 Оба</option>
+                        </select>
                         <input
                             value={newName}
                             onChange={e => setNewName(e.target.value)}

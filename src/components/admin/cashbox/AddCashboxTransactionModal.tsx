@@ -19,14 +19,18 @@ const PAYMENT_METHODS = [
 
 const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
 
-function flattenCategories(cats: ExpenseCategory[]): { id: string; name: string; depth: number }[] {
-    const result: { id: string; name: string; depth: number }[] = [];
+function flattenCategories(cats: ExpenseCategory[], txType?: 'income' | 'expense' | 'transfer'): { id: string; name: string; depth: number; icon?: string }[] {
+    const result: { id: string; name: string; depth: number; icon?: string }[] = [];
+    const filterType = txType === 'transfer' ? 'expense' : txType;
     for (const cat of cats) {
         if (!cat.isActive) continue;
-        result.push({ id: cat.id, name: cat.name, depth: 0 });
+        // Filter by category type: show matching + 'both'
+        if (filterType && cat.categoryType && cat.categoryType !== 'both' && cat.categoryType !== filterType) continue;
+        result.push({ id: cat.id, name: cat.name, depth: 0, icon: cat.icon });
         for (const child of cat.children ?? []) {
             if (!child.isActive) continue;
-            result.push({ id: child.id, name: child.name, depth: 1 });
+            if (filterType && child.categoryType && child.categoryType !== 'both' && child.categoryType !== filterType) continue;
+            result.push({ id: child.id, name: child.name, depth: 1, icon: child.icon });
         }
     }
     return result;
@@ -52,7 +56,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
 
     if (!isOpen) return null;
 
-    const flatCats = flattenCategories(categories);
+    const flatCats = flattenCategories(categories, type);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -137,7 +141,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     <div className="grid grid-cols-3 gap-2">
                         <button
                             type="button"
-                            onClick={() => setType('income')}
+                            onClick={() => { setType('income'); setCategoryId(''); }}
                             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'income'
                                     ? 'bg-green-100 text-green-800 border-2 border-green-300'
@@ -149,7 +153,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         </button>
                         <button
                             type="button"
-                            onClick={() => setType('expense')}
+                            onClick={() => { setType('expense'); setCategoryId(''); }}
                             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'expense'
                                     ? 'bg-red-100 text-red-800 border-2 border-red-300'
@@ -161,7 +165,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         </button>
                         <button
                             type="button"
-                            onClick={() => setType('transfer')}
+                            onClick={() => { setType('transfer'); setCategoryId(''); }}
                             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'transfer'
                                     ? 'bg-blue-100 text-blue-800 border-2 border-blue-300'
