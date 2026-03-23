@@ -147,11 +147,18 @@ export function CrmSessions() {
             const eff = getEffectiveStatus(s);
             return !s.isPaid && eff !== 'CANCELLED_CLIENT' && eff !== 'CANCELLED_THERAPIST';
         }).length;
-        const revenue = monthSessions
-            .filter((s) => s.isPaid)
-            .reduce((sum, s) => sum + (s.price || 0), 0);
-        return { total, completed, unpaid, revenue };
-    }, [sessions, monthStart, monthEnd]);
+        // Revenue grouped by currency
+        const revByCur: Record<string, number> = {};
+        monthSessions.filter(s => s.isPaid).forEach(s => {
+            const client = clientMap.get(s.clientId);
+            const cur = client?.currency || 'GEL';
+            const price = (s.price != null && s.price > 0) ? s.price : (client?.basePrice || 0);
+            revByCur[cur] = (revByCur[cur] || 0) + price;
+        });
+        const revenueLabel = Object.entries(revByCur).filter(([, v]) => v > 0)
+            .map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ') || '0';
+        return { total, completed, unpaid, revenueLabel };
+    }, [sessions, monthStart, monthEnd, clientMap]);
 
     const handleSync = async (dryRun = false) => {
         setSyncing(true);
@@ -302,7 +309,7 @@ export function CrmSessions() {
                     <MiniStat label="Всего" value={stats.total} />
                     <MiniStat label="Завершено" value={stats.completed} />
                     <MiniStat label="Неоплачено" value={stats.unpaid} color={stats.unpaid > 0 ? 'red' : undefined} />
-                    <MiniStat label="Оплачено" value={`${stats.revenue} ₾`} color="green" />
+                    <MiniStat label="Оплачено" value={stats.revenueLabel} color="green" />
                 </div>
             )}
 
