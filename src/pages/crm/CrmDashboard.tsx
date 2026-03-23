@@ -96,7 +96,9 @@ export function CrmDashboard() {
                 <StatCard
                     icon={TrendingUp}
                     label="Доход за месяц"
-                    value={`${(dashboard?.revenueThisMonth ?? 0).toFixed(0)} ₾`}
+                    value={dashboard?.revenueByCurrency && Object.keys(dashboard.revenueByCurrency).length > 0
+                        ? Object.entries(dashboard.revenueByCurrency as Record<string, number>).map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+                        : `${(dashboard?.revenueThisMonth ?? 0).toFixed(0)} ₾`}
                     color="emerald"
                     onClick={() => navigate('/crm/finances')}
                 />

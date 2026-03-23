@@ -185,6 +185,7 @@ export interface CrmDashboard {
     avgHourlyRate?: number;
     totalActiveDebt?: number;
     debtByCurrency?: Record<string, number>;
+    revenueByCurrency?: Record<string, number>;
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────

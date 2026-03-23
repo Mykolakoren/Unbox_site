@@ -61,6 +61,13 @@ def crm_dashboard(
     ).all()
     payments_this_month = sum(float(p.amount or 0) for p in month_payments)
 
+    # Revenue grouped by currency
+    rev_by_currency: dict = {}
+    for p in month_payments:
+        cur = p.currency or "GEL"
+        rev_by_currency[cur] = rev_by_currency.get(cur, 0) + float(p.amount or 0)
+    rev_by_currency = {k: round(v, 2) for k, v in rev_by_currency.items() if v > 0}
+
     upcoming = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
@@ -215,6 +222,7 @@ def crm_dashboard(
         "sessions_this_month": sessions_this_month,
         "unpaid_sessions": unpaid_count,
         "revenue_this_month": round(payments_this_month, 2),
+        "revenue_by_currency": rev_by_currency,
         "upcoming_sessions": upcoming_list,
         # Extended
         "monthly_stats": monthly_stats,
