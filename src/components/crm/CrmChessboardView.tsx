@@ -946,39 +946,79 @@ export function CrmChessboardView() {
                                             const firstSession = linkedSessions[0];
                                             const linkedClient = firstSession ? clientById.get(firstSession.clientId) : undefined;
 
+                                            // Multi-client split view
+                                            const SEGMENT_COLORS = [
+                                                'bg-unbox-green/15 border-unbox-green/40 hover:bg-unbox-green/25',
+                                                'bg-blue-100/60 border-blue-300/50 hover:bg-blue-100',
+                                                'bg-amber-100/60 border-amber-300/50 hover:bg-amber-100',
+                                                'bg-purple-100/60 border-purple-300/50 hover:bg-purple-100',
+                                            ];
+
+                                            const hasMultipleClients = isMine && linkedSessions.length > 1;
+
                                             return (
                                                 <td
                                                     key={`${resource.id}-${cell.slot}`}
                                                     colSpan={colspan}
                                                     className="border-b border-gray-50 py-1 px-0.5"
                                                 >
-                                                    <div
-                                                        onClick={isMine ? () => setLinkBooking(booking) : undefined}
-                                                        className={clsx(
-                                                            'h-8 rounded-md border text-[10px] font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
-                                                            isMine
-                                                                ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-pointer hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
-                                                                : 'bg-gray-100 text-gray-400 border-gray-200 cursor-default'
-                                                        )}
-                                                        title={isMine ? (linkedClient ? 'Изменить клиента' : 'Привязать клиента') : undefined}
-                                                    >
-                                                        <span className="truncate flex-1">
-                                                            {isMine
-                                                                ? (linkedSessions.length > 1
-                                                                    ? `${linkedSessions.length} клиентов`
-                                                                    : linkedClient ? linkedClient.name : '✓ Моё')
-                                                                : 'Занято'}
-                                                        </span>
-                                                        {isMine && (
-                                                            <UserPlus
-                                                                size={10}
-                                                                className={clsx(
-                                                                    'shrink-0 transition-opacity',
-                                                                    linkedClient ? 'opacity-0 group-hover:opacity-60' : 'opacity-40 group-hover:opacity-100'
-                                                                )}
-                                                            />
-                                                        )}
-                                                    </div>
+                                                    {hasMultipleClients ? (
+                                                        <div
+                                                            className="h-8 flex rounded-md overflow-hidden cursor-pointer"
+                                                            onClick={() => setLinkBooking(booking)}
+                                                        >
+                                                            {linkedSessions
+                                                                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                                                                .map((sess, idx) => {
+                                                                    const cl = clientById.get(sess.clientId);
+                                                                    const totalDur = linkedSessions.reduce((s, x) => s + (x.durationMinutes || 60), 0);
+                                                                    const pct = ((sess.durationMinutes || 60) / totalDur) * 100;
+                                                                    const color = SEGMENT_COLORS[idx % SEGMENT_COLORS.length];
+                                                                    return (
+                                                                        <div
+                                                                            key={sess.id}
+                                                                            style={{ width: `${pct}%` }}
+                                                                            className={clsx(
+                                                                                'h-full border-y first:border-l last:border-r first:rounded-l-md last:rounded-r-md',
+                                                                                'text-[9px] font-semibold flex items-center px-1 overflow-hidden select-none transition-colors',
+                                                                                'text-unbox-dark',
+                                                                                color,
+                                                                                idx > 0 && 'border-l border-dashed border-gray-300'
+                                                                            )}
+                                                                            title={cl ? `${cl.name} · ${sess.durationMinutes || 60} мин` : `Слот ${idx + 1}`}
+                                                                        >
+                                                                            <span className="truncate">{cl?.name || `#${idx + 1}`}</span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                        </div>
+                                                    ) : (
+                                                        <div
+                                                            onClick={isMine ? () => setLinkBooking(booking) : undefined}
+                                                            className={clsx(
+                                                                'h-8 rounded-md border text-[10px] font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
+                                                                isMine
+                                                                    ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-pointer hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
+                                                                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-default'
+                                                            )}
+                                                            title={isMine ? (linkedClient ? 'Изменить клиента' : 'Привязать клиента') : undefined}
+                                                        >
+                                                            <span className="truncate flex-1">
+                                                                {isMine
+                                                                    ? (linkedClient ? linkedClient.name : '✓ Моё')
+                                                                    : 'Занято'}
+                                                            </span>
+                                                            {isMine && (
+                                                                <UserPlus
+                                                                    size={10}
+                                                                    className={clsx(
+                                                                        'shrink-0 transition-opacity',
+                                                                        linkedClient ? 'opacity-0 group-hover:opacity-60' : 'opacity-40 group-hover:opacity-100'
+                                                                    )}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </td>
                                             );
                                         }

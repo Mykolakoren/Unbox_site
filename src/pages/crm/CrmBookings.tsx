@@ -427,20 +427,30 @@ interface BookingCardProps {
     booking: BookingHistoryItem;
     linkedClient?: CrmClient;
     linkedSessionId?: string;
+    linkedSessions?: any[];
+    clientById: Map<string, CrmClient>;
     onLink: (booking: BookingHistoryItem, existingSessionId?: string, existingClientId?: string) => void;
 }
 
-function BookingCard({ booking, linkedClient, linkedSessionId, onLink }: BookingCardProps) {
+const CARD_SEGMENT_COLORS = [
+    'bg-unbox-light/40 border-unbox-green/20',
+    'bg-blue-50 border-blue-200/40',
+    'bg-amber-50 border-amber-200/40',
+    'bg-purple-50 border-purple-200/40',
+];
+
+function BookingCard({ booking, linkedClient, linkedSessionId, linkedSessions, clientById, onLink }: BookingCardProps) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const { dateStr, dateObj } = getSafeBookingDate(booking);
 
     const isPast = dateObj ? isBefore(dateObj, new Date()) : false;
     const isActive = booking.status === 'confirmed' || booking.status === 'completed';
+    const hasMultiple = (linkedSessions?.length || 0) > 1;
 
     return (
         <div className={clsx(
             'bg-white rounded-2xl border transition-shadow hover:shadow-md p-4',
-            linkedClient ? 'border-unbox-green/40' : 'border-gray-100',
+            linkedClient || hasMultiple ? 'border-unbox-green/40' : 'border-gray-100',
             !isActive && 'opacity-60'
         )}>
             {/* Top row: date + status */}
@@ -474,8 +484,41 @@ function BookingCard({ booking, linkedClient, linkedSessionId, onLink }: Booking
                 <span>{resource?.name || `Кабинет ${booking.resourceId}`}</span>
             </div>
 
-            {/* Linked client or link button */}
-            {linkedClient ? (
+            {/* Multi-client split display */}
+            {hasMultiple ? (
+                <div className="space-y-1.5">
+                    {linkedSessions!
+                        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                        .map((sess, idx) => {
+                            const cl = clientById.get(sess.clientId);
+                            const color = CARD_SEGMENT_COLORS[idx % CARD_SEGMENT_COLORS.length];
+                            return (
+                                <div key={sess.id} className={clsx('flex items-center justify-between rounded-xl px-3 py-2 border', color)}>
+                                    <div className="flex items-center gap-2">
+                                        <div className={clsx(
+                                            'w-5 h-5 rounded-full text-white flex items-center justify-center text-[10px] font-bold shrink-0',
+                                            idx === 0 ? 'bg-unbox-green' : idx === 1 ? 'bg-blue-500' : idx === 2 ? 'bg-amber-500' : 'bg-purple-500'
+                                        )}>
+                                            {idx + 1}
+                                        </div>
+                                        <div>
+                                            <div className="text-sm font-semibold text-gray-900">{cl?.name || '—'}</div>
+                                            <div className="text-[10px] text-gray-400">{sess.durationMinutes || 60} мин</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    {isActive && (
+                        <button
+                            onClick={() => onLink(booking, linkedSessionId, linkedClient?.id)}
+                            className="w-full text-xs text-gray-400 hover:text-unbox-green transition-colors underline py-1"
+                        >
+                            Изменить
+                        </button>
+                    )}
+                </div>
+            ) : linkedClient ? (
                 <div className="flex items-center justify-between bg-unbox-light/40 rounded-xl px-3 py-2">
                     <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-unbox-green text-white flex items-center justify-center text-xs font-bold shrink-0">
@@ -539,12 +582,25 @@ export function CrmBookings() {
         [allBookings, currentUser?.email]
     );
 
-    // Build lookup: bookingId → session
-    const sessionByBookingId = useMemo(() => {
-        const map = new Map<string, typeof sessions[0]>();
-        sessions.forEach(s => { if (s.bookingId) map.set(s.bookingId, s); });
+    // Build lookup: bookingId → sessions (array for multi-client splits)
+    const sessionsByBookingId = useMemo(() => {
+        const map = new Map<string, typeof sessions>();
+        sessions.forEach(s => {
+            if (s.bookingId) {
+                const arr = map.get(s.bookingId) || [];
+                arr.push(s);
+                map.set(s.bookingId, arr);
+            }
+        });
         return map;
     }, [sessions]);
+
+    // Compat: single session lookup
+    const sessionByBookingId = useMemo(() => {
+        const map = new Map<string, typeof sessions[0]>();
+        sessionsByBookingId.forEach((arr, key) => { if (arr[0]) map.set(key, arr[0]); });
+        return map;
+    }, [sessionsByBookingId]);
 
     // Build lookup: clientId → client
     const clientById = useMemo(() => {
@@ -759,7 +815,8 @@ export function CrmBookings() {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             {filteredBookings.map(booking => {
-                                const linkedSession = sessionByBookingId.get(booking.id);
+                                const allLinked = sessionsByBookingId.get(booking.id) || [];
+                                const linkedSession = allLinked[0];
                                 const linkedClient = linkedSession ? clientById.get(linkedSession.clientId) : undefined;
                                 return (
                                     <BookingCard
@@ -767,6 +824,8 @@ export function CrmBookings() {
                                         booking={booking}
                                         linkedClient={linkedClient}
                                         linkedSessionId={linkedSession?.id}
+                                        linkedSessions={allLinked}
+                                        clientById={clientById}
                                         onLink={handleOpenModal}
                                     />
                                 );
