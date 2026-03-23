@@ -68,33 +68,58 @@ export function CrmFinances() {
     }, [clients]);
 
     const stats = useMemo(() => {
-        const totalRevenue = payments.reduce((s, p) => s + p.amount, 0);
-        const unpaid = sessions.filter(
-            s => !s.isPaid && s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST'
-        );
-        const unpaidTotal = unpaid.reduce((sum, s) => {
+        // Revenue grouped by currency
+        const revByCur: Record<string, number> = {};
+        payments.forEach(p => {
+            const client = clientMap.get(p.clientId);
+            const cur = client?.currency || 'GEL';
+            revByCur[cur] = (revByCur[cur] || 0) + p.amount;
+        });
+
+        // Debt grouped by currency
+        const unpaid = sessions.filter(s => !s.isPaid && s.status === 'COMPLETED');
+        const debtByCur: Record<string, number> = {};
+        unpaid.forEach(s => {
             const client = clientMap.get(s.clientId);
-            return sum + (s.price ?? client?.basePrice ?? 0);
-        }, 0);
+            if (!client || !client.isActive) return;
+            const cur = client.currency || 'GEL';
+            const price = (s.price != null && s.price > 0) ? s.price : (client.basePrice || 0);
+            debtByCur[cur] = (debtByCur[cur] || 0) + price;
+        });
+
         const held = sessions.filter(
             s => s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST'
         ).length;
-        return { totalRevenue, unpaidCount: unpaid.length, unpaidTotal, held };
+
+        const formatMultiCur = (map: Record<string, number>) => {
+            const entries = Object.entries(map).filter(([, v]) => v > 0);
+            if (entries.length === 0) return '0';
+            return entries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ');
+        };
+
+        return {
+            revenueLabel: formatMultiCur(revByCur),
+            debtLabel: formatMultiCur(debtByCur),
+            unpaidCount: unpaid.length,
+            totalPayments: payments.length,
+            held,
+        };
     }, [payments, sessions, clientMap]);
 
     const debtByClient = useMemo(() => {
         const map = new Map<string, { client: CrmClient; count: number; total: number }>();
         sessions
-            .filter(s => !s.isPaid && s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST')
+            .filter(s => !s.isPaid && s.status === 'COMPLETED')
             .forEach(s => {
                 const client = clientMap.get(s.clientId);
-                if (!client) return;
+                if (!client || !client.isActive) return;
+                const price = (s.price != null && s.price > 0) ? s.price : (client.basePrice || 0);
                 const ex = map.get(s.clientId) || { client, count: 0, total: 0 };
                 ex.count++;
-                ex.total += s.price ?? client.basePrice;
+                ex.total += price;
                 map.set(s.clientId, ex);
             });
-        return Array.from(map.values()).sort((a, b) => b.total - a.total);
+        return Array.from(map.values()).filter(v => v.total > 0).sort((a, b) => b.total - a.total);
     }, [sessions, clientMap]);
 
     const PERIODS: { id: Period; label: string }[] = [
@@ -183,7 +208,7 @@ export function CrmFinances() {
                         </div>
                         <div className="text-sm text-unbox-grey">Получено</div>
                     </div>
-                    <div className="text-2xl font-bold text-green-600">{stats.totalRevenue.toFixed(0)} ₾</div>
+                    <div className="text-lg font-bold text-green-600 leading-snug">{stats.revenueLabel}</div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
@@ -193,7 +218,7 @@ export function CrmFinances() {
                         </div>
                         <div className="text-sm text-unbox-grey">Задолженность</div>
                     </div>
-                    <div className="text-2xl font-bold text-orange-600">{stats.unpaidTotal.toFixed(0)} ₾</div>
+                    <div className="text-lg font-bold text-orange-600 leading-snug">{stats.debtLabel}</div>
                     <div className="text-xs text-unbox-grey mt-0.5">{stats.unpaidCount} сессий</div>
                 </div>
 
@@ -204,7 +229,7 @@ export function CrmFinances() {
                         </div>
                         <div className="text-sm text-unbox-grey">Платежей</div>
                     </div>
-                    <div className="text-2xl font-bold text-unbox-dark">{payments.length}</div>
+                    <div className="text-2xl font-bold text-unbox-dark">{stats.totalPayments}</div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
