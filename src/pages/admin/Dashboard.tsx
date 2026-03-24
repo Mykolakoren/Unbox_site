@@ -5,15 +5,18 @@ import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
+import { useCashboxStore } from '../../store/cashboxStore';
 
 
 export function AdminDashboard() {
     const { bookings, users, fetchUsers, fetchAllBookings } = useUserStore();
+    const { transactions, fetchTransactions, balance } = useCashboxStore();
 
     useEffect(() => {
         fetchUsers();
         fetchAllBookings();
-    }, [fetchUsers, fetchAllBookings]);
+        fetchTransactions();
+    }, [fetchUsers, fetchAllBookings, fetchTransactions]);
 
     // 1. Calculate Stats
     const now = new Date();
@@ -22,16 +25,15 @@ export function AdminDashboard() {
 
     const confirmedBookings = bookings.filter(b => b.status === 'confirmed');
 
-    // Revenue
-    const calculateRevenue = (fromDate: Date) => {
-        return confirmedBookings
-            .filter(b => isAfter(new Date(b.date), fromDate) || isSameDay(new Date(b.date), fromDate))
-            .reduce((sum, b) => sum + (b.finalPrice || 0), 0);
-    };
-
-    const totalRevenue = confirmedBookings.reduce((sum, b) => sum + (b.finalPrice || 0), 0);
-    const todayRevenue = calculateRevenue(today);
-    const monthRevenue = calculateRevenue(thisMonth);
+    // Revenue from cashbox (income transactions)
+    const incomeTransactions = transactions.filter(t => t.type === 'income');
+    const todayRevenue = incomeTransactions
+        .filter(t => { const d = new Date(t.date); return isSameDay(d, today) || isAfter(d, today); })
+        .reduce((sum, t) => sum + (t.amount || 0), 0);
+    const monthRevenue = incomeTransactions
+        .filter(t => { const d = new Date(t.date); return isAfter(d, thisMonth) || isSameDay(d, thisMonth); })
+        .reduce((sum, t) => sum + (t.amount || 0), 0);
+    const totalRevenue = incomeTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
 
     // Counts
     const totalUsers = users.length;
@@ -148,7 +150,7 @@ export function AdminDashboard() {
                             <CreditCard size={20} className="text-unbox-green" />
                             <div className="text-sm">
                                 <div className="font-medium">Общая выручка</div>
-                                <div className="text-white/60">{totalRevenue} ₾ за все время</div>
+                                <div className="text-white/60">{balance?.balance?.toFixed(0) ?? totalRevenue} ₾ в кассе</div>
                             </div>
                         </div>
                         <div className="flex items-center gap-3 bg-white/10 p-3 rounded-lg border border-white/10">
