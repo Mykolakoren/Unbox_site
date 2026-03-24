@@ -26,11 +26,12 @@ export function BalanceCard({ filteredTransactions, periodLabel }: Props) {
         };
     }, [filteredTransactions]);
 
-    const b = balances || { balance: 0, cash: 0, card_tbc: 0, card_bog: 0 };
+    const b: any = balances || {};
+    // toCamelCase interceptor converts card_tbc → cardTbc, card_bog → cardBog
     const accounts = [
         { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote, color: 'text-green-700', bg: 'bg-green-50' },
-        { key: 'tbc', label: 'Карта TBC', value: b.card_tbc ?? 0, icon: CreditCard, color: 'text-blue-700', bg: 'bg-blue-50' },
-        { key: 'bog', label: 'Карта BOG', value: b.card_bog ?? 0, icon: Landmark, color: 'text-purple-700', bg: 'bg-purple-50' },
+        { key: 'tbc', label: 'Карта TBC', value: b.cardTbc ?? b.card_tbc ?? 0, icon: CreditCard, color: 'text-blue-700', bg: 'bg-blue-50' },
+        { key: 'bog', label: 'Карта BOG', value: b.cardBog ?? b.card_bog ?? 0, icon: Landmark, color: 'text-purple-700', bg: 'bg-purple-50' },
     ];
 
     return (
