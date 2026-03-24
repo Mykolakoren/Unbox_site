@@ -125,12 +125,14 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                     bg: 'bg-white border border-unbox-green'
                 });
             } else if (b.status === 'cancelled') {
+                // Use updatedAt (cancel time) instead of booking date
+                const cancelDate = b.updatedAt ? getSafeDate(b.updatedAt) : visitDate;
                 list.push({
                     id: `booking-cancel-${b.id}`,
-                    date: visitDate,
+                    date: cancelDate,
                     type: 'booking_cancelled',
                     title: 'Отмена брони',
-                    description: `${RESOURCES.find(r => r.id === b.resourceId)?.name || 'Кабинет'} ${b.cancellationReason ? `(Причина: ${b.cancellationReason})` : ''} ${b.cancelledBy ? `[${b.cancelledBy}]` : ''}`.trim(),
+                    description: `${RESOURCES.find(r => r.id === b.resourceId)?.name || 'Кабинет'} · ${format(visitDate, 'd MMM, HH:mm', { locale: ru })} ${b.cancellationReason ? `(${b.cancellationReason})` : ''} ${b.cancelledBy ? `[${b.cancelledBy}]` : ''}`.trim(),
                     icon: XCircle,
                     color: 'text-unbox-grey', // Was red (Strict palette forbids aggressive red)
                     bg: 'bg-gray-100' // Was red-50
