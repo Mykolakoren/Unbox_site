@@ -139,8 +139,9 @@ class PricingService:
 
     def _is_hot_booking(self, start_time: datetime) -> bool:
         now = datetime.now()
-        if start_time.tzinfo is None:
-            start_time = start_time.replace(tzinfo=timezone.utc)
+        # Strip timezone info to ensure both are naive (local server time)
+        if start_time.tzinfo is not None:
+            start_time = start_time.replace(tzinfo=None)
         diff = start_time - now
         hours_before = diff.total_seconds() / 3600.0
         return 0 < hours_before <= self.PRICING_CONFIG["hot_booking"]["hours_before"]
@@ -148,7 +149,8 @@ class PricingService:
     def _get_weekly_accumulated_hours(self, user: User, start_time: datetime) -> float:
         # Calculate start/end of week (Monday start)
         # start_time is the booking time. We look at the week of the booking.
-        dt = start_time if start_time.tzinfo else start_time.replace(tzinfo=timezone.utc)
+        # Strip timezone to keep everything naive (local server time)
+        dt = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
         
         # ISO calendar: Monday=1, Sunday=7
         iso_day = dt.isoweekday() 
