@@ -46,6 +46,7 @@ import { AdminFinance } from './pages/admin/Finance';
 import { AdminTeam } from './pages/admin/AdminTeam';
 import { AdminSpecialists } from './pages/admin/AdminSpecialists';
 import { TestPage } from './pages/TestPage';
+import { SubscriptionsPage } from './pages/SubscriptionsPage';
 
 // ── Glass panel style for wizard steps (mirrors ExplorePage) ───────────────
 const glassPanel: React.CSSProperties = {
@@ -160,6 +161,9 @@ function App() {
         {/* Specialists Marketplace */}
         <Route path="/specialists" element={<SpecialistsPage />} />
         <Route path="/specialists/:id" element={<SpecialistProfilePage />} />
+
+        {/* Subscriptions */}
+        <Route path="/subscriptions" element={<MinimalLayout glassMode><SubscriptionsPage /></MinimalLayout>} />
 
         {/* Self-assessment tests */}
         <Route path="/tests/:testId" element={<TestPage />} />
