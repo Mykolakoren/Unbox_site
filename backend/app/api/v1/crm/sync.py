@@ -162,7 +162,7 @@ def sync_from_calendar(
             ).first()
             if existing and existing.status not in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST"):
                 existing.status = "CANCELLED_CLIENT"
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now()
                 session.add(existing)
                 updated += 1
             continue
@@ -177,7 +177,7 @@ def sync_from_calendar(
             if abs((existing.date - entry["date"]).total_seconds()) > 60:
                 existing.date = entry["date"]
                 existing.duration_minutes = entry["duration_minutes"]
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now()
                 session.add(existing)
                 updated += 1
             continue

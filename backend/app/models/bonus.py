@@ -27,8 +27,8 @@ class Bonus(BonusBase, table=True):
     __tablename__ = "bonuses"  # type: ignore
 
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class BonusRead(BonusBase):

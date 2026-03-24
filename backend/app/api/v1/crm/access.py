@@ -18,7 +18,7 @@ def apply_for_crm_access(
 ):
     """Any authenticated user can apply for psy_crm.access.
     Owner and senior_admin get auto-approved. Blocks duplicate pending requests."""
-    now = datetime.utcnow()
+    now = datetime.now()
     crm_data = dict(current_user.crm_data or {})
     current_status = crm_data.get("access_status", "none")
 
@@ -110,10 +110,10 @@ def get_my_crm_access(
         if expires_at:
             try:
                 expiry_dt = datetime.fromisoformat(expires_at)
-                if datetime.utcnow() > expiry_dt:
+                if datetime.now() > expiry_dt:
                     crm_data["access_status"] = "expired"
                     current_user.crm_data = crm_data
-                    current_user.updated_at = datetime.utcnow()
+                    current_user.updated_at = datetime.now()
                     perms = list(current_user.permissions or [])
                     if "psy_crm.access" in perms:
                         perms.remove("psy_crm.access")
@@ -126,7 +126,7 @@ def get_my_crm_access(
                         "expires_at": expires_at,
                         "days_remaining": 0,
                     }
-                days_remaining = (expiry_dt - datetime.utcnow()).days
+                days_remaining = (expiry_dt - datetime.now()).days
                 return {
                     "access_status": "active",
                     "permanent": False,
@@ -179,7 +179,7 @@ def get_user_crm_access(
     if access_status == "active" and expires_at:
         try:
             expiry_dt = datetime.fromisoformat(expires_at)
-            if datetime.utcnow() > expiry_dt:
+            if datetime.now() > expiry_dt:
                 access_status = "expired"
                 crm_data["access_status"] = "expired"
                 target_user.crm_data = crm_data
@@ -191,7 +191,7 @@ def get_user_crm_access(
                 session.commit()
                 days_remaining = 0
             else:
-                days_remaining = max(0, (expiry_dt - datetime.utcnow()).days)
+                days_remaining = max(0, (expiry_dt - datetime.now()).days)
         except (ValueError, TypeError):
             pass
 
@@ -255,7 +255,7 @@ def approve_crm_access(
     if not target_user:
         raise HTTPException(404, "User not found")
 
-    now = datetime.utcnow()
+    now = datetime.now()
     expires_at = now + timedelta(days=days)
 
     crm_data = dict(target_user.crm_data or {})
@@ -315,14 +315,14 @@ def reject_crm_access(
     crm_data = dict(target_user.crm_data or {})
     crm_data["access_status"] = "rejected"
     crm_data["rejected_by"] = str(current_user.id)
-    crm_data["rejected_at"] = datetime.utcnow().isoformat()
+    crm_data["rejected_at"] = datetime.now().isoformat()
     if reason:
         crm_data["rejection_reason"] = reason
 
     target_user.crm_data = crm_data
 
     # Record in comment_history
-    now = datetime.utcnow()
+    now = datetime.now()
     comment_history = list(target_user.comment_history or [])
     reject_text = f"CRM запрос отклонён"
     if reason:

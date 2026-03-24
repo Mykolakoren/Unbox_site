@@ -81,7 +81,7 @@ def update_task(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(task, key, value)
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now()
 
     session.add(task)
     session.commit()
@@ -134,7 +134,7 @@ def reorder_tasks(
             task.sort_order = item.sort_order
             if item.status:
                 task.status = item.status
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now()
             session.add(task)
     session.commit()
     return {"ok": True, "updated": len(data.items)}

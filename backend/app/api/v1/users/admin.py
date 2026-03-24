@@ -143,7 +143,7 @@ def toggle_subscription_freeze(
             )
         new_sub["is_frozen"] = True
         new_sub["freeze_count"] = freeze_count + 1
-        new_sub["frozen_until"] = (datetime.utcnow() + timedelta(days=7)).isoformat()
+        new_sub["frozen_until"] = (datetime.now() + timedelta(days=7)).isoformat()
     else:
         new_sub["is_frozen"] = False
         new_sub["frozen_until"] = None
@@ -193,8 +193,8 @@ def update_personal_discount(
     old_percent = user.personal_discount_percent
 
     log_entry = {
-        "id": f"log-{int(datetime.utcnow().timestamp())}",
-        "date": datetime.utcnow().isoformat(),
+        "id": f"log-{int(datetime.now().timestamp())}",
+        "date": datetime.now().isoformat(),
         "oldValue": old_percent,
         "newValue": percent,
         "reason": reason,
@@ -276,7 +276,7 @@ def change_user_password(
         raise HTTPException(status_code=403, detail="Not authorized to change passwords")
 
     user.hashed_password = get_password_hash(new_password)
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now()
     session.add(user)
     session.commit()
 
@@ -330,12 +330,12 @@ def update_permissions(
         final_permissions = permissions
 
     user.permissions = final_permissions
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now()
     session.add(user)
 
     comment_history = list(user.comment_history or [])
     comment_history.append({
-        "date": datetime.utcnow().isoformat(),
+        "date": datetime.now().isoformat(),
         "adminName": current_user.name,
         "text": f"Обновлены права доступа: {', '.join(final_permissions) if final_permissions else 'все сброшены'}",
         "type": "permissions_update",
@@ -388,7 +388,7 @@ def topup_subscription(
         + (f" · {note}" if note else "")
     )
     comment_history.append({
-        "date": datetime.utcnow().isoformat(),
+        "date": datetime.now().isoformat(),
         "adminName": current_user.name,
         "text": log_text,
         "type": "subscription_topup",
@@ -400,7 +400,7 @@ def topup_subscription(
         },
     })
     user.comment_history = comment_history
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now()
     session.add(user)
 
     # Auto-create cashbox income transaction
@@ -417,7 +417,7 @@ def topup_subscription(
             payment_method=cashbox_method,
             description=f"Абонемент: {user.name} +{hours}ч" + (f" ({note})" if note else ""),
             branch=branch,
-            date=datetime.utcnow(),
+            date=datetime.now(),
             admin_id=str(current_user.id),
             admin_name=current_user.name or "",
         )

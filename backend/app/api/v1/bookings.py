@@ -26,7 +26,7 @@ def _booking_end_dt(booking: Booking) -> datetime:
 
 
 def _is_past(booking: Booking) -> bool:
-    return _booking_end_dt(booking) < datetime.utcnow()
+    return _booking_end_dt(booking) < datetime.now()
 
 
 def enrich_booking_status(booking: Booking) -> Booking:
@@ -288,7 +288,7 @@ def cancel_booking(
     except Exception:
         booking_start = booking.date
 
-    hours_until_start = (booking_start - datetime.utcnow()).total_seconds() / 3600
+    hours_until_start = (booking_start - datetime.now()).total_seconds() / 3600
     is_late_cancellation = hours_until_start < 24
 
     if is_late_cancellation and not _is_past(booking) and not current_user.is_admin:
@@ -391,7 +391,7 @@ def reschedule_booking(
     except Exception:
         booking_start = booking.date
 
-    hours_until = (booking_start - datetime.utcnow()).total_seconds() / 3600
+    hours_until = (booking_start - datetime.now()).total_seconds() / 3600
     if hours_until < 24 and not current_user.is_admin:
         raise HTTPException(status_code=400, detail=f"Cannot reschedule less than 24h before start ({hours_until:.1f}h remaining)")
 
@@ -424,7 +424,7 @@ def reschedule_booking(
     booking.date = new_date
     booking.start_time = data.new_start_time
     booking.resource_id = new_resource
-    booking.updated_at = datetime.utcnow()
+    booking.updated_at = datetime.now()
 
     # Update GCal event
     if booking.gcal_event_id:
@@ -503,7 +503,7 @@ def link_crm_client(
             raise HTTPException(status_code=403, detail="CRM client does not belong to you")
 
     booking.crm_client_id = data.crm_client_id
-    booking.updated_at = datetime.utcnow()
+    booking.updated_at = datetime.now()
 
     session.add(booking)
     session.commit()
@@ -541,7 +541,7 @@ def toggle_re_rent(
         raise HTTPException(status_code=400, detail="Cannot re-rent a past booking")
 
     booking.is_re_rent_listed = not booking.is_re_rent_listed
-    booking.updated_at = datetime.utcnow()
+    booking.updated_at = datetime.now()
 
     session.add(booking)
     session.commit()

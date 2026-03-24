@@ -21,7 +21,7 @@ class TeamMember(TeamMemberBase, table=True):
     __tablename__ = "team_members"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 class TeamMemberCreate(SQLModel):

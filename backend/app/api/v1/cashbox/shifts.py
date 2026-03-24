@@ -35,7 +35,7 @@ def end_shift(
     session: Session = Depends(get_session),
     current_user: User = Depends(require_cashbox),
 ):
-    now = datetime.utcnow()
+    now = datetime.now()
 
     # Find last shift
     last_shift = session.exec(
@@ -86,7 +86,7 @@ def get_analytics(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
 ):
-    now = datetime.utcnow()
+    now = datetime.now()
     try:
         dt_from = datetime.fromisoformat(date_from) if date_from else now - timedelta(days=30)
     except ValueError:

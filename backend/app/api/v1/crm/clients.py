@@ -78,7 +78,7 @@ def merge_clients(
             merged_codes.add(src.alias_code)
     target.merged_alias_codes = list(merged_codes)
 
-    target.updated_at = datetime.utcnow()
+    target.updated_at = datetime.now()
     session.add(target)
 
     # Reassign all related records from source clients to target
@@ -271,7 +271,7 @@ def update_client(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(client, key, value)
-    client.updated_at = datetime.utcnow()
+    client.updated_at = datetime.now()
 
     session.add(client)
     session.commit()
@@ -304,7 +304,7 @@ def delete_client(
         return {"ok": True, "permanent": True}
 
     client.is_active = False
-    client.updated_at = datetime.utcnow()
+    client.updated_at = datetime.now()
     session.add(client)
     session.commit()
     return {"ok": True}

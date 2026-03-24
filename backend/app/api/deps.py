@@ -107,7 +107,7 @@ def require_specialist(
         from datetime import datetime
         try:
             expiry_dt = datetime.fromisoformat(expires_at)
-            if datetime.utcnow() > expiry_dt:
+            if datetime.now() > expiry_dt:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Срок доступа к CRM истёк. Запросите продление.",

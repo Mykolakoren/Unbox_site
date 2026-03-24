@@ -190,7 +190,7 @@ def sync_from_calendar(
             "unmatched": [...],  # events that couldn't be matched
         }
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     time_min = now - timedelta(days=months_back * 30)
     time_max = now + timedelta(days=months_forward * 30)
 
@@ -270,7 +270,7 @@ def sync_client_history(
     Fetch events for a specific client by alias codes and/or name.
     Supports merged clients with multiple alias codes.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     time_min = now - timedelta(days=int(years_back * 365))
     time_max = now + timedelta(days=months_forward * 30)
 

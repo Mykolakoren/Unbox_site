@@ -26,7 +26,7 @@ class TimelineService:
             event_type=event_type,
             description=description,
             metadata_dump=metadata,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now()
         )
         session.add(event)
         session.commit()

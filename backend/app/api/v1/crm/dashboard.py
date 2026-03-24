@@ -20,7 +20,7 @@ def crm_dashboard(
 ):
     """Summary stats for the specialist's CRM dashboard."""
     uid = str(current_user.id)
-    now = datetime.utcnow()
+    now = datetime.now()
 
     active_clients = session.exec(
         select(func.count()).where(
@@ -261,7 +261,7 @@ def update_crm_settings(
         else:
             crm_data["calendar_id"] = calendar_id
     current_user.crm_data = crm_data
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = datetime.now()
     session.add(current_user)
     session.commit()
     return {"ok": True, "calendar_id": crm_data.get("calendar_id")}

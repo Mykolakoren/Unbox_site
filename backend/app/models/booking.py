@@ -50,8 +50,8 @@ class Booking(BookingBase, table=True):
     
     user_uuid: Optional[UUID] = Field(default=None, foreign_key="user.id")
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 class BookingCreate(BookingBase):
     # Override required fields from BookingBase — backend computes pricing server-side

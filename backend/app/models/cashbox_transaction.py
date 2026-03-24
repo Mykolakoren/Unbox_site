@@ -27,7 +27,7 @@ class CashboxTransaction(CashboxTransactionBase, table=True):
     admin_id: str = Field(index=True)
     admin_name: str = Field(default="")
     shift_report_id: Optional[str] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 class CashboxTransactionCreate(SQLModel):

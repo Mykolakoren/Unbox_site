@@ -11,7 +11,7 @@ class TimelineEventBase(SQLModel):
     target_type: str # "user", "booking"
     description: str
     metadata_dump: Dict = Field(default={}, sa_type=JSON) # Stores before/after values
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 class TimelineEvent(TimelineEventBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)

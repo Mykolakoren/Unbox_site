@@ -138,7 +138,7 @@ class PricingService:
         return breakdown
 
     def _is_hot_booking(self, start_time: datetime) -> bool:
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
         if start_time.tzinfo is None:
             start_time = start_time.replace(tzinfo=timezone.utc)
         diff = start_time - now

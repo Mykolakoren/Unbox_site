@@ -45,7 +45,7 @@ def auto_complete_sessions(
 ):
     """Auto-mark PLANNED sessions in the past as COMPLETED."""
     uid = str(current_user.id)
-    now = datetime.utcnow()
+    now = datetime.now()
     stmt = select(TherapySession).where(
         TherapySession.specialist_id == uid,
         TherapySession.status == "PLANNED",
@@ -116,7 +116,7 @@ def update_session(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(ts, key, value)
-    ts.updated_at = datetime.utcnow()
+    ts.updated_at = datetime.now()
 
     session.add(ts)
     session.commit()
@@ -178,7 +178,7 @@ def quick_pay_session(
         session.add(payment)
 
     ts.is_paid = True
-    ts.updated_at = datetime.utcnow()
+    ts.updated_at = datetime.now()
     session.add(ts)
 
     session.commit()
@@ -199,7 +199,7 @@ def unmark_paid_session(
         raise HTTPException(400, "Session is not paid")
 
     ts.is_paid = False
-    ts.updated_at = datetime.utcnow()
+    ts.updated_at = datetime.now()
     session.add(ts)
 
     # Remove related payment if exists
@@ -257,7 +257,7 @@ def mark_all_sessions_paid(
             )
             session.add(payment)
         ts.is_paid = True
-        ts.updated_at = datetime.utcnow()
+        ts.updated_at = datetime.now()
         session.add(ts)
         count += 1
 

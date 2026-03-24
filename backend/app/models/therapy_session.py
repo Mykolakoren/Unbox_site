@@ -26,8 +26,8 @@ class TherapySession(TherapySessionBase, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     specialist_id: str = Field(index=True)  # User UUID, no FK constraint (type mismatch)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class TherapySessionCreate(SQLModel):

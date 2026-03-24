@@ -20,7 +20,7 @@ class ExpenseCategory(ExpenseCategoryBase, table=True):
     __tablename__ = "expense_categories"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 class ExpenseCategoryCreate(SQLModel):

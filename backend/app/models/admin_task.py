@@ -27,8 +27,8 @@ class AdminTask(AdminTaskBase, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     created_by: str = Field(default="")
     created_by_name: str = Field(default="")
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class AdminTaskCreate(SQLModel):
@@ -83,7 +83,7 @@ class AdminTaskComment(AdminTaskCommentBase, table=True):
     task_id: str = Field(index=True)
     author_id: str = Field(default="")
     author_name: str = Field(default="")
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
 
 
 class AdminTaskCommentCreate(SQLModel):

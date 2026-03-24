@@ -53,7 +53,7 @@ def create_payment(
         ts = session.get(TherapySession, data.session_id)
         if ts and ts.specialist_id == str(current_user.id):
             ts.is_paid = True
-            ts.updated_at = datetime.utcnow()
+            ts.updated_at = datetime.now()
             session.add(ts)
 
     session.add(payment)

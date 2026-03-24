@@ -22,7 +22,7 @@ class ShiftReport(ShiftReportBase, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     admin_id: str = Field(index=True)
     admin_name: str = Field(default="")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 class ShiftReportCreate(SQLModel):

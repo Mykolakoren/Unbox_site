@@ -36,7 +36,7 @@ def get_discount_progress(
 
     # 2. Weekly Accumulated Hours
     pricing = PricingService(session)
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     accumulated_hours = pricing._get_weekly_accumulated_hours(current_user, now)
 
     # 3. Determine Tiers

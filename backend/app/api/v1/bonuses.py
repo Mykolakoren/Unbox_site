@@ -101,7 +101,7 @@ def create_bonus(
 
     expires_at = None
     if data.expires_days:
-        expires_at = datetime.utcnow() + timedelta(days=data.expires_days)
+        expires_at = datetime.now() + timedelta(days=data.expires_days)
 
     bonus = Bonus(
         user_id=data.user_id,
@@ -172,7 +172,7 @@ def create_bulk_bonus(
     bulk_id = str(uuid4())
     expires_at = None
     if data.expires_days:
-        expires_at = datetime.utcnow() + timedelta(days=data.expires_days)
+        expires_at = datetime.now() + timedelta(days=data.expires_days)
 
     created = 0
     for user in users:
@@ -233,7 +233,7 @@ def approve_bonus(
     bonus.status = "active"
     bonus.approved_by_id = str(current_user.id)
     bonus.approved_by_name = current_user.name or ""
-    bonus.updated_at = datetime.utcnow()
+    bonus.updated_at = datetime.now()
     session.add(bonus)
     session.commit()
     session.refresh(bonus)
@@ -276,7 +276,7 @@ def reject_bonus(
     bonus.reject_reason = payload.get("reason", "")
     bonus.approved_by_id = str(current_user.id)
     bonus.approved_by_name = current_user.name or ""
-    bonus.updated_at = datetime.utcnow()
+    bonus.updated_at = datetime.now()
     session.add(bonus)
     session.commit()
     session.refresh(bonus)
@@ -314,16 +314,16 @@ def use_bonus(
         raise HTTPException(400, f"Cannot use bonus with status '{bonus.status}'")
 
     # Check expiry
-    if bonus.expires_at and bonus.expires_at < datetime.utcnow():
+    if bonus.expires_at and bonus.expires_at < datetime.now():
         bonus.status = "expired"
-        bonus.updated_at = datetime.utcnow()
+        bonus.updated_at = datetime.now()
         session.add(bonus)
         session.commit()
         raise HTTPException(400, "Bonus has expired")
 
     bonus.status = "used"
-    bonus.used_at = datetime.utcnow()
-    bonus.updated_at = datetime.utcnow()
+    bonus.used_at = datetime.now()
+    bonus.updated_at = datetime.now()
     session.add(bonus)
     session.commit()
     session.refresh(bonus)
