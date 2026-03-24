@@ -7,7 +7,7 @@ import { Button } from '../components/ui/Button';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle
+    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
@@ -1467,16 +1467,20 @@ function BookingCard({
                 <div className={clsx(
                     "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1",
                     {
-                        'bg-unbox-light text-unbox-dark': booking.status === 'confirmed',
+                        'bg-unbox-light text-unbox-dark': booking.status === 'confirmed' && !booking.isReRentListed,
+                        'bg-amber-50 text-amber-700 border border-amber-200': booking.isReRentListed && booking.status === 'confirmed',
                         'bg-gray-100 text-gray-500': booking.status === 'completed',
                         'bg-red-50 text-red-400': booking.status === 'cancelled',
                         'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
+                        'bg-yellow-50 text-yellow-700 border border-yellow-200': booking.status === 'pending_approval',
                     }
                 )}>
-                    {booking.status === 'confirmed' && <><BadgeCheck size={12} /> Подтверждено</>}
+                    {booking.status === 'confirmed' && booking.isReRentListed && <><RotateCcw size={12} /> На переаренде</>}
+                    {booking.status === 'confirmed' && !booking.isReRentListed && <><BadgeCheck size={12} /> Подтверждено</>}
                     {booking.status === 'cancelled' && <><XCircle size={12} /> Отменено</>}
                     {booking.status === 'completed' && <><Check size={12} /> Завершено</>}
                     {booking.status === 're-rented' && '♻️ Пересдано'}
+                    {booking.status === 'pending_approval' && <><Clock size={12} /> Ожидает</>}
                 </div>
             </div>
 
@@ -1509,7 +1513,11 @@ function BookingCard({
             {/* Actions for confirmed bookings */}
             {booking.status === 'confirmed' && !isPast && (
                 <div className="mt-4 pt-4 border-t border-unbox-light">
-                    {canMod ? (
+                    {booking.isReRentListed ? (
+                        <div className="text-center text-sm text-amber-600 font-medium py-2">
+                            ✨ На переаренде — ожидает нового арендатора
+                        </div>
+                    ) : canMod ? (
                         <div className="flex gap-2">
                             <Button variant="outline" size="sm" className="flex-1" onClick={() => onEdit(booking)}>
                                 Перенести
