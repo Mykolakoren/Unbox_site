@@ -95,6 +95,13 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    extendBooking: async (bookingId: string, extraMinutes: number = 30) => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/extend`, {
+            extra_minutes: extraMinutes,
+        });
+        return mapToFrontend(response.data);
+    },
+
     // Hot booking approval
     getPendingApprovals: async (): Promise<BookingHistoryItem[]> => {
         const response = await api.get<any[]>('/bookings/pending-approval');

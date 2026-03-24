@@ -846,6 +846,109 @@ def toggle_re_rent(
     return enrich_booking_status(booking)
 
 
+# ─── Extend Booking ──────────────────────────────────────────────────────────
+
+class ExtendRequest(PydanticBaseModel):
+    extra_minutes: int = 30  # default 30 min extension
+
+
+@router.patch("/{booking_id}/extend", response_model=BookingRead)
+def extend_booking(
+    booking_id: str,
+    payload: ExtendRequest,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Extend a booking by adding extra minutes (30 min increments)."""
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    is_owner = _check_ownership(booking, current_user)
+    if not is_owner and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if booking.status != "confirmed":
+        raise HTTPException(status_code=400, detail="Only confirmed bookings can be extended")
+
+    if _is_past(booking):
+        raise HTTPException(status_code=400, detail="Cannot extend a past booking")
+
+    extra = payload.extra_minutes
+    if extra < 30 or extra % 30 != 0:
+        raise HTTPException(status_code=400, detail="Extension must be in 30-minute increments")
+
+    new_duration = booking.duration + extra
+
+    # Check if the extended time is available
+    new_end_h, new_end_m = divmod(
+        int(booking.start_time.split(":")[0]) * 60
+        + int(booking.start_time.split(":")[1])
+        + new_duration,
+        60
+    )
+    new_end_time = f"{new_end_h:02d}:{new_end_m:02d}"
+
+    # Check for conflicts in the extended slot
+    all_bookings = session.exec(
+        select(Booking).where(
+            Booking.resource_id == booking.resource_id,
+            Booking.date == booking.date,
+            Booking.status.in_(["confirmed", "pending_approval"]),
+            Booking.id != b_uuid,
+        )
+    ).all()
+
+    old_end_h = int(booking.start_time.split(":")[0]) * 60 + int(booking.start_time.split(":")[1]) + booking.duration
+    new_end_total = int(booking.start_time.split(":")[0]) * 60 + int(booking.start_time.split(":")[1]) + new_duration
+
+    for other in all_bookings:
+        other_start = int(other.start_time.split(":")[0]) * 60 + int(other.start_time.split(":")[1])
+        other_end = other_start + other.duration
+        # Check if the extended portion overlaps
+        if other_start < new_end_total and other_end > old_end_h:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Конфликт с бронью {other.start_time} ({other.duration} мин). Слот занят."
+            )
+
+    # Calculate additional price
+    from app.services.pricing import PricingService
+    pricing = PricingService(session)
+    # Simple proportional pricing: (extra_minutes / original_duration) * original_price
+    if booking.final_price and booking.duration > 0:
+        price_per_min = booking.final_price / booking.duration
+        extra_price = round(price_per_min * extra, 2)
+    else:
+        extra_price = 0
+
+    booking.duration = new_duration
+    booking.final_price = round((booking.final_price or 0) + extra_price, 2)
+    booking.updated_at = datetime.now()
+
+    # Deduct from balance if applicable
+    if extra_price > 0 and not current_user.is_admin:
+        target_user = session.get(User, UUID(booking.user_uuid)) if booking.user_uuid else None
+        if not target_user:
+            target_user = session.exec(
+                select(User).where(User.email == booking.user_id)
+            ).first()
+        if target_user:
+            target_user.balance -= extra_price
+            session.add(target_user)
+
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+
+    return enrich_booking_status(booking)
+
+
 # ─── Hot Booking Approval ────────────────────────────────────────────────────
 
 @router.get("/pending-approval", response_model=List[BookingRead])

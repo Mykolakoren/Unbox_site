@@ -1009,18 +1009,35 @@ function BookingsChessboard({
                             </div>
                         </div>
                     ) : canModify(activeBooking) ? (
-                        <div className="flex gap-2 pt-1">
+                        <div className="space-y-2 pt-1">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => { setActiveBooking(null); onReschedule(activeBooking); }}
+                                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-unbox-light text-unbox-dark text-xs font-semibold hover:border-unbox-green hover:text-unbox-green transition-all"
+                                >
+                                    <RefreshCw size={12} /> Перенести
+                                </button>
+                                <button
+                                    onClick={() => { setActiveBooking(null); onCancel(activeBooking.id); }}
+                                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-red-100 text-red-500 text-xs font-semibold hover:bg-red-50 transition-all"
+                                >
+                                    <X size={12} /> Отменить
+                                </button>
+                            </div>
                             <button
-                                onClick={() => { setActiveBooking(null); onReschedule(activeBooking); }}
-                                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-unbox-light text-unbox-dark text-xs font-semibold hover:border-unbox-green hover:text-unbox-green transition-all"
+                                onClick={async () => {
+                                    try {
+                                        const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
+                                        setActiveBooking(null);
+                                        fetchAllBookings();
+                                        toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
+                                    } catch (err: any) {
+                                        toast.error(err?.response?.data?.detail || 'Не удалось продлить');
+                                    }
+                                }}
+                                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-unbox-light text-unbox-dark text-xs font-semibold hover:bg-unbox-green/20 transition-all"
                             >
-                                <RefreshCw size={12} /> Перенести
-                            </button>
-                            <button
-                                onClick={() => { setActiveBooking(null); onCancel(activeBooking.id); }}
-                                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-red-100 text-red-500 text-xs font-semibold hover:bg-red-50 transition-all"
-                            >
-                                <X size={12} /> Отменить
+                                <Plus size={12} /> Продлить +30 мин
                             </button>
                         </div>
                     ) : activeBooking.isReRentListed ? (
@@ -1053,6 +1070,22 @@ function BookingsChessboard({
                                 <div className="text-[11px] text-unbox-grey text-center italic">
                                     Менее 24ч до начала — бесплатная отмена недоступна
                                 </div>
+                                <button
+                                    onClick={async () => {
+                                        if (!confirm('Продление менее чем за 24ч. Отмена этого действия будет платной и только через администратора. Продолжить?')) return;
+                                        try {
+                                            const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
+                                            setActiveBooking(null);
+                                            fetchAllBookings();
+                                            toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
+                                        } catch (err: any) {
+                                            toast.error(err?.response?.data?.detail || 'Не удалось продлить');
+                                        }
+                                    }}
+                                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-unbox-light text-unbox-dark text-xs font-semibold hover:bg-unbox-green/20 transition-all"
+                                >
+                                    <Plus size={12} /> Продлить +30 мин
+                                </button>
                                 <button
                                     onClick={() => { setActiveBooking(null); onReRent(activeBooking.id); }}
                                     className="w-full py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
