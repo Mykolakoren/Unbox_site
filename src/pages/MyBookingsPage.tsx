@@ -1029,7 +1029,7 @@ function BookingsChessboard({
                                     try {
                                         const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
                                         setActiveBooking(null);
-                                        fetchAllBookings();
+                                        fetchBookings?.();
                                         toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
                                     } catch (err: any) {
                                         toast.error(err?.response?.data?.detail || 'Не удалось продлить');
@@ -1076,7 +1076,7 @@ function BookingsChessboard({
                                         try {
                                             const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
                                             setActiveBooking(null);
-                                            fetchAllBookings();
+                                            fetchBookings?.();
                                             toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
                                         } catch (err: any) {
                                             toast.error(err?.response?.data?.detail || 'Не удалось продлить');

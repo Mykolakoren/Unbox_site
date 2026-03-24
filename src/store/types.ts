@@ -111,6 +111,7 @@ export interface BookingHistoryItem extends BookingState {
     cancellationReason?: string;
     cancelledBy?: string; // Admin Name/ID who cancelled
     crmClientId?: string; // Link to TherapistClient.id
+    updatedAt?: string;
 }
 
 export interface WaitlistEntry {
