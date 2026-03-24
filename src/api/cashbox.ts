@@ -16,6 +16,8 @@ export interface CashboxTransaction {
     adminId: string;
     adminName: string;
     shiftReportId?: string;
+    clientId?: string;
+    clientName?: string;
     createdAt: string;
 }
 
@@ -28,6 +30,8 @@ export interface CashboxTransactionCreate {
     description?: string;
     branch?: string;
     date?: string;
+    client_id?: string;
+    client_name?: string;
 }
 
 export interface ExpenseCategory {
@@ -148,6 +152,11 @@ export const cashboxApi = {
         const { data } = await api.get('/cashbox/analytics', {
             params: { date_from: dateFrom, date_to: dateTo },
         });
+        return data;
+    },
+
+    correctBalance: async (payload: { payment_method: string; new_balance: number; reason?: string }): Promise<any> => {
+        const { data } = await api.post('/cashbox/balance-correction', payload);
         return data;
     },
 };

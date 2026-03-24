@@ -16,6 +16,8 @@ class CashboxTransactionBase(SQLModel):
     description: Optional[str] = Field(default=None)
     branch: Optional[str] = Field(default=None)
     date: datetime = Field(index=True)
+    client_id: Optional[str] = Field(default=None, index=True)  # CRM client link
+    client_name: Optional[str] = Field(default=None)  # denormalized for display
 
 
 class CashboxTransaction(CashboxTransactionBase, table=True):
@@ -37,6 +39,8 @@ class CashboxTransactionCreate(SQLModel):
     description: Optional[str] = None
     branch: Optional[str] = None
     date: Optional[datetime] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
 
 
 class CashboxTransactionRead(CashboxTransactionBase):

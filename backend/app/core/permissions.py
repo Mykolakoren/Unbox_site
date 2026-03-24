@@ -21,6 +21,7 @@ SENIOR_ADMIN_GRANTABLE = {
     "subscriptions.manage", "subscriptions.request_discount", "subscriptions.set_discount",
     # Финансы
     "finance.topup_balance", "finance.set_credit_limit", "finance.view_reports", "finance.manage_cashbox",
+    "finance.balance_correction",
     # Контент
     "content.edit_locations", "content.edit_rooms", "content.add_locations", "content.add_rooms",
     "content.set_hours", "content.edit_pricing",
@@ -56,6 +57,7 @@ SENIOR_ADMIN_DEFAULT_PERMISSIONS = ADMIN_DEFAULT_PERMISSIONS | {
     "bookings.override_24h",
     "subscriptions.set_discount",
     "finance.manage_cashbox",
+    "finance.balance_correction",
     "content.add_locations", "content.add_rooms", "content.edit_pricing",
     "admin.assign_roles", "admin.accept_requests",
 }

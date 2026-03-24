@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
@@ -52,6 +52,18 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [branch, setBranch] = useState('');
     const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [transferTo, setTransferTo] = useState('card_tbc');
+    const [clientId, setClientId] = useState('');
+    const [clientSearch, setClientSearch] = useState('');
+    const [crmClients, setCrmClients] = useState<{id: string; name: string; aliasCode?: string}[]>([]);
+
+    // Fetch CRM clients for income linking
+    useEffect(() => {
+        import('../../../api/crm').then(({ crmApi }) => {
+            crmApi.getClients(true).then(clients => {
+                setCrmClients(clients.map((c: any) => ({ id: c.id, name: c.name, aliasCode: c.aliasCode })));
+            }).catch(() => {});
+        });
+    }, []);
     const [saving, setSaving] = useState(false);
 
     if (!isOpen) return null;
@@ -104,7 +116,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     description: description || undefined,
                     branch: branch || undefined,
                     date: dateValue,
-                });
+                    client_id: (type === 'income' && clientId) ? clientId : undefined,
+                    client_name: (type === 'income' && clientId) ? crmClients.find(c => c.id === clientId)?.name : undefined,
+                } as any);
                 toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
             }
             setAmount('');
@@ -268,6 +282,28 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                         {c.depth > 0 ? `  └ ${c.name}` : c.name}
                                     </option>
                                 ))}
+                            </select>
+                        </div>
+                    )}
+
+                    {/* Client (income only) */}
+                    {type === 'income' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
+                            <select
+                                value={clientId}
+                                onChange={e => setClientId(e.target.value)}
+                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                            >
+                                <option value="">— Без привязки к клиенту —</option>
+                                {crmClients
+                                    .filter(c => !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+                                    .map(c => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.aliasCode ? `#${c.aliasCode} ` : ''}{c.name}
+                                        </option>
+                                    ))
+                                }
                             </select>
                         </div>
                     )}

@@ -122,6 +122,14 @@ def create_transaction(
             raise HTTPException(404, "Категория не найдена")
         cat_name = cat.name
 
+    # Resolve client name if client_id provided
+    client_name = payload.client_name
+    if payload.client_id and not client_name:
+        from app.models.therapist_client import TherapistClient
+        client = session.get(TherapistClient, payload.client_id)
+        if client:
+            client_name = client.name
+
     tx = CashboxTransaction(
         type=payload.type,
         amount=payload.amount,
@@ -133,6 +141,8 @@ def create_transaction(
         date=payload.date or datetime.now(),  # local server time (Tbilisi UTC+4)
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",
+        client_id=payload.client_id,
+        client_name=client_name,
     )
     session.add(tx)
     session.commit()
@@ -164,3 +174,63 @@ def delete_transaction(
     session.delete(tx)
     session.commit()
     return {"ok": True}
+
+
+@router.post("/balance-correction")
+def create_balance_correction(
+    payload: dict,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_cashbox),
+):
+    """Create a balance correction (start balance or adjustment). Owner/senior_admin only."""
+    from app.api import deps
+    if not deps.has_permission(current_user, "finance.balance_correction"):
+        raise HTTPException(403, "Нет права на корректировку остатков")
+
+    payment_method = payload.get("payment_method", "cash")
+    new_balance = payload.get("new_balance")
+    reason = payload.get("reason", "Корректировка остатков")
+
+    if new_balance is None:
+        raise HTTPException(400, "new_balance обязателен")
+
+    # Calculate current balance for this payment method
+    income = session.exec(
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
+            CashboxTransaction.type == "income",
+            CashboxTransaction.payment_method == payment_method,
+        )
+    ).one()
+    expense = session.exec(
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
+            CashboxTransaction.type == "expense",
+            CashboxTransaction.payment_method == payment_method,
+        )
+    ).one()
+    current_balance = float(income) - float(expense)
+    diff = float(new_balance) - current_balance
+
+    if abs(diff) < 0.01:
+        return {"ok": True, "message": "Баланс уже соответствует", "diff": 0}
+
+    # Create correction transaction
+    tx = CashboxTransaction(
+        type="income" if diff > 0 else "expense",
+        amount=abs(diff),
+        currency="GEL",
+        payment_method=payment_method,
+        description=f"[КОРРЕКЦИЯ] {reason} (было: {current_balance:.2f}, стало: {new_balance:.2f})",
+        date=datetime.now(),
+        admin_id=str(current_user.id),
+        admin_name=current_user.name or "",
+    )
+    session.add(tx)
+    session.commit()
+
+    return {
+        "ok": True,
+        "previous_balance": round(current_balance, 2),
+        "new_balance": round(float(new_balance), 2),
+        "diff": round(diff, 2),
+        "transaction_id": tx.id,
+    }
