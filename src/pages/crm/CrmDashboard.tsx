@@ -111,15 +111,15 @@ export function CrmDashboard() {
             {/* Extended Stats Row */}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 <StatCard
-                    icon={Wallet}
-                    label="Средний чек"
-                    value={`${(dashboard?.avgCheck ?? 0).toFixed(0)} ₾`}
+                    icon={BarChart3}
+                    label="Средняя ставка/час"
+                    value={`≈ ${(dashboard?.avgHourlyRate ?? 0).toFixed(0)} ₾`}
                     color="blue"
                 />
                 <StatCard
-                    icon={BarChart3}
-                    label="Ставка / час"
-                    value={`${(dashboard?.avgHourlyRate ?? 0).toFixed(0)} ₾`}
+                    icon={Wallet}
+                    label="Мин / Макс ставка"
+                    value={`${dashboard?.minRate ?? 0} – ${dashboard?.maxRate ?? 0} ₾`}
                     color="blue"
                 />
                 <StatCard

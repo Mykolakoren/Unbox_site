@@ -222,9 +222,19 @@ def crm_dashboard(
         )
     ).all()
 
-    avg_check = round(total_payments_all / max(len(completed_sessions), 1), 2)
     total_hours = sum(s.duration_minutes or 60 for s in completed_sessions) / 60
     avg_hourly_rate = round(total_payments_all / max(total_hours, 1), 2)
+
+    # Min/Max rates from client base prices (active clients only)
+    active_clients_all = session.exec(
+        select(TherapistClient).where(
+            TherapistClient.specialist_id == uid,
+            TherapistClient.is_active == True,
+        )
+    ).all()
+    client_rates = [c.base_price for c in active_clients_all if c.base_price and c.base_price > 0]
+    min_rate = min(client_rates) if client_rates else 0
+    max_rate = max(client_rates) if client_rates else 0
 
     # Group debt by currency
     debt_by_currency: dict = {}
@@ -246,8 +256,9 @@ def crm_dashboard(
         "monthly_stats": monthly_stats,
         "clients_without_future_sessions": clients_no_future,
         "debt_by_client": debt_by_client,
-        "avg_check": avg_check,
         "avg_hourly_rate": avg_hourly_rate,
+        "min_rate": min_rate,
+        "max_rate": max_rate,
         "total_active_debt": round(total_active_debt, 2),
         "debt_by_currency": debt_by_currency,
     }
