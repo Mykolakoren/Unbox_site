@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, Settings2, X } from 'lucide-react';
 import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth,
     startOfDay, endOfDay, addDays, addWeeks, addMonths, format,
@@ -66,6 +67,11 @@ export function AdminFinance() {
     const [tab, setTab] = useState<Tab>('transactions');
     const [showAddTx, setShowAddTx] = useState(false);
     const [showEndShift, setShowEndShift] = useState(false);
+    const [showCorrection, setShowCorrection] = useState(false);
+    const [corrAccount, setCorrAccount] = useState('cash');
+    const [corrAmount, setCorrAmount] = useState('');
+    const [corrReason, setCorrReason] = useState('');
+    const [corrSaving, setCorrSaving] = useState(false);
 
     // Period filters
     const [periodMode, setPeriodMode] = useState<PeriodMode>('week');
@@ -80,6 +86,7 @@ export function AdminFinance() {
     const currentUser = useUserStore(s => s.currentUser);
     const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions } = useCashboxStore();
     const canManageCategories = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
+    const canCorrectBalance = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
 
     useEffect(() => {
         fetchBalance(selectedBranch || undefined);
@@ -121,6 +128,15 @@ export function AdminFinance() {
                     <p className="text-xs sm:text-sm text-unbox-grey mt-0.5">Управление кассой и расходами</p>
                 </div>
                 <div className="flex gap-2">
+                    {canCorrectBalance && (
+                        <button
+                            onClick={() => setShowCorrection(true)}
+                            className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-amber-300 text-xs sm:text-sm font-medium text-amber-700 hover:bg-amber-50 transition-colors"
+                        >
+                            <Settings2 size={14} />
+                            <span className="hidden sm:inline">Корректировка</span>
+                        </button>
+                    )}
                     <button
                         onClick={() => setShowEndShift(true)}
                         className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -277,6 +293,84 @@ export function AdminFinance() {
             {/* Modals */}
             <AddCashboxTransactionModal isOpen={showAddTx} onClose={() => setShowAddTx(false)} />
             <EndShiftModal isOpen={showEndShift} onClose={() => setShowEndShift(false)} />
+
+            {/* Balance Correction Modal — owner/senior_admin only */}
+            {showCorrection && canCorrectBalance && createPortal(
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowCorrection(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-bold text-gray-900">Корректировка остатка</h3>
+                            <button onClick={() => setShowCorrection(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <p className="text-xs text-gray-500">Установите фактический остаток на счёте. Разница будет записана как корректировка с сохранением истории.</p>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Счёт</label>
+                            <select value={corrAccount} onChange={e => setCorrAccount(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm">
+                                <option value="cash">Наличные</option>
+                                <option value="card_tbc">Карта TBC</option>
+                                <option value="card_bog">Карта BOG</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Фактический остаток (GEL)</label>
+                            <input
+                                type="number"
+                                value={corrAmount}
+                                onChange={e => setCorrAmount(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Причина корректировки *</label>
+                            <textarea
+                                value={corrReason}
+                                onChange={e => setCorrReason(e.target.value)}
+                                placeholder="Укажите причину..."
+                                rows={2}
+                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm resize-none"
+                            />
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                            <button onClick={() => setShowCorrection(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">Отмена</button>
+                            <button
+                                disabled={corrSaving || !corrReason.trim() || corrAmount === ''}
+                                onClick={async () => {
+                                    setCorrSaving(true);
+                                    try {
+                                        const { api } = await import('../../api/client');
+                                        await api.post('/cashbox/balance-correction', {
+                                            payment_method: corrAccount,
+                                            actual_balance: parseFloat(corrAmount),
+                                            reason: corrReason.trim(),
+                                        });
+                                        const { toast } = await import('sonner');
+                                        toast.success('Остаток скорректирован');
+                                        setShowCorrection(false);
+                                        setCorrAmount('');
+                                        setCorrReason('');
+                                        fetchBalance();
+                                        fetchTransactions();
+                                    } catch (err: any) {
+                                        const { toast } = await import('sonner');
+                                        toast.error(err?.response?.data?.detail || 'Ошибка корректировки');
+                                    } finally {
+                                        setCorrSaving(false);
+                                    }
+                                }}
+                                className="flex-1 px-4 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                            >
+                                {corrSaving ? 'Сохранение...' : 'Применить'}
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
         </div>
     );
 }
