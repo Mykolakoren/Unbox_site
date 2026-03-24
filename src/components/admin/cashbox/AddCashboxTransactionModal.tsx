@@ -54,13 +54,13 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [transferTo, setTransferTo] = useState('card_tbc');
     const [clientId, setClientId] = useState('');
     const [clientSearch, setClientSearch] = useState('');
-    const [crmClients, setCrmClients] = useState<{id: string; name: string; aliasCode?: string}[]>([]);
+    const [bookingUsers, setBookingUsers] = useState<{id: string; name: string; email: string}[]>([]);
 
-    // Fetch CRM clients for income linking
+    // Fetch booking Users (not CRM clients — those are specialist-only)
     useEffect(() => {
-        import('../../../api/crm').then(({ crmApi }) => {
-            crmApi.getClients(true).then(clients => {
-                setCrmClients(clients.map((c: any) => ({ id: c.id, name: c.name, aliasCode: c.aliasCode })));
+        import('../../../api/users').then(({ usersApi }) => {
+            usersApi.getUsers(0, 500).then(users => {
+                setBookingUsers(users.map((u: any) => ({ id: u.id || u.email, name: u.name, email: u.email })));
             }).catch(() => {});
         });
     }, []);
@@ -117,7 +117,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     branch: branch || undefined,
                     date: dateValue,
                     client_id: (type === 'income' && clientId) ? clientId : undefined,
-                    client_name: (type === 'income' && clientId) ? crmClients.find(c => c.id === clientId)?.name : undefined,
+                    client_name: (type === 'income' && clientId) ? bookingUsers.find(c => c.id === clientId)?.name : undefined,
                 } as any);
                 toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
             }
@@ -296,11 +296,11 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
                             >
                                 <option value="">— Без привязки к клиенту —</option>
-                                {crmClients
-                                    .filter(c => !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+                                {bookingUsers
+                                    .filter(c => !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase()) || c.email.toLowerCase().includes(clientSearch.toLowerCase()))
                                     .map(c => (
                                         <option key={c.id} value={c.id}>
-                                            {c.aliasCode ? `#${c.aliasCode} ` : ''}{c.name}
+                                            {c.name} ({c.email})
                                         </option>
                                     ))
                                 }
