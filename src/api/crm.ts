@@ -183,6 +183,8 @@ export interface CrmDashboard {
     debtByClient?: DebtByClient[];
     avgCheck?: number;
     avgHourlyRate?: number;
+    minRate?: number;
+    maxRate?: number;
     totalActiveDebt?: number;
     debtByCurrency?: Record<string, number>;
     revenueByCurrency?: Record<string, number>;
