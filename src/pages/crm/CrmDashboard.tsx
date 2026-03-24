@@ -159,18 +159,33 @@ export function CrmDashboard() {
                             />
                             <YAxis fontSize={12} tickLine={false} axisLine={false} />
                             <Tooltip
-                                formatter={(value: any, name: any) => [
-                                    `${Number(value).toFixed(0)} ₾`,
-                                    name === 'received' ? 'Получено' : name === 'expected' ? 'Ожидалось' : 'Сессий',
-                                ]}
-                                labelFormatter={(label: any) => {
+                                content={({ active, payload, label }: any) => {
+                                    if (!active || !payload?.length) return null;
                                     const parts = String(label).split('-');
-                                    if (parts.length < 2) return String(label);
-                                    const [y, m] = parts;
                                     const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-                                    return `${months[parseInt(m, 10) - 1]} ${y}`;
+                                    const title = parts.length >= 2 ? `${months[parseInt(parts[1], 10) - 1]} ${parts[0]}` : label;
+                                    const data = payload[0]?.payload || {};
+                                    const formatByCur = (cur: Record<string, number> | undefined) => {
+                                        if (!cur) return null;
+                                        const entries = Object.entries(cur).filter(([, v]) => v > 0);
+                                        if (entries.length <= 1) return null;
+                                        return entries.map(([c, v]) => `${v.toFixed(0)} ${c}`).join(' · ');
+                                    };
+                                    return (
+                                        <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-3 text-sm">
+                                            <div className="font-bold text-gray-800 mb-2">{title}</div>
+                                            <div className="text-gray-500">Ожидалось : <span className="font-medium text-gray-700">≈ {Number(data.expected || 0).toFixed(0)} ₾</span></div>
+                                            {formatByCur(data.expectedByCurrency) && (
+                                                <div className="text-[11px] text-gray-400 ml-2 mb-1">{formatByCur(data.expectedByCurrency)}</div>
+                                            )}
+                                            <div className="text-unbox-green">Получено : <span className="font-medium">≈ {Number(data.received || 0).toFixed(0)} ₾</span></div>
+                                            {formatByCur(data.receivedByCurrency) && (
+                                                <div className="text-[11px] text-gray-400 ml-2 mb-1">{formatByCur(data.receivedByCurrency)}</div>
+                                            )}
+                                            <div className="text-gray-400 text-xs mt-1">{data.sessionCount || 0} сессий</div>
+                                        </div>
+                                    );
                                 }}
-                                contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: 13 }}
                             />
                             <Bar dataKey="expected" name="expected" fill="#d4e2e1" radius={[6, 6, 0, 0]} />
                             <Bar dataKey="received" name="received" fill="#2a8c7a" radius={[6, 6, 0, 0]} />

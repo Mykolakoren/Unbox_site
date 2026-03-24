@@ -91,7 +91,9 @@ def crm_dashboard(
 
     # --- Extended stats ---
 
-    # Monthly stats (12 months)
+    # Monthly stats (12 months) — convert to GEL equivalent
+    GEL_RATES = {"GEL": 1, "USD": 2.7, "EUR": 2.95, "RUB": 0.03}
+
     monthly_stats = []
     for i in range(11, -1, -1):
         m_start = (now.replace(day=1) - timedelta(days=30 * i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -107,7 +109,15 @@ def crm_dashboard(
                 TherapistPayment.date < m_end,
             )
         ).all()
-        received = sum(float(p.amount or 0) for p in m_payments)
+
+        # Received: convert each payment to GEL
+        received_gel = 0.0
+        received_by_cur: dict[str, float] = {}
+        for p in m_payments:
+            amt = float(p.amount or 0)
+            cur = (p.currency or "GEL").upper()
+            received_by_cur[cur] = received_by_cur.get(cur, 0) + amt
+            received_gel += amt * GEL_RATES.get(cur, 1)
 
         m_sessions = session.exec(
             select(TherapySession).where(
@@ -118,16 +128,24 @@ def crm_dashboard(
             )
         ).all()
 
-        expected = 0.0
+        # Expected: convert each session price to GEL
+        expected_gel = 0.0
+        expected_by_cur: dict[str, float] = {}
         for ms in m_sessions:
             client = session.get(TherapistClient, ms.client_id)
-            expected += ms.price if ms.price is not None else (client.base_price if client else 0)
+            price = ms.price if ms.price is not None else (client.base_price if client else 0)
+            cur = (client.currency if client else "GEL") or "GEL"
+            cur = cur.upper()
+            expected_by_cur[cur] = expected_by_cur.get(cur, 0) + price
+            expected_gel += price * GEL_RATES.get(cur, 1)
 
         monthly_stats.append({
             "month": m_start.strftime("%Y-%m"),
-            "received": round(float(received), 2),
-            "expected": round(expected, 2),
+            "received": round(received_gel, 2),
+            "expected": round(expected_gel, 2),
             "session_count": len(m_sessions),
+            "received_by_currency": received_by_cur,
+            "expected_by_currency": expected_by_cur,
         })
 
     # Clients without future sessions
