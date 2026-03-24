@@ -53,7 +53,6 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [transferTo, setTransferTo] = useState('card_tbc');
     const [clientId, setClientId] = useState('');
-    const [clientSearch, setClientSearch] = useState('');
     const [bookingUsers, setBookingUsers] = useState<{id: string; name: string; email: string}[]>([]);
 
     // Fetch booking Users (not CRM clients — those are specialist-only)
@@ -296,9 +295,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
                             >
                                 <option value="">— Без привязки к клиенту —</option>
-                                {bookingUsers
-                                    .filter(c => !clientSearch || c.name.toLowerCase().includes(clientSearch.toLowerCase()) || c.email.toLowerCase().includes(clientSearch.toLowerCase()))
-                                    .map(c => (
+                                {bookingUsers.map(c => (
                                         <option key={c.id} value={c.id}>
                                             {c.name} ({c.email})
                                         </option>
