@@ -48,6 +48,7 @@ def build_category_tree(categories: List[ExpenseCategory]) -> List[dict]:
             "parent_id": cat.parent_id,
             "icon": cat.icon,
             "is_active": cat.is_active,
+            "category_type": getattr(cat, "category_type", "expense"),
             "created_at": cat.created_at,
             "children": [],
         }
