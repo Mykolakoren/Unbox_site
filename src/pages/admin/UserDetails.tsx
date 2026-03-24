@@ -112,7 +112,7 @@ export function AdminUserDetails() {
 
 
 
-    const handleAddFunds = async (amount: number, method: 'cash' | 'tbc' | 'bog') => {
+    const handleAddFunds = async (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => {
         updateUserById(user.email, { balance: user.balance + amount });
 
         addTransaction({
@@ -125,14 +125,16 @@ export function AdminUserDetails() {
             description: 'Пополнение баланса'
         });
 
-        // Auto-create cashbox income
+        // Auto-create cashbox income with proper category
         const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
         try {
             await api.post('/cashbox/transactions', {
                 type: 'income',
                 amount,
                 payment_method: methodMap[method] || 'cash',
+                category_id: 'cat-topup',
                 description: `Пополнение баланса: ${user.name}`,
+                branch: branch || undefined,
             });
         } catch { /* cashbox may not be accessible for this admin */ }
 
@@ -273,6 +275,7 @@ export function AdminUserDetails() {
                 isOpen={isAddFundsOpen}
                 onClose={() => setIsAddFundsOpen(false)}
                 onConfirm={handleAddFunds}
+                userName={user.name}
             />
             <AssignSubscriptionModal
                 isOpen={isAssignSubOpen}

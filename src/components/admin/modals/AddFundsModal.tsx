@@ -7,13 +7,22 @@ import { toast } from 'sonner';
 interface AddFundsModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (amount: number, method: 'cash' | 'tbc' | 'bog') => void;
+    onConfirm: (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => void;
+    userName?: string;
 }
 
-export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps) {
+const PAYMENT_METHODS = [
+    { id: 'cash', label: 'Наличные', icon: '💵' },
+    { id: 'tbc', label: 'TBC Bank', icon: '🔵' },
+    { id: 'bog', label: 'BOG (Ge)', icon: '🟠' },
+] as const;
 
+const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
+
+export function AddFundsModal({ isOpen, onClose, onConfirm, userName }: AddFundsModalProps) {
     const [amount, setAmount] = useState('');
     const [method, setMethod] = useState<'cash' | 'tbc' | 'bog'>('cash');
+    const [branch, setBranch] = useState('');
 
     if (!isOpen) return null;
 
@@ -24,16 +33,10 @@ export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps
             toast.error('Введите корректную сумму');
             return;
         }
-        onConfirm(value, method);
+        onConfirm(value, method, branch || undefined);
         setAmount('');
         onClose();
     };
-
-    const PAYMENT_METHODS = [
-        { id: 'cash', label: 'Наличные', icon: '💵' },
-        { id: 'tbc', label: 'TBC Bank', icon: '🔵' },
-        { id: 'bog', label: 'BOG (Ge)', icon: '🟠' },
-    ] as const;
 
     return createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -54,14 +57,17 @@ export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps
                         <CreditCard size={24} />
                     </div>
                     <h3 className="text-xl font-bold text-gray-900">Пополнить баланс</h3>
+                    {userName && (
+                        <p className="text-unbox-green text-sm font-medium mt-1">{userName}</p>
+                    )}
                     <p className="text-gray-500 text-sm mt-1">
-                        Введите сумму и способ оплаты
+                        Операция отразится в кассе автоматически
                     </p>
                 </div>
 
-                <form onSubmit={handleSubmit}>
-                    <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
                             Сумма (GEL)
                         </label>
                         <input
@@ -74,8 +80,8 @@ export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps
                         />
                     </div>
 
-                    <div className="mb-6">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
                             Способ оплаты
                         </label>
                         <div className="grid grid-cols-3 gap-2">
@@ -96,7 +102,21 @@ export function AddFundsModal({ isOpen, onClose, onConfirm }: AddFundsModalProps
                         </div>
                     </div>
 
-                    <div className="flex gap-3">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                            Филиал
+                        </label>
+                        <select
+                            value={branch}
+                            onChange={e => setBranch(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                        >
+                            <option value="">Не указан</option>
+                            {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
                         <Button variant="outline" type="button" onClick={onClose} className="flex-1">
                             Отмена
                         </Button>
