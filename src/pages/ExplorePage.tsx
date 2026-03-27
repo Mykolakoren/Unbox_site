@@ -173,7 +173,7 @@ export function ExplorePage() {
                         {isAdmin && (
                             <button
                                 onClick={() => navigate('/admin')}
-                                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-unbox-dark/70 hover:text-unbox-dark transition-colors"
+                                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-unbox-dark/70 hover:text-unbox-dark transition-colors cursor-pointer"
                                 style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.70)' }}
                             >
                                 <ShieldCheck size={13} />
