@@ -42,7 +42,7 @@ def create_resource(
     resource: ResourceCreate,
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    if current_user.role not in ALLOWED_ROLES and not current_user.is_superuser:
+    if current_user.role not in ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     db_resource = session.get(Resource, resource.id)
@@ -64,7 +64,7 @@ def update_resource(
     resource_in: ResourceUpdate,
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    if current_user.role not in ALLOWED_ROLES and not current_user.is_superuser:
+    if current_user.role not in ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     db_resource = session.get(Resource, resource_id)

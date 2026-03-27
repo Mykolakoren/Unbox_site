@@ -11,16 +11,14 @@ import os
 # Vercel Postgres usually sets POSTGRES_URL
 connection_url = settings.DATABASE_URL or os.environ.get("POSTGRES_URL") or sqlite_url
 
-print(f"DEBUG: Connecting to DB type: {'POSTGRES' if 'postgres' in str(connection_url) else 'SQLITE'}")
-
 # Fix for Vercel/Neon: "postgres://" -> "postgresql://"
 if connection_url and connection_url.startswith("postgres://"):
     connection_url = connection_url.replace("postgres://", "postgresql://", 1)
 
 connect_args = {"check_same_thread": False} if "sqlite" in connection_url else {}
 engine = create_engine(
-    connection_url, 
-    echo=True, 
+    connection_url,
+    echo=False,
     connect_args=connect_args,
     pool_pre_ping=True,
     pool_recycle=300

@@ -4,6 +4,7 @@ from sqlmodel import select, Session
 from app.api import deps
 from app.models.waitlist import Waitlist, WaitlistCreate, WaitlistRead
 from app.models.user import User
+from app.core.permissions import ADMIN_ROLES
 
 router = APIRouter()
 
@@ -53,7 +54,7 @@ def delete_waitlist_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
         
-    if entry.user_uuid != current_user.id and not current_user.is_admin:
+    if entry.user_uuid != current_user.id and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     session.delete(entry)

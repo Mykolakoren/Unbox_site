@@ -1,3 +1,4 @@
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { MinimalLayout } from './components/MinimalLayout';
 import { Summary } from './components/Summary';
@@ -8,7 +9,7 @@ import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 // Store
 import { useBookingStore } from './store/bookingStore';
 
-// New Pages
+// Public pages (loaded eagerly — critical path)
 import { ExplorePage } from './pages/ExplorePage';
 import { SpecialistsPage } from './pages/SpecialistsPage';
 import { SpecialistProfilePage } from './pages/SpecialistProfilePage';
@@ -18,52 +19,37 @@ import { DashboardLayout } from './components/DashboardLayout';
 import { MyBookingsPage } from './pages/MyBookingsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { DashboardOverview } from './pages/DashboardOverview';
-import { AdminLayout } from './pages/admin/AdminLayout';
-import { AdminUsers } from './pages/admin/Users';
-import { AdminBookings } from './pages/admin/Bookings';
-import { AdminDashboard } from './pages/admin/Dashboard';
-import { AdminWaitlist } from './pages/admin/Waitlist';
-import { AdminUserDetails } from './pages/admin/UserDetails';
-import { AdminCabinets } from './pages/admin/Cabinets';
-import { AdminKnowledgeBase } from './pages/admin/KnowledgeBase';
-import { AdminTasksBoard } from './pages/admin/TasksBoard';
-
-// CRM Pages (Specialist Personal Cabinet)
-import { CrmLayout } from './pages/crm/CrmLayout';
-import { CrmDashboard } from './pages/crm/CrmDashboard';
-import { CrmClients } from './pages/crm/CrmClients';
-import { CrmClientDetail } from './pages/crm/CrmClientDetail';
-import { CrmSessions } from './pages/crm/CrmSessions';
-import { CrmBookings } from './pages/crm/CrmBookings';
-import { CrmFinances } from './pages/crm/CrmFinances';
-import { CrmNotes } from './pages/crm/CrmNotes';
-import { CrmSettings } from './pages/crm/CrmSettings';
-
-// Admin CRM
-import { AdminCrm } from './pages/admin/AdminCrm';
-import { AdminAccessRights } from './pages/admin/AccessRights';
-import { AdminFinance } from './pages/admin/Finance';
-import { AdminTeam } from './pages/admin/AdminTeam';
-import { AdminSpecialists } from './pages/admin/AdminSpecialists';
 import { TestPage } from './pages/TestPage';
 import { SubscriptionsPage } from './pages/SubscriptionsPage';
 
-// ── Glass panel style for wizard steps (mirrors ExplorePage) ───────────────
-const glassPanel: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.14)',
-  backdropFilter: 'blur(36px) saturate(160%)',
-  WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-  border: '1px solid rgba(255,255,255,0.28)',
-  boxShadow: '0 20px 60px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.45)',
-};
-const glassSummary: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.22)',
-  backdropFilter: 'blur(24px) saturate(150%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-  border: '1px solid rgba(255,255,255,0.35)',
-  boxShadow: '0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.50)',
-};
-// ────────────────────────────────────────────────────────────────────────────
+// Admin pages (lazy loaded — only for admins)
+const AdminLayout = lazy(() => import('./pages/admin/AdminLayout').then(m => ({ default: m.AdminLayout })));
+const AdminUsers = lazy(() => import('./pages/admin/Users').then(m => ({ default: m.AdminUsers })));
+const AdminBookings = lazy(() => import('./pages/admin/Bookings').then(m => ({ default: m.AdminBookings })));
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard').then(m => ({ default: m.AdminDashboard })));
+const AdminWaitlist = lazy(() => import('./pages/admin/Waitlist').then(m => ({ default: m.AdminWaitlist })));
+const AdminUserDetails = lazy(() => import('./pages/admin/UserDetails').then(m => ({ default: m.AdminUserDetails })));
+const AdminCabinets = lazy(() => import('./pages/admin/Cabinets').then(m => ({ default: m.AdminCabinets })));
+const AdminKnowledgeBase = lazy(() => import('./pages/admin/KnowledgeBase').then(m => ({ default: m.AdminKnowledgeBase })));
+const AdminTasksBoard = lazy(() => import('./pages/admin/TasksBoard').then(m => ({ default: m.AdminTasksBoard })));
+const AdminCrm = lazy(() => import('./pages/admin/AdminCrm').then(m => ({ default: m.AdminCrm })));
+const AdminAccessRights = lazy(() => import('./pages/admin/AccessRights').then(m => ({ default: m.AdminAccessRights })));
+const AdminFinance = lazy(() => import('./pages/admin/Finance').then(m => ({ default: m.AdminFinance })));
+const AdminTeam = lazy(() => import('./pages/admin/AdminTeam').then(m => ({ default: m.AdminTeam })));
+const AdminSpecialists = lazy(() => import('./pages/admin/AdminSpecialists').then(m => ({ default: m.AdminSpecialists })));
+
+// CRM pages (lazy loaded — only for specialists)
+const CrmLayout = lazy(() => import('./pages/crm/CrmLayout').then(m => ({ default: m.CrmLayout })));
+const CrmDashboard = lazy(() => import('./pages/crm/CrmDashboard').then(m => ({ default: m.CrmDashboard })));
+const CrmClients = lazy(() => import('./pages/crm/CrmClients').then(m => ({ default: m.CrmClients })));
+const CrmClientDetail = lazy(() => import('./pages/crm/CrmClientDetail').then(m => ({ default: m.CrmClientDetail })));
+const CrmSessions = lazy(() => import('./pages/crm/CrmSessions').then(m => ({ default: m.CrmSessions })));
+const CrmBookings = lazy(() => import('./pages/crm/CrmBookings').then(m => ({ default: m.CrmBookings })));
+const CrmFinances = lazy(() => import('./pages/crm/CrmFinances').then(m => ({ default: m.CrmFinances })));
+const CrmNotes = lazy(() => import('./pages/crm/CrmNotes').then(m => ({ default: m.CrmNotes })));
+const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ default: m.CrmSettings })));
+
+import { glassPanel, glassSummary } from './utils/styles';
 
 // Booking Flow Wrapper
 function BookingWizard() {
@@ -123,9 +109,9 @@ function BookingWizard() {
   );
 }
 
-import { useEffect } from 'react';
 import { useUserStore } from './store/userStore';
 import { Toaster } from 'sonner';
+import { ModuleErrorBoundary } from './components/ui/ModuleErrorBoundary';
 
 function App() {
   const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
@@ -149,9 +135,16 @@ function App() {
     }
   }, [fetchBookings, fetchCurrentUser, fetchWaitlist]);
 
+  const lazyFallback = (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+    </div>
+  );
+
   return (
     <>
       <Toaster position="top-center" richColors closeButton />
+      <Suspense fallback={lazyFallback}>
       <Routes>
         {/* Public Booking Flow */}
         <Route path="/" element={<ExplorePage />} />
@@ -169,7 +162,7 @@ function App() {
         <Route path="/tests/:testId" element={<TestPage />} />
 
         {/* Legacy Checkout Wizard Route (for backward compat / direct checkout) */}
-        <Route path="/checkout" element={<BookingWizard />} />
+        <Route path="/checkout" element={<ModuleErrorBoundary moduleName="Бронирование"><BookingWizard /></ModuleErrorBoundary>} />
 
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
@@ -182,7 +175,7 @@ function App() {
         </Route>
 
         {/* CRM — Specialist Personal Cabinet */}
-        <Route path="/crm" element={<CrmLayout />}>
+        <Route path="/crm" element={<ModuleErrorBoundary moduleName="CRM"><CrmLayout /></ModuleErrorBoundary>}>
           <Route index element={<CrmDashboard />} />
           <Route path="clients" element={<CrmClients />} />
           <Route path="clients/:clientId" element={<CrmClientDetail />} />
@@ -193,8 +186,8 @@ function App() {
           <Route path="settings" element={<CrmSettings />} />
         </Route>
 
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminDashboard />} /> {/* Dashboard Home */}
+        <Route path="/admin" element={<ModuleErrorBoundary moduleName="Админ-панель"><AdminLayout /></ModuleErrorBoundary>}>
+          <Route index element={<AdminDashboard />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="users/:email" element={<AdminUserDetails />} />
           <Route path="cabinets" element={<AdminCabinets />} />
@@ -211,6 +204,7 @@ function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </>
   );
 }

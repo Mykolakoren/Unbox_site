@@ -5,6 +5,7 @@ from app.api import deps
 from app.db.session import get_session
 from app.models.timeline import TimelineEvent, TimelineEventRead
 from app.models.user import User
+from app.core.permissions import ADMIN_ROLES
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ def read_timeline_events(
     Retrieve timeline events.
     """
     # Access Control: Only admins
-    if not current_user.is_admin:
+    if current_user.role not in ADMIN_ROLES:
         # Or maybe allow users to see their own history?
         # For now, strict admin only.
         from fastapi import HTTPException

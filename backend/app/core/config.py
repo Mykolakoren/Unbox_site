@@ -4,14 +4,14 @@ from typing import List, Optional
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Unbox Booking API"
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = "changethis-generate-secure-key-in-prod" # TODO: usage: openssl rand -hex 32
+    SECRET_KEY: str = "changethis-generate-secure-key-in-prod"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8 # 8 days
-    
-    # OAuth — defaults must match frontend Google client ID & Telegram bot
-    GOOGLE_CLIENT_ID: Optional[str] = "277953497231-ejqnao55sn2b8seegf3ckldg7704hdq3.apps.googleusercontent.com"
-    TELEGRAM_BOT_TOKEN: Optional[str] = "8209648149:AAEJlsuCaMzbm0im_0cDRlqcIzug0Ihi9J0"
-    
+
+    # OAuth — set via environment variables
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: Optional[str] = None
+
     # First Superuser (for auto-creation on deploy)
     FIRST_SUPERUSER: str = "admin@unbox.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin123"
@@ -32,9 +32,18 @@ class Settings(BaseSettings):
     CALENDAR_ID_CAPSULE_1: Optional[str] = None
     CALENDAR_ID_CAPSULE_2: Optional[str] = None
 
-    # CORS
-    # Allow all origins for Vercel Preview deployments
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    # CORS — разрешённые домены (добавьте через env BACKEND_CORS_ORIGINS='["..."]')
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "https://unbox.com.ge",
+        "https://www.unbox.com.ge",
+        "https://unboxcrm.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
+    ]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra='ignore')
 

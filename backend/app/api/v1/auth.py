@@ -166,17 +166,8 @@ def telegram_login(
     secret_key = hashlib.sha256(settings.TELEGRAM_BOT_TOKEN.encode()).digest()
     hash_calc = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     
-    # DEBUG LOGGING (Can be removed later)
-    # print(f"Telegram Auth Debug:")
-    # print(f"Received Data: {login_data.dict()}")
-    # print(f"Check String: {data_check_string}")
-    # print(f"Calculated Hash: {hash_calc}")
-    # print(f"Received Hash: {login_data.hash}")
-    
     if hash_calc != login_data.hash:
-        print(f"Telegram Hash Mismatch! Exp: {hash_calc}, Got: {login_data.hash}")
-        print(f"Check String used: \n{data_check_string}")
-        raise HTTPException(status_code=400, detail=f"Invalid Telegram Hash. Debug: {hash_calc} != {login_data.hash}")
+        raise HTTPException(status_code=400, detail="Invalid Telegram authentication hash")
         
     # Check Auth Date (Optional: expiration check)
     # if time.time() - login_data.auth_date > 86400: ...

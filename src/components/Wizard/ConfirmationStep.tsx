@@ -28,7 +28,7 @@ import { User as UserIcon } from 'lucide-react';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
-    const { currentUser, addBookings, bookings, rescheduleBooking, users } = useUserStore();
+    const { currentUser, addBookings, bookings, users, fetchCurrentUser } = useUserStore();
     const [confirmed, setConfirmed] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [availabilityError, setAvailabilityError] = useState<string | null>(null);
@@ -373,22 +373,14 @@ export function ConfirmationStep() {
                 console.log(`Submitting ${newBookings.length} bookings...`);
 
                 if (isRescheduling && oldBooking) {
-                    // Reschedule Action
-                    // Assuming 1:1 mapping for simplicity in this flow (User modifies 1 booking into 1 or more?)
-                    // If cart has multiple items, Reschedule assumes we are replacing ONE old booking with MANY?
-                    // Or usually 1 to 1.
-                    // Let's assume the first item in cart replaces the old booking.
-                    // Warn logic: "Reschedule" usually implies 1 slot -> 1 slot.
-                    // But our cart allows multiple.
-                    // We will mark old as Rescheduled and Add ALL new ones.
-                    rescheduleBooking(oldBooking.id, newBookings[0]);
-                    // Note: If multiple new bookings, we only pass first one to "reschedule" action linked?
-                    // The action expects `newBooking` object.
-                    // If user added 2 slots, we really are just cancelling old and adding 2 new.
-                    // But for status tracking, we link 1.
-
+                    const first = newBookings[0];
+                    await bookingsApi.rescheduleBooking(oldBooking.id, {
+                        newDate: first.date,
+                        newStartTime: first.startTime,
+                        newResourceId: first.resourceId,
+                    });
+                    await fetchCurrentUser();
                     if (newBookings.length > 1) {
-                        // Add others manually
                         await addBookings(newBookings.slice(1));
                     }
                 } else {
@@ -404,10 +396,17 @@ export function ConfirmationStep() {
                     b.status === 'pending_approval' || (b as any).status === 'pendingApproval'
                 );
 
+                // Check if any booking had GCal sync failure
+                const hasGcalFailure = latestBookings.some(b => (b as any).gcalSyncFailed);
+
                 if (isPending) {
                     toast.info('🕐 Запрос на горячую бронь отправлен администратору. Вы получите уведомление.');
                 } else {
                     toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
+                }
+
+                if (hasGcalFailure) {
+                    toast.warning('Бронирование создано, но не синхронизировано с Google Calendar. Администратор уведомлён.');
                 }
 
                 // Navigate after showing success screen

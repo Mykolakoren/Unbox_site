@@ -219,7 +219,11 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
             });
 
             const { extras } = get();
-            const extrasCost = extras.length * 5;
+            const { EXTRAS } = await import('../utils/data');
+            const extrasCost = extras.reduce((sum, id) => {
+                const extra = EXTRAS.find(e => e.id === id);
+                return sum + (extra?.price || 0);
+            }, 0);
 
             set({
                 quote,

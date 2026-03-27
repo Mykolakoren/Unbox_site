@@ -49,8 +49,8 @@ class Booking(BookingBase, table=True):
     # Decision: Link to User.id (UUID). Frontend migration will need to handle this lookup.
     
     user_uuid: Optional[UUID] = Field(default=None, foreign_key="user.id")
-    
-    created_at: datetime = Field(default_factory=datetime.now)
+
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
 
 class BookingCreate(BookingBase):
@@ -65,3 +65,4 @@ class BookingRead(BookingBase):
     user_uuid: Optional[UUID]
     user_id: str # Return email for frontend compatibility
     created_at: datetime
+    gcal_sync_failed: bool = False

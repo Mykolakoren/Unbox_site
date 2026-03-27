@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -7,6 +8,8 @@ from sqlmodel import Session
 from app.api.deps import get_session, get_current_user, get_optional_current_user
 from app.models.user import User
 from app.services.pricing import PricingService, PriceBreakdown
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,5 +42,5 @@ def get_pricing_quote(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"Pricing Error: {e}")
+        logger.error(f"Pricing Error: {e}")
         raise HTTPException(status_code=500, detail="Pricing calculation failed")

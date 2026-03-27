@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'sonner';
 
 // API URL:
 // In development, use VITE_API_URL or fallback to relative path (proxied by Vite)
@@ -10,6 +11,7 @@ export const api = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
+    timeout: 30000,
 });
 
 import { toCamelCase, toSnakeCase } from '../utils/transformers';
@@ -29,7 +31,7 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-// Response interceptor: Transform Response & Handle 401/403
+// Response interceptor: Transform Response & Handle errors
 api.interceptors.response.use(
     (response) => {
         // Transform response data to camelCase for frontend
@@ -41,11 +43,23 @@ api.interceptors.response.use(
     (error) => {
         const status = error.response?.status;
         const detail = error.response?.data?.detail;
+
         // Clear invalid/expired token and redirect to login
         if (status === 401 || (status === 403 && detail === 'Could not validate credentials')) {
             localStorage.removeItem('token');
             window.location.href = '/login';
+            return Promise.reject(error);
         }
+
+        // Show toast for server errors (don't spam for 4xx which are handled by components)
+        if (status && status >= 500) {
+            toast.error('Ошибка сервера. Попробуйте позже.');
+        } else if (!error.response && error.code === 'ECONNABORTED') {
+            toast.error('Превышено время ожидания. Проверьте соединение.');
+        } else if (!error.response && error.message === 'Network Error') {
+            toast.error('Нет соединения с сервером.');
+        }
+
         return Promise.reject(error);
     }
 );

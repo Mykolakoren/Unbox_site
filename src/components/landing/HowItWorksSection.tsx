@@ -1,3 +1,4 @@
+import React from 'react';
 import { motion } from 'framer-motion';
 import { Search, CalendarCheck, MapPin, ArrowRight } from 'lucide-react';
 
@@ -46,9 +47,11 @@ export function HowItWorksSection() {
                     viewport={{ once: true }}
                     className="text-center mb-12"
                 >
-                    <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Как это работает</p>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Три шага к первой сессии</h2>
-                    <p className="mt-2 text-unbox-dark/50 text-sm">Просто, быстро и комфортно</p>
+                    <div className="inline-block px-6 py-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+                        <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Как это работает</p>
+                        <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Три шага к первой сессии</h2>
+                        <p className="mt-2 text-unbox-dark/60 text-sm">Просто, быстро и комфортно</p>
+                    </div>
                 </motion.div>
 
                 {/* Infographic: 3 steps with arrows */}
@@ -56,9 +59,8 @@ export function HowItWorksSection() {
                     {STEPS.map((step, i) => {
                         const Icon = step.icon;
                         return (
-                            <>
+                            <React.Fragment key={step.num}>
                                 <motion.div
-                                    key={step.num}
                                     initial={{ opacity: 0, y: 24 }}
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true }}
@@ -91,7 +93,6 @@ export function HowItWorksSection() {
                                 {/* Arrow between steps — hidden on mobile */}
                                 {i < STEPS.length - 1 && (
                                     <motion.div
-                                        key={`arrow-${i}`}
                                         initial={{ opacity: 0 }}
                                         whileInView={{ opacity: 1 }}
                                         viewport={{ once: true }}
@@ -101,7 +102,7 @@ export function HowItWorksSection() {
                                         <ArrowRight size={20} className="text-unbox-green/40" />
                                     </motion.div>
                                 )}
-                            </>
+                            </React.Fragment>
                         );
                     })}
                 </div>

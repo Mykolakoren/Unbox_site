@@ -13,6 +13,12 @@ reusable_oauth2 = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/login"
 )
 
+# Optional version: does NOT return 401 when token is missing
+optional_oauth2 = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/login",
+    auto_error=False,
+)
+
 def get_current_user(
     session: Annotated[Session, Depends(get_session)],
     token: Annotated[str, Depends(reusable_oauth2)]
@@ -28,9 +34,7 @@ def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
             )
-    except (JWTError, ValidationError) as e:
-        print(f"DEBUG AUTH ERROR: {e}")
-        print(f"DEBUG TOKEN: {token}")
+    except (JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
@@ -104,10 +108,12 @@ def require_specialist(
     crm_data = current_user.crm_data or {}
     expires_at = crm_data.get("access_expires_at")
     if expires_at:
-        from datetime import datetime
+        from datetime import datetime, timezone
         try:
             expiry_dt = datetime.fromisoformat(expires_at)
-            if datetime.now() > expiry_dt:
+            # Ensure both sides use the same timezone awareness
+            now = datetime.now(timezone.utc) if expiry_dt.tzinfo else datetime.now()
+            if now > expiry_dt:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Срок доступа к CRM истёк. Запросите продление.",
@@ -130,7 +136,7 @@ def require_crm_access(
 
 def get_optional_current_user(
     session: Annotated[Session, Depends(get_session)],
-    token: Annotated[str | None, Depends(reusable_oauth2)] = None
+    token: Annotated[str | None, Depends(optional_oauth2)] = None,
 ) -> User | None:
     if not token:
         return None

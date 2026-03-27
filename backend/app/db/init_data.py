@@ -197,9 +197,7 @@ def migrate_add_columns():
 
 def init_data():
     migrate_add_columns()
-    print("DEBUG: Entering init_data()")
     with Session(engine) as session:
-        print("DEBUG: Session executed")
         
         # Init User
         user = session.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).first()

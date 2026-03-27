@@ -38,10 +38,10 @@ export function ReferralSection() {
                 viewport={{ once: true }}
                 className="rounded-3xl p-8 sm:p-10 flex flex-col sm:flex-row items-center gap-6"
                 style={{
-                    background: 'rgba(71,109,107,0.12)',
+                    background: 'rgba(255,255,255,0.6)',
                     backdropFilter: 'blur(20px) saturate(150%)',
                     WebkitBackdropFilter: 'blur(20px) saturate(150%)',
-                    border: '1px solid rgba(71,109,107,0.30)',
+                    border: '1px solid rgba(71,109,107,0.25)',
                     boxShadow: '0 4px 20px rgba(71,109,107,0.08)',
                 }}
             >

@@ -31,11 +31,13 @@ export function SelfTestsSection({ onScrollToSpecialists }: Props) {
                         viewport={{ once: true }}
                         className="text-center mb-10"
                     >
-                        <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Самопознание</p>
-                        <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Психологические тесты</h2>
-                        <p className="mt-2 text-unbox-dark/50 text-sm max-w-md mx-auto">
-                            Пройдите проверенные тесты и получите расшифровку за несколько минут
-                        </p>
+                        <div className="inline-block px-6 py-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+                            <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Самопознание</p>
+                            <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Психологические тесты</h2>
+                            <p className="mt-2 text-unbox-dark/60 text-sm max-w-md mx-auto">
+                                Пройдите проверенные тесты и получите расшифровку за несколько минут
+                            </p>
+                        </div>
                     </motion.div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

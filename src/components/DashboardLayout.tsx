@@ -8,40 +8,32 @@ import { CrmAccessToggle } from './CrmAccessToggle';
 export function DashboardLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
     const navigate = useNavigate();
-    const [authChecked, setAuthChecked] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         const token = localStorage.getItem('token');
         if (!token) {
-            // No token at all → go to login immediately
             navigate('/login');
             return;
         }
         if (currentUser) {
-            // User already loaded (from persist or previous fetch)
-            setAuthChecked(true);
+            setIsLoading(false);
             return;
         }
-        // Token exists but user not loaded yet → fetch and wait
         fetchCurrentUser()
-            .then(() => setAuthChecked(true))
+            .then(() => setIsLoading(false))
             .catch(() => {
-                // Token invalid → interceptor clears it, redirect
                 localStorage.removeItem('token');
                 navigate('/login');
             });
     }, [currentUser, navigate, fetchCurrentUser]);
 
-    // Still loading user from token
-    if (!currentUser) {
-        if (!authChecked && localStorage.getItem('token')) {
-            return (
-                <div className="flex items-center justify-center min-h-screen bg-gray-50/80">
-                    <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
-                </div>
-            );
-        }
-        return null;
+    if (isLoading || !currentUser) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50/80">
+                <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
+            </div>
+        );
     }
 
     const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';

@@ -1,9 +1,12 @@
 """CRM Sessions — therapy session CRUD + quick-pay."""
+import logging
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlmodel import Session, select
 from app.api import deps
+
+logger = logging.getLogger(__name__)
 from app.models.user import User
 from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import (
@@ -94,7 +97,7 @@ def create_session(
                 )
                 therapy_session.google_event_id = gcal_id
             except Exception as e:
-                print(f"GCal push failed: {e}")
+                logger.warning(f"GCal push failed: {e}")
 
     session.add(therapy_session)
     session.commit()

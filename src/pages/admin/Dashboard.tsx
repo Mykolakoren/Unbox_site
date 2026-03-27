@@ -150,7 +150,7 @@ export function AdminDashboard() {
                             <CreditCard size={20} className="text-unbox-green" />
                             <div className="text-sm">
                                 <div className="font-medium">Общая выручка</div>
-                                <div className="text-white/60">{balance?.balance?.toFixed(0) ?? totalRevenue} ₾ в кассе</div>
+                                <div className="text-white/60">{(balance || totalRevenue).toFixed(0)} ₾ в кассе</div>
                             </div>
                         </div>
                         <div className="flex items-center gap-3 bg-white/10 p-3 rounded-lg border border-white/10">

@@ -32,6 +32,24 @@ class PricingService:
     def __init__(self, session: Session):
         self.session = session
 
+    # Extras price registry (server-side source of truth, mirrors frontend EXTRAS)
+    EXTRAS_PRICES: Dict[str, float] = {
+        "sandbox": 0.0,
+        "sandbox_toys": 10.0,
+        "flipchart": 10.0,
+        "projector": 20.0,
+    }
+
+    @classmethod
+    def calculate_extras_price(cls, extras_ids: List[str]) -> float:
+        """Calculate total extras price from server-side registry."""
+        return sum(cls.EXTRAS_PRICES.get(eid, 0.0) for eid in extras_ids)
+
+    @classmethod
+    def validate_extras(cls, extras_ids: List[str]) -> List[str]:
+        """Return list of unknown extra IDs (if any)."""
+        return [eid for eid in extras_ids if eid not in cls.EXTRAS_PRICES]
+
     # Pricing Configuration (Mirroring Frontend)
     PRICING_CONFIG = {
         "hot_booking": {"hours_before": 12, "percent": 10},
@@ -49,30 +67,30 @@ class PricingService:
     }
 
     def calculate_price(
-        self, 
-        user: User, 
-        resource_id: str, 
+        self,
+        user: Optional[User],
+        resource_id: str,
         start_time: datetime, # Full datetime
         duration_minutes: int,
         format_type: str = "individual"
     ) -> PriceBreakdown:
-        
+
         # 1. Fetch Resource
         resource = self.session.get(Resource, resource_id)
         if not resource:
             raise ValueError("Resource not found")
-            
+
         booked_hours = duration_minutes / 60.0
-        
+
         # 2. Determine Base Rate
         base_rate = resource.hourly_rate
         # Create a simple multiplier for group format if not explicitly stored
-        if format_type == "group" and resource.type == "cabinet": 
+        if format_type == "group" and resource.type == "cabinet":
              # Logic from config: IND=20, GRP=35. (Multiplier ~1.75 or explicit lookup)
              pass
 
         base_price = base_rate * booked_hours
-        
+
         breakdown = PriceBreakdown(
             base_price=base_price,
             hourly_rate=base_rate,
@@ -81,9 +99,13 @@ class PricingService:
             final_price=base_price
         )
 
+        # If user is anonymous — return base price without discounts
+        if user is None:
+            return breakdown
+
         # 3. Apply Hierarchy
         # Order: Subscription -> Manual (N/A here) -> Max(Weekly, Duration, Hot)
-        
+
         # A. Subscription (Priority 1)
         if self._apply_subscription(user, breakdown, resource, format_type):
             return breakdown
@@ -216,9 +238,5 @@ class PricingService:
                 return True
                 
         return False
-                
-        return False
-                
-        return False
-    
+
     # Removed _apply_hot_booking as it is now integrated into calculate_price logic

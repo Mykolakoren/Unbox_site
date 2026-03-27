@@ -1,3 +1,4 @@
+import logging
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select, Session
@@ -10,7 +11,9 @@ from uuid import UUID
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
 from app.services.booking import check_availability
+from app.core.permissions import ADMIN_ROLES
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -37,8 +40,10 @@ def enrich_booking_status(booking: Booking) -> Booking:
 
 
 def _check_ownership(booking: Booking, user: User) -> bool:
-    return (booking.user_uuid and booking.user_uuid == user.id) or \
-           (booking.user_id == user.email)
+    # Primary: check by UUID (reliable). Fallback: email (legacy bookings without UUID).
+    if booking.user_uuid:
+        return booking.user_uuid == user.id
+    return booking.user_id == user.email
 
 
 # ─── GET endpoints ────────────────────────────────────────────────────────────
@@ -52,7 +57,7 @@ def read_my_bookings(
 ) -> Any:
     """Retrieve current user's bookings."""
     statement = select(Booking).where(
-        Booking.user_id == current_user.email
+        (Booking.user_uuid == current_user.id) | (Booking.user_id == current_user.email)
     ).offset(skip).limit(limit)
     bookings = session.exec(statement).all()
     return [enrich_booking_status(b) for b in bookings]
@@ -160,7 +165,7 @@ def create_booking(
 
         # Determine Booking Owner
         booking_owner = current_user
-        if current_user.is_admin and booking_in.target_user_id:
+        if current_user.role in ADMIN_ROLES and booking_in.target_user_id:
             target = None
             try:
                 target = session.get(User, UUID(booking_in.target_user_id))
@@ -171,9 +176,17 @@ def create_booking(
             if target:
                 booking_owner = target
 
-        # Pricing & Payment
+        # Validate & price extras server-side
         from app.services.pricing import PricingService
         from datetime import time
+
+        if booking_in.extras:
+            unknown = PricingService.validate_extras(booking_in.extras)
+            if unknown:
+                raise HTTPException(status_code=400, detail=f"Unknown extras: {', '.join(unknown)}")
+        extras_total = PricingService.calculate_extras_price(booking_in.extras or [])
+
+        # Pricing & Payment
 
         try:
             h, m = map(int, booking_in.start_time.split(':'))
@@ -203,12 +216,13 @@ def create_booking(
                 if 'usedHours' in new_sub: del new_sub['usedHours']
                 booking_owner.subscription = new_sub
         else:
+            total_due = quote.final_price + extras_total
             available_funds = booking_owner.balance + booking_owner.credit_limit
-            if available_funds < quote.final_price:
-                raise HTTPException(status_code=400, detail=f"Insufficient funds. Required: {quote.final_price}, Available: {available_funds}")
-            booking_owner.balance -= quote.final_price
+            if available_funds < total_due:
+                raise HTTPException(status_code=400, detail=f"Insufficient funds. Required: {total_due}, Available: {available_funds}")
+            booking_owner.balance -= total_due
 
-        booking_in.final_price = quote.final_price
+        booking_in.final_price = quote.final_price + extras_total
         booking_in.base_price = quote.base_price
         booking_in.applied_rule = quote.applied_rule
         booking_in.discount_amount = quote.discount_amount
@@ -232,6 +246,7 @@ def create_booking(
         session.refresh(booking)
 
         # Google Calendar Sync
+        gcal_sync_ok = False
         try:
             event_id = gcal_service.create_event(booking)
             if event_id:
@@ -239,15 +254,22 @@ def create_booking(
                 session.add(booking)
                 session.commit()
                 session.refresh(booking)
+                gcal_sync_ok = True
         except Exception as e:
-            print(f"GCal Sync Failed (Non-blocking): {e}")
+            logger.warning(f"GCal Sync Failed (Non-blocking): {e}")
 
-        return booking
+        # Build response with sync status
+        result = BookingRead.model_validate(booking)
+        if not gcal_sync_ok:
+            logger.info(f"Booking {booking.id} created without GCal sync")
+            result.gcal_sync_failed = True
+
+        return result
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Booking Creation Error: {e}")
+        logger.error(f"Booking Creation Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -269,7 +291,7 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     is_owner = _check_ownership(booking, current_user)
-    if not is_owner and not current_user.is_admin:
+    if not is_owner and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status == "cancelled":
@@ -291,7 +313,7 @@ def cancel_booking(
     hours_until_start = (booking_start - datetime.now()).total_seconds() / 3600
     is_late_cancellation = hours_until_start < 24
 
-    if is_late_cancellation and not _is_past(booking) and not current_user.is_admin:
+    if is_late_cancellation and not _is_past(booking) and not current_user.role in ADMIN_ROLES:
         raise HTTPException(
             status_code=400,
             detail=f"Cancellation is not allowed less than 24 hours before start. Time remaining: {hours_until_start:.1f}h"
@@ -374,7 +396,7 @@ def reschedule_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     is_owner = _check_ownership(booking, current_user)
-    if not is_owner and not current_user.is_admin:
+    if not is_owner and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status != "confirmed":
@@ -392,7 +414,7 @@ def reschedule_booking(
         booking_start = booking.date
 
     hours_until = (booking_start - datetime.now()).total_seconds() / 3600
-    if hours_until < 24 and not current_user.is_admin:
+    if hours_until < 24 and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=400, detail=f"Cannot reschedule less than 24h before start ({hours_until:.1f}h remaining)")
 
     # Parse new date
@@ -438,7 +460,7 @@ def reschedule_booking(
             if event_id:
                 booking.gcal_event_id = event_id
         except Exception as e:
-            print(f"GCal reschedule sync failed: {e}")
+            logger.warning(f"GCal reschedule sync failed: {e}")
 
     session.add(booking)
     session.commit()
@@ -490,7 +512,7 @@ def link_crm_client(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     is_owner = _check_ownership(booking, current_user)
-    if not is_owner and not current_user.is_admin:
+    if not is_owner and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     # Validate CRM client belongs to this specialist
@@ -531,7 +553,7 @@ def toggle_re_rent(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     is_owner = _check_ownership(booking, current_user)
-    if not is_owner and not current_user.is_admin:
+    if not is_owner and not current_user.role in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status != "confirmed":

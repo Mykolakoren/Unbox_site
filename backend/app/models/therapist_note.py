@@ -18,8 +18,8 @@ class TherapistNote(TherapistNoteBase, table=True):
     __tablename__ = "therapist_notes"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    specialist_id: str = Field(index=True)  # User UUID, no FK constraint (type mismatch)
-    created_at: datetime = Field(default_factory=datetime.now)
+    specialist_id: str = Field(index=True)  # User UUID as string (no FK due to SQLite UUID limitation)
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
 
 

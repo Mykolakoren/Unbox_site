@@ -18,10 +18,10 @@ export function ContactSection() {
                     viewport={{ once: true }}
                     className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6"
                 >
-                    <div>
+                    <div className="inline-block px-5 py-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
                         <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Связь</p>
                         <h2 className="text-xl font-bold text-unbox-dark">Есть вопросы? Напишите нам</h2>
-                        <p className="text-unbox-dark/50 text-sm mt-1">Ответим в Telegram или Instagram</p>
+                        <p className="text-unbox-dark/60 text-sm mt-1">Ответим в Telegram или Instagram</p>
                     </div>
 
                     <div className="flex flex-wrap gap-3">
