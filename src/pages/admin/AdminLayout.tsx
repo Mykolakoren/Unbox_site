@@ -98,6 +98,12 @@ export function AdminLayout() {
                     <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-unbox-green/20 text-unbox-green text-[10px] font-bold uppercase tracking-wider border border-unbox-green/30 shrink-0">
                         Admin
                     </span>
+                    <Link
+                        to="/"
+                        className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white/50 hover:text-white/90 hover:bg-white/10 transition-all shrink-0"
+                    >
+                        На сайт
+                    </Link>
 
                     {/* Desktop Nav */}
                     <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">

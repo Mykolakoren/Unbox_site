@@ -19,7 +19,7 @@ import { SpecialistPortalHero } from '../components/landing/SpecialistPortalHero
 import { ContactSection } from '../components/landing/ContactSection';
 import { ClientHeroPanel } from '../components/landing/ClientHeroPanel';
 import { SelfTestsSection } from '../components/landing/SelfTestsSection';
-import { LogIn, LayoutDashboard, ChevronDown } from 'lucide-react';
+import { LogIn, LayoutDashboard, ChevronDown, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -73,6 +73,8 @@ export function ExplorePage() {
     const { currentUser } = useUserStore();
     const { data: locations = [], isLoading } = useLocations();
     const navigate = useNavigate();
+
+    const isAdmin = currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? '');
 
     // ── Visitor mode ──────────────────────────────────────────────
     const [visitorMode, setVisitorMode] = useState<VisitorMode>(() => {
@@ -168,6 +170,16 @@ export function ExplorePage() {
                         >
                             Абонементы
                         </Link>
+                        {isAdmin && (
+                            <button
+                                onClick={() => navigate('/admin')}
+                                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-unbox-dark/70 hover:text-unbox-dark transition-colors"
+                                style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.70)' }}
+                            >
+                                <ShieldCheck size={13} />
+                                Админ
+                            </button>
+                        )}
                         {!currentUser ? (
                             <Link
                                 to="/login"
