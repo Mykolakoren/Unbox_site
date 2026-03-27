@@ -1323,7 +1323,7 @@ export function MyBookingsPage() {
                                 </span>
                             </div>
                             <button
-                                onClick={() => { setCrmMode(null); navigate('/crm', { replace: true }); }}
+                                onClick={() => { setCrmMode(null); navigate('/crm/sessions', { replace: true }); }}
                                 className="p-1 hover:bg-orange-100 rounded-lg text-orange-500 transition-colors"
                                 title="Отмена"
                             >
@@ -1343,7 +1343,7 @@ export function MyBookingsPage() {
                         crmClients={crmClients.map(c => ({ id: c.id, name: c.name, aliasCode: c.aliasCode }))}
                         refreshBookings={refreshBookings}
                         crmMode={crmMode}
-                        onCrmBooked={() => { setCrmMode(null); navigate('/crm'); }}
+                        onCrmBooked={() => { setCrmMode(null); navigate('/crm/sessions'); }}
                         usersMap={usersMap}
                     />
                 </div>
