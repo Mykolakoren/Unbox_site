@@ -239,11 +239,13 @@ def mark_all_sessions_paid(
         raise HTTPException(404, "Client not found")
 
     uid = str(current_user.id)
+    now = datetime.now()
     unpaid = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
             TherapySession.client_id == client_id,
             TherapySession.is_paid == False,
+            TherapySession.date <= now,
             TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
         )
     ).all()
