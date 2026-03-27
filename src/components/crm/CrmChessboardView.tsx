@@ -526,13 +526,13 @@ function LinkBookingModal({
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export function CrmChessboardView() {
+export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) {
     const { bookings, currentUser, fetchBookings } = useUserStore();
     const { resources, fetchResources } = useBookingStore();
     const { clients, sessions, fetchClients, fetchSessions, createSession, updateSession, deleteSession } = useCrmStore();
 
     const [filterLocation, setFilterLocation] = useState<string>('all');
-    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [selectedDate, setSelectedDate] = useState(initialDate ?? new Date());
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [bookSlot, setBookSlot] = useState<{ resId: string; time: string; date: Date; duration: number } | null>(null);
     const [linkBooking, setLinkBooking] = useState<BookingHistoryItem | null>(null);

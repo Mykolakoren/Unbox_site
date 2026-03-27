@@ -66,6 +66,7 @@ export function CrmSessions() {
     const { sessions, clients, fetchSessions, fetchClients, createSession, updateSession, deleteSession, quickPaySession, loading } =
         useCrmStore();
     const [view, setView] = useState<ViewMode>('list');
+    const [chessDate, setChessDate] = useState<Date | undefined>();
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [weekAnchor, setWeekAnchor] = useState(new Date());
     const [statusFilter, setStatusFilter] = useState<string>('COMPLETED');
@@ -117,7 +118,7 @@ export function CrmSessions() {
             }
         });
         const sorted = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-        return statusFilter === 'all' ? sorted : sorted.slice(0, 2);
+        return sorted;
     }, [sessions, todayStr, statusFilter]);
 
     // Past groups: days < today within selected month
@@ -345,13 +346,14 @@ export function CrmSessions() {
                         setPrefillDate(dateStr);
                         setShowForm(true);
                     }}
+                    onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }}
                     updateSession={updateSession}
                     quickPaySession={quickPaySession}
                 />
             )}
 
             {/* Chessboard view */}
-            {view === 'chess' && <CrmChessboardView />}
+            {view === 'chess' && <CrmChessboardView initialDate={chessDate} />}
 
             {/* Sessions by Date (list view) */}
             {view === 'list' && (loading && !sessions.length ? (
@@ -374,7 +376,7 @@ export function CrmSessions() {
                                 <div className="flex-1 h-px bg-unbox-green/30" />
                             </div>
                             {upcomingGroups.map(([day, daySessions]) => (
-                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => navigate('/dashboard/bookings', { state: { openGrid: true, targetDate: d } })} />
+                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }} />
                             ))}
                         </div>
                     )}
@@ -388,7 +390,7 @@ export function CrmSessions() {
                                 </div>
                             )}
                             {pastGroups.map(([day, daySessions]) => (
-                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => navigate('/dashboard/bookings', { state: { openGrid: true, targetDate: d } })} />
+                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }} />
                             ))}
                         </div>
                     )}
@@ -487,6 +489,7 @@ function WeekCalendar({
     clientMap,
     navigate,
     onAddSession,
+    onBookRoom,
     updateSession,
     quickPaySession,
 }: {
@@ -495,6 +498,7 @@ function WeekCalendar({
     clientMap: Map<string, CrmClient>;
     navigate: ReturnType<typeof useNavigate>;
     onAddSession: (dateStr: string) => void;
+    onBookRoom: (dateStr: string) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
 }) {
@@ -535,7 +539,7 @@ function WeekCalendar({
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => navigate('/dashboard/bookings', { state: { openGrid: true, targetDate: dayStr } })}
+                                    onClick={() => onBookRoom(dayStr)}
                                     className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-light bg-white hover:bg-unbox-light/40 text-unbox-grey hover:text-unbox-dark transition-colors"
                                 >
                                     <LayoutGrid className="w-3 h-3" />
@@ -579,7 +583,7 @@ function WeekCalendar({
                                                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">Каб ✓</span>
                                                     ) : !isCancelled && (
                                                         <button
-                                                            onClick={() => navigate('/dashboard/bookings', { state: { crmMode: { sessionId: session.id, clientId: session.clientId, clientName: client?.name, date: session.date, duration: session.durationMinutes } } })}
+                                                            onClick={() => navigate('/dashboard/bookings', { state: { crmMode: { sessionId: session.id, clientId: session.clientId, clientName: client?.name, date: parseSessionDate(session.date).toISOString(), duration: session.durationMinutes } } })}
                                                             className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors"
                                                         >+Каб</button>
                                                     )}
@@ -716,7 +720,7 @@ function DayGroup({
                                                                 sessionId: session.id,
                                                                 clientId: session.clientId,
                                                                 clientName: client?.name || 'Клиент',
-                                                                date: session.date,
+                                                                date: parseSessionDate(session.date).toISOString(),
                                                                 duration: session.durationMinutes,
                                                             },
                                                         },

@@ -554,7 +554,7 @@ export function CrmClientDetail() {
                                                                 sessionId: s.id,
                                                                 clientId: client.id,
                                                                 clientName: client.name,
-                                                                date: s.date,
+                                                                date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z',
                                                                 duration: s.durationMinutes,
                                                             },
                                                         },

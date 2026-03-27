@@ -15,6 +15,7 @@ import {
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import type { CrmPaymentCreate, CrmClient } from '../../api/crm';
+import { totalInGel } from '../../utils/currency';
 
 type Period = 'day' | 'week' | 'month';
 
@@ -97,9 +98,18 @@ export function CrmFinances() {
             return entries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ');
         };
 
+        const revenueGel = totalInGel(revByCur);
+        const debtGel = totalInGel(debtByCur);
+        const revEntries = Object.entries(revByCur).filter(([, v]) => v > 0);
+        const debtEntries = Object.entries(debtByCur).filter(([, v]) => v > 0);
+        const showRevEquiv = revEntries.length > 1 || (revEntries.length === 1 && revEntries[0][0] !== 'GEL');
+        const showDebtEquiv = debtEntries.length > 1 || (debtEntries.length === 1 && debtEntries[0][0] !== 'GEL');
+
         return {
             revenueLabel: formatMultiCur(revByCur),
             debtLabel: formatMultiCur(debtByCur),
+            revenueGel: showRevEquiv ? `≈ ${revenueGel.toFixed(0)} ₾` : null,
+            debtGel: showDebtEquiv ? `≈ ${debtGel.toFixed(0)} ₾` : null,
             unpaidCount: unpaid.length,
             totalPayments: payments.length,
             held,
@@ -209,6 +219,7 @@ export function CrmFinances() {
                         <div className="text-sm text-unbox-grey">Получено</div>
                     </div>
                     <div className="text-lg font-bold text-green-600 leading-snug">{stats.revenueLabel}</div>
+                    {stats.revenueGel && <div className="text-xs text-unbox-grey mt-0.5">{stats.revenueGel}</div>}
                 </div>
 
                 <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
@@ -219,7 +230,7 @@ export function CrmFinances() {
                         <div className="text-sm text-unbox-grey">Задолженность</div>
                     </div>
                     <div className="text-lg font-bold text-orange-600 leading-snug">{stats.debtLabel}</div>
-                    <div className="text-xs text-unbox-grey mt-0.5">{stats.unpaidCount} сессий</div>
+                    <div className="text-xs text-unbox-grey mt-0.5">{stats.unpaidCount} сессий{stats.debtGel ? ` · ${stats.debtGel}` : ''}</div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">

@@ -330,7 +330,7 @@ export function CrmDashboard() {
                                                                 sessionId: s.id,
                                                                 clientId: s.clientId,
                                                                 clientName: s.clientName,
-                                                                date: s.date,
+                                                                date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z',
                                                             },
                                                         },
                                                     });
