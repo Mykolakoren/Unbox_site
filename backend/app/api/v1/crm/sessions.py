@@ -136,6 +136,14 @@ def delete_session(
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
         raise HTTPException(404, "Session not found")
+
+    # Delete related payments first (foreign key constraint)
+    related_payments = session.exec(
+        select(TherapistPayment).where(TherapistPayment.session_id == session_id)
+    ).all()
+    for payment in related_payments:
+        session.delete(payment)
+
     session.delete(ts)
     session.commit()
     return {"ok": True}
