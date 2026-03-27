@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
     Calendar,
@@ -63,13 +63,16 @@ type ViewMode = 'list' | 'week' | 'chess';
 
 export function CrmSessions() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { sessions, clients, fetchSessions, fetchClients, createSession, updateSession, deleteSession, quickPaySession, loading } =
         useCrmStore();
     const [view, setView] = useState<ViewMode>('list');
     const [chessDate, setChessDate] = useState<Date | undefined>();
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [weekAnchor, setWeekAnchor] = useState(new Date());
-    const [statusFilter, setStatusFilter] = useState<string>('COMPLETED');
+    const [statusFilter, setStatusFilter] = useState<string>(
+        (location.state as any)?.statusFilter || 'COMPLETED'
+    );
     const [showForm, setShowForm] = useState(false);
     const [prefillDate, setPrefillDate] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -87,6 +90,21 @@ export function CrmSessions() {
     const dateFrom = monthStart < todayStr ? monthStart : todayStr;
     // dateTo: later of month end or +60 days (to always include near future)
     const dateTo = monthEnd > futureEnd ? monthEnd : futureEnd;
+
+    const handleBookCab = (session: CrmSession, clientName: string) => {
+        navigate('/dashboard/bookings', {
+            state: {
+                crmMode: {
+                    sessionId: session.id,
+                    clientId: session.clientId,
+                    clientName: clientName,
+                    date: parseSessionDate(session.date).toISOString(),
+                    duration: session.durationMinutes,
+                },
+                returnFilter: statusFilter,
+            },
+        });
+    };
 
     useEffect(() => {
         fetchClients();
@@ -347,6 +365,7 @@ export function CrmSessions() {
                         setShowForm(true);
                     }}
                     onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }}
+                    onBookCab={handleBookCab}
                     updateSession={updateSession}
                     quickPaySession={quickPaySession}
                 />
@@ -376,7 +395,7 @@ export function CrmSessions() {
                                 <div className="flex-1 h-px bg-unbox-green/30" />
                             </div>
                             {upcomingGroups.map(([day, daySessions]) => (
-                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }} />
+                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }} onBookCab={handleBookCab} />
                             ))}
                         </div>
                     )}
@@ -390,7 +409,7 @@ export function CrmSessions() {
                                 </div>
                             )}
                             {pastGroups.map(([day, daySessions]) => (
-                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }} />
+                                <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => { setChessDate(new Date(d)); setView('chess'); }} onBookCab={handleBookCab} />
                             ))}
                         </div>
                     )}
@@ -490,6 +509,7 @@ function WeekCalendar({
     navigate,
     onAddSession,
     onBookRoom,
+    onBookCab,
     updateSession,
     quickPaySession,
 }: {
@@ -499,6 +519,7 @@ function WeekCalendar({
     navigate: ReturnType<typeof useNavigate>;
     onAddSession: (dateStr: string) => void;
     onBookRoom: (dateStr: string) => void;
+    onBookCab: (session: CrmSession, clientName: string) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
 }) {
@@ -583,7 +604,7 @@ function WeekCalendar({
                                                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">Каб ✓</span>
                                                     ) : !isCancelled && (
                                                         <button
-                                                            onClick={() => navigate('/dashboard/bookings', { state: { crmMode: { sessionId: session.id, clientId: session.clientId, clientName: client?.name, date: parseSessionDate(session.date).toISOString(), duration: session.durationMinutes } } })}
+                                                            onClick={() => onBookCab?.(session, client?.name || 'Клиент')}
                                                             className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors"
                                                         >+Каб</button>
                                                     )}
@@ -640,6 +661,7 @@ function DayGroup({
     deleteSession,
     quickPaySession,
     onBookRoom,
+    onBookCab,
 }: {
     day: string;
     daySessions: CrmSession[];
@@ -650,6 +672,7 @@ function DayGroup({
     deleteSession: (id: string) => Promise<void>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookRoom?: (day: string) => void;
+    onBookCab?: (session: CrmSession, clientName: string) => void;
 }) {
     const navigate = useNavigate();
     return (
@@ -714,17 +737,7 @@ function DayGroup({
                                                 </span>
                                             ) : !isCancelled && (
                                                 <button
-                                                    onClick={() => navigate('/dashboard/bookings', {
-                                                        state: {
-                                                            crmMode: {
-                                                                sessionId: session.id,
-                                                                clientId: session.clientId,
-                                                                clientName: client?.name || 'Клиент',
-                                                                date: parseSessionDate(session.date).toISOString(),
-                                                                duration: session.durationMinutes,
-                                                            },
-                                                        },
-                                                    })}
+                                                    onClick={() => onBookCab?.(session, client?.name || 'Клиент')}
                                                     className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors"
                                                 >
                                                     + Кабинет
