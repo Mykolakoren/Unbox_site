@@ -1343,7 +1343,7 @@ export function MyBookingsPage() {
                         crmClients={crmClients.map(c => ({ id: c.id, name: c.name, aliasCode: c.aliasCode }))}
                         refreshBookings={refreshBookings}
                         crmMode={crmMode}
-                        onCrmBooked={() => { setCrmMode(null); navigate('/crm/sessions'); }}
+                        onCrmBooked={() => { setCrmMode(null); navigate('/crm/sessions', { replace: true }); }}
                         usersMap={usersMap}
                     />
                 </div>
@@ -1654,15 +1654,19 @@ function CrmQuickBookingModal({
                 locationId: resource?.locationId,
             } as any);
             await bookingsApi.linkCrmClient(booking.id, crmMode.clientId);
-            // Sync booking time back to CRM session (non-blocking)
-            try {
+            // Link booking to CRM session and sync time
+            if (crmMode.sessionId) {
+                const sessionUpdate: Record<string, any> = {
+                    bookingId: booking.id,
+                    isBooked: true,
+                };
+                // Also sync time if it changed
                 const sessionDateStr = crmMode.date ? format(parseISO(crmMode.date), 'yyyy-MM-dd') : null;
                 const sessionTime = crmMode.date ? format(parseISO(crmMode.date), 'HH:mm') : null;
-                if (crmMode.sessionId && (dateStr !== sessionDateStr || slot.time !== sessionTime)) {
-                    await updateSession(crmMode.sessionId, { date: `${dateStr}T${slot.time}:00` });
+                if (dateStr !== sessionDateStr || slot.time !== sessionTime) {
+                    sessionUpdate.date = `${dateStr}T${slot.time}:00`;
                 }
-            } catch {
-                // Session sync is best-effort
+                await updateSession(crmMode.sessionId, sessionUpdate);
             }
             toast.success(`Кабинет забронирован для ${crmMode.clientName}`);
             onBooked();
