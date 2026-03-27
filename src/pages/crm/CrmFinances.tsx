@@ -137,7 +137,7 @@ export function CrmFinances() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold">Финансы</h1>
-                    <p className="text-unbox-grey text-sm">Платежи и задолженности</p>
+                    <p className="text-unbox-dark/60 text-sm">Платежи и задолженности</p>
                 </div>
                 <button
                     onClick={() => setShowForm(true)}

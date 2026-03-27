@@ -57,7 +57,7 @@ export function CrmNotes() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold">Заметки</h1>
-                    <p className="text-unbox-grey text-sm">Записи по клиентам</p>
+                    <p className="text-unbox-dark/60 text-sm">Записи по клиентам</p>
                 </div>
                 <button
                     onClick={() => setShowForm(true)}

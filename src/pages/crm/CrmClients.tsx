@@ -131,7 +131,7 @@ export function CrmClients() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold">Клиенты</h1>
-                    <p className="text-unbox-grey text-sm">
+                    <p className="text-unbox-dark/60 text-sm">
                         {clients.filter((c) => c.isActive).length} активных из{' '}
                         {clients.length}
                     </p>

@@ -189,7 +189,7 @@ export function CrmSessions() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold">Сессии</h1>
-                    <p className="text-unbox-grey text-sm">Управление расписанием и оплатой</p>
+                    <p className="text-unbox-dark/60 text-sm">Управление расписанием и оплатой</p>
                 </div>
                 <div className="flex items-center gap-2">
                     {/* View toggle */}
@@ -370,8 +370,8 @@ export function CrmSessions() {
                     {upcomingGroups.length > 0 && (
                         <div className="space-y-6">
                             <div className="flex items-center gap-2">
-                                <span className="text-xs font-semibold uppercase tracking-wide text-unbox-green">Предстоящие</span>
-                                <div className="flex-1 h-px bg-unbox-green/20" />
+                                <span className="text-xs font-semibold uppercase tracking-wide text-unbox-green bg-white/60 backdrop-blur-sm px-3 py-1 rounded-lg">Предстоящие</span>
+                                <div className="flex-1 h-px bg-unbox-green/30" />
                             </div>
                             {upcomingGroups.map(([day, daySessions]) => (
                                 <DayGroup key={day} day={day} daySessions={daySessions} clientMap={clientMap} editingId={editingId} setEditingId={setEditingId} updateSession={updateSession} deleteSession={deleteSession} quickPaySession={quickPaySession} onBookRoom={(d) => navigate('/dashboard/bookings', { state: { openGrid: true, targetDate: d } })} />
@@ -383,8 +383,8 @@ export function CrmSessions() {
                         <div className="space-y-6">
                             {upcomingGroups.length > 0 && (
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs font-semibold uppercase tracking-wide text-unbox-grey">История</span>
-                                    <div className="flex-1 h-px bg-unbox-light" />
+                                    <span className="text-xs font-semibold uppercase tracking-wide text-unbox-dark/70 bg-white/60 backdrop-blur-sm px-3 py-1 rounded-lg">История</span>
+                                    <div className="flex-1 h-px bg-unbox-dark/15" />
                                 </div>
                             )}
                             {pastGroups.map(([day, daySessions]) => (

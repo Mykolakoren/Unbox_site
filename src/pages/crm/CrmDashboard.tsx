@@ -68,7 +68,7 @@ export function CrmDashboard() {
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div>
                 <h1 className="text-2xl font-bold mb-1">CRM Кабинет</h1>
-                <p className="text-unbox-grey">Управление клиентами и сессиями</p>
+                <p className="text-unbox-dark/60">Управление клиентами и сессиями</p>
             </div>
 
             {/* Stat Cards */}
