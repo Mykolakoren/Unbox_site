@@ -53,7 +53,7 @@ interface CrmStore {
     deleteNote: (id: string) => Promise<void>;
 
     // Dashboard
-    fetchDashboard: () => Promise<void>;
+    fetchDashboard: (month?: string) => Promise<void>;
 
     // Payment Accounts
     fetchPaymentAccounts: () => Promise<void>;
@@ -227,10 +227,10 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
 
     // ── Dashboard ────────────────────────────────────────────────────────────
 
-    fetchDashboard: async () => {
+    fetchDashboard: async (month?: string) => {
         set({ loading: true, error: null });
         try {
-            const dashboard = await crmApi.getDashboard(get().viewAsSpecialistId ?? undefined);
+            const dashboard = await crmApi.getDashboard(get().viewAsSpecialistId ?? undefined, month);
             set({ dashboard, loading: false });
         } catch (e: any) {
             set({ error: e.message, loading: false });

@@ -369,10 +369,11 @@ export const crmApi = {
     },
 
     // Dashboard
-    getDashboard: async (specialistId?: string): Promise<CrmDashboard> => {
-        const response = await api.get('/crm/dashboard', {
-            params: specialistId ? { specialist_id: specialistId } : {},
-        });
+    getDashboard: async (specialistId?: string, month?: string): Promise<CrmDashboard> => {
+        const params: Record<string, string> = {};
+        if (specialistId) params.specialist_id = specialistId;
+        if (month) params.month = month;
+        const response = await api.get('/crm/dashboard', { params });
         return response.data;
     },
 

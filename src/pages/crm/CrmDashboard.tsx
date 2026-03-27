@@ -8,6 +8,7 @@ import {
     AlertCircle,
     TrendingUp,
     Clock,
+    ChevronLeft,
     ChevronRight,
     Loader2,
     Wallet,
@@ -18,7 +19,7 @@ import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     CartesianGrid,
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addMonths, subMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { crmApi } from '../../api/crm';
 import { toast } from 'sonner';
@@ -41,6 +42,9 @@ export function CrmDashboard() {
     const { dashboard, fetchDashboard, loading } = useCrmStore();
     const navigate = useNavigate();
     const [calendarIdSaved, setCalendarIdSaved] = useState<string | null>(null);
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+    const monthStr = format(currentMonth, 'yyyy-MM');
+    const isThisMonth = format(new Date(), 'yyyy-MM') === monthStr;
 
     useEffect(() => {
         // Auto-complete past PLANNED sessions, then load dashboard
@@ -49,12 +53,12 @@ export function CrmDashboard() {
                 toast.info(`${result.autoCompleted} ${result.autoCompleted === 1 ? 'сессия автозавершена' : 'сессий автозавершены'}`);
             }
         }).catch(() => {}).finally(() => {
-            fetchDashboard();
+            fetchDashboard(monthStr);
         });
         crmApi.getSettings().then((s) => {
             setCalendarIdSaved(s.calendarId);
         }).catch(() => {});
-    }, [fetchDashboard]);
+    }, [fetchDashboard, monthStr]);
 
     if (loading && !dashboard) {
         return (
@@ -66,9 +70,36 @@ export function CrmDashboard() {
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div>
-                <h1 className="text-2xl font-bold mb-1">CRM Кабинет</h1>
-                <p className="text-unbox-dark/60">Управление клиентами и сессиями</p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold mb-1">CRM Кабинет</h1>
+                    <p className="text-unbox-dark/60">Управление клиентами и сессиями</p>
+                </div>
+                <div className="flex items-center gap-2 bg-white rounded-xl border border-unbox-light px-1 py-1 shadow-sm">
+                    <button
+                        onClick={() => setCurrentMonth(d => subMonths(d, 1))}
+                        className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="font-medium text-sm w-32 text-center capitalize">
+                        {format(currentMonth, 'LLLL yyyy', { locale: ru })}
+                    </span>
+                    <button
+                        onClick={() => setCurrentMonth(d => addMonths(d, 1))}
+                        className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
+                    >
+                        <ChevronRight className="w-4 h-4" />
+                    </button>
+                    {!isThisMonth && (
+                        <button
+                            onClick={() => setCurrentMonth(new Date())}
+                            className="text-xs px-2 py-1 text-unbox-grey hover:text-unbox-dark transition-colors"
+                        >
+                            Сейчас
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Stat Cards */}

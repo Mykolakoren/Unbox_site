@@ -1,7 +1,7 @@
 """CRM Dashboard — stats + settings for specialist."""
 from typing import Optional, List
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, Query
 from sqlmodel import Session, select, func
 from app.api import deps
 from app.models.user import User
@@ -17,10 +17,25 @@ router = APIRouter()
 def crm_dashboard(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
+    month: Optional[str] = Query(None, description="Month in YYYY-MM format"),
 ):
     """Summary stats for the specialist's CRM dashboard."""
     uid = str(current_user.id)
     now = datetime.now()
+
+    # Parse month parameter or use current month
+    if month:
+        try:
+            month_start = datetime.strptime(month, "%Y-%m").replace(hour=0, minute=0, second=0, microsecond=0)
+        except ValueError:
+            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1)
 
     active_clients = session.exec(
         select(func.count()).where(
@@ -29,12 +44,11 @@ def crm_dashboard(
         )
     ).one()
 
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     sessions_this_month = session.exec(
         select(func.count()).where(
             TherapySession.specialist_id == uid,
             TherapySession.date >= month_start,
-            TherapySession.date <= now,
+            TherapySession.date < month_end,
             TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
         )
     ).one()
@@ -57,6 +71,7 @@ def crm_dashboard(
         select(TherapistPayment).where(
             TherapistPayment.specialist_id == uid,
             TherapistPayment.date >= month_start,
+            TherapistPayment.date < month_end,
         )
     ).all()
     payments_this_month = sum(float(p.amount or 0) for p in month_payments)
