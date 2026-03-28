@@ -1,96 +1,141 @@
 import { motion } from 'framer-motion';
-import { Clock, Snowflake, Percent, ArrowRight, Check, Star, Users, Zap, Gift, Shield, MessageCircle } from 'lucide-react';
+import { Clock, Snowflake, Percent, ArrowRight, Check, Star, Users, Zap, Gift, Shield, MessageCircle, Sparkles } from 'lucide-react';
 
+// ── Standard Prices ──────────────────────────────────────────────────────────
+const STANDARD_PRICES = [
+    { label: 'Индивидуальный кабинет', price: 20, unit: '₾/час', icon: '🏠', desc: 'Кабинеты 1–8' },
+    { label: 'Групповой кабинет', price: 35, unit: '₾/час', icon: '👥', desc: 'До 20 человек' },
+    { label: 'Капсула', price: 10, unit: '₾/час', icon: '🧘', desc: 'Приватное пространство' },
+];
+
+// ── Subscription Plans ───────────────────────────────────────────────────────
 const SUBSCRIPTIONS = [
     {
         id: 'trial',
         name: 'Пробный',
-        hours: 3,
-        rate: 20,
-        discount: 10,
-        price: 54,
-        fullPrice: 60,
+        tagline: 'Попробуйте формат Unbox',
+        hours: 4,
+        capsuleHours: 1,
+        price: 70,
+        fullPrice: 90,
+        discount: 22,
         duration: '14 дней',
-        audience: 'Для тех, кто хочет попробовать',
-        description: 'Идеальный старт — протестируйте формат работы в Unbox без обязательств.',
-        features: ['Любой кабинет или капсула', '14 дней на использование'],
+        features: [
+            'Любой индивидуальный кабинет',
+            '1 час в капсуле в любое время',
+        ],
         bonuses: [],
-        color: 'from-gray-50 to-gray-100',
+        color: 'from-slate-50 to-gray-100',
         borderColor: 'border-gray-200',
+        accentColor: 'text-gray-600',
         badge: null,
+        popular: false,
     },
     {
         id: 'warm-start',
         name: 'Тёплый старт',
+        tagline: 'Уверенный старт практики',
         hours: 10,
-        rate: 20,
-        discount: 10,
+        capsuleHours: 4,
         price: 180,
-        fullPrice: 200,
+        fullPrice: 240,
+        discount: 25,
         duration: '30 дней',
-        audience: 'Для начинающих специалистов',
-        description: 'Начните практику с комфортом — 10 часов по выгодной цене.',
-        features: ['Любой кабинет или капсула', '30 дней на использование'],
+        features: [
+            'Любой индивидуальный кабинет',
+            '4 часа в капсуле в любое время',
+            'Бесплатный перенос бронирований',
+        ],
         bonuses: [],
-        color: 'from-blue-50 to-indigo-50',
-        borderColor: 'border-blue-200',
+        color: 'from-sky-50 to-blue-50',
+        borderColor: 'border-sky-200',
+        accentColor: 'text-sky-600',
         badge: null,
+        popular: false,
     },
     {
         id: 'regular',
         name: 'Регулярный практик',
+        tagline: 'Для стабильной практики',
         hours: 20,
-        rate: 20,
-        discount: 15,
-        price: 340,
-        fullPrice: 400,
+        capsuleHours: 6,
+        price: 350,
+        fullPrice: 555,
+        discount: 37,
         duration: '30 дней',
-        audience: 'Для специалистов с клиентской базой',
-        description: 'Устойчивая практика — фиксированное или гибкое расписание.',
-        features: ['Фиксированное или гибкое расписание', '30 дней на использование'],
-        bonuses: ['Бесплатная перепланировка 1 раз', 'Размещение в списке специалистов Unbox'],
+        features: [
+            'Любой индивидуальный кабинет',
+            '6 часов в капсуле в любое время',
+            'Бесплатный перенос бронирований',
+            'Размещение в каталоге Unbox',
+        ],
+        bonuses: [
+            'Заморозка абонемента — 7 дней',
+            'Кофе Меама — 5 капсул',
+            'Скидка на книги — 25%',
+            'Массаж ШВЗ после сессий — 1 сеанс',
+        ],
         color: 'from-emerald-50 to-teal-50',
-        borderColor: 'border-emerald-200',
-        badge: null,
+        borderColor: 'border-emerald-300',
+        accentColor: 'text-emerald-600',
+        badge: 'Популярный',
+        popular: true,
     },
     {
         id: 'pro',
         name: 'Профи+',
+        tagline: 'Максимум для профессионалов',
         hours: 40,
-        rate: 20,
-        discount: 20,
-        price: 640,
-        fullPrice: 800,
+        capsuleHours: 10,
+        price: 650,
+        fullPrice: 1135,
+        discount: 43,
         duration: '45 дней',
-        audience: 'Для активно практикующих',
-        description: 'Максимум возможностей для интенсивной практики.',
-        features: ['Любые кабинеты, включая групповые', '45 дней на использование'],
+        features: [
+            'Любой индивидуальный кабинет',
+            '10 часов в капсуле в любое время',
+            'Бесплатный перенос бронирований',
+            'Перерывы 30 мин между сессиями бесплатно',
+            'Размещение в каталоге Unbox',
+        ],
         bonuses: [
-            'Приоритетное бронирование',
-            '2 бесплатных часа в подарок',
-            'Доступ в капсулу вне графика',
-            'Размещение в списке специалистов Unbox',
+            'Заморозка абонемента — 30 дней',
+            'Кофе Меама — 10 капсул',
+            'Съёмка рилз — 1 час в любом филиале',
+            'Скидка на книги — 50%',
+            'Массаж ШВЗ — 2 сеанса или фототерапия — 1 сеанс',
         ],
         color: 'from-amber-50 to-orange-50',
         borderColor: 'border-amber-300',
-        badge: 'Популярный',
+        accentColor: 'text-amber-600',
+        badge: 'Максимум',
+        popular: false,
     },
     {
         id: 'group',
         name: 'Групповой мастер',
-        hours: 16,
-        rate: 35,
-        discount: 25,
-        price: 420,
-        fullPrice: 560,
-        duration: '30 дней',
-        audience: 'Для тренеров и коучей',
-        description: 'Специально для групповой работы — тренинги, воркшопы, мастермайнды.',
-        features: ['Групповые кабинеты (до 20 чел.)', '30 дней на использование'],
-        bonuses: ['Рассылка мероприятия по базе Unbox'],
-        color: 'from-purple-50 to-pink-50',
-        borderColor: 'border-purple-200',
+        tagline: 'Для тренингов и воркшопов',
+        hours: 20,
+        capsuleHours: 0,
+        bonusIndividualHours: 4,
+        price: 450,
+        fullPrice: 863,
+        discount: 48,
+        duration: '45 дней',
+        features: [
+            'Групповые кабинеты (до 20 чел.)',
+            '4 часа в любом индивидуальном кабинете',
+        ],
+        bonuses: [
+            'Съёмка рилз — 1 час в любом филиале',
+            'Кофе Меама — 6 капсул',
+            'Скидка на книги — 33%',
+        ],
+        color: 'from-violet-50 to-purple-50',
+        borderColor: 'border-violet-300',
+        accentColor: 'text-violet-600',
         badge: 'Группы',
+        popular: false,
     },
 ];
 
@@ -103,7 +148,7 @@ const CONDITIONS = [
     {
         icon: Snowflake,
         title: 'Заморозка',
-        description: 'Возможна заморозка на 7 дней в течение действия абонемента.',
+        description: 'Заморозка абонемента доступна от тарифа "Регулярный практик": 7 дней, "Профи+": 30 дней.',
     },
     {
         icon: Percent,
@@ -117,13 +162,13 @@ const cardAnim = {
     visible: (i: number) => ({
         opacity: 1,
         y: 0,
-        transition: { delay: i * 0.1, duration: 0.5 },
+        transition: { delay: i * 0.08, duration: 0.5 },
     }),
 };
 
 export function SubscriptionsPage() {
     return (
-        <div className="max-w-6xl mx-auto px-4 py-8 md:py-16 space-y-16">
+        <div className="max-w-7xl mx-auto px-4 py-8 md:py-16 space-y-16">
             {/* Hero */}
             <motion.div
                 initial={{ opacity: 0, y: -20 }}
@@ -135,12 +180,45 @@ export function SubscriptionsPage() {
                     Абонементы <span className="text-unbox-green">Unbox</span>
                 </h1>
                 <p className="text-lg text-unbox-grey max-w-2xl mx-auto">
-                    Выберите подходящий абонемент для вашей практики. Экономьте до 25% на аренде кабинетов.
+                    Экономьте до 48% на аренде кабинетов. Капсулы, кофе, массаж и другие бонусы — включены.
                 </p>
             </motion.div>
 
+            {/* Standard Prices */}
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.2, duration: 0.5 }}
+                className="space-y-4"
+            >
+                <h2 className="text-center text-sm font-bold uppercase tracking-wider text-unbox-grey">
+                    Стандартные цены без абонемента
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto">
+                    {STANDARD_PRICES.map((sp) => (
+                        <div
+                            key={sp.label}
+                            className="flex items-center gap-3 rounded-2xl px-5 py-4"
+                            style={{
+                                background: 'rgba(255,255,255,0.65)',
+                                backdropFilter: 'blur(16px)',
+                                WebkitBackdropFilter: 'blur(16px)',
+                                border: '1px solid rgba(255,255,255,0.50)',
+                                boxShadow: '0 2px 12px rgba(71,109,107,0.06)',
+                            }}
+                        >
+                            <span className="text-2xl">{sp.icon}</span>
+                            <div>
+                                <div className="font-bold text-unbox-dark text-lg">{sp.price} {sp.unit}</div>
+                                <div className="text-xs text-unbox-grey">{sp.label}</div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </motion.div>
+
             {/* Subscription Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {SUBSCRIPTIONS.map((sub, i) => (
                     <motion.div
                         key={sub.id}
@@ -148,56 +226,74 @@ export function SubscriptionsPage() {
                         initial="hidden"
                         animate="visible"
                         variants={cardAnim}
-                        className={`relative rounded-2xl border-2 ${sub.borderColor} overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1 ${
-                            sub.badge === 'Популярный' ? 'ring-2 ring-unbox-green/40 shadow-lg' : ''
+                        className={`relative rounded-2xl border-2 ${sub.borderColor} overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1 flex flex-col ${
+                            sub.popular ? 'ring-2 ring-unbox-green/40 shadow-lg md:-translate-y-2' : ''
                         }`}
                         style={{
-                            background: 'rgba(255,255,255,0.75)',
+                            background: 'rgba(255,255,255,0.80)',
                             backdropFilter: 'blur(20px) saturate(140%)',
                             WebkitBackdropFilter: 'blur(20px) saturate(140%)',
                         }}
                     >
+                        {/* Badge */}
                         {sub.badge && (
                             <div className={`absolute top-0 right-0 px-4 py-1.5 rounded-bl-xl text-xs font-bold text-white ${
-                                sub.badge === 'Популярный' ? 'bg-unbox-green' : 'bg-purple-500'
+                                sub.popular ? 'bg-unbox-green' : sub.id === 'group' ? 'bg-violet-500' : 'bg-amber-500'
                             }`}>
                                 <Star size={12} className="inline mr-1 -mt-0.5" />
                                 {sub.badge}
                             </div>
                         )}
 
-                        <div className={`p-6 bg-gradient-to-br ${sub.color}`}>
+                        {/* Header */}
+                        <div className={`p-6 pb-4 bg-gradient-to-br ${sub.color}`}>
                             <h3 className="text-xl font-bold text-unbox-dark">{sub.name}</h3>
-                            <p className="text-sm text-unbox-grey mt-1">{sub.audience}</p>
+                            <p className="text-sm text-unbox-grey mt-0.5">{sub.tagline}</p>
                         </div>
 
-                        <div className="p-6 space-y-5">
-                            {/* Price */}
-                            <div className="flex items-baseline gap-3">
-                                <span className="text-3xl font-bold text-unbox-dark">{sub.price} ₾</span>
-                                <span className="text-lg text-gray-400 line-through">{sub.fullPrice} ₾</span>
-                                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">
-                                    -{sub.discount}%
-                                </span>
+                        {/* Body */}
+                        <div className="p-6 pt-4 space-y-5 flex-1 flex flex-col">
+                            {/* Price block */}
+                            <div>
+                                <div className="flex items-baseline gap-3">
+                                    <span className="text-3xl font-bold text-unbox-dark">{sub.price} ₾</span>
+                                    <span className="text-base text-gray-400 line-through">{sub.fullPrice} ₾</span>
+                                    <span className="px-2.5 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">
+                                        -{sub.discount}%
+                                    </span>
+                                </div>
+                                <div className="text-xs text-unbox-grey mt-1">
+                                    Экономия: {sub.fullPrice - sub.price} ₾
+                                </div>
                             </div>
 
-                            {/* Meta */}
-                            <div className="flex items-center gap-4 text-sm text-unbox-grey">
-                                <div className="flex items-center gap-1.5">
-                                    <Clock size={14} className="text-unbox-green" />
-                                    {sub.hours} часов
+                            {/* Meta pills */}
+                            <div className="flex flex-wrap gap-2">
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-unbox-light/50 text-xs font-medium text-unbox-dark">
+                                    <Clock size={13} className="text-unbox-green" />
+                                    {sub.hours} ч {sub.id === 'group' ? 'груп.' : 'инд.'}
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                    <Shield size={14} className="text-unbox-green" />
+                                {sub.capsuleHours > 0 && (
+                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-50 text-xs font-medium text-violet-700">
+                                        <Sparkles size={13} />
+                                        +{sub.capsuleHours} ч капсула
+                                    </div>
+                                )}
+                                {(sub as any).bonusIndividualHours > 0 && (
+                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-xs font-medium text-emerald-700">
+                                        <Gift size={13} />
+                                        +{(sub as any).bonusIndividualHours} ч инд.
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 text-xs font-medium text-gray-600">
+                                    <Shield size={13} />
                                     {sub.duration}
                                 </div>
                             </div>
 
-                            {/* Description */}
-                            <p className="text-sm text-gray-600 leading-relaxed">{sub.description}</p>
-
                             {/* Features */}
                             <div className="space-y-2">
+                                <div className="text-[11px] font-bold text-unbox-dark/60 uppercase tracking-wider">Что включено</div>
                                 {sub.features.map((f, j) => (
                                     <div key={j} className="flex items-start gap-2 text-sm text-gray-700">
                                         <Check size={14} className="text-unbox-green mt-0.5 flex-shrink-0" />
@@ -209,8 +305,8 @@ export function SubscriptionsPage() {
                             {/* Bonuses */}
                             {sub.bonuses.length > 0 && (
                                 <div className="pt-3 border-t border-gray-100 space-y-2">
-                                    <div className="text-xs font-bold text-unbox-green uppercase tracking-wider flex items-center gap-1">
-                                        <Gift size={12} /> Бонусы
+                                    <div className="text-[11px] font-bold text-amber-600 uppercase tracking-wider flex items-center gap-1">
+                                        <Gift size={11} /> Подарки и бонусы
                                     </div>
                                     {sub.bonuses.map((b, j) => (
                                         <div key={j} className="flex items-start gap-2 text-sm text-gray-600">
@@ -221,14 +317,15 @@ export function SubscriptionsPage() {
                                 </div>
                             )}
 
-                            {/* CTA */}
+                            {/* Spacer + CTA */}
+                            <div className="flex-1" />
                             <a
                                 href="https://t.me/UnboxCenter"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className={`block w-full text-center py-3 rounded-xl font-bold text-sm transition-all ${
-                                    sub.badge === 'Популярный'
-                                        ? 'bg-unbox-green text-white hover:bg-unbox-green/90 shadow-md'
+                                className={`block w-full text-center py-3.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
+                                    sub.popular
+                                        ? 'bg-unbox-green text-white hover:bg-unbox-dark shadow-md hover:shadow-lg'
                                         : 'bg-unbox-light text-unbox-dark hover:bg-unbox-green hover:text-white'
                                 }`}
                             >
@@ -273,7 +370,7 @@ export function SubscriptionsPage() {
                 </div>
             </motion.div>
 
-            {/* For Groups */}
+            {/* Custom */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -297,7 +394,7 @@ export function SubscriptionsPage() {
                     href="https://t.me/UnboxCenter"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-unbox-green text-white font-bold rounded-xl hover:bg-unbox-green/90 transition-colors shadow-md"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-unbox-green text-white font-bold rounded-xl hover:bg-unbox-green/90 transition-colors shadow-md cursor-pointer"
                 >
                     <MessageCircle size={18} />
                     Написать нам
