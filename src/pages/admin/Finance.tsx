@@ -105,11 +105,16 @@ export function AdminFinance() {
         fetchAnalytics();
     }, [fetchBalance, fetchCategories, fetchShiftReports, fetchAnalytics, selectedBranch]);
 
-    // Fetch transactions when period or branch changes
-    useEffect(() => {
+    // Refetch with current period dates
+    const refetchTransactions = () => {
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
         const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
         fetchTransactions({ dateFrom, dateTo, limit: 200 });
+    };
+
+    // Fetch transactions when period or branch changes
+    useEffect(() => {
+        refetchTransactions();
     }, [fetchTransactions, period.from.getTime(), period.to.getTime()]);
 
     const canGoNext = periodMode !== 'custom' && periodOffset < 0;
@@ -288,7 +293,7 @@ export function AdminFinance() {
 
             {/* Tab content */}
             <div className="bg-white rounded-2xl border border-unbox-light/50 shadow-sm p-6">
-                {tab === 'transactions' && <CashboxTransactionTable filteredTransactions={filtered} />}
+                {tab === 'transactions' && <CashboxTransactionTable filteredTransactions={filtered} onRefresh={refetchTransactions} />}
                 {tab === 'categories' && canManageCategories && <CategoryManager />}
                 {tab === 'shifts' && <ShiftReportsTable />}
             </div>
@@ -297,7 +302,7 @@ export function AdminFinance() {
             <CashboxAnalytics />
 
             {/* Modals */}
-            <AddCashboxTransactionModal isOpen={showAddTx} onClose={() => setShowAddTx(false)} />
+            <AddCashboxTransactionModal isOpen={showAddTx} onClose={() => { setShowAddTx(false); refetchTransactions(); }} />
             <EndShiftModal isOpen={showEndShift} onClose={() => setShowEndShift(false)} />
 
             {/* Balance Correction Modal — owner/senior_admin only */}

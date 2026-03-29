@@ -377,17 +377,18 @@ export function SubscriptionsPage() {
                 transition={{ delay: 0.8, duration: 0.5 }}
                 className="rounded-2xl p-8 md:p-10 text-center space-y-4"
                 style={{
-                    background: 'rgba(71,109,107,0.08)',
-                    backdropFilter: 'blur(16px)',
-                    WebkitBackdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(71,109,107,0.15)',
+                    background: 'rgba(255,255,255,0.75)',
+                    backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(71,109,107,0.20)',
+                    boxShadow: '0 4px 20px rgba(71,109,107,0.08)',
                 }}
             >
                 <Users size={32} className="mx-auto text-unbox-green" />
                 <h2 className="text-2xl font-bold text-unbox-dark">
                     Индивидуальные условия
                 </h2>
-                <p className="text-unbox-grey max-w-lg mx-auto">
+                <p className="text-unbox-dark/60 max-w-lg mx-auto">
                     Нужно больше часов или особый формат? Мы подберём персональные условия для вашей практики.
                 </p>
                 <a

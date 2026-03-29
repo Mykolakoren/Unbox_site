@@ -42,9 +42,10 @@ const getMethodLabelFull = (m: string) => {
 
 interface Props {
     filteredTransactions: CashboxTransaction[];
+    onRefresh?: () => void;
 }
 
-export function CashboxTransactionTable({ filteredTransactions }: Props) {
+export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Props) {
     const { isLoading, deleteTransaction } = useCashboxStore();
     const { currentUser } = useUserStore();
     const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -55,6 +56,7 @@ export function CashboxTransactionTable({ filteredTransactions }: Props) {
         try {
             await deleteTransaction(id);
             toast.success('Операция удалена');
+            onRefresh?.();
         } catch {
             toast.error(isSeniorOrOwner
                 ? 'Не удалось удалить операцию'

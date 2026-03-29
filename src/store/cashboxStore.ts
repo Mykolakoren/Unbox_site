@@ -56,12 +56,12 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
 
     createTransaction: async (data) => {
         await cashboxApi.createTransaction(data);
-        await Promise.all([get().fetchTransactions(), get().fetchBalance()]);
+        await get().fetchBalance();
     },
 
     deleteTransaction: async (id) => {
         await cashboxApi.deleteTransaction(id);
-        await Promise.all([get().fetchTransactions(), get().fetchBalance()]);
+        await get().fetchBalance();
     },
 
     fetchCategories: async () => {
