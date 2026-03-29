@@ -292,3 +292,35 @@ def telegram_login_callback(
     </html>
     """
     return HTMLResponse(content=html_content)
+
+
+# ── Self change password ─────────────────────────────────────────────────────
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+def change_own_password(
+    *,
+    payload: ChangePasswordRequest,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """Change own password. Requires current password verification."""
+    if not current_user.hashed_password:
+        raise HTTPException(400, "Аккаунт без пароля (Google/Telegram). Установите пароль через администратора.")
+
+    if not security.verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(400, "Неверный текущий пароль")
+
+    if len(payload.new_password) < 6:
+        raise HTTPException(400, "Пароль должен быть не менее 6 символов")
+
+    current_user.hashed_password = security.get_password_hash(payload.new_password)
+    from datetime import datetime as dt
+    current_user.updated_at = dt.now()
+    session.add(current_user)
+    session.commit()
+    return {"ok": True}

@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { useUserStore } from '../store/userStore';
 import { Button } from '../components/ui/Button';
-import { Shield, User, Phone, Mail, Plus } from 'lucide-react';
+import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SubscriptionCard } from '../components/SubscriptionCard';
+import { toast } from 'sonner';
+import { api } from '../api/client';
 import { hasPermission } from '../utils/permissions';
 
 export function ProfilePage() {
@@ -112,6 +115,9 @@ export function ProfilePage() {
                 </div>
             </div>
 
+            {/* Change Password */}
+            <ChangePasswordSection />
+
             {/* Admin Access Section — only for users with admin role or admin.access permission */}
             {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
                 <div className="bg-white p-6 rounded-2xl border border-unbox-light">
@@ -132,6 +138,112 @@ export function ProfilePage() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ── Change Password Section ──────────────────────────────────────────────────
+
+function ChangePasswordSection() {
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [showCurrent, setShowCurrent] = useState(false);
+    const [showNew, setShowNew] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (newPassword.length < 6) {
+            toast.error('Пароль должен быть не менее 6 символов');
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            toast.error('Пароли не совпадают');
+            return;
+        }
+        setSaving(true);
+        try {
+            await api.post('/auth/change-password', {
+                current_password: currentPassword,
+                new_password: newPassword,
+            });
+            toast.success('Пароль успешно изменён');
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Ошибка смены пароля');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-2xl border border-unbox-light">
+            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                <Lock className="text-unbox-green" size={20} />
+                Смена пароля
+            </h3>
+            <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
+                <div>
+                    <label className="block text-sm font-medium mb-2">Текущий пароль</label>
+                    <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <input
+                            type={showCurrent ? 'text' : 'password'}
+                            className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            required
+                            placeholder="Введите текущий пароль"
+                        />
+                        <button type="button" onClick={() => setShowCurrent(!showCurrent)} className="absolute right-3 top-1/2 -translate-y-1/2 text-unbox-grey hover:text-unbox-dark">
+                            {showCurrent ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium mb-2">Новый пароль</label>
+                    <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <input
+                            type={showNew ? 'text' : 'password'}
+                            className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            required
+                            minLength={6}
+                            placeholder="Минимум 6 символов"
+                        />
+                        <button type="button" onClick={() => setShowNew(!showNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-unbox-grey hover:text-unbox-dark">
+                            {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium mb-2">Подтвердите пароль</label>
+                    <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <input
+                            type="password"
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            required
+                            placeholder="Повторите новый пароль"
+                        />
+                    </div>
+                    {confirmPassword && newPassword !== confirmPassword && (
+                        <p className="text-xs text-red-500 mt-1">Пароли не совпадают</p>
+                    )}
+                </div>
+                <div className="pt-2">
+                    <Button type="submit" disabled={saving || !currentPassword || !newPassword || newPassword !== confirmPassword}>
+                        {saving ? 'Сохранение...' : 'Изменить пароль'}
+                    </Button>
+                </div>
+            </form>
         </div>
     );
 }
