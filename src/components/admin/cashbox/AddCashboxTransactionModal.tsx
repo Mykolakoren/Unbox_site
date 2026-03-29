@@ -42,12 +42,21 @@ const ACCOUNTS = [
     { id: 'card_bog', label: 'Карта BOG' },
 ] as const;
 
+const SUBSCRIPTION_PLANS = [
+    { id: 'trial', name: 'Пробный', price: 70 },
+    { id: 'warm-start', name: 'Тёплый старт', price: 180 },
+    { id: 'regular', name: 'Регулярный практик', price: 350 },
+    { id: 'pro', name: 'Профи+', price: 650 },
+    { id: 'group', name: 'Групповой мастер', price: 450 },
+];
+
 export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const { createTransaction, categories } = useCashboxStore();
     const [type, setType] = useState<'income' | 'expense' | 'transfer'>('income');
     const [amount, setAmount] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [categoryId, setCategoryId] = useState('');
+    const [selectedPlan, setSelectedPlan] = useState('');
     const [description, setDescription] = useState('');
     const [branch, setBranch] = useState('');
     const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
@@ -272,7 +281,10 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">Категория</label>
                             <select
                                 value={categoryId}
-                                onChange={e => setCategoryId(e.target.value)}
+                                onChange={e => {
+                                    setCategoryId(e.target.value);
+                                    setSelectedPlan('');
+                                }}
                                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm bg-white"
                             >
                                 <option value="">Без категории</option>
@@ -284,6 +296,39 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             </select>
                         </div>
                     )}
+
+                    {/* Subscription plan selector */}
+                    {(() => {
+                        const selectedCat = flatCats.find(c => c.id === categoryId);
+                        const isSubscriptionCat = selectedCat && selectedCat.name.toLowerCase().includes('абонемент');
+                        if (!isSubscriptionCat) return null;
+                        return (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Тариф</label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    {SUBSCRIPTION_PLANS.map(plan => (
+                                        <button
+                                            key={plan.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setSelectedPlan(plan.id);
+                                                setAmount(String(plan.price));
+                                                setDescription(prev => prev || `Абонемент "${plan.name}"`);
+                                            }}
+                                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl border-2 text-sm font-medium transition-all cursor-pointer ${
+                                                selectedPlan === plan.id
+                                                    ? 'border-unbox-green bg-unbox-light/50 text-unbox-dark'
+                                                    : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                                            }`}
+                                        >
+                                            <span>{plan.name}</span>
+                                            <span className="font-bold">{plan.price} ₾</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {/* Client (income only) */}
                     {type === 'income' && (
