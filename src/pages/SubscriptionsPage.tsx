@@ -193,11 +193,9 @@ export function SubscriptionsPage() {
                 transition={{ delay: 0.2, duration: 0.5 }}
                 className="space-y-4"
             >
-                <div className="inline-block px-5 py-2 rounded-xl mx-auto" style={{ background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', display: 'block', textAlign: 'center' }}>
-                    <h2 className="text-sm font-bold uppercase tracking-wider text-unbox-dark/60">
-                        Стандартные цены без абонемента
-                    </h2>
-                </div>
+                <h2 className="text-center text-sm font-bold uppercase tracking-wider text-unbox-dark/70">
+                    Стандартные цены без абонемента
+                </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto">
                     {STANDARD_PRICES.map((sp) => (
                         <div
