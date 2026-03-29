@@ -117,4 +117,26 @@ export const bookingsApi = {
         const response = await api.post<any>(`/bookings/${bookingId}/reject`);
         return mapToFrontend(response.data);
     },
+
+    // Recurring bookings
+    createRecurringBooking: async (data: {
+        resourceId: string;
+        locationId: string;
+        startTime: string;
+        duration: number;
+        format: string;
+        paymentMethod: string;
+        firstDate: string;
+        weeks: number;
+        targetUserId?: string;
+        crmClientId?: string;
+    }): Promise<{ ok: boolean; recurringGroupId: string; created: number; totalCost: number; dates: string[] }> => {
+        const response = await api.post('/bookings/recurring', data);
+        return response.data;
+    },
+
+    cancelRecurringSeries: async (groupId: string): Promise<{ ok: boolean; cancelled: number }> => {
+        const response = await api.delete(`/bookings/recurring/${groupId}`);
+        return response.data;
+    },
 };

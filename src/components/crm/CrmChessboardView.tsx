@@ -61,6 +61,8 @@ function CrmQuickBookModal({
     const [price, setPrice] = useState('');
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurringWeeks, setRecurringWeeks] = useState(12);
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
     const endTime = (() => {
@@ -89,6 +91,24 @@ function CrmQuickBookModal({
     const handleBook = async () => {
         setSaving(true);
         try {
+            if (isRecurring) {
+                const result = await bookingsApi.createRecurringBooking({
+                    resourceId: slot.resId,
+                    locationId: resource?.locationId || 'unbox_one',
+                    startTime: slot.time,
+                    duration,
+                    format: resource?.formats?.[0] || 'individual',
+                    paymentMethod: 'balance',
+                    firstDate: dateStr,
+                    weeks: recurringWeeks,
+                    crmClientId: selectedClientId || undefined,
+                });
+                toast.success(`Создано ${result.created} бронирований`);
+                await useUserStore.getState().fetchBookings();
+                onClose();
+                return;
+            }
+
             const res = await bookingsApi.createBooking({
                 resourceId: slot.resId,
                 date: dateStr,
@@ -97,9 +117,7 @@ function CrmQuickBookModal({
                 format: resource?.formats?.[0] || 'individual',
                 locationId: resource?.locationId,
             } as any);
-            // res should have booking id — fetch bookings to get it
             await useUserStore.getState().fetchBookings();
-            // Find the newly created booking
             const newBooking = useUserStore.getState().bookings.find(b => {
                 const bd = parseBookingDate(b.date);
                 return format(bd, 'yyyy-MM-dd') === dateStr &&
@@ -116,8 +134,12 @@ function CrmQuickBookModal({
             onClose();
         } catch (e: any) {
             const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : e.message || 'Ошибка бронирования';
-            toast.error(msg);
+            if (typeof detail === 'object' && detail?.conflicts) {
+                toast.error(`Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+            } else {
+                const msg = typeof detail === 'string' ? detail : e.message || 'Ошибка бронирования';
+                toast.error(msg);
+            }
         } finally {
             setSaving(false);
         }
@@ -247,18 +269,37 @@ function CrmQuickBookModal({
                     </div>
                 </div>
 
+                {/* Recurring */}
+                <div className="px-5 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="rounded" />
+                        <span className="text-sm font-medium text-unbox-dark">Повторять каждую неделю</span>
+                    </label>
+                    {isRecurring && (
+                        <div className="flex items-center gap-2 pl-6">
+                            <input
+                                type="number" value={recurringWeeks}
+                                onChange={e => setRecurringWeeks(Math.max(2, Math.min(52, Number(e.target.value))))}
+                                min={2} max={52}
+                                className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            />
+                            <span className="text-xs text-unbox-grey">недель (≈ {Math.round(recurringWeeks / 4.3)} мес.)</span>
+                        </div>
+                    )}
+                </div>
+
                 {/* Footer */}
-                <div className="flex gap-3 p-5 pt-0">
-                    <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+                <div className="flex gap-3 p-5 pt-3">
+                    <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer">
                         Отмена
                     </button>
                     <button
                         onClick={handleBook}
                         disabled={saving}
-                        className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                        className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        {selectedClientId ? 'Забронировать + сессия' : 'Забронировать'}
+                        {isRecurring ? `Создать ${recurringWeeks} броней` : selectedClientId ? 'Забронировать + сессия' : 'Забронировать'}
                     </button>
                 </div>
             </div>

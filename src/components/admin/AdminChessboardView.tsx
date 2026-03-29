@@ -784,6 +784,8 @@ function AdminQuickBookingModal({
     const [saving, setSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedUser, setSelectedUser] = useState<{ id: string; email: string; name: string } | null>(null);
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurringWeeks, setRecurringWeeks] = useState(12);
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
     const endTime = (() => {
@@ -806,21 +808,41 @@ function AdminQuickBookingModal({
         }
         setSaving(true);
         try {
-            await bookingsApi.createBooking({
-                resourceId: slot.resId,
-                date: dateStr, // Send as string 'YYYY-MM-DD' to avoid timezone shift
-                startTime: slot.time,
-                duration,
-                format: resource?.formats?.[0] || 'individual',
-                locationId: resource?.locationId,
-                targetUserId: selectedUser.email,
-            } as any);
-            toast.success(`Бронирование создано для ${selectedUser.name}`);
+            if (isRecurring) {
+                const result = await bookingsApi.createRecurringBooking({
+                    resourceId: slot.resId,
+                    locationId: resource?.locationId || 'unbox_one',
+                    startTime: slot.time,
+                    duration,
+                    format: resource?.formats?.[0] || 'individual',
+                    paymentMethod: 'balance',
+                    firstDate: dateStr,
+                    weeks: recurringWeeks,
+                    targetUserId: selectedUser.email,
+                });
+                toast.success(`Создано ${result.created} бронирований на ${result.totalCost} ₾`);
+            } else {
+                await bookingsApi.createBooking({
+                    resourceId: slot.resId,
+                    date: dateStr,
+                    startTime: slot.time,
+                    duration,
+                    format: resource?.formats?.[0] || 'individual',
+                    locationId: resource?.locationId,
+                    targetUserId: selectedUser.email,
+                } as any);
+                toast.success(`Бронирование создано для ${selectedUser.name}`);
+            }
             onBooked();
         } catch (e: any) {
             const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
-            toast.error(msg);
+            if (typeof detail === 'object' && detail?.conflicts) {
+                const conflicts = detail.conflicts as Array<{ date: string; day: string }>;
+                toast.error(`Конфликт: заняты ${conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+            } else {
+                const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
+                toast.error(msg);
+            }
         } finally {
             setSaving(false);
         }
@@ -924,13 +946,39 @@ function AdminQuickBookingModal({
                     </div>
                 </div>
 
+                {/* Recurring toggle */}
+                <div className="space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={isRecurring}
+                            onChange={e => setIsRecurring(e.target.checked)}
+                            className="rounded"
+                        />
+                        <span className="text-sm font-medium text-unbox-dark">Повторять каждую неделю</span>
+                    </label>
+                    {isRecurring && (
+                        <div className="flex items-center gap-2 pl-6">
+                            <input
+                                type="number"
+                                value={recurringWeeks}
+                                onChange={e => setRecurringWeeks(Math.max(2, Math.min(52, Number(e.target.value))))}
+                                min={2}
+                                max={52}
+                                className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                            />
+                            <span className="text-xs text-unbox-grey">недель ({isRecurring ? `≈ ${Math.round(recurringWeeks / 4.3)} мес.` : ''})</span>
+                        </div>
+                    )}
+                </div>
+
                 <button
                     onClick={handleBook}
                     disabled={saving || !selectedUser}
-                    className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Забронировать
+                    {isRecurring ? `Создать ${recurringWeeks} бронирований` : 'Забронировать'}
                 </button>
             </div>
         </div>

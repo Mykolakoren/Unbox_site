@@ -41,6 +41,9 @@ class BookingBase(SQLModel):
     gcal_event_id: Optional[str] = None
     gcal_calendar_id: Optional[str] = None
 
+    # Recurring booking group
+    recurring_group_id: Optional[str] = None
+
 class Booking(BookingBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: str = Field(index=True) # Linking to User.email for now (legacy compatibility), or User.id?
@@ -66,3 +69,4 @@ class BookingRead(BookingBase):
     user_id: str # Return email for frontend compatibility
     created_at: datetime
     gcal_sync_failed: bool = False
+    recurring_group_id: Optional[str] = None
