@@ -240,16 +240,21 @@ def crm_dashboard(
     total_hours = sum(s.duration_minutes or 60 for s in completed_sessions) / 60
     avg_hourly_rate = round(total_payments_all / max(total_hours, 1), 2)
 
-    # Min/Max rates from client base prices (active clients only)
+    # Min/Max rates from client base prices (active clients only), converted to GEL
     active_clients_all = session.exec(
         select(TherapistClient).where(
             TherapistClient.specialist_id == uid,
             TherapistClient.is_active == True,
         )
     ).all()
-    client_rates = [c.base_price for c in active_clients_all if c.base_price and c.base_price > 0]
-    min_rate = min(client_rates) if client_rates else 0
-    max_rate = max(client_rates) if client_rates else 0
+    client_rates_gel = []
+    for c in active_clients_all:
+        if c.base_price and c.base_price > 0:
+            cur = (c.currency or "GEL").upper()
+            rate_gel = c.base_price * GEL_RATES.get(cur, 1)
+            client_rates_gel.append(round(rate_gel, 0))
+    min_rate = min(client_rates_gel) if client_rates_gel else 0
+    max_rate = max(client_rates_gel) if client_rates_gel else 0
 
     # Group debt by currency
     debt_by_currency: dict = {}
