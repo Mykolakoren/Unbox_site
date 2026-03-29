@@ -109,7 +109,7 @@ export function AdminFinance() {
     useEffect(() => {
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
         const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
-        fetchTransactions({ dateFrom, dateTo, limit: 1000 });
+        fetchTransactions({ dateFrom, dateTo, limit: 200 });
     }, [fetchTransactions, period.from.getTime(), period.to.getTime()]);
 
     const canGoNext = periodMode !== 'custom' && periodOffset < 0;
