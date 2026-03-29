@@ -198,8 +198,11 @@ def sync_from_calendar(
 
     # Build alias → client_id lookup
     alias_map = {c.alias_code: c.id for c in clients if c.alias_code}
-    # Build name → client_id lookup (lowercase, first word)
-    name_map = {c.name.lower().split()[0]: c.id for c in clients}
+    # Build name → client_id lookup (full normalized name)
+    name_map = {}
+    for c in clients:
+        norm = " ".join(c.name.lower().strip().split())
+        name_map[norm] = c.id
 
     matched = []
     unmatched = []
@@ -220,14 +223,23 @@ def sync_from_calendar(
         alias = _extract_alias_code(summary)
         client_id = alias_map.get(alias) if alias else None
 
-        # Fallback: name match
+        # Fallback: strict name match (full name, not partial)
         if not client_id:
-            # Strip alias from summary for name matching
-            clean_name = re.sub(r"#\d{4}", "", summary).strip().lower()
-            for name_key, cid in name_map.items():
-                if name_key in clean_name:
-                    client_id = cid
-                    break
+            clean_name = " ".join(re.sub(r"#\d{4}", "", summary).strip().lower().split())
+            # Try exact full name match first
+            if clean_name in name_map:
+                client_id = name_map[clean_name]
+            else:
+                # Try word-set match: all words from client name must be in event, or vice versa
+                clean_words = set(clean_name.split())
+                for name_key, cid in name_map.items():
+                    name_words = set(name_key.split())
+                    if len(name_words) >= 2 and name_words == clean_words:
+                        client_id = cid
+                        break
+                    elif len(name_words) >= 2 and name_words.issubset(clean_words) and len(clean_words) <= len(name_words) + 1:
+                        client_id = cid
+                        break
 
         # Use Tbilisi timezone (UTC+4) for status comparison
         now_local = datetime.now()
@@ -307,7 +319,18 @@ def sync_client_history(
                              'стратсессия', 'информация', 'супервизия', 'отвезти', 'заполнить',
                              'нова подія', 'rust', 'http']
             if not any(kw in clean for kw in skip_keywords):
-                matched = name_lower in clean or clean in name_lower
+                # Strict match: full name must match, or event name must be full name
+                # Avoid partial matches like "Александр" matching "Александр Петров"
+                clean_words = set(clean.split())
+                name_words = set(name_lower.split())
+                # Match only if ALL words from the shorter name are in the longer name
+                # AND the shorter name has at least 2 words (to avoid single-word collisions)
+                if len(clean_words) >= 2 and clean_words.issubset(name_words):
+                    matched = True
+                elif len(name_words) >= 2 and name_words.issubset(clean_words):
+                    matched = True
+                elif clean == name_lower:
+                    matched = True
 
         if not matched:
             continue
