@@ -46,7 +46,7 @@ export function DashboardLayout() {
     ];
 
     return (
-        <SidebarLayout navItems={navItems} customBottomContent={<CrmAccessToggle />}>
+        <SidebarLayout navItems={navItems} customTopContent={<CrmAccessToggle />}>
             <Outlet />
         </SidebarLayout>
     );

@@ -15,10 +15,11 @@ interface SidebarLayoutProps {
     children: React.ReactNode;
     navItems: NavItem[];
     title?: string;
+    customTopContent?: React.ReactNode;
     customBottomContent?: React.ReactNode;
 }
 
-export function SidebarLayout({ children, navItems, customBottomContent }: SidebarLayoutProps) {
+export function SidebarLayout({ children, navItems, customTopContent, customBottomContent }: SidebarLayoutProps) {
     const location = useLocation();
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
@@ -76,6 +77,8 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                         </div>
                     )}
                 </div>
+
+                {customTopContent && <div className="px-4 mb-2">{customTopContent}</div>}
 
                 <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
                     {navItems.map((item) => (
@@ -142,6 +145,8 @@ export function SidebarLayout({ children, navItems, customBottomContent }: Sideb
                         <X size={18} />
                     </button>
                 </div>
+
+                {customTopContent && <div className="px-4 pt-2">{customTopContent}</div>}
 
                 <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
                     {navItems.map((item) => (

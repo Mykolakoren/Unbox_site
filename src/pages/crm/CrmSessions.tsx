@@ -937,10 +937,12 @@ function SessionEditPanel({
     onQuickPay?: (account: string) => Promise<void>;
     onCancel: () => void;
 }) {
+    const clients = useCrmStore(s => s.clients);
     const [date, setDate] = useState(format(parseSessionDate(session.date), "yyyy-MM-dd'T'HH:mm"));
     const [duration, setDuration] = useState(String(session.durationMinutes));
     const [status, setStatus] = useState(getEffectiveStatus(session));
     const [price, setPrice] = useState(String(session.price ?? ''));
+    const [clientId, setClientId] = useState(session.clientId);
     const [isPaid, setIsPaid] = useState(session.isPaid);
     const [account, setAccount] = useState(clientDefaultAccount || 'cash');
     const [saving, setSaving] = useState(false);
@@ -950,22 +952,21 @@ function SessionEditPanel({
         setSaving(true);
         try {
             // If marking as paid and it wasn't paid before, use quickPay with account
+            const updateData: CrmSessionUpdate = {
+                date: new Date(date).toISOString(),
+                durationMinutes: Number(duration),
+                status,
+                price: price ? Number(price) : undefined,
+            };
+            if (clientId !== session.clientId) {
+                updateData.clientId = clientId;
+            }
             if (isPaid && !session.isPaid && onQuickPay) {
-                await onSave({
-                    date: new Date(date).toISOString(),
-                    durationMinutes: Number(duration),
-                    status,
-                    price: price ? Number(price) : undefined,
-                });
+                await onSave(updateData);
                 await onQuickPay(account);
             } else {
-                await onSave({
-                    date: new Date(date).toISOString(),
-                    durationMinutes: Number(duration),
-                    status,
-                    price: price ? Number(price) : undefined,
-                    isPaid,
-                });
+                updateData.isPaid = isPaid;
+                await onSave(updateData);
             }
         } catch (err: any) {
             toast.error(err.message || 'Ошибка');
@@ -1029,6 +1030,25 @@ function SessionEditPanel({
                     />
                 </div>
             </div>
+
+            {/* Client selector */}
+            {clients && clients.length > 0 && (
+                <div>
+                    <label className="text-xs font-medium text-unbox-dark mb-1 block">Клиент</label>
+                    <select
+                        value={clientId}
+                        onChange={(e) => setClientId(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white max-w-xs"
+                    >
+                        {clients.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}{c.aliasCode ? ` #${c.aliasCode}` : ''}</option>
+                        ))}
+                    </select>
+                    {clientId !== session.clientId && (
+                        <p className="text-[10px] text-orange-500 mt-0.5">Клиент будет изменён</p>
+                    )}
+                </div>
+            )}
 
             <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-3">
