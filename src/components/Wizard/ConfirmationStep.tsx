@@ -810,18 +810,29 @@ export function ConfirmationStep() {
                     </div>
                 )}
 
-                <Button size="lg" className="w-full md:w-auto" onClick={handleConfirm} disabled={isLoadingPricing || isSubmitting}>
-                    {isLoadingPricing || isSubmitting
-                        ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {isLoadingPricing ? 'Расчет цены...' : 'Оформление...'}</>
-                        : isRescheduling
-                            ? 'Подтвердить перенос'
-                            : isEditing
-                                ? 'Сохранить изменения'
-                                : state.paymentMethod === 'subscription'
-                                    ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
-                                    : `Оплатить ${totalPrice.toFixed(1)} ₾`
-                    }
-                </Button>
+                <div className="flex gap-3 flex-col sm:flex-row">
+                    <button
+                        type="button"
+                        onClick={() => state.setStep(state.step - 1)}
+                        className="px-6 py-3 rounded-xl border-2 border-unbox-light text-unbox-dark font-bold hover:bg-unbox-light/50 transition-colors cursor-pointer"
+                    >
+                        ← Назад
+                    </button>
+                    <Button size="lg" className="flex-1 md:flex-none" onClick={handleConfirm} disabled={isLoadingPricing || isSubmitting}>
+                        {isLoadingPricing || isSubmitting
+                            ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {isLoadingPricing ? 'Расчет цены...' : 'Оформление...'}</>
+                            : isRescheduling
+                                ? 'Подтвердить перенос'
+                                : isEditing
+                                    ? 'Сохранить изменения'
+                                    : state.paymentMethod === 'bonus'
+                                        ? 'Забронировать бесплатно'
+                                        : state.paymentMethod === 'subscription'
+                                            ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
+                                            : `Оплатить ${totalPrice.toFixed(1)} ₾`
+                        }
+                    </Button>
+                </div>
             </div>
         </motion.div>
     );
