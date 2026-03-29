@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Clock, Snowflake, Percent, ArrowRight, Check, Star, Users, Zap, Gift, Shield, MessageCircle, Sparkles } from 'lucide-react';
+import { Clock, Snowflake, Percent, ArrowRight, Check, Star, Users, Zap, Gift, Shield, MessageCircle, Sparkles, TrendingUp, Timer, Flame, Award, ChevronRight, BarChart3 } from 'lucide-react';
 
 // ── Standard Prices ──────────────────────────────────────────────────────────
 const STANDARD_PRICES = [
@@ -177,10 +177,10 @@ export function SubscriptionsPage() {
                 className="text-center space-y-4"
             >
                 <h1 className="text-4xl md:text-5xl font-bold text-unbox-dark">
-                    Абонементы <span className="text-unbox-green">Unbox</span>
+                    Тарифы и скидки <span className="text-unbox-green">Unbox</span>
                 </h1>
                 <p className="text-lg text-unbox-grey max-w-2xl mx-auto">
-                    Экономьте до 48% на аренде кабинетов. Капсулы, кофе, массаж и другие бонусы — включены.
+                    Прозрачная система скидок — до 50%. Абонементы, кофе, массаж и другие бонусы — включены.
                 </p>
             </motion.div>
 
@@ -367,6 +367,165 @@ export function SubscriptionsPage() {
                             <p className="text-sm text-unbox-grey leading-relaxed">{cond.description}</p>
                         </div>
                     ))}
+                </div>
+            </motion.div>
+
+            {/* ═══ Pricing & Discounts Infographic ═══ */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.7, duration: 0.5 }}
+                className="space-y-8"
+            >
+                <div className="text-center space-y-2">
+                    <h2 className="text-2xl font-bold text-unbox-dark">Как работают скидки</h2>
+                    <p className="text-sm text-unbox-grey max-w-xl mx-auto">
+                        В Unbox действует прогрессивная система скидок. Чем больше вы бронируете — тем выгоднее каждый час. Скидки не суммируются: применяется одна — самая выгодная для вас.
+                    </p>
+                </div>
+
+                {/* Discount types */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                    {/* 1. Weekly Progressive */}
+                    <div className="rounded-2xl p-6 space-y-4" style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                                <TrendingUp size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-unbox-dark">Прогрессивная скидка за объём</h3>
+                                <p className="text-xs text-unbox-grey">Считается автоматически за неделю (Пн–Вс)</p>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            {[
+                                { hours: '0–5 ч', percent: '0%', bar: 'w-0', color: 'bg-gray-200' },
+                                { hours: '5–11 ч', percent: '10%', bar: 'w-1/4', color: 'bg-emerald-300' },
+                                { hours: '11–16 ч', percent: '25%', bar: 'w-2/4', color: 'bg-emerald-400' },
+                                { hours: '16+ ч', percent: '50%', bar: 'w-full', color: 'bg-emerald-500' },
+                            ].map(tier => (
+                                <div key={tier.hours} className="flex items-center gap-3">
+                                    <span className="text-xs text-unbox-grey w-14 shrink-0">{tier.hours}</span>
+                                    <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden relative">
+                                        <div className={`h-full ${tier.color} rounded-full transition-all ${tier.bar}`} />
+                                    </div>
+                                    <span className="text-sm font-bold text-unbox-dark w-10 text-right">{tier.percent}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <p className="text-xs text-unbox-grey italic">
+                            Пример: при 12 часах за неделю каждый час стоит 15 ₾ вместо 20 ₾
+                        </p>
+                    </div>
+
+                    {/* 2. Duration discount */}
+                    <div className="rounded-2xl p-6 space-y-4" style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                                <Timer size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-unbox-dark">Скидка за длительность сессии</h3>
+                                <p className="text-xs text-unbox-grey">Бронируете больше — платите меньше за час</p>
+                            </div>
+                        </div>
+                        <div className="space-y-2.5">
+                            {[
+                                { label: '2 часа подряд', percent: '10%', icon: '⏱' },
+                                { label: '3 часа подряд', percent: '15%', icon: '⏱' },
+                                { label: '4+ часа подряд', percent: '20%', icon: '⏱' },
+                            ].map(tier => (
+                                <div key={tier.label} className="flex items-center gap-3 bg-blue-50/50 rounded-xl px-4 py-2.5">
+                                    <span className="text-lg">{tier.icon}</span>
+                                    <span className="text-sm text-unbox-dark flex-1">{tier.label}</span>
+                                    <span className="text-sm font-bold text-blue-600 bg-blue-100 px-2.5 py-0.5 rounded-full">-{tier.percent}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 3. Hot Booking */}
+                    <div className="rounded-2xl p-6 space-y-4" style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center">
+                                <Flame size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-unbox-dark">Горячая бронь</h3>
+                                <p className="text-xs text-unbox-grey">Скидка 10% при бронировании менее чем за 12 часов</p>
+                            </div>
+                        </div>
+                        <div className="bg-orange-50/60 rounded-xl p-4 space-y-2">
+                            <div className="flex items-center gap-2">
+                                <Flame size={16} className="text-orange-500" />
+                                <span className="text-sm text-unbox-dark font-medium">-10% на любой кабинет</span>
+                            </div>
+                            <p className="text-xs text-unbox-grey leading-relaxed">
+                                Если до сессии осталось менее 12 часов, бронь стоит дешевле. Невозвратная и без переноса — но по лучшей цене.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* 4. Personal / Subscription */}
+                    <div className="rounded-2xl p-6 space-y-4" style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
+                                <Award size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-unbox-dark">Персональная скидка & Абонемент</h3>
+                                <p className="text-xs text-unbox-grey">Фиксированная скидка или оплата часами</p>
+                            </div>
+                        </div>
+                        <div className="space-y-2.5">
+                            <div className="flex items-center gap-3 bg-violet-50/50 rounded-xl px-4 py-2.5">
+                                <Star size={16} className="text-violet-500" />
+                                <span className="text-sm text-unbox-dark flex-1">Абонемент — фиксированная цена за час</span>
+                                <span className="text-xs font-bold text-violet-600">Приоритет 1</span>
+                            </div>
+                            <div className="flex items-center gap-3 bg-violet-50/50 rounded-xl px-4 py-2.5">
+                                <Award size={16} className="text-violet-500" />
+                                <span className="text-sm text-unbox-dark flex-1">Персональная скидка — индивидуально</span>
+                                <span className="text-xs font-bold text-violet-600">до 50%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Priority order */}
+                <div className="rounded-2xl p-6" style={{ background: 'rgba(255,255,255,0.80)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-xl bg-unbox-light text-unbox-green flex items-center justify-center">
+                            <BarChart3 size={20} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-unbox-dark">Порядок применения скидок</h3>
+                            <p className="text-xs text-unbox-grey">Применяется одна скидка — самая выгодная для вас</p>
+                        </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-0">
+                        {[
+                            { label: 'Абонемент', desc: 'Фиксированная цена', color: 'bg-violet-100 text-violet-700 border-violet-200' },
+                            { label: 'Персональная', desc: 'Индивидуальный %', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+                            { label: 'За объём', desc: 'Недельные часы', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+                            { label: 'За длительность', desc: '2+ часа подряд', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+                            { label: 'Горячая бронь', desc: 'Менее 12ч', color: 'bg-orange-100 text-orange-700 border-orange-200' },
+                        ].map((step, i) => (
+                            <div key={step.label} className="flex items-center gap-2 flex-1">
+                                <div className={`flex-1 rounded-xl border px-3 py-2.5 text-center ${step.color}`}>
+                                    <div className="text-xs font-bold">{step.label}</div>
+                                    <div className="text-[10px] opacity-70">{step.desc}</div>
+                                </div>
+                                {i < 4 && (
+                                    <ChevronRight size={14} className="text-unbox-grey shrink-0 hidden sm:block" />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-xs text-unbox-grey mt-3 text-center">
+                        Система автоматически выбирает лучший вариант. Скидки не суммируются между собой.
+                    </p>
                 </div>
             </motion.div>
 
