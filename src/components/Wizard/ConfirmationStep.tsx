@@ -482,10 +482,15 @@ export function ConfirmationStep() {
         start.setHours(h, m, 0, 0);
         const end = new Date(start.getTime() + state.duration * 60000);
 
+        const resource = RESOURCES.find(r => r.id === state.resourceId);
+        const loc = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
+            : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
+            : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
+            : 'Unbox, Батуми';
         const event = {
-            title: `Бронирование Unbox: ${state.resourceId === 'cabinet-5' ? 'Кабинет 5' : 'Капсула 1'}`,
-            description: `Бронирование в Unbox. ${state.format === 'individual' ? 'Индивидуально' : 'Группа'}.`,
-            location: 'Unbox, Tbilisi',
+            title: `Unbox: ${resource?.name || 'Кабинет'}`,
+            description: `${currentUser?.name || ''}\n${resource?.name || ''}, ${state.duration} мин`,
+            location: loc,
             startTime: start,
             endTime: end
         };
@@ -500,10 +505,15 @@ export function ConfirmationStep() {
         start.setHours(h, m, 0, 0);
         const end = new Date(start.getTime() + state.duration * 60000);
 
+        const resource = RESOURCES.find(r => r.id === state.resourceId);
+        const loc = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
+            : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
+            : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
+            : 'Unbox, Батуми';
         const event = {
-            title: `Бронирование Unbox: ${state.resourceId === 'cabinet-5' ? 'Кабинет 5' : 'Капсула 1'}`,
-            description: `Бронирование в Unbox. ${state.format === 'individual' ? 'Индивидуально' : 'Группа'}.`,
-            location: 'Unbox, Tbilisi',
+            title: `Unbox: ${resource?.name || 'Кабинет'}`,
+            description: `${currentUser?.name || ''}\n${resource?.name || ''}, ${state.duration} мин`,
+            location: loc,
             startTime: start,
             endTime: end
         };

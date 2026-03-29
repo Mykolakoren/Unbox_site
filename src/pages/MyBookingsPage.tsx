@@ -1477,7 +1477,19 @@ function BookingCard({
                                 const start = parseUTC(booking.date);
                                 start.setHours(h, m, 0, 0);
                                 const end = new Date(start.getTime() + booking.duration * 60000);
-                                window.open(generateGoogleCalendarUrl({ title: 'Бронирование Unbox', description: 'Бронирование кабинета', location: 'Unbox, Tbilisi', startTime: start, endTime: end }), '_blank');
+                                const resource = RESOURCES.find(r => r.id === booking.resourceId);
+                                const location = resource?.locationId === 'unbox_one' ? 'Unbox One, ул. Палиашвили 4, Батуми'
+                                    : resource?.locationId === 'unbox_uni' ? 'Unbox Uni, ул. Тбел Абусеридзе 38, Батуми'
+                                    : resource?.locationId === 'neo_school' ? 'Neo School, ул. Сулаберидзе 80, Батуми'
+                                    : 'Unbox, Батуми';
+                                const userName = useUserStore.getState().currentUser?.name || '';
+                                window.open(generateGoogleCalendarUrl({
+                                    title: `Unbox: ${resource?.name || 'Кабинет'}`,
+                                    description: `${userName}\n${resource?.name || ''}, ${booking.duration} мин`,
+                                    location,
+                                    startTime: start,
+                                    endTime: end,
+                                }), '_blank');
                             }}
                             className="text-xs text-unbox-green hover:underline flex items-center gap-1 mt-1"
                         >
