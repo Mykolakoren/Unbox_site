@@ -129,9 +129,15 @@ export function AdminChessboardView() {
         const nowStr = format(now, 'yyyy-MM-dd');
 
         const isPast = (slot: string): boolean => {
+            // Admin can book up to 12 hours in the past
+            const slotMin = timeToMin(slot);
+            const slotDate = new Date(selectedDate);
+            slotDate.setHours(Math.floor(slotMin / 60), slotMin % 60, 0, 0);
+            const hoursAgo = (now.getTime() - slotDate.getTime()) / (1000 * 60 * 60);
+            if (hoursAgo > 0 && hoursAgo <= 12) return false; // Allow recent past for admins
             if (dateStr < nowStr) return true;
             if (dateStr > nowStr) return false;
-            return timeToMin(slot) < now.getHours() * 60 + now.getMinutes();
+            return slotMin < now.getHours() * 60 + now.getMinutes();
         };
 
         const map = new Map<string, CellInfo[]>();
