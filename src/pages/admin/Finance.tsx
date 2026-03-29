@@ -88,14 +88,6 @@ export function AdminFinance() {
     const canManageCategories = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
     const canCorrectBalance = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
 
-    useEffect(() => {
-        fetchBalance(selectedBranch || undefined);
-        fetchTransactions();
-        fetchCategories();
-        fetchShiftReports();
-        fetchAnalytics();
-    }, [fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, selectedBranch]);
-
     // Compute period range
     const period = useMemo(() => {
         if (periodMode === 'custom') {
@@ -105,6 +97,20 @@ export function AdminFinance() {
         }
         return getPeriodRange(periodMode, periodOffset);
     }, [periodMode, periodOffset, customFrom, customTo]);
+
+    useEffect(() => {
+        fetchBalance(selectedBranch || undefined);
+        fetchCategories();
+        fetchShiftReports();
+        fetchAnalytics();
+    }, [fetchBalance, fetchCategories, fetchShiftReports, fetchAnalytics, selectedBranch]);
+
+    // Fetch transactions when period or branch changes
+    useEffect(() => {
+        const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
+        const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
+        fetchTransactions({ dateFrom, dateTo, limit: 1000 });
+    }, [fetchTransactions, period.from.getTime(), period.to.getTime()]);
 
     const canGoNext = periodMode !== 'custom' && periodOffset < 0;
 
