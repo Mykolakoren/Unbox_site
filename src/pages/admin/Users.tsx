@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useUserStore, type User } from '../../store/userStore';
-import { Search, Edit, Shield, User as UserIcon } from 'lucide-react';
+import { Search, Edit, Shield, User as UserIcon, Plus, X, Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { TimelineList } from '../../components/Timeline/TimelineList';
+import { api } from '../../api/client';
+import { toast } from 'sonner';
 
 export function AdminUsers() {
     const { users, updateUserById, fetchUsers } = useUserStore();
     const [search, setSearch] = useState('');
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    const [showAddUser, setShowAddUser] = useState(false);
 
     useEffect(() => {
         fetchUsers();
@@ -22,17 +25,26 @@ export function AdminUsers() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center gap-4">
                 <h1 className="text-2xl font-bold">Клиенты</h1>
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
-                    <input
-                        type="text"
-                        placeholder="Поиск клиента..."
-                        className="pl-10 pr-4 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green w-64"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                    />
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setShowAddUser(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-unbox-green text-white rounded-lg font-medium text-sm hover:bg-unbox-dark transition-colors shadow-sm cursor-pointer"
+                    >
+                        <Plus size={16} />
+                        Новый клиент
+                    </button>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <input
+                            type="text"
+                            placeholder="Поиск клиента..."
+                            className="pl-10 pr-4 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green w-64"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -146,9 +158,172 @@ export function AdminUsers() {
                     onUpdate={updateUserById}
                 />
             )}
+
+            {/* Add User Modal */}
+            {showAddUser && (
+                <AddUserModal
+                    onClose={() => setShowAddUser(false)}
+                    onCreated={() => { setShowAddUser(false); fetchUsers(); }}
+                />
+            )}
         </div>
     );
 }
+
+// ── Add User Modal ───────────────────────────────────────────────────────────
+
+function generatePassword(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let result = '';
+    for (let i = 0; i < 8; i++) result += chars[Math.floor(Math.random() * chars.length)];
+    return result;
+}
+
+function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [phone, setPhone] = useState('');
+    const [password, setPassword] = useState(generatePassword());
+    const [showPassword, setShowPassword] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [created, setCreated] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const handleCreate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!name.trim() || !email.trim()) {
+            toast.error('Имя и email обязательны');
+            return;
+        }
+        setSaving(true);
+        try {
+            await api.post('/auth/register', {
+                name: name.trim(),
+                email: email.trim().toLowerCase(),
+                phone: phone.trim() || undefined,
+                password,
+            });
+            toast.success('Клиент создан');
+            setCreated(true);
+        } catch (err: any) {
+            const detail = err?.response?.data?.detail;
+            toast.error(typeof detail === 'string' ? detail : 'Ошибка создания');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const copyCredentials = () => {
+        const text = `Логин: ${email}\nПароль: ${password}\n\nСайт: https://unbox.com.ge/login`;
+        navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            toast.success('Данные скопированы в буфер');
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5 animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold">{created ? 'Клиент создан' : 'Новый клиент'}</h3>
+                    <button onClick={created ? onCreated : onClose} className="p-1 hover:bg-unbox-light rounded-lg">
+                        <X size={20} className="text-unbox-grey" />
+                    </button>
+                </div>
+
+                {!created ? (
+                    <form onSubmit={handleCreate} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Имя *</label>
+                            <input
+                                type="text"
+                                className="w-full px-4 py-2.5 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                value={name}
+                                onChange={e => setName(e.target.value)}
+                                placeholder="Иван Иванов"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Email *</label>
+                            <input
+                                type="email"
+                                className="w-full px-4 py-2.5 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                placeholder="client@email.com"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Телефон</label>
+                            <input
+                                type="tel"
+                                className="w-full px-4 py-2.5 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                value={phone}
+                                onChange={e => setPhone(e.target.value)}
+                                placeholder="+995..."
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Временный пароль</label>
+                            <div className="relative">
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    className="w-full px-4 py-2.5 pr-20 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green font-mono"
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                />
+                                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+                                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="p-1 text-unbox-grey hover:text-unbox-dark">
+                                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                    <button type="button" onClick={() => setPassword(generatePassword())} className="p-1 text-unbox-grey hover:text-unbox-dark text-xs font-bold">
+                                        ↻
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={saving}
+                            className="w-full py-3 bg-unbox-green text-white font-bold rounded-xl hover:bg-unbox-dark transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                            {saving ? 'Создание...' : 'Создать клиента'}
+                        </button>
+                    </form>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
+                            <p className="text-sm text-green-800 font-medium">Передайте клиенту данные для входа:</p>
+                            <div className="bg-white rounded-lg p-3 font-mono text-sm space-y-1">
+                                <div><span className="text-unbox-grey">Логин:</span> {email}</div>
+                                <div><span className="text-unbox-grey">Пароль:</span> {password}</div>
+                                <div><span className="text-unbox-grey">Сайт:</span> unbox.com.ge/login</div>
+                            </div>
+                        </div>
+                        <button
+                            onClick={copyCredentials}
+                            className="w-full py-3 bg-unbox-dark text-white font-bold rounded-xl hover:bg-unbox-green transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                            {copied ? <Check size={16} /> : <Copy size={16} />}
+                            {copied ? 'Скопировано!' : 'Скопировать данные'}
+                        </button>
+                        <button
+                            onClick={onCreated}
+                            className="w-full py-2.5 border border-unbox-light text-unbox-dark font-medium rounded-xl hover:bg-unbox-light/50 transition-colors cursor-pointer"
+                        >
+                            Готово
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ── Edit User Modal ──────────────────────────────────────────────────────────
 
 function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () => void, onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
     const currentUser = useUserStore(s => s.currentUser);
