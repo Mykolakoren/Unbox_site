@@ -203,7 +203,39 @@ def create_booking(
             format_type=booking_in.format
         )
 
-        if booking_in.payment_method == 'subscription':
+        if booking_in.payment_method == 'bonus':
+            # Pay with bonus hours
+            from app.models.bonus import Bonus
+            booked_hours = booking_in.duration / 60.0
+            active_bonuses = session.exec(
+                select(Bonus).where(
+                    Bonus.user_id == str(booking_owner.id),
+                    Bonus.status == "active",
+                    Bonus.type == "free_hour",
+                )
+            ).all()
+            # Filter out expired
+            now = datetime.now()
+            active_bonuses = [b for b in active_bonuses if not b.expires_at or b.expires_at > now]
+            total_bonus_hours = sum(b.quantity for b in active_bonuses)
+            if total_bonus_hours < booked_hours - 0.01:
+                raise HTTPException(status_code=400, detail=f"Недостаточно бонусных часов. Доступно: {total_bonus_hours}, нужно: {booked_hours}")
+            # Consume bonuses (FIFO)
+            remaining_to_deduct = booked_hours
+            for b in sorted(active_bonuses, key=lambda x: x.created_at):
+                if remaining_to_deduct <= 0:
+                    break
+                if b.quantity <= remaining_to_deduct:
+                    remaining_to_deduct -= b.quantity
+                    b.status = "used"
+                    b.used_at = now
+                else:
+                    b.quantity -= remaining_to_deduct
+                    remaining_to_deduct = 0
+                session.add(b)
+            quote.final_price = 0.0
+            extras_total = 0.0  # Bonus covers extras too
+        elif booking_in.payment_method == 'subscription':
             if quote.applied_rule != 'SUBSCRIPTION':
                 raise HTTPException(status_code=400, detail="Insufficient subscription hours or invalid format for plan")
             if booking_owner.subscription:

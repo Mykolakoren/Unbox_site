@@ -17,6 +17,31 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _create_welcome_bonus(session: Session, user: User) -> None:
+    """Create a 1-hour free booking bonus for a new user."""
+    try:
+        from app.models.bonus import Bonus
+        bonus = Bonus(
+            user_id=str(user.id),
+            type="free_hour",
+            quantity=1.0,
+            status="active",
+            description="Добро пожаловать в Unbox! 1 час аренды в подарок",
+            granted_by_id="system",
+            granted_by_name="Система",
+            expires_at=datetime.now() + timedelta(days=90),
+        )
+        session.add(bonus)
+        session.commit()
+        logger.info(f"Welcome bonus created for {user.email}")
+    except Exception as e:
+        logger.warning(f"Failed to create welcome bonus for {user.email}: {e}")
+
+
 class GoogleLoginData(BaseModel):
     token: str
 
@@ -72,6 +97,10 @@ def register_new_user(
     session.add(user)
     session.commit()
     session.refresh(user)
+
+    # Auto-create welcome bonus (1 free hour)
+    _create_welcome_bonus(session, user)
+
     return user
 
 @router.post("/google", response_model=dict)
@@ -121,6 +150,7 @@ def google_login(
                 session.add(user)
                 session.commit()
                 session.refresh(user)
+                _create_welcome_bonus(session, user)
 
         user_id = user.id
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -262,6 +292,7 @@ def telegram_login_callback(
         session.add(user)
         session.commit()
         session.refresh(user)
+        _create_welcome_bonus(session, user)
 
     user_id = user.id
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

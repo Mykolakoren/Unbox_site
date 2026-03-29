@@ -24,7 +24,8 @@ import { format, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { motion } from 'framer-motion';
 import { useCrmStore } from '../../store/crmStore';
-import { User as UserIcon } from 'lucide-react';
+import { User as UserIcon, Gift } from 'lucide-react';
+import { bonusesApi, type Bonus } from '../../api/bonuses';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
@@ -38,9 +39,16 @@ export function ConfirmationStep() {
     const navigate = useNavigate();
     const shouldResetOnUnmount = useRef(false);
 
-    // Fetch CRM clients for specialist users
+    const [activeBonuses, setActiveBonuses] = useState<Bonus[]>([]);
+
+    // Fetch CRM clients and bonuses
     useEffect(() => {
-        if (currentUser) fetchCrmClients(true).catch(() => {});
+        if (currentUser) {
+            fetchCrmClients(true).catch(() => {});
+            bonusesApi.getMyBonuses().then(bonuses => {
+                setActiveBonuses(bonuses.filter(b => b.status === 'active' && b.type === 'freeHour'));
+            }).catch(() => {});
+        }
     }, [currentUser, fetchCrmClients]);
 
     // Reset booking state only after unmount (route change) to avoid race with <Navigate to="/" />
@@ -185,6 +193,11 @@ export function ConfirmationStep() {
         return { isSubscriptionEligible: true, subscriptionReason: '' };
     }, [effectiveUser, cartDetails, state.format]);
 
+    // Bonus eligibility
+    const totalBonusHours = activeBonuses.reduce((sum, b) => sum + (b.quantity || 0), 0);
+    const totalBookingHours = cartDetails.reduce((sum, item) => sum + (item.duration / 60), 0);
+    const isBonusEligible = totalBonusHours >= totalBookingHours - 0.01 && totalBonusHours > 0;
+
     // Auto-select subscription if eligible and balance logic prefers it? 
     // Or just default to balance. Let's default to balance but maybe switch to sub if balance is low? 
     // Let's keep simple default: Balance. Or 'subscription' if eligible? 
@@ -197,7 +210,10 @@ export function ConfirmationStep() {
         if (!isSubscriptionEligible && state.paymentMethod === 'subscription') {
             state.setPaymentMethod('balance');
         }
-    }, [isSubscriptionEligible, state.paymentMethod]);
+        if (!isBonusEligible && state.paymentMethod === 'bonus') {
+            state.setPaymentMethod('balance');
+        }
+    }, [isSubscriptionEligible, isBonusEligible, state.paymentMethod]);
 
 
     const handleConfirm = async () => {
@@ -649,6 +665,35 @@ export function ConfirmationStep() {
                 <div className="space-y-3 pt-4 border-t border-unbox-light">
                     <h3 className="font-bold text-lg text-unbox-dark">Способ оплаты</h3>
                     <div className="grid gap-3">
+                        {/* Option: Bonus */}
+                        {totalBonusHours > 0 && (
+                            <div
+                                className={`
+                                    relative p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                    ${state.paymentMethod === 'bonus'
+                                        ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-400'
+                                        : 'border-amber-200 hover:border-amber-300 bg-amber-50/50'}
+                                    ${!isBonusEligible ? 'opacity-50 pointer-events-none' : ''}
+                                `}
+                                onClick={() => isBonusEligible && state.setPaymentMethod('bonus')}
+                            >
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${state.paymentMethod === 'bonus' ? 'border-amber-500' : 'border-amber-300'}`}>
+                                            {state.paymentMethod === 'bonus' && <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />}
+                                        </div>
+                                        <Gift size={16} className="text-amber-600" />
+                                        <span className="font-bold text-amber-800">Бонусные часы</span>
+                                    </div>
+                                    <span className="font-bold text-amber-700">Бесплатно</span>
+                                </div>
+                                <div className="ml-7 text-xs text-amber-600 mt-1 font-medium">
+                                    Доступно: {totalBonusHours} ч бонусов
+                                    {!isBonusEligible && <span className="text-amber-800 ml-1">(недостаточно часов)</span>}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Option: Subscription */}
                         <div
                             className={`

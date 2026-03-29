@@ -10,7 +10,7 @@ export interface PricingParams {
     extras: ExtraOption[];
     resourceId?: string;
     selectedSlots?: string[];
-    paymentMethod?: 'balance' | 'subscription';
+    paymentMethod?: 'balance' | 'subscription' | 'bonus';
     accumulatedWeeklyHours?: number;
     // User Settings
     personalDiscountPercent?: number;

@@ -46,7 +46,7 @@ export interface BookingState {
     duration: number; // Deprecated
     selectedSlots: string[]; // Format: "resourceId|HH:mm" - simplified for easy Set/check logic
     extras: string[]; // ids of selected extras
-    paymentMethod?: 'balance' | 'subscription';
+    paymentMethod?: 'balance' | 'subscription' | 'bonus';
     hoursDeducted?: number;
     bookingForUser?: string | null;
     groupSize?: GroupSize | null;

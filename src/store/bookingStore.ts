@@ -32,7 +32,7 @@ export interface BookingStore extends BookingState {
     setSlotRange: (resourceId: string, timeSlots: string[]) => void;
     replaceSlots: (newSlots: string[]) => void;
     clearCart: () => void;
-    setPaymentMethod: (method: 'balance' | 'subscription') => void;
+    setPaymentMethod: (method: 'balance' | 'subscription' | 'bonus') => void;
     selectedSlots: string[]; // "resId|time"
 
     // Edit Mode

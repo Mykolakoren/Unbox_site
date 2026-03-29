@@ -210,9 +210,24 @@ export function DashboardOverview() {
     const [activeId, setActiveId] = useState<string | null>(null);
     const [bonuses, setBonuses] = useState<Bonus[]>([]);
 
+    const [showWelcome, setShowWelcome] = useState(false);
+
     useEffect(() => {
-        bonusesApi.getMyBonuses().then(setBonuses).catch(() => {});
-    }, []);
+        bonusesApi.getMyBonuses().then(b => {
+            setBonuses(b);
+            // Show welcome popup for new users with active bonuses
+            const hasActiveBonuses = b.some(bonus => bonus.status === 'active');
+            const alreadyShown = localStorage.getItem('unbox_welcome_shown');
+            if (hasActiveBonuses && !alreadyShown && currentUser) {
+                // Check if user was created within last 7 days
+                const createdAt = new Date((currentUser as any).createdAt || 0);
+                const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                if (createdAt > sevenDaysAgo) {
+                    setShowWelcome(true);
+                }
+            }
+        }).catch(() => {});
+    }, [currentUser]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -655,6 +670,36 @@ export function DashboardOverview() {
                     ) : null}
                 </DragOverlay>
             </DndContext>
+
+            {/* Welcome Bonus Popup */}
+            {showWelcome && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center space-y-5 animate-in zoom-in-95 duration-300">
+                        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
+                            <Gift size={32} className="text-amber-600" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-unbox-dark">Добро пожаловать!</h2>
+                        <p className="text-unbox-grey">
+                            Мы дарим вам <span className="font-bold text-amber-600">1 час бесплатной аренды</span> любого кабинета.
+                            Используйте бонус при бронировании!
+                        </p>
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                            <div className="text-sm text-amber-700 font-medium">Ваш бонус</div>
+                            <div className="text-3xl font-bold text-amber-600 mt-1">1 час</div>
+                            <div className="text-xs text-amber-500 mt-1">Действителен 90 дней</div>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setShowWelcome(false);
+                                localStorage.setItem('unbox_welcome_shown', '1');
+                            }}
+                            className="w-full py-3 bg-unbox-green text-white font-bold rounded-xl hover:bg-unbox-dark transition-colors cursor-pointer"
+                        >
+                            Отлично, спасибо!
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
