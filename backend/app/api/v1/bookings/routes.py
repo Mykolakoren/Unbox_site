@@ -443,7 +443,7 @@ def create_booking(
         # Google Calendar Sync
         gcal_sync_ok = False
         try:
-            event_id = gcal_service.create_event(booking)
+            event_id = gcal_service.create_event(booking, user_name=booking_owner.name)
             if event_id:
                 booking.gcal_event_id = event_id
                 session.add(booking)
@@ -719,7 +719,7 @@ def reschedule_booking(
         except Exception:
             pass
         try:
-            event_id = gcal_service.create_event(booking)
+            event_id = gcal_service.create_event(booking, user_name=current_user.name)
             if event_id:
                 booking.gcal_event_id = event_id
         except Exception as e:
@@ -1016,7 +1016,7 @@ def approve_booking(
 
     # GCal sync
     try:
-        event_id = gcal_service.create_event(booking)
+        event_id = gcal_service.create_event(booking, user_name=current_user.name)
         if event_id:
             booking.gcal_event_id = event_id
             session.add(booking)

@@ -98,7 +98,20 @@ class GoogleCalendarService:
         logger.warning(f"Google Calendar: No mapping found for resource_id: {resource_id}")
         return None
 
-    def create_event(self, booking: Booking) -> Optional[str]:
+    RESOURCE_NAMES = {
+        "unbox_one_room_1": "Кабинет 1",
+        "unbox_one_room_2": "Кабинет 2",
+        "unbox_uni_room_5": "Кабинет 5",
+        "unbox_uni_room_6": "Кабинет 6",
+        "unbox_uni_room_7": "Кабинет 7",
+        "unbox_uni_room_8": "Кабинет 8",
+        "unbox_uni_room_9": "Кабинет 9",
+        "unbox_uni_capsule_1": "Капсула 1",
+        "unbox_uni_capsule_2": "Капсула 2",
+        "neo_school_room_1": "Аудитория 1",
+    }
+
+    def create_event(self, booking: Booking, user_name: str = None) -> Optional[str]:
         """
         Create an event in Google Calendar. Returns event ID.
         """
@@ -111,9 +124,9 @@ class GoogleCalendarService:
             logger.warning(f"Google Calendar: No Calendar ID found for resource {booking.resource_id}")
             return None
 
-        summary = f"Бронь: {booking.format} ({booking.payment_method})"
-        if booking.user_id:
-             summary += f" - {booking.user_id}"
+        room_name = self.RESOURCE_NAMES.get(booking.resource_id, booking.resource_id)
+        name = user_name or ''
+        summary = f"{name} — {room_name}".strip(' —')
 
         try:
             # Construct start/end datetime strings
@@ -130,7 +143,7 @@ class GoogleCalendarService:
 
             event = {
                 'summary': summary,
-                'description': f"Booking ID: {booking.id}\nExtras: {booking.extras}",
+                'description': f"{room_name}, {booking.duration} мин" + (f"\nExtras: {', '.join(booking.extras)}" if booking.extras else ''),
                 'start': {
                     'dateTime': start_dt,
                     'timeZone': 'Asia/Tbilisi',
