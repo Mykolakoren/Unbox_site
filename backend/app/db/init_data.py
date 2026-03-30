@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Static Resources Data (Mirrors frontend/src/utils/data.ts)
 INITIAL_RESOURCES = [
-    # Unbox One
+    # Unbox One (Палиашвили 4, Батуми)
     {
         "id": "unbox_one_room_1",
         "name": "Кабинет 1",
@@ -22,21 +22,23 @@ INITIAL_RESOURCES = [
         "area": 9,
         "min_booking_hours": 1,
         "formats": ["individual"],
-        "description": "Компактный кабинет для индивидуальной, детской и семейной терапии."
+        "description": "Уютный кабинет с песочной терапией для индивидуальной, детской и семейной работы.",
+        "services": ["sandbox", "soundproof", "climate_control", "wifi"]
     },
     {
         "id": "unbox_one_room_2",
         "name": "Кабинет 2",
         "type": "cabinet",
         "hourly_rate": 20,
-        "capacity": 10,
+        "capacity": 4,
         "location_id": "unbox_one",
         "area": 12,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
-        "description": "Универсальный кабинет для индивидуальной работы, семейных консультаций и малых групп."
+        "formats": ["individual"],
+        "description": "Кабинет в нейтральных тонах для индивидуальной терапии и семейных консультаций.",
+        "services": ["natural_light", "soundproof", "couch", "climate_control", "wifi"]
     },
-    # Unbox Uni
+    # Unbox Uni (Тбел Абусеридзе 38, Батуми)
     {
         "id": "unbox_uni_room_5",
         "name": "Кабинет 5",
@@ -47,67 +49,47 @@ INITIAL_RESOURCES = [
         "area": 10,
         "min_booking_hours": 1,
         "formats": ["individual"],
-        "description": "Кабинет для индивидуальной, детской и семейной терапии."
+        "description": "Светлый кабинет для индивидуальной, детской и семейной терапии.",
+        "services": ["natural_light", "couch", "climate_control", "wifi"]
     },
     {
         "id": "unbox_uni_room_6",
         "name": "Кабинет 6",
         "type": "cabinet",
         "hourly_rate": 20,
-        "capacity": 10,
+        "capacity": 4,
         "location_id": "unbox_uni",
         "area": 16,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
-        "description": "Кабинет подходит для индивидуальной и групповой работы, а также для работы с детьми и семейных консультаций."
+        "formats": ["individual"],
+        "description": "Просторный кабинет с песочной терапией для индивидуальной работы и работы с детьми.",
+        "services": ["sandbox", "natural_light", "couch", "climate_control", "wifi"]
     },
     {
         "id": "unbox_uni_room_7",
         "name": "Кабинет 7",
         "type": "cabinet",
-        "hourly_rate": 20,
+        "hourly_rate": 30,
         "capacity": 20,
         "location_id": "unbox_uni",
         "area": 25,
         "min_booking_hours": 1,
         "formats": ["individual", "group"],
-        "description": "Большой кабинет для групповых встреч, тренингов, лекций и мероприятий."
+        "description": "Большой групповой кабинет для тренингов, лекций, супервизий и мероприятий.",
+        "services": ["flipchart", "projector", "whiteboard", "climate_control", "wifi", "natural_light"]
     },
     {
         "id": "unbox_uni_room_8",
         "name": "Кабинет 8",
         "type": "cabinet",
-        "hourly_rate": 20,
+        "hourly_rate": 30,
         "capacity": 20,
         "location_id": "unbox_uni",
         "area": 20,
         "min_booking_hours": 1,
         "formats": ["individual", "group"],
-        "description": "Просторный кабинет для групповой и индивидуальной работы."
-    },
-    {
-        "id": "unbox_uni_capsule_1",
-        "name": "Капсула 1",
-        "type": "capsule",
-        "hourly_rate": 10,
-        "capacity": 1,
-        "location_id": "unbox_uni",
-        "area": 2,
-        "min_booking_hours": 1,
-        "formats": ["individual"],
-        "description": "Индивидуальная капсула для онлайн-сессий и сосредоточенной работы."
-    },
-    {
-        "id": "unbox_uni_capsule_2",
-        "name": "Капсула 2",
-        "type": "capsule",
-        "hourly_rate": 10,
-        "capacity": 1,
-        "location_id": "unbox_uni",
-        "area": 2,
-        "min_booking_hours": 1,
-        "formats": ["individual"],
-        "description": "Индивидуальная капсула для онлайн-сессий и сосредоточенной работы."
+        "description": "Просторный групповой кабинет для групповой терапии, воркшопов и обучения.",
+        "services": ["flipchart", "whiteboard", "climate_control", "wifi"]
     },
     {
         "id": "unbox_uni_room_9",
@@ -119,7 +101,34 @@ INITIAL_RESOURCES = [
         "area": 16,
         "min_booking_hours": 1,
         "formats": ["individual", "group"],
-        "description": "Уютный кабинет для индивидуальной и групповой работы."
+        "description": "Уютный кабинет для индивидуальной и групповой работы.",
+        "services": ["private_entrance", "couch", "climate_control", "wifi"]
+    },
+    {
+        "id": "unbox_uni_capsule_1",
+        "name": "Капсула 1",
+        "type": "capsule",
+        "hourly_rate": 10,
+        "capacity": 1,
+        "location_id": "unbox_uni",
+        "area": 2,
+        "min_booking_hours": 1,
+        "formats": ["individual"],
+        "description": "Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.",
+        "services": ["soundproof", "wifi", "climate_control"]
+    },
+    {
+        "id": "unbox_uni_capsule_2",
+        "name": "Капсула 2",
+        "type": "capsule",
+        "hourly_rate": 10,
+        "capacity": 1,
+        "location_id": "unbox_uni",
+        "area": 2,
+        "min_booking_hours": 1,
+        "formats": ["individual"],
+        "description": "Индивидуальная капсула для онлайн-сессий и сосредоточенной работы.",
+        "services": ["soundproof", "wifi", "climate_control"]
     }
 ]
 

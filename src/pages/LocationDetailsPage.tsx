@@ -39,12 +39,15 @@ export function LocationDetailsPage() {
     // Location resources (active only)
     const locationResources = resources.filter(r => r.locationId === id && r.isActive !== false);
 
-    // Gallery photos
-    const photos = [
-        location.image || 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1556761175-5973dc0f32d7?auto=format&fit=crop&q=80'
-    ];
+    // Gallery photos — collect from location resources
+    const allResourcePhotos = locationResources.flatMap(r => r.photos || []);
+    const photos = allResourcePhotos.length >= 3
+        ? allResourcePhotos.slice(0, 3)
+        : [
+            allResourcePhotos[0] || location.image || '/img/offices/miniature_cab_1_pal.jpg',
+            allResourcePhotos[1] || '/img/offices/cabinet_5_ira.jpg',
+            allResourcePhotos[2] || '/img/offices/cabinet_7_liza.webp',
+        ];
 
     const calculateTotal = () => {
         let total = 0;
