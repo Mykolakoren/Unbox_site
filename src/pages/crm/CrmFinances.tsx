@@ -14,7 +14,7 @@ import {
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
-import type { CrmPaymentCreate, CrmClient } from '../../api/crm';
+import { crmApi, type CrmPaymentCreate, type CrmClient, type CrmSession } from '../../api/crm';
 import { totalInGel } from '../../utils/currency';
 
 type Period = 'day' | 'week' | 'month';
@@ -51,16 +51,29 @@ export function CrmFinances() {
     const [period, setPeriod] = useState<Period>('month');
     const [anchor, setAnchor] = useState(new Date());
     const [showForm, setShowForm] = useState(false);
+    const [allUnpaidSessions, setAllUnpaidSessions] = useState<CrmSession[]>([]);
 
     const { from, to } = getPeriodRange(anchor, period);
     const dateFrom = format(from, 'yyyy-MM-dd');
     const dateTo = format(to, 'yyyy-MM-dd');
+
+    const viewAsSpecialistId = useCrmStore(s => s.viewAsSpecialistId);
 
     useEffect(() => { fetchClients(); }, [fetchClients]);
     useEffect(() => {
         fetchPayments({ dateFrom, dateTo });
         fetchSessions({ dateFrom, dateTo });
     }, [fetchPayments, fetchSessions, dateFrom, dateTo]);
+
+    // Fetch ALL unpaid completed sessions (no date filter) for total debt calculation
+    useEffect(() => {
+        crmApi.getSessions({
+            status: 'COMPLETED',
+            specialistId: viewAsSpecialistId ?? undefined,
+        }).then(all => {
+            setAllUnpaidSessions(all.filter(s => !s.isPaid));
+        }).catch(() => {});
+    }, [viewAsSpecialistId, payments, sessions]); // refresh when payments/sessions change
 
     const clientMap = useMemo(() => {
         const map = new Map<string, CrmClient>();
@@ -77,10 +90,9 @@ export function CrmFinances() {
             revByCur[cur] = (revByCur[cur] || 0) + p.amount;
         });
 
-        // Debt grouped by currency
-        const unpaid = sessions.filter(s => !s.isPaid && s.status === 'COMPLETED');
+        // Total debt grouped by currency — uses ALL unpaid sessions (not filtered by period)
         const debtByCur: Record<string, number> = {};
-        unpaid.forEach(s => {
+        allUnpaidSessions.forEach(s => {
             const client = clientMap.get(s.clientId);
             if (!client || !client.isActive) return;
             const cur = client.currency || 'GEL';
@@ -110,16 +122,15 @@ export function CrmFinances() {
             debtLabel: formatMultiCur(debtByCur),
             revenueGel: showRevEquiv ? `≈ ${revenueGel.toFixed(0)} ₾` : null,
             debtGel: showDebtEquiv ? `≈ ${debtGel.toFixed(0)} ₾` : null,
-            unpaidCount: unpaid.length,
+            unpaidCount: allUnpaidSessions.length,
             totalPayments: payments.length,
             held,
         };
-    }, [payments, sessions, clientMap]);
+    }, [payments, sessions, allUnpaidSessions, clientMap]);
 
     const debtByClient = useMemo(() => {
         const map = new Map<string, { client: CrmClient; count: number; total: number }>();
-        sessions
-            .filter(s => !s.isPaid && s.status === 'COMPLETED')
+        allUnpaidSessions
             .forEach(s => {
                 const client = clientMap.get(s.clientId);
                 if (!client || !client.isActive) return;
@@ -130,7 +141,7 @@ export function CrmFinances() {
                 map.set(s.clientId, ex);
             });
         return Array.from(map.values()).filter(v => v.total > 0).sort((a, b) => b.total - a.total);
-    }, [sessions, clientMap]);
+    }, [allUnpaidSessions, clientMap]);
 
     const PERIODS: { id: Period; label: string }[] = [
         { id: 'day',   label: 'День' },
@@ -227,7 +238,7 @@ export function CrmFinances() {
                         <div className="w-9 h-9 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center">
                             <AlertTriangle className="w-5 h-5" />
                         </div>
-                        <div className="text-sm text-unbox-grey">Задолженность</div>
+                        <div className="text-sm text-unbox-grey">Общий долг</div>
                     </div>
                     <div className="text-lg font-bold text-orange-600 leading-snug">{stats.debtLabel}</div>
                     <div className="text-xs text-unbox-grey mt-0.5">{stats.unpaidCount} сессий{stats.debtGel ? ` · ${stats.debtGel}` : ''}</div>

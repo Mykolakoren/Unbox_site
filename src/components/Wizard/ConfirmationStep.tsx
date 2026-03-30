@@ -389,16 +389,17 @@ export function ConfirmationStep() {
                 console.log(`Submitting ${newBookings.length} bookings...`);
 
                 if (isRescheduling && oldBooking) {
-                    const first = newBookings[0];
+                    // Reschedule updates a single existing booking — merge all selected slots
+                    // into one continuous block (use first start time, sum durations)
+                    const mergedDate = newBookings[0].date;
+                    const mergedStartTime = newBookings[0].startTime;
+                    const mergedResourceId = newBookings[0].resourceId;
                     await bookingsApi.rescheduleBooking(oldBooking.id, {
-                        newDate: first.date,
-                        newStartTime: first.startTime,
-                        newResourceId: first.resourceId,
+                        newDate: mergedDate,
+                        newStartTime: mergedStartTime,
+                        newResourceId: mergedResourceId,
                     });
                     await fetchCurrentUser();
-                    if (newBookings.length > 1) {
-                        await addBookings(newBookings.slice(1));
-                    }
                 } else {
                     await addBookings(newBookings);
                 }
