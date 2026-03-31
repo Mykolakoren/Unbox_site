@@ -17,11 +17,12 @@ const CATEGORIES = [
     { value: 'education', label: 'Игропрактики / Педагоги' },
 ];
 
+// All fields in camelCase (after axios interceptor transforms snake_case → camelCase)
 interface SpecialistExtended extends Specialist {
     category?: string | null;
-    is_verified?: boolean;
-    user_id?: string;
-    sort_order?: number;
+    isVerified?: boolean;
+    userId?: string;
+    sortOrder?: number;
 }
 
 interface EditModalProps {
@@ -32,8 +33,8 @@ interface EditModalProps {
 
 function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
     const [category, setCategory] = useState(specialist.category ?? '');
-    const [isVerified, setIsVerified] = useState(specialist.is_verified ?? false);
-    const [userId, setUserId] = useState(specialist.user_id ?? '');
+    const [isVerified, setIsVerified] = useState(specialist.isVerified ?? false);
+    const [userId, setUserId] = useState(specialist.userId ?? '');
     const [allUsers, setAllUsers] = useState<{ id: string; email: string; name: string }[]>([]);
     const [saving, setSaving] = useState(false);
 
@@ -48,10 +49,10 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
         try {
             const payload: any = {
                 category: category || null,
-                is_verified: isVerified,
+                isVerified,
             };
-            if (userId && userId !== specialist.user_id) {
-                payload.user_id = userId;
+            if (userId && userId !== specialist.userId) {
+                payload.userId = userId;
             }
             await api.patch(`/specialists/admin/${specialist.id}`, payload);
             toast.success('Специалист обновлён');
@@ -281,8 +282,8 @@ export function AdminSpecialists() {
         try {
             const r = await api.get('/specialists/admin/all');
             const data: SpecialistExtended[] = r.data;
-            // Sort by sort_order, then by name
-            data.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+            // Sort by sortOrder (camelCase after interceptor), then by index
+            data.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
             setSpecialists(data);
         } catch {
             toast.error('Не удалось загрузить специалистов');
@@ -293,12 +294,15 @@ export function AdminSpecialists() {
 
     useEffect(() => { load(); }, []);
 
+    // Toggle visibility (isVerified) — camelCase for request interceptor
     const handleToggleVisibility = async (s: SpecialistExtended) => {
         setToggling(s.id);
         try {
-            await api.patch(`/specialists/admin/${s.id}`, { is_verified: !s.is_verified });
-            setSpecialists(prev => prev.map(sp => sp.id === s.id ? { ...sp, is_verified: !sp.is_verified } : sp));
-            toast.success(s.is_verified ? 'Специалист скрыт из каталога' : 'Специалист виден в каталоге');
+            await api.patch(`/specialists/admin/${s.id}`, { isVerified: !s.isVerified });
+            setSpecialists(prev => prev.map(sp =>
+                sp.id === s.id ? { ...sp, isVerified: !sp.isVerified } : sp
+            ));
+            toast.success(s.isVerified ? 'Специалист скрыт из каталога' : 'Специалист виден в каталоге');
         } catch {
             toast.error('Ошибка при обновлении');
         } finally {
@@ -320,17 +324,20 @@ export function AdminSpecialists() {
         }
     };
 
+    // Move specialist up/down and save new order
     const handleMove = async (index: number, direction: 'up' | 'down') => {
         const newList = [...specialists];
         const targetIndex = direction === 'up' ? index - 1 : index + 1;
         if (targetIndex < 0 || targetIndex >= newList.length) return;
         [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
-        const updated = newList.map((s, i) => ({ ...s, sort_order: i }));
+        const updated = newList.map((s, i) => ({ ...s, sortOrder: i }));
         setSpecialists(updated);
         try {
-            await api.post('/specialists/admin/reorder', updated.map(s => ({ id: s.id, sort_order: s.sort_order ?? 0 })));
+            // Send as camelCase — request interceptor converts to snake_case for backend
+            await api.post('/specialists/admin/reorder', updated.map(s => ({ id: s.id, sortOrder: s.sortOrder ?? 0 })));
         } catch {
             toast.error('Ошибка при сохранении порядка');
+            load(); // revert on error
         }
     };
 
@@ -383,37 +390,43 @@ export function AdminSpecialists() {
                             <table className="w-full text-left">
                                 <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                                     <tr>
-                                        <th className="p-4 pl-4 w-20 text-center">Порядок</th>
+                                        <th className="p-3 pl-4 w-16 text-center">Порядок</th>
                                         <th className="p-4">Специалист</th>
                                         <th className="p-4">Категория</th>
                                         <th className="p-4">Специализации</th>
                                         <th className="p-4">Цена</th>
-                                        <th className="p-4">Статус</th>
+                                        <th className="p-4">Показ</th>
                                         <th className="p-4 text-right pr-6">Действия</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-unbox-light">
                                     {specialists.map((s, idx) => (
                                         <tr key={s.id} className="hover:bg-unbox-light/50 transition-colors">
+
+                                            {/* ── Sort order arrows ── */}
                                             <td className="p-2 pl-4 text-center">
                                                 <div className="flex flex-col items-center gap-0.5">
                                                     <button
                                                         onClick={() => handleMove(idx, 'up')}
                                                         disabled={idx === 0}
-                                                        className="p-0.5 rounded text-unbox-dark/30 hover:text-unbox-dark disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                                        className="p-1 rounded hover:bg-unbox-light text-unbox-dark/40 hover:text-unbox-dark disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                                        title="Переместить вверх"
                                                     >
                                                         <ChevronUp size={14} />
                                                     </button>
-                                                    <span className="text-xs text-unbox-dark/40 font-mono w-5 text-center">{idx + 1}</span>
+                                                    <span className="text-[11px] text-unbox-dark/40 font-mono leading-none">{idx + 1}</span>
                                                     <button
                                                         onClick={() => handleMove(idx, 'down')}
                                                         disabled={idx === specialists.length - 1}
-                                                        className="p-0.5 rounded text-unbox-dark/30 hover:text-unbox-dark disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                                        className="p-1 rounded hover:bg-unbox-light text-unbox-dark/40 hover:text-unbox-dark disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                                        title="Переместить вниз"
                                                     >
                                                         <ChevronDown size={14} />
                                                     </button>
                                                 </div>
                                             </td>
+
+                                            {/* ── Name + photo ── */}
                                             <td className="p-4">
                                                 <div className="flex items-center gap-3">
                                                     {s.photoUrl ? (
@@ -429,7 +442,9 @@ export function AdminSpecialists() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="p-4 text-sm text-unbox-dark/70">{categoryLabel((s as SpecialistExtended).category)}</td>
+
+                                            <td className="p-4 text-sm text-unbox-dark/70">{categoryLabel(s.category)}</td>
+
                                             <td className="p-4">
                                                 <div className="flex flex-wrap gap-1">
                                                     {(s.specializations ?? []).slice(0, 2).map((sp: string) => (
@@ -439,28 +454,33 @@ export function AdminSpecialists() {
                                                     ))}
                                                 </div>
                                             </td>
+
                                             <td className="p-4 text-sm text-unbox-dark/70">от {s.basePriceGel} ₾</td>
+
+                                            {/* ── Visibility toggle ── */}
                                             <td className="p-4">
                                                 <button
                                                     onClick={() => handleToggleVisibility(s)}
                                                     disabled={toggling === s.id}
-                                                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg transition-colors ${
-                                                        s.is_verified
+                                                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                                                        s.isVerified
                                                             ? 'text-unbox-green bg-unbox-green/10 hover:bg-unbox-green/20'
                                                             : 'text-unbox-dark/40 bg-unbox-light hover:bg-unbox-dark/10'
                                                     }`}
-                                                    title={s.is_verified ? 'Скрыть из каталога' : 'Показать в каталоге'}
+                                                    title={s.isVerified ? 'Кликните чтобы скрыть' : 'Кликните чтобы показать'}
                                                 >
                                                     {toggling === s.id ? (
                                                         <Loader2 size={13} className="animate-spin" />
-                                                    ) : s.is_verified ? (
+                                                    ) : s.isVerified ? (
                                                         <Eye size={13} />
                                                     ) : (
                                                         <EyeOff size={13} />
                                                     )}
-                                                    {s.is_verified ? 'Виден' : 'Скрыт'}
+                                                    {s.isVerified ? 'Виден' : 'Скрыт'}
                                                 </button>
                                             </td>
+
+                                            {/* ── Actions ── */}
                                             <td className="p-4 text-right pr-6">
                                                 <div className="flex items-center justify-end gap-1">
                                                     <button
