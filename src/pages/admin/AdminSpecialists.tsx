@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle, Circle, Pencil, X, Clock, Check, XCircle, Loader2 } from 'lucide-react';
+import { Pencil, X, Clock, Check, XCircle, Loader2, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
 import { crmApi, type CrmAccessRequest } from '../../api/crm';
@@ -246,6 +246,9 @@ export function AdminSpecialists() {
     const currentUser = useUserStore(s => s.currentUser);
     const canAcceptRequests = currentUser ? hasPermission(currentUser, 'admin.accept_requests') : false;
 
+    const [deleting, setDeleting] = useState<string | null>(null);
+    const [toggling, setToggling] = useState<string | null>(null);
+
     const load = async () => {
         try {
             const r = await api.get('/specialists/admin/all');
@@ -258,6 +261,33 @@ export function AdminSpecialists() {
     };
 
     useEffect(() => { load(); }, []);
+
+    const handleToggleVisibility = async (s: SpecialistExtended) => {
+        setToggling(s.id);
+        try {
+            await api.patch(`/specialists/admin/${s.id}`, { is_verified: !s.is_verified });
+            setSpecialists(prev => prev.map(sp => sp.id === s.id ? { ...sp, is_verified: !sp.is_verified } : sp));
+            toast.success(s.is_verified ? 'Специалист скрыт из каталога' : 'Специалист виден в каталоге');
+        } catch {
+            toast.error('Ошибка при обновлении');
+        } finally {
+            setToggling(null);
+        }
+    };
+
+    const handleDelete = async (s: SpecialistExtended) => {
+        if (!window.confirm(`Удалить анкету ${s.firstName} ${s.lastName}? Это действие необратимо.`)) return;
+        setDeleting(s.id);
+        try {
+            await api.delete(`/specialists/admin/${s.id}`);
+            setSpecialists(prev => prev.filter(sp => sp.id !== s.id));
+            toast.success('Анкета удалена');
+        } catch {
+            toast.error('Ошибка при удалении');
+        } finally {
+            setDeleting(null);
+        }
+    };
 
     const categoryLabel = (cat?: string | null) =>
         CATEGORIES.find(c => c.value === (cat ?? ''))?.label ?? '—';
@@ -346,23 +376,44 @@ export function AdminSpecialists() {
                                             </td>
                                             <td className="p-4 text-sm text-unbox-dark/70">от {s.basePriceGel} ₾</td>
                                             <td className="p-4">
-                                                {s.is_verified ? (
-                                                    <span className="flex items-center gap-1 text-unbox-green text-xs font-medium">
-                                                        <CheckCircle size={13} /> Верифицирован
-                                                    </span>
-                                                ) : (
-                                                    <span className="flex items-center gap-1 text-unbox-dark/40 text-xs">
-                                                        <Circle size={13} /> Не верифицирован
-                                                    </span>
-                                                )}
+                                                <button
+                                                    onClick={() => handleToggleVisibility(s)}
+                                                    disabled={toggling === s.id}
+                                                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg transition-colors ${
+                                                        s.is_verified
+                                                            ? 'text-unbox-green bg-unbox-green/10 hover:bg-unbox-green/20'
+                                                            : 'text-unbox-dark/40 bg-unbox-light hover:bg-unbox-dark/10'
+                                                    }`}
+                                                    title={s.is_verified ? 'Скрыть из каталога' : 'Показать в каталоге'}
+                                                >
+                                                    {toggling === s.id ? (
+                                                        <Loader2 size={13} className="animate-spin" />
+                                                    ) : s.is_verified ? (
+                                                        <Eye size={13} />
+                                                    ) : (
+                                                        <EyeOff size={13} />
+                                                    )}
+                                                    {s.is_verified ? 'Виден' : 'Скрыт'}
+                                                </button>
                                             </td>
                                             <td className="p-4 text-right pr-6">
-                                                <button
-                                                    onClick={() => setEditing(s)}
-                                                    className="p-1.5 rounded-lg hover:bg-unbox-light transition-colors text-unbox-dark/40 hover:text-unbox-dark"
-                                                >
-                                                    <Pencil size={14} />
-                                                </button>
+                                                <div className="flex items-center justify-end gap-1">
+                                                    <button
+                                                        onClick={() => setEditing(s)}
+                                                        className="p-1.5 rounded-lg hover:bg-unbox-light transition-colors text-unbox-dark/40 hover:text-unbox-dark"
+                                                        title="Редактировать"
+                                                    >
+                                                        <Pencil size={14} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(s)}
+                                                        disabled={deleting === s.id}
+                                                        className="p-1.5 rounded-lg hover:bg-red-50 transition-colors text-unbox-dark/30 hover:text-red-500"
+                                                        title="Удалить"
+                                                    >
+                                                        {deleting === s.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}

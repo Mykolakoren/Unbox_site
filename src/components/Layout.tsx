@@ -25,6 +25,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                             <Link to="/" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
                                 Забронировать
                             </Link>
+                            <Link to="/#locations" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
+                                Кабинеты
+                            </Link>
                             <Link to="/specialists" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
                                 Специалисты
                             </Link>

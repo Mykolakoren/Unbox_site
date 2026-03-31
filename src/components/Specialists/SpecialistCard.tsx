@@ -26,7 +26,7 @@ export function SpecialistCard({ specialist }: SpecialistCardProps) {
     return (
         <Card className="h-full flex flex-col hover:shadow-lg transition-all duration-300 border border-unbox-light/50 group overflow-hidden">
             {/* Image Section */}
-            <div className="relative aspect-square overflow-hidden bg-gradient-to-br from-unbox-light to-white">
+            <div className="relative aspect-[3/4] overflow-hidden bg-gradient-to-br from-unbox-light to-white">
                 {specialist.photoUrl ? (
                     <img
                         src={specialist.photoUrl}

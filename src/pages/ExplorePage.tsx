@@ -163,6 +163,13 @@ export function ExplorePage() {
 
                     {/* Right: Nav + Auth */}
                     <div className="flex-1 flex items-center justify-end gap-3">
+                        <a
+                            href="#locations"
+                            className="hidden sm:flex items-center px-3 py-1.5 rounded-full text-xs font-semibold text-unbox-dark/70 hover:text-unbox-dark transition-colors"
+                            style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.70)' }}
+                        >
+                            Кабинеты
+                        </a>
                         <Link
                             to="/subscriptions"
                             className="hidden sm:flex items-center px-3 py-1.5 rounded-full text-xs font-semibold text-unbox-dark/70 hover:text-unbox-dark transition-colors"

@@ -97,7 +97,7 @@ export function SpecialistsSection({ categoryFilter }: Props) {
                             }}
                         >
                             {/* Photo */}
-                            <div className="relative aspect-square overflow-hidden">
+                            <div className="relative aspect-[3/4] overflow-hidden">
                                 {s.photoUrl ? (
                                     <img
                                         src={s.photoUrl}

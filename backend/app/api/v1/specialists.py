@@ -77,6 +77,23 @@ def update_specialist_admin(
     return specialist
 
 
+@router.delete("/admin/{specialist_id}")
+def delete_specialist(
+    *,
+    specialist_id: UUID,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin)
+):
+    """Admin: permanently delete a specialist profile."""
+    specialist = session.get(Specialist, specialist_id)
+    if not specialist:
+        raise HTTPException(status_code=404, detail="Specialist not found")
+
+    session.delete(specialist)
+    session.commit()
+    return {"ok": True, "id": str(specialist_id)}
+
+
 @router.get("/{specialist_id}", response_model=SpecialistRead)
 def get_specialist(
     *,
