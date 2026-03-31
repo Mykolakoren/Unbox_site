@@ -229,6 +229,9 @@ export function ExplorePage() {
                                     <ClientHeroPanel
                                         activeCategory={categoryFilter}
                                         onCategorySelect={handleCategorySelect}
+                                        onScrollToSpecialists={() => {
+                                            setTimeout(() => specialistsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+                                        }}
                                     />
                                 </div>
                             </div>
@@ -324,8 +327,9 @@ export function ExplorePage() {
                             <div ref={specialistsSectionRef}>
                                 <SpecialistsSection categoryFilter={categoryFilter} />
                             </div>
-                            <SelfTestsSection onScrollToSpecialists={() => specialistsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })} />
                             <HowItWorksSection />
+                            <CabinetsShowcaseSection />
+                            <SelfTestsSection onScrollToSpecialists={() => specialistsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })} />
                             <EventsSection />
                             <ArticlesSection />
                             <ReferralSection />
@@ -333,19 +337,17 @@ export function ExplorePage() {
                             <ContactSection />
                         </>
                     ) : currentUser ? (
-                        // Logged-in user: no onboarding, just useful sections
+                        // Logged-in specialist: useful sections
                         <>
                             <CabinetsShowcaseSection />
-                            <SpecialistsSection />
                             <TeamSection />
                             <ContactSection />
                         </>
                     ) : (
-                        // Guest / not logged in: full onboarding funnel
+                        // Guest specialist: onboarding funnel
                         <>
-                            <WhyUnboxSection />
                             <CabinetsShowcaseSection />
-                            <SpecialistsSection />
+                            <WhyUnboxSection />
                             <SpecialistApplySection />
                             <TeamSection />
                             <ContactSection />
