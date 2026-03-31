@@ -65,3 +65,4 @@ class SpecialistUpdate(SQLModel):
 class SpecialistRead(SpecialistBase):
     id: UUID
     user_id: UUID
+    sort_order: int = 0
