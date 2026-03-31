@@ -20,6 +20,7 @@ const CATEGORIES = [
 interface SpecialistExtended extends Specialist {
     category?: string | null;
     is_verified?: boolean;
+    user_id?: string;
 }
 
 interface EditModalProps {
@@ -31,15 +32,27 @@ interface EditModalProps {
 function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
     const [category, setCategory] = useState(specialist.category ?? '');
     const [isVerified, setIsVerified] = useState(specialist.is_verified ?? false);
+    const [userId, setUserId] = useState(specialist.user_id ?? '');
+    const [allUsers, setAllUsers] = useState<{ id: string; email: string; name: string }[]>([]);
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        api.get('/users/').then(r => {
+            setAllUsers(r.data.map((u: any) => ({ id: u.id, email: u.email, name: u.name })));
+        }).catch(() => {});
+    }, []);
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            await api.patch(`/specialists/admin/${specialist.id}`, {
+            const payload: any = {
                 category: category || null,
                 is_verified: isVerified,
-            });
+            };
+            if (userId && userId !== specialist.user_id) {
+                payload.user_id = userId;
+            }
+            await api.patch(`/specialists/admin/${specialist.id}`, payload);
             toast.success('Специалист обновлён');
             onSaved();
             onClose();
@@ -85,6 +98,20 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                         />
                         <span className="text-sm font-medium text-unbox-dark/70">Верифицирован (виден в каталоге)</span>
                     </label>
+
+                    <div>
+                        <label className="block text-sm font-medium text-unbox-dark/70 mb-1">Привязать к аккаунту</label>
+                        <select
+                            value={userId}
+                            onChange={e => setUserId(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                        >
+                            <option value="">— не привязан —</option>
+                            {allUsers.map(u => (
+                                <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 <div className="flex gap-2 mt-6">

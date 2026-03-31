@@ -11,6 +11,7 @@ import {
     StickyNote,
     Loader2,
     BookOpen,
+    Clock,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
@@ -25,6 +26,7 @@ const CRM_TABS = [
     { icon: BookOpen,        label: 'Бронирования',  path: '/crm/bookings' },
     { icon: Wallet,          label: 'Финансы',       path: '/crm/finances' },
     { icon: StickyNote,      label: 'Заметки',       path: '/crm/notes' },
+    { icon: Clock,           label: 'Расписание',    path: '/crm/schedule' },
     { icon: Settings,        label: 'Настройки',     path: '/crm/settings' },
 ];
 

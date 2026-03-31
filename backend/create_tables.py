@@ -5,6 +5,8 @@ from app.models.resource import Resource
 from app.models.booking import Booking
 from app.models.waitlist import Waitlist
 from app.models.specialist import Specialist
+from app.models.specialist_schedule import SpecialistSchedule
+from app.models.specialist_appointment import SpecialistAppointment
 
 
 def create_tables():

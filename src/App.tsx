@@ -47,6 +47,7 @@ const CrmSessions = lazy(() => import('./pages/crm/CrmSessions').then(m => ({ de
 const CrmBookings = lazy(() => import('./pages/crm/CrmBookings').then(m => ({ default: m.CrmBookings })));
 const CrmFinances = lazy(() => import('./pages/crm/CrmFinances').then(m => ({ default: m.CrmFinances })));
 const CrmNotes = lazy(() => import('./pages/crm/CrmNotes').then(m => ({ default: m.CrmNotes })));
+const CrmSchedule = lazy(() => import('./pages/crm/CrmSchedule').then(m => ({ default: m.CrmSchedule })));
 const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ default: m.CrmSettings })));
 
 import { glassPanel, glassSummary } from './utils/styles';
@@ -183,6 +184,7 @@ function App() {
           <Route path="bookings" element={<CrmBookings />} />
           <Route path="finances" element={<CrmFinances />} />
           <Route path="notes" element={<CrmNotes />} />
+          <Route path="schedule" element={<CrmSchedule />} />
           <Route path="settings" element={<CrmSettings />} />
         </Route>
 

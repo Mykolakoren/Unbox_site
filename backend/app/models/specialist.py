@@ -56,6 +56,7 @@ class SpecialistUpdate(SQLModel):
     base_price_gel: Optional[int] = None
     is_verified: Optional[bool] = None
     category: Optional[str] = None
+    user_id: Optional[UUID] = None
     payment_accounts: Optional[List[dict]] = None
 
 class SpecialistRead(SpecialistBase):

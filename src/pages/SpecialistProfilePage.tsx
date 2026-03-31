@@ -7,6 +7,7 @@ import { Card } from '../components/ui/Card';
 import { api } from '../api/client';
 import type { Specialist } from '../components/Specialists/SpecialistCard';
 import { useBookingStore } from '../store/bookingStore';
+import { SpecialistBookingChessboard } from '../components/Specialists/SpecialistBookingChessboard';
 
 export function SpecialistProfilePage() {
     const { id } = useParams<{ id: string }>();
@@ -170,6 +171,16 @@ export function SpecialistProfilePage() {
 
                     </div>
                 </div>
+
+                {/* Booking Chessboard */}
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+                    <SpecialistBookingChessboard
+                        specialistId={specialist.id}
+                        specialistName={`${specialist.firstName} ${specialist.lastName}`}
+                        formats={specialist.formats}
+                        basePriceGel={specialist.basePriceGel}
+                    />
+                </motion.div>
 
             </div>
         </div>
