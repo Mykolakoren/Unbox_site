@@ -324,10 +324,10 @@ export function ExplorePage() {
                 <div className="relative z-10">
                     {visitorMode === 'client' ? (
                         <>
+                            <HowItWorksSection />
                             <div ref={specialistsSectionRef}>
                                 <SpecialistsSection categoryFilter={categoryFilter} />
                             </div>
-                            <HowItWorksSection />
                             <CabinetsShowcaseSection />
                             <SelfTestsSection onScrollToSpecialists={() => specialistsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })} />
                             <EventsSection />

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from typing import List, Optional
 from uuid import UUID
+from pydantic import BaseModel
 
 from app.db.session import get_session
 from app.models.specialist import Specialist, SpecialistRead, SpecialistCreate, SpecialistUpdate
@@ -23,8 +24,8 @@ def get_specialists(
     Get a list of verified specialists for the public directory.
     Supports basic filtering.
     """
-    # Only return verified specialists for the public directory
-    statement = select(Specialist).where(Specialist.is_verified == True)
+    # Only return verified specialists for the public directory, sorted by sort_order
+    statement = select(Specialist).where(Specialist.is_verified == True).order_by(Specialist.sort_order)
 
     # Execute and filter in python for JSON array fields since SQLite JSON filtering can be tricky
     specialists = session.exec(statement).all()
@@ -75,6 +76,27 @@ def update_specialist_admin(
     session.commit()
     session.refresh(specialist)
     return specialist
+
+
+class ReorderItem(BaseModel):
+    id: UUID
+    sort_order: int
+
+@router.post("/admin/reorder")
+def reorder_specialists(
+    *,
+    items: List[ReorderItem],
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin)
+):
+    """Admin: bulk update sort_order for specialists."""
+    for item in items:
+        specialist = session.get(Specialist, item.id)
+        if specialist:
+            specialist.sort_order = item.sort_order
+            session.add(specialist)
+    session.commit()
+    return {"ok": True}
 
 
 @router.delete("/admin/{specialist_id}")

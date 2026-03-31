@@ -23,6 +23,8 @@ class SpecialistBase(SQLModel):
     # Category for public catalog filtering
     # Values: psychology | psychiatry | narcology | coaching | education
     category: Optional[str] = Field(default=None)
+    # Display order in public catalog (lower = shown first)
+    sort_order: int = Field(default=0)
     # Custom payment accounts for Psy CRM
     payment_accounts: List[dict] = Field(
         default_factory=lambda: [
@@ -58,6 +60,7 @@ class SpecialistUpdate(SQLModel):
     category: Optional[str] = None
     user_id: Optional[UUID] = None
     payment_accounts: Optional[List[dict]] = None
+    sort_order: Optional[int] = None
 
 class SpecialistRead(SpecialistBase):
     id: UUID

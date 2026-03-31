@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Pencil, X, Clock, Check, XCircle, Loader2, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Pencil, X, Clock, Check, XCircle, Loader2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
 import { crmApi, type CrmAccessRequest } from '../../api/crm';
@@ -21,6 +21,7 @@ interface SpecialistExtended extends Specialist {
     category?: string | null;
     is_verified?: boolean;
     user_id?: string;
+    sort_order?: number;
 }
 
 interface EditModalProps {
@@ -279,7 +280,10 @@ export function AdminSpecialists() {
     const load = async () => {
         try {
             const r = await api.get('/specialists/admin/all');
-            setSpecialists(r.data);
+            const data: SpecialistExtended[] = r.data;
+            // Sort by sort_order, then by name
+            data.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+            setSpecialists(data);
         } catch {
             toast.error('Не удалось загрузить специалистов');
         } finally {
@@ -313,6 +317,20 @@ export function AdminSpecialists() {
             toast.error('Ошибка при удалении');
         } finally {
             setDeleting(null);
+        }
+    };
+
+    const handleMove = async (index: number, direction: 'up' | 'down') => {
+        const newList = [...specialists];
+        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= newList.length) return;
+        [newList[index], newList[targetIndex]] = [newList[targetIndex], newList[index]];
+        const updated = newList.map((s, i) => ({ ...s, sort_order: i }));
+        setSpecialists(updated);
+        try {
+            await api.post('/specialists/admin/reorder', updated.map(s => ({ id: s.id, sort_order: s.sort_order ?? 0 })));
+        } catch {
+            toast.error('Ошибка при сохранении порядка');
         }
     };
 
@@ -365,7 +383,8 @@ export function AdminSpecialists() {
                             <table className="w-full text-left">
                                 <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                                     <tr>
-                                        <th className="p-4 pl-6">Специалист</th>
+                                        <th className="p-4 pl-4 w-20 text-center">Порядок</th>
+                                        <th className="p-4">Специалист</th>
                                         <th className="p-4">Категория</th>
                                         <th className="p-4">Специализации</th>
                                         <th className="p-4">Цена</th>
@@ -374,9 +393,28 @@ export function AdminSpecialists() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-unbox-light">
-                                    {specialists.map(s => (
+                                    {specialists.map((s, idx) => (
                                         <tr key={s.id} className="hover:bg-unbox-light/50 transition-colors">
-                                            <td className="p-4 pl-6">
+                                            <td className="p-2 pl-4 text-center">
+                                                <div className="flex flex-col items-center gap-0.5">
+                                                    <button
+                                                        onClick={() => handleMove(idx, 'up')}
+                                                        disabled={idx === 0}
+                                                        className="p-0.5 rounded text-unbox-dark/30 hover:text-unbox-dark disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        <ChevronUp size={14} />
+                                                    </button>
+                                                    <span className="text-xs text-unbox-dark/40 font-mono w-5 text-center">{idx + 1}</span>
+                                                    <button
+                                                        onClick={() => handleMove(idx, 'down')}
+                                                        disabled={idx === specialists.length - 1}
+                                                        className="p-0.5 rounded text-unbox-dark/30 hover:text-unbox-dark disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        <ChevronDown size={14} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td className="p-4">
                                                 <div className="flex items-center gap-3">
                                                     {s.photoUrl ? (
                                                         <img src={s.photoUrl} alt="" className="w-9 h-9 rounded-full object-cover" />
