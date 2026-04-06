@@ -12,6 +12,7 @@ import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight 
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
+import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 
 // ─── Time Slots: 09:00 – 20:30 (30-min steps) ───────────────────────────────
@@ -337,6 +338,61 @@ export function AdminChessboardView() {
     // Clear selection when date changes
     useEffect(() => { setNewSlots([]); }, [selectedDate]);
 
+    // ── Mobile detection ──
+    const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    const [mobileResIdx, setMobileResIdx] = useState(0);
+    useEffect(() => {
+        const check = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', check);
+        return () => window.removeEventListener('resize', check);
+    }, []);
+    const mobileRes = filteredResources[mobileResIdx] ?? filteredResources[0] ?? null;
+
+    // ── Mobile hour-pairs for 2-column grid ──
+    const mobileHourPairs = useMemo(() => {
+        const pairs: [string, string | null][] = [];
+        for (let i = 0; i < TIME_SLOTS.length; i += 2) {
+            pairs.push([TIME_SLOTS[i], TIME_SLOTS[i + 1] ?? null]);
+        }
+        return pairs;
+    }, []);
+
+    // ── Mobile tap handler ──
+    const handleMobileTap = (resId: string, time: string, _isHourTap: boolean) => {
+        if (isSlotOccupied(resId, time)) return;
+        const slotIdx = TIME_SLOTS.indexOf(time);
+        const block = getNewBlockForResource(resId);
+
+        // Deselect if tapping selected slot
+        if (newSlots.includes(`${resId}|${time}`)) {
+            setNewSlotRange(resId, []);
+            return;
+        }
+
+        if (block) {
+            // Extending — always +1 slot at a time
+            const newStart = Math.min(block.start, slotIdx);
+            const newEnd = Math.max(block.end, slotIdx);
+            const slots: string[] = [];
+            for (let i = newStart; i <= newEnd; i++) {
+                if (isSlotOccupied(resId, TIME_SLOTS[i])) return;
+                slots.push(TIME_SLOTS[i]);
+            }
+            setNewSlotRange(resId, slots);
+        } else {
+            // First selection — ALWAYS auto-select pair (1h minimum)
+            const pairStart = slotIdx % 2 === 0 ? slotIdx : slotIdx - 1;
+            const pairEnd = pairStart + 1;
+            if (pairEnd >= TIME_SLOTS.length) return;
+            const slots: string[] = [];
+            for (let i = pairStart; i <= pairEnd; i++) {
+                if (isSlotOccupied(resId, TIME_SLOTS[i])) return;
+                slots.push(TIME_SLOTS[i]);
+            }
+            setNewSlotRange(resId, slots);
+        }
+    };
+
     // Handle "Продолжить" — open admin booking modal with pre-filled duration
     const handleContinueNewBooking = () => {
         if (newSlots.length === 0) return;
@@ -383,6 +439,278 @@ export function AdminChessboardView() {
     };
 
     // ─── Render ───────────────────────────────────────────────────────────────
+
+    // ── MOBILE VIEW ──
+    if (isMobile) {
+        const mobileBlock = mobileRes ? getNewBlockForResource(mobileRes.id) : null;
+        const mobileBlockStartTime = mobileBlock ? TIME_SLOTS[mobileBlock.start] : null;
+        const mobileBlockEndTime = mobileBlock ? (() => {
+            const [h, m] = TIME_SLOTS[mobileBlock.end].split(':').map(Number);
+            return format(addMinutes(setMinutes(setHours(startOfToday(), h), m), 30), 'HH:mm');
+        })() : null;
+        const mobileBlockDuration = mobileBlock ? (mobileBlock.end - mobileBlock.start + 1) * 30 : 0;
+
+        // Build slot lookup for current mobile resource
+        const mobileCells = mobileRes ? (rowCellsMap.get(mobileRes.id) ?? []) : [];
+        const mobileBookingBySlot = new Map<string, CellInfo>();
+        const mobileConsumed = new Set<string>();
+        mobileCells.forEach(cell => {
+            if (cell.type === 'booking') {
+                mobileBookingBySlot.set(cell.slot, cell);
+                // Mark consumed slots
+                const startIdx = TIME_SLOTS.indexOf(cell.slot);
+                for (let i = 1; i < cell.colspan; i++) {
+                    if (startIdx + i < TIME_SLOTS.length) {
+                        mobileConsumed.add(TIME_SLOTS[startIdx + i]);
+                    }
+                }
+            }
+        });
+
+        const renderMobileSlot = (slot: string | null, isHourCol: boolean) => {
+            if (!slot || !mobileRes) return <div className="flex-1" />;
+            if (mobileConsumed.has(slot)) return null;
+
+            const bookingCell = mobileBookingBySlot.get(slot);
+            if (bookingCell && bookingCell.type === 'booking') {
+                const b = bookingCell.booking;
+                const endSlotIdx = TIME_SLOTS.indexOf(slot) + bookingCell.colspan;
+                const endTime = endSlotIdx < TIME_SLOTS.length ? TIME_SLOTS[endSlotIdx] : '21:00';
+                return (
+                    <button
+                        onClick={() => setSelectedBooking(b)}
+                        className={clsx(
+                            'flex-1 flex items-center justify-between px-2.5 py-2 rounded-xl text-left transition-colors min-h-[48px] border',
+                            getBookingStyle(b)
+                        )}
+                    >
+                        <div className="min-w-0">
+                            <div className="text-[10px] font-bold tabular-nums">{slot}–{endTime}</div>
+                            <div className="text-[10px] truncate font-medium">{getUserName(b.userId)}</div>
+                        </div>
+                    </button>
+                );
+            }
+
+            // Free slot
+            const past = (() => {
+                const cell = mobileCells.find(c => c.slot === slot);
+                return cell?.type === 'free' ? cell.past : false;
+            })();
+            const selected = isNewSlotSelected(mobileRes.id, slot);
+
+            return (
+                <button
+                    onClick={() => !past && handleMobileTap(mobileRes.id, slot, isHourCol)}
+                    disabled={past}
+                    className={clsx(
+                        'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all min-h-[48px]',
+                        past
+                            ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                            : selected
+                                ? 'bg-unbox-green text-white shadow-sm'
+                                : isPeakTime(slot)
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]'
+                                    : 'bg-white text-gray-700 border border-gray-100 active:scale-[0.97]'
+                    )}
+                >
+                    <span className={clsx('text-sm font-bold tabular-nums', selected ? 'text-white' : past ? 'text-gray-300' : 'text-gray-700')}>
+                        {slot}
+                    </span>
+                    {selected ? (
+                        <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                        </div>
+                    ) : !past ? (
+                        <div className="w-5 h-5 rounded-full border-2 border-gray-200" />
+                    ) : null}
+                </button>
+            );
+        };
+
+        return (
+            <div className="space-y-3 pb-28">
+                {/* Location filter */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                    {[{ id: 'all', name: 'Все' } as const, ...LOCATIONS].map(loc => (
+                        <button
+                            key={loc.id}
+                            onClick={() => setFilterLocation(loc.id)}
+                            className={clsx(
+                                'shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                                filterLocation === loc.id
+                                    ? 'bg-unbox-green text-white border-unbox-green'
+                                    : 'bg-white text-unbox-grey border-unbox-light'
+                            )}
+                        >
+                            {loc.name}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Week nav */}
+                <div className="flex items-center gap-1">
+                    <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-unbox-light">
+                        <ChevronLeft size={16} />
+                    </button>
+                    <div className="flex-1 text-center text-sm font-medium">
+                        {format(weekStart, 'd MMM', { locale: ru })} – {format(endOfWeek(weekStart, { weekStartsOn: 1 }), 'd MMM', { locale: ru })}
+                    </div>
+                    <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-unbox-light">
+                        <ChevronRight size={16} />
+                    </button>
+                </div>
+
+                {/* Day selector */}
+                <div className="grid grid-cols-7 gap-1">
+                    {weekDays.map(day => (
+                        <button
+                            key={day.toISOString()}
+                            onClick={() => setSelectedDate(day)}
+                            className={clsx(
+                                'flex flex-col items-center py-2 rounded-xl text-xs transition-all',
+                                isSameDay(day, selectedDate)
+                                    ? 'bg-unbox-green text-white shadow-md'
+                                    : isToday(day)
+                                        ? 'bg-unbox-light text-unbox-green border border-unbox-green/40'
+                                        : 'bg-white text-unbox-grey border border-unbox-light/50'
+                            )}
+                        >
+                            <span className="text-[9px] font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
+                            <span className="text-sm font-bold">{format(day, 'd')}</span>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Resource tabs */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                    {filteredResources.map((r, idx) => (
+                        <button
+                            key={r.id}
+                            onClick={() => setMobileResIdx(idx)}
+                            className={clsx(
+                                'shrink-0 px-3 py-2 rounded-xl text-xs font-medium border transition-colors',
+                                mobileResIdx === idx
+                                    ? 'bg-unbox-green text-white border-unbox-green'
+                                    : 'bg-white text-gray-500 border-gray-200'
+                            )}
+                        >
+                            <div className="font-bold whitespace-nowrap">{r.name}</div>
+                            <div className="text-[10px] opacity-70 whitespace-nowrap">
+                                {LOCATIONS.find(l => l.id === r.locationId)?.name ?? ''}
+                            </div>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Selected block summary */}
+                {mobileBlock && mobileRes && (
+                    <div className="flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3">
+                        <div>
+                            <div className="text-sm font-bold text-unbox-dark">{mobileBlockStartTime} — {mobileBlockEndTime}</div>
+                            <div className="text-xs text-unbox-grey">{mobileBlockDuration} мин · {mobileRes.name}</div>
+                        </div>
+                        <button
+                            onClick={() => setNewSlotRange(mobileRes.id, [])}
+                            className="p-1.5 rounded-lg bg-red-100 text-red-500"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                )}
+
+                {/* 2-column time grid */}
+                <div className="rounded-2xl bg-white border border-gray-100 p-2 space-y-1">
+                    {mobileHourPairs.map(([left, right]) => {
+                        const leftRendered = renderMobileSlot(left, true);
+                        const rightRendered = right ? renderMobileSlot(right, false) : <div className="flex-1" />;
+                        if (!leftRendered && !rightRendered) return null;
+                        return (
+                            <div key={left} className="flex gap-1.5">
+                                {leftRendered || <div className="flex-1" />}
+                                {rightRendered}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Bottom bar */}
+                {mobileBlock && (
+                    <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3">
+                        <div
+                            className="rounded-2xl p-3.5 flex items-center justify-between"
+                            style={{
+                                background: 'rgba(255,255,255,0.85)',
+                                backdropFilter: 'blur(24px)',
+                                WebkitBackdropFilter: 'blur(24px)',
+                                border: '1px solid rgba(255,255,255,0.50)',
+                                boxShadow: '0 -4px 20px rgba(0,0,0,0.08)',
+                            }}
+                        >
+                            <div className="text-sm text-unbox-dark">
+                                <span className="font-bold text-unbox-green">{mobileBlockDuration} мин</span> выбрано
+                            </div>
+                            <button
+                                onClick={handleContinueNewBooking}
+                                className="bg-unbox-green text-white font-medium text-sm px-5 py-2.5 rounded-xl shadow-md flex items-center gap-1.5"
+                            >
+                                Продолжить <ArrowRight size={14} />
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Admin booking modal */}
+                {adminBookSlot && (
+                    <AdminQuickBookingModal
+                        slot={adminBookSlot}
+                        users={users}
+                        onClose={() => { setAdminBookSlot(null); setNewSlots([]); }}
+                        onBooked={() => {
+                            setAdminBookSlot(null);
+                            setNewSlots([]);
+                            fetchAllBookings();
+                        }}
+                    />
+                )}
+
+                {/* Booking detail popup */}
+                {selectedBooking && (
+                    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm p-3" onClick={() => setSelectedBooking(null)}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-start justify-between mb-3">
+                                <div>
+                                    <div className="font-bold text-unbox-dark">{getUserName(selectedBooking.userId)}</div>
+                                    <div className="text-xs text-unbox-grey">{selectedBooking.userId}</div>
+                                </div>
+                                <button onClick={() => setSelectedBooking(null)} className="p-1 hover:bg-unbox-light rounded-lg">
+                                    <X size={16} />
+                                </button>
+                            </div>
+                            <div className="space-y-2 text-sm mb-4">
+                                <InfoRow label="Ресурс" value={resources.find(r => r.id === selectedBooking.resourceId)?.name ?? ''} />
+                                <InfoRow label="Дата" value={format(parseBookingDate(selectedBooking.date), 'd MMMM yyyy', { locale: ru })} />
+                                <InfoRow label="Время" value={`${selectedBooking.startTime} · ${(selectedBooking.duration ?? 0) / 60}ч`} />
+                                <InfoRow label="Цена" value={`${selectedBooking.finalPrice} ₾`} />
+                                <InfoRow label="Статус" value={statusLabel(selectedBooking)} />
+                            </div>
+                            {selectedBooking.status === 'confirmed' && (
+                                <div className="grid grid-cols-3 gap-1.5">
+                                    <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
+                                    <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
+                                        {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
+                                    </button>
+                                    <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Отмена</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // ── DESKTOP VIEW ──
     return (
         <div className="space-y-4">
 
@@ -471,10 +799,13 @@ export function AdminChessboardView() {
                             {TIME_SLOTS.map(slot => (
                                 <th
                                     key={slot}
-                                    className="border-r border-b border-unbox-light/50 text-center py-1.5 px-0"
+                                    className={clsx(
+                                        "border-r border-b border-unbox-light/50 text-center py-1.5 px-0",
+                                        isPeakTime(slot) && "bg-amber-50/50"
+                                    )}
                                 >
                                     {slot.endsWith(':00')
-                                        ? <span className="font-semibold text-unbox-dark text-[11px]">{slot.slice(0, 2)}</span>
+                                        ? <span className={clsx("font-semibold text-[11px]", isPeakTime(slot) ? "text-amber-600" : "text-unbox-dark")}>{slot.slice(0, 2)}</span>
                                         : <span className="text-unbox-light/60 text-[10px]">·</span>
                                     }
                                 </th>
@@ -572,7 +903,9 @@ export function AdminChessboardView() {
                                                             ? "bg-gray-50/60"
                                                             : newSel
                                                                 ? "bg-unbox-green text-white z-10 cursor-grab shadow-sm"
-                                                                : "hover:bg-unbox-green/10 cursor-pointer",
+                                                                : isPeakTime(cell.slot)
+                                                                    ? "bg-amber-50/60 hover:bg-amber-100/50 cursor-pointer"
+                                                                    : "hover:bg-unbox-green/10 cursor-pointer",
                                                         newSel && !isNewSingle && !isNewStart && "border-l border-white/20",
                                                         isNewStart && newSel && "rounded-l-lg",
                                                         isNewEnd && newSel && "rounded-r-lg"
@@ -784,8 +1117,8 @@ function AdminQuickBookingModal({
     const [saving, setSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedUser, setSelectedUser] = useState<{ id: string; email: string; name: string } | null>(null);
-    const [isRecurring, setIsRecurring] = useState(false);
-    const [recurringWeeks, setRecurringWeeks] = useState(12);
+    const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
+    const [recurringOccurrences, setRecurringOccurrences] = useState(12);
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
     const endTime = (() => {
@@ -808,7 +1141,7 @@ function AdminQuickBookingModal({
         }
         setSaving(true);
         try {
-            if (isRecurring) {
+            if (recurringPattern) {
                 const result = await bookingsApi.createRecurringBooking({
                     resourceId: slot.resId,
                     locationId: resource?.locationId || 'unbox_one',
@@ -817,10 +1150,12 @@ function AdminQuickBookingModal({
                     format: resource?.formats?.[0] || 'individual',
                     paymentMethod: 'balance',
                     firstDate: dateStr,
-                    weeks: recurringWeeks,
+                    occurrences: recurringOccurrences,
+                    pattern: recurringPattern,
                     targetUserId: selectedUser.email,
                 });
-                toast.success(`Создано ${result.created} бронирований на ${result.totalCost} ₾`);
+                const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+                toast.success(`Создано ${result.created} бронирований (${patternLabel}) на ${result.totalCost} ₾`);
             } else {
                 await bookingsApi.createBooking({
                     resourceId: slot.resId,
@@ -946,28 +1281,50 @@ function AdminQuickBookingModal({
                     </div>
                 </div>
 
-                {/* Recurring toggle */}
+                {/* Recurring pattern */}
                 <div className="space-y-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={isRecurring}
-                            onChange={e => setIsRecurring(e.target.checked)}
-                            className="rounded"
-                        />
-                        <span className="text-sm font-medium text-unbox-dark">Повторять каждую неделю</span>
-                    </label>
-                    {isRecurring && (
-                        <div className="flex items-center gap-2 pl-6">
+                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Повторение</label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {([
+                            { id: '', label: 'Разово' },
+                            { id: 'weekly', label: 'Еженед.' },
+                            { id: 'biweekly', label: '2 нед.' },
+                            { id: 'monthly', label: 'Ежемес.' },
+                        ] as const).map(p => (
+                            <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => setRecurringPattern(p.id)}
+                                className={`py-1.5 rounded-xl text-xs font-medium border transition-colors text-center ${
+                                    recurringPattern === p.id
+                                        ? 'bg-unbox-green text-white border-unbox-green'
+                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                }`}
+                            >
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
+                    {recurringPattern && (
+                        <div className="flex items-center gap-2 pt-1">
                             <input
                                 type="number"
-                                value={recurringWeeks}
-                                onChange={e => setRecurringWeeks(Math.max(2, Math.min(52, Number(e.target.value))))}
+                                value={recurringOccurrences}
+                                onChange={e => {
+                                    const max = recurringPattern === 'monthly' ? 24 : 52;
+                                    setRecurringOccurrences(Math.max(2, Math.min(max, Number(e.target.value))));
+                                }}
                                 min={2}
-                                max={52}
+                                max={recurringPattern === 'monthly' ? 24 : 52}
                                 className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
                             />
-                            <span className="text-xs text-unbox-grey">недель ({isRecurring ? `≈ ${Math.round(recurringWeeks / 4.3)} мес.` : ''})</span>
+                            <span className="text-xs text-unbox-grey">
+                                повторений · {recurringPattern === 'monthly'
+                                    ? `≈ ${recurringOccurrences} мес.`
+                                    : recurringPattern === 'biweekly'
+                                        ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
+                                        : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
+                            </span>
                         </div>
                     )}
                 </div>
@@ -978,7 +1335,7 @@ function AdminQuickBookingModal({
                     className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    {isRecurring ? `Создать ${recurringWeeks} бронирований` : 'Забронировать'}
+                    {recurringPattern ? `Создать серию · ${recurringOccurrences} броней` : 'Забронировать'}
                 </button>
             </div>
         </div>

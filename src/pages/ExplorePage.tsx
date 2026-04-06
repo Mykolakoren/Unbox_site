@@ -7,7 +7,7 @@ import { JoinWaitlistModal } from '../components/JoinWaitlistModal';
 import { TeamSection } from '../components/TeamSection';
 import { SpecialistsSection } from '../components/SpecialistsSection';
 import { WelcomeOverlay } from '../components/WelcomeOverlay';
-import { HowItWorksSection } from '../components/landing/HowItWorksSection';
+
 import { EventsSection } from '../components/landing/EventsSection';
 import { ArticlesSection } from '../components/landing/ArticlesSection';
 import { ReferralSection } from '../components/landing/ReferralSection';
@@ -19,6 +19,8 @@ import { SpecialistPortalHero } from '../components/landing/SpecialistPortalHero
 import { ContactSection } from '../components/landing/ContactSection';
 import { ClientHeroPanel } from '../components/landing/ClientHeroPanel';
 import { SelfTestsSection } from '../components/landing/SelfTestsSection';
+import { GridHouseLanding } from '../components/landing/GridHouseLanding';
+import { useDesignFlag } from '../hooks/useDesignFlag';
 import { LogIn, LayoutDashboard, ChevronDown, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -48,13 +50,11 @@ function MapBounds({ locations, selectedLocId }: { locations: any[], selectedLoc
     return null;
 }
 
-// ─── iOS 26 Liquid Glass styles ────────────────────────────────────────────
+// ─── Header style (post-Liquid Glass) ──────────────────────────────────────
 const glassHeader: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.10)',
-    backdropFilter: 'blur(24px) saturate(150%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-    border: '1px solid rgba(255,255,255,0.22)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.40)',
+    background: 'rgba(255,255,255,0.94)',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+    boxShadow: '0 1px 8px rgba(0,0,0,0.03)',
 };
 
 const glassMapFrame: React.CSSProperties = {
@@ -91,6 +91,17 @@ export function ExplorePage() {
         setVisitorMode(null);
     };
 
+    // ── Grid House design flag — full-page rollback-safe variant ──
+    if (useDesignFlag()) {
+        return (
+            <GridHouseLanding
+                visitorMode={visitorMode}
+                onModeSelect={handleModeSelect}
+                onModeReset={resetMode}
+            />
+        );
+    }
+
     // ── Category filter (client mode) ─────────────────────────────
     const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
     const specialistsSectionRef = useRef<HTMLDivElement>(null);
@@ -119,16 +130,9 @@ export function ExplorePage() {
             </AnimatePresence>
 
             {/* ══════════════════════════════════════════════
-                FULL-PAGE BACKGROUND PHOTO
+                BACKGROUND
             ══════════════════════════════════════════════ */}
-            <div className="fixed inset-0 z-0">
-                <img
-                    src="/hero-bg.jpg"
-                    alt=""
-                    className="w-full h-full object-cover object-[center_45%]"
-                />
-                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.52)' }} />
-            </div>
+            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
 
             {/* ══════════════════════════════════════════════
                 GLASS HEADER — floating pill
@@ -188,19 +192,27 @@ export function ExplorePage() {
                             </button>
                         )}
                         {!currentUser ? (
-                            <Link
-                                to="/login"
-                                className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all brand-gradient"
-                            >
-                                <LogIn size={15} />
-                                Войти
-                            </Link>
+                            <>
+                                <Link
+                                    to="/location/unbox_one"
+                                    className="flex sm:hidden items-center gap-1.5 px-3.5 py-2 rounded-full text-white text-xs font-semibold shadow-lg bg-[#476D6B]"
+                                >
+                                    Бронировать
+                                </Link>
+                                <Link
+                                    to="/login"
+                                    className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all bg-[#476D6B]"
+                                >
+                                    <LogIn size={15} />
+                                    Войти
+                                </Link>
+                            </>
                         ) : (
                             <button
                                 onClick={() => navigate('/dashboard')}
                                 className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/70 backdrop-blur-md border border-white/60 text-unbox-dark hover:bg-white transition-all text-sm font-medium shadow-md"
                             >
-                                <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 brand-gradient">
+                                <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 bg-[#476D6B]">
                                     {currentUser.name?.charAt(0).toUpperCase() ?? <LayoutDashboard size={12} />}
                                 </div>
                                 <span className="max-w-[120px] truncate">{currentUser.name}</span>
@@ -324,7 +336,6 @@ export function ExplorePage() {
                 <div className="relative z-10">
                     {visitorMode === 'client' ? (
                         <>
-                            <HowItWorksSection />
                             <div ref={specialistsSectionRef}>
                                 <SpecialistsSection categoryFilter={categoryFilter} />
                             </div>

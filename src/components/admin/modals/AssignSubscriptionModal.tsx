@@ -26,10 +26,10 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
     };
 
     const PAYMENT_METHODS = [
-        { id: 'cash', label: 'Наличные', icon: '💵' },
-        { id: 'tbc', label: 'TBC Bank', icon: '🔵' },
-        { id: 'bog', label: 'BOG (Ge)', icon: '🟠' },
-        { id: 'balance', label: 'С баланса', icon: '💰' },
+        { id: 'cash', label: 'Наличные', color: 'bg-green-100 text-green-600' },
+        { id: 'tbc', label: 'TBC Bank', color: 'bg-blue-100 text-blue-600' },
+        { id: 'bog', label: 'BOG (Ge)', color: 'bg-orange-100 text-orange-600' },
+        { id: 'balance', label: 'С баланса', color: 'bg-unbox-light text-unbox-green' },
     ] as const;
 
     return createPortal(
@@ -103,7 +103,7 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
                                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                         }`}
                                 >
-                                    <span>{pm.icon}</span>
+                                    <span className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-bold ${pm.color}`}>{pm.label[0]}</span>
                                     {pm.label}
                                 </button>
                             ))}

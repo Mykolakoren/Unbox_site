@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { BriefcaseMedical, Loader2, Clock, AlertCircle } from 'lucide-react';
 import { crmApi, type CrmAccessStatus } from '../api/crm';
 import { useUserStore } from '../store/userStore';
+import { useCrmModeStore } from '../store/crmModeStore';
 
 export function CrmAccessToggle() {
     const navigate = useNavigate();
     const currentUser = useUserStore(s => s.currentUser);
+    const crmEnabled = useCrmModeStore(s => s.enabled);
+    const setCrmEnabled = useCrmModeStore(s => s.setEnabled);
     const [access, setAccess] = useState<CrmAccessStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const [applying, setApplying] = useState(false);
@@ -18,8 +21,11 @@ export function CrmAccessToggle() {
             .finally(() => setLoading(false));
     }, []);
 
+    const hasAccess = access?.accessStatus === 'active';
+    const isOn = hasAccess && crmEnabled;
+
     const handleNavigate = () => {
-        if (!access || access.accessStatus !== 'active') return;
+        if (!isOn) return;
         navigate('/crm');
     };
 
@@ -27,9 +33,9 @@ export function CrmAccessToggle() {
         e.stopPropagation();
         if (!access || applying) return;
 
-        // If active — turn off (just navigate away, don't revoke)
+        // Has backend access — flip local enabled flag (doesn't revoke access)
         if (access.accessStatus === 'active') {
-            navigate('/crm');
+            setCrmEnabled(!crmEnabled);
             return;
         }
 
@@ -43,7 +49,7 @@ export function CrmAccessToggle() {
             const result = await crmApi.applyForAccess();
             if (isPrivileged || result.status === 'active') {
                 setAccess(prev => prev ? { ...prev, accessStatus: 'active', permanent: true } : prev);
-                navigate('/crm');
+                setCrmEnabled(true);
             } else {
                 setAccess(prev => prev ? { ...prev, accessStatus: 'pending' } : prev);
             }
@@ -65,7 +71,6 @@ export function CrmAccessToggle() {
 
     if (!access) return null;
 
-    const isActive = access.accessStatus === 'active';
     const isPending = access.accessStatus === 'pending';
     const isExpired = access.accessStatus === 'expired';
     const isRejected = access.accessStatus === 'rejected';
@@ -74,10 +79,10 @@ export function CrmAccessToggle() {
         <div className="flex items-center gap-2">
             {/* CRM button */}
             <button
-                onClick={isActive ? handleNavigate : undefined}
+                onClick={isOn ? handleNavigate : undefined}
                 className={`
                     flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-                    ${isActive
+                    ${isOn
                         ? 'bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/20 cursor-pointer'
                         : isPending
                             ? 'bg-amber-50 text-amber-600 cursor-default'
@@ -88,13 +93,16 @@ export function CrmAccessToggle() {
                 <BriefcaseMedical size={18} className="flex-shrink-0" />
                 <div className="text-left min-w-0">
                     <div className="truncate leading-tight">
-                        {isActive ? 'Мой CRM' : 'Режим CRM'}
+                        {hasAccess ? 'Мой CRM' : 'Режим CRM'}
                     </div>
-                    {isActive && !access.permanent && access.daysRemaining !== null && (
+                    {isOn && !access.permanent && access.daysRemaining !== null && (
                         <div className="text-[10px] opacity-70 flex items-center gap-1">
                             <Clock size={10} />
                             {access.daysRemaining} {getDaysLabel(access.daysRemaining)}
                         </div>
+                    )}
+                    {hasAccess && !crmEnabled && (
+                        <div className="text-[10px] opacity-70">Отключён</div>
                     )}
                     {isPending && (
                         <div className="text-[10px] opacity-70 flex items-center gap-1">
@@ -122,11 +130,17 @@ export function CrmAccessToggle() {
                 onClick={handleToggle}
                 disabled={isPending || applying}
                 className="flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title={isActive ? 'Открыть CRM' : isPending ? 'Ожидает одобрения' : 'Запросить доступ'}
+                title={
+                    hasAccess
+                        ? (crmEnabled ? 'Выключить CRM режим' : 'Включить CRM режим')
+                        : isPending
+                            ? 'Ожидает одобрения'
+                            : 'Запросить доступ'
+                }
             >
                 <div className={`
                     w-10 h-[22px] rounded-full flex items-center transition-all px-0.5
-                    ${isActive ? 'bg-unbox-green justify-end' : isPending ? 'bg-amber-300 justify-center' : 'bg-gray-300 justify-start'}
+                    ${isOn ? 'bg-unbox-green justify-end' : isPending ? 'bg-amber-300 justify-center' : 'bg-gray-300 justify-start'}
                 `}>
                     {applying ? (
                         <Loader2 size={12} className="text-white animate-spin mx-auto" />
@@ -134,7 +148,7 @@ export function CrmAccessToggle() {
                         <Clock size={12} className="text-white mx-auto" />
                     ) : (
                         <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-all
-                            ${isActive ? 'scale-100' : 'scale-90'}
+                            ${isOn ? 'scale-100' : 'scale-90'}
                         `} />
                     )}
                 </div>

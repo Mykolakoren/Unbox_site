@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import { crmApi } from '../api/crm';
 import type {
     CrmClient, CrmClientCreate, CrmClientUpdate,
@@ -102,31 +103,40 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     },
 
     createClient: async (data) => {
-        const client = await crmApi.createClient(data);
-        set((s) => ({ clients: [...s.clients, client].sort((a, b) => a.name.localeCompare(b.name)) }));
-        return client;
+        try {
+            const client = await crmApi.createClient(data);
+            set((s) => ({ clients: [...s.clients, client].sort((a, b) => a.name.localeCompare(b.name)) }));
+            return client;
+        } catch (error) {
+            toast.error('Не удалось создать клиента');
+            throw error;
+        }
     },
 
     updateClient: async (id, data) => {
-        const updated = await crmApi.updateClient(id, data);
-        set((s) => ({
-            clients: s.clients.map((c) => (c.id === id ? updated : c)),
-        }));
-        return updated;
+        try {
+            const updated = await crmApi.updateClient(id, data);
+            set((s) => ({
+                clients: s.clients.map((c) => (c.id === id ? updated : c)),
+            }));
+            return updated;
+        } catch (error) {
+            toast.error('Не удалось обновить клиента');
+            throw error;
+        }
     },
 
     deleteClient: async (id, permanent = false) => {
-        await crmApi.deleteClient(id, permanent);
-        if (permanent) {
-            // Hard delete — remove from local state
-            set((s) => ({
-                clients: s.clients.filter((c) => c.id !== id),
-            }));
-        } else {
-            // Soft delete — update is_active to false locally
-            set((s) => ({
-                clients: s.clients.map((c) => (c.id === id ? { ...c, isActive: false } : c)),
-            }));
+        try {
+            await crmApi.deleteClient(id, permanent);
+            if (permanent) {
+                set((s) => ({ clients: s.clients.filter((c) => c.id !== id) }));
+            } else {
+                set((s) => ({ clients: s.clients.map((c) => (c.id === id ? { ...c, isActive: false } : c)) }));
+            }
+        } catch (error) {
+            toast.error('Не удалось удалить клиента');
+            throw error;
         }
     },
 
@@ -146,32 +156,52 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     },
 
     createSession: async (data) => {
-        const session = await crmApi.createSession(data);
-        set((s) => ({ sessions: [session, ...s.sessions] }));
-        return session;
+        try {
+            const session = await crmApi.createSession(data);
+            set((s) => ({ sessions: [session, ...s.sessions] }));
+            return session;
+        } catch (error) {
+            toast.error('Не удалось создать сессию');
+            throw error;
+        }
     },
 
     updateSession: async (id, data) => {
-        const updated = await crmApi.updateSession(id, data);
-        set((s) => ({
-            sessions: s.sessions.map((sess) => (sess.id === id ? updated : sess)),
-        }));
-        return updated;
+        try {
+            const updated = await crmApi.updateSession(id, data);
+            set((s) => ({
+                sessions: s.sessions.map((sess) => (sess.id === id ? updated : sess)),
+            }));
+            return updated;
+        } catch (error) {
+            toast.error('Не удалось обновить сессию');
+            throw error;
+        }
     },
 
     deleteSession: async (id) => {
-        await crmApi.deleteSession(id);
-        set((s) => ({ sessions: s.sessions.filter((sess) => sess.id !== id) }));
+        try {
+            await crmApi.deleteSession(id);
+            set((s) => ({ sessions: s.sessions.filter((sess) => sess.id !== id) }));
+        } catch (error) {
+            toast.error('Не удалось удалить сессию');
+            throw error;
+        }
     },
 
     quickPaySession: async (id, account?) => {
-        const result = await crmApi.quickPaySession(id, account);
-        set((s) => ({
-            sessions: s.sessions.map((sess) =>
-                sess.id === id ? { ...sess, isPaid: true } : sess
-            ),
-        }));
-        return { amount: result.amount, currency: result.currency };
+        try {
+            const result = await crmApi.quickPaySession(id, account);
+            set((s) => ({
+                sessions: s.sessions.map((sess) =>
+                    sess.id === id ? { ...sess, isPaid: true } : sess
+                ),
+            }));
+            return { amount: result.amount, currency: result.currency };
+        } catch (error) {
+            toast.error('Не удалось отметить оплату');
+            throw error;
+        }
     },
 
     // ── Payments ─────────────────────────────────────────────────────────────
@@ -190,17 +220,21 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     },
 
     createPayment: async (data) => {
-        const payment = await crmApi.createPayment(data);
-        set((s) => ({ payments: [payment, ...s.payments] }));
-        // If session linked, mark it as paid
-        if (data.sessionId) {
-            set((s) => ({
-                sessions: s.sessions.map((sess) =>
-                    sess.id === data.sessionId ? { ...sess, isPaid: true } : sess
-                ),
-            }));
+        try {
+            const payment = await crmApi.createPayment(data);
+            set((s) => ({ payments: [payment, ...s.payments] }));
+            if (data.sessionId) {
+                set((s) => ({
+                    sessions: s.sessions.map((sess) =>
+                        sess.id === data.sessionId ? { ...sess, isPaid: true } : sess
+                    ),
+                }));
+            }
+            return payment;
+        } catch (error) {
+            toast.error('Не удалось создать платёж');
+            throw error;
         }
-        return payment;
     },
 
     // ── Notes ────────────────────────────────────────────────────────────────
@@ -215,14 +249,24 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     },
 
     createNote: async (data) => {
-        const note = await crmApi.createNote(data);
-        set((s) => ({ notes: [note, ...s.notes] }));
-        return note;
+        try {
+            const note = await crmApi.createNote(data);
+            set((s) => ({ notes: [note, ...s.notes] }));
+            return note;
+        } catch (error) {
+            toast.error('Не удалось создать заметку');
+            throw error;
+        }
     },
 
     deleteNote: async (id) => {
-        await crmApi.deleteNote(id);
-        set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+        try {
+            await crmApi.deleteNote(id);
+            set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+        } catch (error) {
+            toast.error('Не удалось удалить заметку');
+            throw error;
+        }
     },
 
     // ── Dashboard ────────────────────────────────────────────────────────────
@@ -249,7 +293,12 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     },
 
     updatePaymentAccounts: async (accounts) => {
-        const updated = await crmApi.updatePaymentAccounts(accounts);
-        set({ paymentAccounts: updated });
+        try {
+            const updated = await crmApi.updatePaymentAccounts(accounts);
+            set({ paymentAccounts: updated });
+        } catch (error) {
+            toast.error('Не удалось сохранить платёжные аккаунты');
+            throw error;
+        }
     },
 }));

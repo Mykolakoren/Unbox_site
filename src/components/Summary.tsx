@@ -2,7 +2,7 @@ import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
 import type { PricingResult } from '../types';
 
-import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck } from 'lucide-react';
+import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck, Sunrise } from 'lucide-react';
 import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
 import { EXTRAS, RESOURCES } from '../utils/data';
@@ -16,6 +16,7 @@ const DISCOUNT_INFO: Record<PricingResult['discountType'], { label: string; Icon
     loyalty:  { label: 'Накопительная (за неделю)', Icon: TrendingUp },
     personal: { label: 'Персональная скидка', Icon: UserCheck },
 };
+
 
 export function Summary() {
     const state = useBookingStore();
@@ -61,6 +62,8 @@ export function Summary() {
         let totalExtras = 0;
         let totalDiscount = 0;
         let totalFinal = 0;
+        let totalPeakSurcharge = 0;
+        let totalSubPeakDebt = 0;
 
         const details = bookingsList.map(b => {
             const selectedExtras = EXTRAS.filter(e => state.extras.includes(e.id));
@@ -88,6 +91,8 @@ export function Summary() {
             totalExtras += p.extrasPrice;
             totalDiscount += p.discountAmount;
             totalFinal += p.finalPrice;
+            totalPeakSurcharge += p.peakSurcharge;
+            totalSubPeakDebt += p.subscriptionPeakDebt;
 
             return { ...b, price: p };
         });
@@ -98,7 +103,9 @@ export function Summary() {
                 basePrice: totalBase,
                 extrasPrice: totalExtras,
                 discountAmount: totalDiscount,
-                finalPrice: totalFinal
+                finalPrice: totalFinal,
+                peakSurcharge: totalPeakSurcharge,
+                subscriptionPeakDebt: totalSubPeakDebt,
             }
         };
 
@@ -222,8 +229,35 @@ export function Summary() {
             <div className="border-t border-gray-100 my-4 pt-4 space-y-2">
                 <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Базовая стоимость</span>
-                    <span>{total.basePrice} ₾</span>
+                    <span>{total.basePrice.toFixed(1)} ₾</span>
                 </div>
+                {(total.peakSurcharge ?? 0) > 0 && (
+                    <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 flex items-center gap-1">
+                            <Sunrise size={12} className="text-amber-500" />
+                            Пиковые часы (+25%)
+                        </span>
+                        <span className="text-amber-600">вкл. {(total.peakSurcharge ?? 0).toFixed(1)} ₾</span>
+                    </div>
+                )}
+                {(total.subscriptionPeakDebt ?? 0) > 0 && (
+                    <div className="rounded-lg px-3 py-2"
+                        style={{
+                            background: 'rgba(251,191,36,0.10)',
+                            border: '1px solid rgba(251,191,36,0.30)',
+                        }}>
+                        <div className="flex justify-between text-sm font-medium text-amber-700">
+                            <span className="flex items-center gap-1">
+                                <Sunrise size={12} />
+                                Доплата за пиковые часы
+                            </span>
+                            <span>+{(total.subscriptionPeakDebt ?? 0).toFixed(1)} ₾</span>
+                        </div>
+                        <div className="text-[11px] text-amber-600/80 mt-0.5">
+                            Абонемент покрывает стандартные часы. Пиковые часы (9–10, 20–22) — доплата 5 ₾/ч, записывается в счёт.
+                        </div>
+                    </div>
+                )}
                 {total.extrasPrice > 0 && (
                     <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Доп. опции</span>

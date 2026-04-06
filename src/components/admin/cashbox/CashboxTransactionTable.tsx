@@ -97,6 +97,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                             <th className="font-medium py-3">Способ</th>
                             <th className="font-medium py-3">Категория</th>
                             <th className="font-medium py-3">Филиал</th>
+                            <th className="font-medium py-3">Клиент</th>
                             <th className="font-medium py-3">Описание</th>
                             <th className="font-medium py-3">Админ</th>
                             <th className="font-medium py-3 pr-2 text-right w-10"></th>
@@ -135,6 +136,9 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                     </td>
                                     <td className="py-3 align-top">
                                         <span className="text-gray-600 text-xs">{tx.branch || '—'}</span>
+                                    </td>
+                                    <td className="py-3 align-top">
+                                        <span className="text-gray-700 text-sm">{tx.clientName || '—'}</span>
                                     </td>
                                     <td className="py-3 align-top">
                                         <span className="text-gray-600 truncate max-w-[200px] block">{tx.description || '—'}</span>
@@ -203,7 +207,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                 )}
                             </div>
 
-                            {/* Row 2: Method + Category + Branch */}
+                            {/* Row 2: Method + Category + Client + Branch */}
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-gray-200 text-xs text-gray-600">
                                     {getMethodIcon(tx.paymentMethod)}
@@ -211,6 +215,9 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                 </span>
                                 {tx.categoryName && (
                                     <span className="text-xs text-gray-500">{tx.categoryName}</span>
+                                )}
+                                {tx.clientName && (
+                                    <span className="text-xs text-gray-700 font-medium">· {tx.clientName}</span>
                                 )}
                                 {tx.branch && (
                                     <span className="text-xs text-gray-400">· {tx.branch}</span>

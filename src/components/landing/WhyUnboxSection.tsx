@@ -83,8 +83,8 @@ function BenefitCard({ b, i }: { b: typeof BENEFITS[0]; i: number }) {
             className="relative flex flex-col gap-4 p-6 rounded-3xl cursor-default overflow-hidden"
             style={{
                 background: hovered
-                    ? 'rgba(255,255,255,0.72)'
-                    : 'rgba(255,255,255,0.52)',
+                    ? 'rgba(255,255,255,0.85)'
+                    : 'rgba(255,255,255,0.70)',
                 backdropFilter: 'blur(24px) saturate(160%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(160%)',
                 border: hovered

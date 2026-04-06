@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import {
     cashboxApi,
     type CashboxTransaction,
@@ -40,8 +41,12 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
     isLoading: false,
 
     fetchBalance: async (branch?: string) => {
-        const data = await cashboxApi.getBalance(branch);
-        set({ balance: data.balance, balances: data });
+        try {
+            const data = await cashboxApi.getBalance(branch);
+            set({ balance: data.balance, balances: data });
+        } catch (error) {
+            toast.error('Не удалось загрузить баланс кассы');
+        }
     },
 
     fetchTransactions: async (params) => {
@@ -49,55 +54,101 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
         try {
             const transactions = await cashboxApi.getTransactions(params);
             set({ transactions });
+        } catch (error) {
+            toast.error('Не удалось загрузить транзакции');
         } finally {
             set({ isLoading: false });
         }
     },
 
     createTransaction: async (data) => {
-        await cashboxApi.createTransaction(data);
-        await get().fetchBalance();
+        try {
+            await cashboxApi.createTransaction(data);
+            await get().fetchBalance();
+            toast.success('Транзакция создана');
+        } catch (error) {
+            toast.error('Не удалось создать транзакцию');
+            throw error;
+        }
     },
 
     deleteTransaction: async (id) => {
-        await cashboxApi.deleteTransaction(id);
-        await get().fetchBalance();
+        try {
+            await cashboxApi.deleteTransaction(id);
+            await get().fetchBalance();
+            toast.success('Транзакция удалена');
+        } catch (error) {
+            toast.error('Не удалось удалить транзакцию');
+            throw error;
+        }
     },
 
     fetchCategories: async () => {
-        const categories = await cashboxApi.getCategories();
-        set({ categories });
+        try {
+            const categories = await cashboxApi.getCategories();
+            set({ categories });
+        } catch (error) {
+            toast.error('Не удалось загрузить категории');
+        }
     },
 
     createCategory: async (data) => {
-        await cashboxApi.createCategory(data);
-        await get().fetchCategories();
+        try {
+            await cashboxApi.createCategory(data);
+            await get().fetchCategories();
+        } catch (error) {
+            toast.error('Не удалось создать категорию');
+            throw error;
+        }
     },
 
     updateCategory: async (id, data) => {
-        await cashboxApi.updateCategory(id, data);
-        await get().fetchCategories();
+        try {
+            await cashboxApi.updateCategory(id, data);
+            await get().fetchCategories();
+        } catch (error) {
+            toast.error('Не удалось обновить категорию');
+            throw error;
+        }
     },
 
     deleteCategory: async (id) => {
-        await cashboxApi.deleteCategory(id);
-        await get().fetchCategories();
+        try {
+            await cashboxApi.deleteCategory(id);
+            await get().fetchCategories();
+        } catch (error) {
+            toast.error('Не удалось удалить категорию');
+            throw error;
+        }
     },
 
     fetchShiftReports: async () => {
-        const shiftReports = await cashboxApi.getShiftReports();
-        set({ shiftReports });
+        try {
+            const shiftReports = await cashboxApi.getShiftReports();
+            set({ shiftReports });
+        } catch (error) {
+            toast.error('Не удалось загрузить отчёты смен');
+        }
     },
 
     endShift: async (data) => {
-        const report = await cashboxApi.endShift(data);
-        await get().fetchShiftReports();
-        await get().fetchBalance();
-        return report;
+        try {
+            const report = await cashboxApi.endShift(data);
+            await get().fetchShiftReports();
+            await get().fetchBalance();
+            return report;
+        } catch (error) {
+            toast.error('Не удалось закрыть смену');
+            throw error;
+        }
     },
 
     fetchAnalytics: async (dateFrom, dateTo) => {
-        const analytics = await cashboxApi.getAnalytics(dateFrom, dateTo);
-        set({ analytics });
+        try {
+            const analytics = await cashboxApi.getAnalytics(dateFrom, dateTo);
+            set({ analytics });
+        } catch (error) {
+            toast.error('Не удалось загрузить аналитику');
+        }
     },
 }));

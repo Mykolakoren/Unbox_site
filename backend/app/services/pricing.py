@@ -10,20 +10,25 @@ class PriceBreakdown(BaseModel):
     base_price: float
     hourly_rate: float
     booked_hours: float
-    
+
     # Applied Rules
     applied_rule: str # "SUBSCRIPTION", "HOT_BOOKING", "WEEKLY_PROGRESSIVE", "NONE"
-    
+
     # Discount Details
     discount_percent: int = 0
     discount_amount: float = 0.0
-    
+
     # Subscription Details
     subscription_plan: Optional[str] = None
     hours_deducted: float = 0.0
-    
+
     final_price: float
-    
+
+    # Peak hours
+    peak_surcharge: float = 0.0
+    peak_slot_count: int = 0
+    subscription_peak_debt: float = 0.0
+
     # Flags
     is_non_refundable: bool = False
     is_non_reschedulable: bool = False
@@ -63,8 +68,28 @@ class PricingService:
             {"min": 5, "max": 10.999, "percent": 10},
             {"min": 11, "max": 15.999, "percent": 25},
             {"min": 16, "max": 9999, "percent": 50},
-        ]
+        ],
+        "peak_hours": {
+            "surcharge_percent": 25,
+            "subscription_surcharge_gel": 5,
+            "ranges": [
+                {"start": "09:00", "end": "10:00"},
+                {"start": "20:00", "end": "22:00"},
+            ],
+        },
     }
+
+    @staticmethod
+    def _is_peak_time(time_str: str) -> bool:
+        """Check if HH:MM falls into a peak hour range."""
+        h, m = map(int, time_str.split(":"))
+        mins = h * 60 + m
+        for r in PricingService.PRICING_CONFIG["peak_hours"]["ranges"]:
+            sh, sm = map(int, r["start"].split(":"))
+            eh, em = map(int, r["end"].split(":"))
+            if mins >= sh * 60 + sm and mins < eh * 60 + em:
+                return True
+        return False
 
     def calculate_price(
         self,
@@ -89,14 +114,37 @@ class PricingService:
              # Logic from config: IND=20, GRP=35. (Multiplier ~1.75 or explicit lookup)
              pass
 
-        base_price = base_rate * booked_hours
+        # 2b. Calculate base price with peak hours surcharge
+        surcharge_pct = self.PRICING_CONFIG["peak_hours"]["surcharge_percent"]
+        peak_surcharge = 0.0
+        peak_slot_count = 0
+        base_price = 0.0
+
+        # Check each 30-min slot for peak hours
+        start_h = start_time.hour
+        start_m = start_time.minute
+        start_total = start_h * 60 + start_m
+        for m in range(start_total, start_total + duration_minutes, 30):
+            h = m // 60
+            mm = m % 60
+            slot_str = f"{h:02d}:{mm:02d}"
+            slot_base = base_rate / 2  # 30-min slot
+            if self._is_peak_time(slot_str):
+                surcharge = slot_base * (surcharge_pct / 100)
+                peak_surcharge += surcharge
+                peak_slot_count += 1
+                base_price += slot_base + surcharge
+            else:
+                base_price += slot_base
 
         breakdown = PriceBreakdown(
             base_price=base_price,
             hourly_rate=base_rate,
             booked_hours=booked_hours,
             applied_rule="NONE",
-            final_price=base_price
+            final_price=base_price,
+            peak_surcharge=peak_surcharge,
+            peak_slot_count=peak_slot_count,
         )
 
         # If user is anonymous — return base price without discounts
@@ -223,7 +271,14 @@ class PricingService:
             breakdown.applied_rule = "SUBSCRIPTION"
             breakdown.subscription_plan = plan_id
             breakdown.hours_deducted = breakdown.booked_hours
-            breakdown.final_price = 0.0 
+            # Peak hours debt: subscription covers base but peak surcharge = +5 GEL/hr
+            if breakdown.peak_slot_count > 0:
+                peak_hours = breakdown.peak_slot_count / 2.0
+                sub_surcharge = self.PRICING_CONFIG["peak_hours"]["subscription_surcharge_gel"]
+                breakdown.subscription_peak_debt = peak_hours * sub_surcharge
+                breakdown.final_price = breakdown.subscription_peak_debt
+            else:
+                breakdown.final_price = 0.0
             return True
         else:
             # Hours exhausted, apply generic plan discount if any

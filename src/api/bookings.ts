@@ -127,11 +127,33 @@ export const bookingsApi = {
         format: string;
         paymentMethod: string;
         firstDate: string;
-        weeks: number;
+        occurrences: number;
+        pattern: 'weekly' | 'biweekly' | 'monthly';
+        weeks?: number;  // backward compat
         targetUserId?: string;
         crmClientId?: string;
     }): Promise<{ ok: boolean; recurringGroupId: string; created: number; totalCost: number; dates: string[] }> => {
-        const response = await api.post('/bookings/recurring', data);
+        const response = await api.post('/bookings/recurring', {
+            ...data,
+            weeks: data.occurrences,  // backend compat
+        });
+        return response.data;
+    },
+
+    getRecurringGroups: async (): Promise<Array<{
+        recurringGroupId: string;
+        resourceId: string;
+        locationId: string;
+        startTime: string;
+        duration: number;
+        crmClientId?: string;
+        paymentMethod: string;
+        futureCount: number;
+        totalCount: number;
+        nextDate: string | null;
+        pattern: 'weekly' | 'biweekly' | 'monthly';
+    }>> => {
+        const response = await api.get('/bookings/recurring-groups');
         return response.data;
     },
 

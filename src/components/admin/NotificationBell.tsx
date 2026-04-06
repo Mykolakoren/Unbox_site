@@ -11,6 +11,10 @@ import { useAdminTaskStore } from '../../store/adminTaskStore';
 // Icon mapping
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
     UserPlus, CalendarX, AlertTriangle, Clock, ListTodo, Bell,
+    // Lowercase aliases for backend icon names
+    clock: Clock,
+    userPlus: UserPlus,
+    alertTriangle: AlertTriangle,
 };
 
 function timeAgo(dateStr: string): string {
@@ -190,6 +194,7 @@ export function NotificationBell() {
                                             <div className={clsx(
                                                 "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
                                                 n.type === 'crm_access_request' ? "bg-blue-50 text-blue-500" :
+                                                n.type === 'hot_booking_approval' ? "bg-orange-50 text-orange-500" :
                                                 n.type === 'task_deadline' ? "bg-amber-50 text-amber-600" :
                                                 n.type === 'booking_cancelled' ? "bg-red-50 text-red-500" :
                                                 "bg-gray-100 text-gray-500"

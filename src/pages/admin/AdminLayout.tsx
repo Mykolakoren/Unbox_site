@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
     BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star,
@@ -9,6 +9,7 @@ import { useUserStore } from '../../store/userStore';
 import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const NAV_ITEMS = [
     { path: '/admin',             icon: LayoutDashboard, label: 'Дашборд',       exact: true },
@@ -69,13 +70,15 @@ export function AdminLayout() {
         window.location.href = '/login';
     };
 
+    // ── Grid House design flag — rollback-safe variant ──
+    if (useDesignFlag()) {
+        return <GridHouseAdminShell navItems={navItems} currentUser={currentUser} onLogout={handleLogout} />;
+    }
+
     return (
         <div className="min-h-screen flex flex-col text-unbox-dark relative">
-            {/* Full-page photo background */}
-            <div className="fixed inset-0 z-0">
-                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
-                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
-            </div>
+            {/* Background */}
+            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
 
             {/* ── Top Navigation Bar ── */}
             <header
@@ -244,4 +247,252 @@ export function AdminLayout() {
             </main>
         </div>
     );
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// GRID HOUSE VARIANT — sidebar shell, mono nav, hairline surfaces
+// Rollback: delete everything below + the early-return block above.
+// ═════════════════════════════════════════════════════════════════════════
+
+type GHNavItem = {
+    path: string;
+    label: string;
+    exact?: boolean;
+};
+
+type CurrentUser = ReturnType<typeof useUserStore.getState>['currentUser'];
+
+function GridHouseAdminShell({
+    navItems,
+    currentUser,
+    onLogout,
+}: {
+    navItems: Array<{ path: string; label: string; icon: React.FC<{ size?: number }>; exact?: boolean }>;
+    currentUser: CurrentUser;
+    onLogout: () => void;
+}) {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 960);
+    const [mobileOpen, setMobileOpen] = useState(false);
+
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 960);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+
+    const hairline = `1px solid ${GH.ink10}`;
+
+    const ghNav: GHNavItem[] = navItems.map(i => ({ path: i.path, label: i.label, exact: i.exact }));
+    const isActive = (item: GHNavItem) =>
+        item.exact ? location.pathname === item.path : location.pathname.startsWith(item.path);
+    const activeItem = ghNav.find(isActive) ?? ghNav[0];
+    const activeIndex = ghNav.findIndex(isActive);
+
+    const roleLabel =
+        currentUser?.role === 'owner' ? 'Владелец'
+        : currentUser?.role === 'senior_admin' ? 'Старший админ'
+        : 'Администратор';
+
+    return (
+        <div
+            style={{
+                minHeight: '100vh',
+                background: GH.paper,
+                color: GH.ink,
+                fontFamily: GH_SANS,
+                WebkitFontSmoothing: 'antialiased',
+                display: 'flex',
+                position: 'relative',
+            }}
+        >
+            {/* ── SIDEBAR ── */}
+            <aside
+                style={{
+                    width: 260,
+                    minWidth: 260,
+                    background: GH.ink5,
+                    borderRight: hairline,
+                    position: narrow ? 'fixed' : 'sticky',
+                    top: 0,
+                    left: 0,
+                    height: '100vh',
+                    overflowY: 'auto',
+                    transform: narrow && !mobileOpen ? 'translateX(-100%)' : 'translateX(0)',
+                    transition: 'transform 0.2s ease',
+                    zIndex: 50,
+                    display: 'flex',
+                    flexDirection: 'column',
+                }}
+            >
+                {/* Brand */}
+                <div style={{ padding: '22px 24px 18px', borderBottom: hairline }}>
+                    <Link to="/" style={{ fontSize: 24, fontWeight: 700, color: GH.ink, textDecoration: 'none', letterSpacing: '-0.01em' }}>
+                        Unbox
+                    </Link>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
+                        Админ · Контроль
+                    </div>
+                </div>
+
+                {/* User */}
+                <div style={{ padding: '18px 24px', borderBottom: hairline }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
+                        Сессия · {roleLabel}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>
+                        {currentUser?.name ?? '—'}
+                    </div>
+                </div>
+
+                {/* Nav */}
+                <nav style={{ flex: 1, padding: 0 }}>
+                    {ghNav.map((item, i) => {
+                        const active = isActive(item);
+                        return (
+                            <Link
+                                key={item.path}
+                                to={item.path}
+                                onClick={() => setMobileOpen(false)}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '44px 1fr',
+                                    alignItems: 'center',
+                                    padding: '14px 24px',
+                                    borderBottom: hairline,
+                                    background: active ? GH.ink : 'transparent',
+                                    color: active ? GH.paper : GH.ink,
+                                    textDecoration: 'none',
+                                    transition: 'background 0.1s ease',
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        letterSpacing: '0.12em',
+                                        fontVariantNumeric: 'tabular-nums',
+                                        opacity: active ? 0.5 : 0.45,
+                                    }}
+                                >
+                                    {String(i + 1).padStart(2, '0')}
+                                </div>
+                                <div style={{ fontSize: 14, fontWeight: active ? 600 : 500, letterSpacing: '-0.005em' }}>
+                                    {item.label}
+                                </div>
+                            </Link>
+                        );
+                    })}
+                </nav>
+
+                {/* Footer actions */}
+                <div style={{ borderTop: hairline }}>
+                    <button
+                        type="button"
+                        onClick={() => navigate('/')}
+                        style={footerBtnStyle(GH.ink60, hairline)}
+                    >
+                        ← На сайт
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => navigate('/crm')}
+                        style={footerBtnStyle(GH.accent, hairline)}
+                    >
+                        → CRM
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onLogout}
+                        style={footerBtnStyle(GH.danger, 'none')}
+                    >
+                        ↳ Выйти
+                    </button>
+                </div>
+            </aside>
+
+            {/* Mobile backdrop */}
+            {narrow && mobileOpen && (
+                <div
+                    onClick={() => setMobileOpen(false)}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(15,15,16,0.35)',
+                        zIndex: 45,
+                    }}
+                />
+            )}
+
+            {/* ── MAIN ── */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                {/* Top bar */}
+                <header
+                    style={{
+                        borderBottom: hairline,
+                        background: GH.paper,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 30,
+                        padding: '16px 28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {narrow && (
+                            <button
+                                type="button"
+                                onClick={() => setMobileOpen(true)}
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 11,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    color: GH.ink,
+                                    background: 'transparent',
+                                    border: `1px solid ${GH.ink10}`,
+                                    padding: '6px 10px',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                ☰ Меню
+                            </button>
+                        )}
+                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                            {String((activeIndex < 0 ? 0 : activeIndex) + 1).padStart(2, '0')} · {activeItem?.label ?? 'Раздел'}
+                        </div>
+                    </div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
+                        Unbox · Grid House · Черновик
+                    </div>
+                </header>
+
+                {/* Content */}
+                <main style={{ flex: 1, padding: 'clamp(24px, 3vw, 40px)', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+                    <Outlet />
+                </main>
+            </div>
+        </div>
+    );
+}
+
+function footerBtnStyle(color: string, border: string): React.CSSProperties {
+    return {
+        width: '100%',
+        padding: '14px 24px',
+        textAlign: 'left',
+        fontFamily: GH_MONO,
+        fontSize: 11,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color,
+        background: 'transparent',
+        border: 'none',
+        borderBottom: border !== 'none' ? border : undefined,
+        cursor: 'pointer',
+    };
 }

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import type { BookingState, Format, PricingResult, GroupSize } from '../types';
 import { resourcesApi } from '../api/resources';
 import { pricingApi } from '../api/pricing';
@@ -44,6 +45,10 @@ export interface BookingStore extends BookingState {
     setBookingForUser: (userId: string | null) => void;
     reset: () => void;
 
+    // Highlighted resource (for visual emphasis on chessboard)
+    highlightedResourceId: string | null;
+    setHighlightedResourceId: (id: string | null) => void;
+
     // Computed
     price: PricingResult;
     quote: PriceBreakdown | null;
@@ -70,15 +75,15 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     resources: RESOURCES, // Initial static data
     locations: [],
     quote: null,
+    highlightedResourceId: null,
 
     fetchResources: async () => {
         try {
             const data = await resourcesApi.getAll();
-            // Sort by sort_order (backend may already sort, but ensure consistent order)
             data.sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
             set({ resources: data });
         } catch (error) {
-            console.error("Failed to fetch resources:", error);
+            toast.error('Не удалось загрузить кабинеты');
         }
     },
     fetchLocations: async () => {
@@ -86,7 +91,7 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
             const data = await locationsApi.getLocations();
             set({ locations: data });
         } catch (error) {
-            console.error("Failed to fetch locations:", error);
+            toast.error('Не удалось загрузить локации');
         }
     },
     editBookingId: null,
@@ -114,6 +119,9 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         discountAmount: 0,
         discountType: 'none',
         finalPrice: 0,
+        peakSurcharge: 0,
+        peakSlotCount: 0,
+        subscriptionPeakDebt: 0,
     },
 
     setStep: (step) => set({ step }),
@@ -134,6 +142,7 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         set({ resourceId });
         get().fetchQuote();
     },
+    setHighlightedResourceId: (id) => set({ highlightedResourceId: id }),
 
     setFormat: (format) => {
         set({ format, groupSize: format === 'individual' ? null : get().groupSize });
@@ -232,11 +241,14 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
                     extrasPrice: extrasCost,
                     discountAmount: quote.discountAmount,
                     discountType: quote.appliedRule as any,
-                    finalPrice: quote.finalPrice + extrasCost
+                    finalPrice: quote.finalPrice + extrasCost,
+                    peakSurcharge: quote.peakSurcharge ?? 0,
+                    peakSlotCount: quote.peakSlotCount ?? 0,
+                    subscriptionPeakDebt: quote.subscriptionPeakDebt ?? 0,
                 }
             });
         } catch (error) {
-            console.error("Failed to fetch quote:", error);
+            // Silent for quote — user sees empty price, no need to spam toast
             set({ quote: null });
         }
     },

@@ -12,13 +12,11 @@ interface MinimalLayoutProps {
     glassMode?: boolean;
 }
 
-// ── iOS 26 Liquid Glass header style (mirrors ExplorePage) ──────────────────
+// ── Header style (post-Liquid Glass) ────────────────────────────────────────
 const glassHeader: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.10)',
-    backdropFilter: 'blur(24px) saturate(150%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-    border: '1px solid rgba(255,255,255,0.22)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.40)',
+    background: 'rgba(255,255,255,0.94)',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+    boxShadow: '0 1px 8px rgba(0,0,0,0.03)',
 };
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -44,18 +42,8 @@ export function MinimalLayout({
         return (
             <div className="min-h-screen font-sans text-unbox-dark selection:bg-unbox-green selection:text-white">
 
-                {/* Full-page photo background */}
-                <div className="fixed inset-0 z-0">
-                    <img
-                        src="/hero-bg.jpg"
-                        alt=""
-                        className="w-full h-full object-cover object-[center_45%]"
-                    />
-                    <div
-                        className="absolute inset-0"
-                        style={{ background: 'rgba(255,255,255,0.52)' }}
-                    />
-                </div>
+                {/* Background */}
+                <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
 
                 {/* Floating glass header pill */}
                 <header className="fixed top-0 left-0 right-0 z-50 px-4 md:px-8 pt-4">
@@ -82,7 +70,7 @@ export function MinimalLayout({
                                 <img
                                     src="/unbox-logo.png"
                                     alt="Unbox"
-                                    className="h-[81px] object-contain drop-shadow-md group-hover:scale-[1.15] transition-transform duration-200"
+                                    className="h-[50px] sm:h-[81px] object-contain drop-shadow-md group-hover:scale-[1.15] transition-transform duration-200"
                                 />
                             </Link>
                         </div>
@@ -92,7 +80,7 @@ export function MinimalLayout({
                             {!currentUser ? (
                                 <Link
                                     to="/login"
-                                    className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all brand-gradient"
+                                    className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all bg-[#476D6B]"
                                 >
                                     <LogIn size={15} />
                                     Войти
@@ -103,7 +91,7 @@ export function MinimalLayout({
                                     className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/70 backdrop-blur-md border border-white/60 text-unbox-dark hover:bg-white transition-all text-sm font-medium shadow-md"
                                 >
                                     <div
-                                        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 brand-gradient"
+                                        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 bg-[#476D6B]"
                                     >
                                         {currentUser.name?.charAt(0).toUpperCase() ?? <LayoutDashboard size={12} />}
                                     </div>
@@ -151,7 +139,7 @@ export function MinimalLayout({
                             <img
                                 src="/unbox-logo.png"
                                 alt="Unbox"
-                                className="h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200 drop-shadow-sm"
+                                className="h-[50px] sm:h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200 drop-shadow-sm"
                             />
                         </Link>
                     </div>
@@ -161,7 +149,7 @@ export function MinimalLayout({
                         {!currentUser ? (
                             <Link
                                 to="/login"
-                                className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all brand-gradient"
+                                className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all bg-[#476D6B]"
                             >
                                 <LogIn size={15} />
                                 Войти
@@ -172,7 +160,7 @@ export function MinimalLayout({
                                 className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-white/50 text-unbox-dark hover:bg-white transition-all text-sm font-medium shadow-md hover:shadow-lg hover:-translate-y-0.5"
                             >
                                 <div
-                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm brand-gradient"
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm bg-[#476D6B]"
                                 >
                                     {currentUser.name?.charAt(0).toUpperCase() ?? <LayoutDashboard size={12} />}
                                 </div>

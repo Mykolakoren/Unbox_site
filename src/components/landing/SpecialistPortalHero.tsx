@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -8,25 +8,23 @@ import {
 import { format, isToday, isTomorrow, isBefore } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useUserStore } from '../../store/userStore';
+import { useCrmModeStore } from '../../store/crmModeStore';
 import { RESOURCES } from '../../utils/data';
+import { crmApi } from '../../api/crm';
 import type { User } from '../../store/types';
 import type { BookingHistoryItem } from '../../store/types';
 
-// ── Glass styles ─────────────────────────────────────────────────────────────
+// ── Panel styles (post-Liquid Glass) ─────────────────────────────────────────
 const glassPanel: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.55)',
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    border: '1px solid rgba(255,255,255,0.72)',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
+    background: 'rgba(255,255,255,0.92)',
+    border: '1px solid rgba(0,0,0,0.06)',
+    boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
 };
 
 const glassTile: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.60)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255,255,255,0.80)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.04)',
+    background: 'rgba(255,255,255,0.80)',
+    border: '1px solid rgba(0,0,0,0.05)',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.03)',
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -150,12 +148,27 @@ export function SpecialistPortalHero({ user }: Props) {
     const { bookings, fetchBookings } = useUserStore();
     const navigate = useNavigate();
     const firstName = user.name?.split(' ')[0] ?? 'Специалист';
-    const isVerified = user.role === 'specialist';
     const isAdmin = user.role === 'admin' || user.role === 'senior_admin' || user.role === 'owner';
+
+    // Check CRM access to show quick-action shortcuts only if CRM mode is active
+    const hasRoleCrmAccess = user.role === 'specialist' || user.role === 'owner' || user.role === 'senior_admin';
+    const [hasCrmAccess, setHasCrmAccess] = useState<boolean>(hasRoleCrmAccess);
+    const crmModeEnabled = useCrmModeStore(s => s.enabled);
+    const showCrmShortcuts = hasCrmAccess && crmModeEnabled;
 
     useEffect(() => {
         fetchBookings();
     }, [fetchBookings]);
+
+    useEffect(() => {
+        if (hasRoleCrmAccess) {
+            setHasCrmAccess(true);
+            return;
+        }
+        crmApi.getMyAccess()
+            .then(s => setHasCrmAccess(s.accessStatus === 'active'))
+            .catch(() => setHasCrmAccess(false));
+    }, [hasRoleCrmAccess, user.id]);
 
     // ── Filter user's bookings ──────────────────────────────────────
     const myBookings = useMemo(() => {
@@ -207,55 +220,48 @@ export function SpecialistPortalHero({ user }: Props) {
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4 }}
-                className="rounded-[28px] px-6 py-5 sm:px-8 sm:py-6"
+                className="rounded-[20px] sm:rounded-[28px] px-4 py-4 sm:px-8 sm:py-6"
                 style={glassPanel}
             >
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex items-center gap-3 sm:gap-4">
                     {/* Avatar */}
                     <div
-                        className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 text-xl font-black text-white select-none"
+                        className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 text-base sm:text-xl font-black text-white select-none"
                         style={{ background: 'rgba(71,109,107,0.70)', border: '2px solid rgba(255,255,255,0.50)' }}
                     >
                         {firstName[0]}
                     </div>
 
                     <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                            <h1 className="text-xl font-black text-unbox-dark leading-none">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            <h1 className="text-base sm:text-xl font-black text-unbox-dark leading-tight">
                                 {firstName}, добро пожаловать!
                             </h1>
-                            {isVerified && (
-                                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                    style={{ background: 'rgba(71,109,107,0.15)', color: 'rgb(71,109,107)', border: '1px solid rgba(71,109,107,0.25)' }}
-                                >
-                                    <CheckCircle2 size={10} />
-                                    Верифицирован
-                                </span>
-                            )}
                             {isAdmin && (
-                                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                <span className="flex items-center gap-0.5 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                                     style={{ background: 'rgba(71,109,107,0.15)', color: 'rgb(71,109,107)', border: '1px solid rgba(71,109,107,0.25)' }}
                                 >
-                                    <CheckCircle2 size={10} />
+                                    <CheckCircle2 size={9} />
                                     {user.role === 'owner' ? 'Owner' : user.role === 'senior_admin' ? 'Senior Admin' : 'Admin'}
                                 </span>
                             )}
                         </div>
-                        <p className="text-unbox-dark/50 text-sm">{user.email}</p>
+                        <p className="text-unbox-dark/50 text-xs sm:text-sm truncate">{user.email}</p>
                     </div>
 
                     {/* Quick stats */}
-                    <div className="flex gap-3 shrink-0">
+                    <div className="flex gap-2 shrink-0">
                         {[
-                            { icon: CalendarDays, label: 'Бронирований', value: totalBookings },
+                            { icon: CalendarDays, label: 'Брони', value: totalBookings },
                             { icon: Wallet, label: 'Баланс', value: `${user.balance?.toFixed(0) ?? 0} ₾` },
                         ].map(s => (
-                            <div key={s.label} className="flex flex-col items-center gap-0.5 rounded-2xl px-4 py-2.5"
+                            <div key={s.label} className="flex flex-col items-center gap-0.5 rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-2 sm:py-2.5"
                                 style={{ background: 'rgba(71,109,107,0.06)', border: '1px solid rgba(71,109,107,0.12)' }}
                             >
-                                <s.icon size={14} className="text-unbox-dark/40 mb-0.5" />
-                                <span className="text-unbox-dark font-black text-base leading-none">{s.value}</span>
-                                <span className="text-unbox-dark/35 text-[10px]">{s.label}</span>
+                                <s.icon size={12} className="text-unbox-dark/40 sm:hidden" />
+                                <s.icon size={14} className="text-unbox-dark/40 hidden sm:block mb-0.5" />
+                                <span className="text-unbox-dark font-black text-sm sm:text-base leading-none">{s.value}</span>
+                                <span className="text-unbox-dark/35 text-[9px] sm:text-[10px]">{s.label}</span>
                             </div>
                         ))}
                     </div>
@@ -329,7 +335,8 @@ export function SpecialistPortalHero({ user }: Props) {
                 )}
             </motion.div>
 
-            {/* ── Quick actions row ── */}
+            {/* ── Quick actions row (only if CRM mode is active) ── */}
+            {showCrmShortcuts && (
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -370,6 +377,7 @@ export function SpecialistPortalHero({ user }: Props) {
                     );
                 })}
             </motion.div>
+            )}
 
             {/* ── Past bookings (collapsed) ── */}
             {pastBookings.length > 0 && (
@@ -378,7 +386,7 @@ export function SpecialistPortalHero({ user }: Props) {
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.3 }}
                     className="rounded-[28px] px-6 py-4 sm:px-8"
-                    style={{ ...glassPanel, background: 'rgba(255,255,255,0.40)' }}
+                    style={{ ...glassPanel, background: 'rgba(255,255,255,0.65)' }}
                 >
                     <div className="flex items-center justify-between mb-3">
                         <h3 className="text-sm font-semibold text-unbox-dark/50 flex items-center gap-2">

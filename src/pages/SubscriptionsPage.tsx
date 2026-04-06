@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion';
 import { Clock, Snowflake, Percent, ArrowRight, Check, Star, Users, Zap, Gift, Shield, MessageCircle, Sparkles, TrendingUp, Timer, Flame, Award, ChevronRight, BarChart3 } from 'lucide-react';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 // ── Standard Prices ──────────────────────────────────────────────────────────
 const STANDARD_PRICES = [
-    { label: 'Индивидуальный кабинет', price: 20, unit: '₾/час', icon: '🏠', desc: 'Кабинеты 1–8' },
-    { label: 'Групповой кабинет', price: 35, unit: '₾/час', icon: '👥', desc: 'До 20 человек' },
-    { label: 'Капсула', price: 10, unit: '₾/час', icon: '🧘', desc: 'Приватное пространство' },
+    { label: 'Индивидуальный кабинет', price: 20, unit: '₾/час', icon: 'cabinet', desc: 'Кабинеты 1–8' },
+    { label: 'Групповой кабинет', price: 35, unit: '₾/час', icon: 'group', desc: 'До 20 человек' },
+    { label: 'Капсула', price: 10, unit: '₾/час', icon: 'capsule', desc: 'Приватное пространство' },
 ];
 
 // ── Subscription Plans ───────────────────────────────────────────────────────
@@ -167,6 +168,10 @@ const cardAnim = {
 };
 
 export function SubscriptionsPage() {
+    const gridHouse = useDesignFlag();
+
+    if (gridHouse) return <GridHouseSubscriptions />;
+
     return (
         <div className="max-w-7xl mx-auto px-4 py-8 md:py-16 space-y-16">
             {/* Hero */}
@@ -209,7 +214,9 @@ export function SubscriptionsPage() {
                                 boxShadow: '0 2px 12px rgba(71,109,107,0.06)',
                             }}
                         >
-                            <span className="text-2xl">{sp.icon}</span>
+                            <div className="w-10 h-10 rounded-xl bg-unbox-green/10 flex items-center justify-center text-unbox-green flex-shrink-0">
+                                {sp.icon === 'cabinet' ? <Users size={20} /> : sp.icon === 'group' ? <Users size={20} /> : <Zap size={20} />}
+                            </div>
                             <div>
                                 <div className="font-bold text-unbox-dark text-lg">{sp.price} {sp.unit}</div>
                                 <div className="text-xs text-unbox-grey">{sp.label}</div>
@@ -434,12 +441,12 @@ export function SubscriptionsPage() {
                         </div>
                         <div className="space-y-2.5">
                             {[
-                                { label: '2 часа подряд', percent: '10%', icon: '⏱' },
-                                { label: '3 часа подряд', percent: '15%', icon: '⏱' },
-                                { label: '4+ часа подряд', percent: '20%', icon: '⏱' },
+                                { label: '2 часа подряд', percent: '10%' },
+                                { label: '3 часа подряд', percent: '15%' },
+                                { label: '4+ часа подряд', percent: '20%' },
                             ].map(tier => (
                                 <div key={tier.label} className="flex items-center gap-3 bg-blue-50/50 rounded-xl px-4 py-2.5">
-                                    <span className="text-lg">{tier.icon}</span>
+                                    <Timer size={16} className="text-blue-500 flex-shrink-0" />
                                     <span className="text-sm text-unbox-dark flex-1">{tier.label}</span>
                                     <span className="text-sm font-bold text-blue-600 bg-blue-100 px-2.5 py-0.5 rounded-full">-{tier.percent}</span>
                                 </div>
@@ -562,6 +569,156 @@ export function SubscriptionsPage() {
                     Написать нам
                 </a>
             </motion.div>
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Grid House — SubscriptionsPage
+   ═══════════════════════════════════════════════════════════════ */
+
+const ghsubMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghsubHairline = `1px solid ${GH.ink10}`;
+
+function GridHouseSubscriptions() {
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 1100, margin: '0 auto', padding: '48px 24px 80px' }}>
+            {/* Header */}
+            <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 48, textAlign: 'center' }}>
+                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 8 }}>ТАРИФЫ</div>
+                <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
+                    Тарифы и скидки Unbox
+                </h1>
+                <p style={{ fontSize: 15, color: GH.ink60, maxWidth: 560, margin: '0 auto' }}>
+                    Прозрачная система скидок — до 50%. Абонементы, кофе, массаж и другие бонусы — включены.
+                </p>
+            </div>
+
+            {/* Standard prices */}
+            <div style={{ marginBottom: 48 }}>
+                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>СТАНДАРТНЫЕ ЦЕНЫ</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 0, border: ghsubHairline }}>
+                    {STANDARD_PRICES.map((p, i) => (
+                        <div key={i} style={{ padding: '20px 16px', borderRight: i < STANDARD_PRICES.length - 1 ? ghsubHairline : 'none' }}>
+                            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{p.label}</div>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 28, fontWeight: 700, color: GH.ink }}>
+                                {p.price} <span style={{ fontSize: 14, color: GH.ink30 }}>{p.unit}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: GH.ink30, marginTop: 4 }}>{p.desc}</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Subscription plans */}
+            <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>АБОНЕМЕНТЫ</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 48 }}>
+                {SUBSCRIPTIONS.map(plan => (
+                    <div key={plan.id} style={{ border: plan.popular ? `2px solid ${GH.ink}` : ghsubHairline, padding: 24, display: 'flex', flexDirection: 'column' }}>
+                        {plan.badge && (
+                            <span style={{ ...ghsubMono, color: plan.popular ? GH.accent : GH.ink30, fontSize: 9, marginBottom: 8 }}>
+                                {plan.badge.toUpperCase()}
+                            </span>
+                        )}
+                        <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>{plan.name}</div>
+                        <div style={{ fontSize: 13, color: GH.ink60, marginBottom: 16 }}>{plan.tagline}</div>
+
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontFamily: GH_MONO, fontSize: 36, fontWeight: 700 }}>{plan.price}</span>
+                            <span style={{ fontSize: 14, color: GH.ink30 }}>₾</span>
+                            {plan.fullPrice > plan.price && (
+                                <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink30, textDecoration: 'line-through' }}>
+                                    {plan.fullPrice} ₾
+                                </span>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                            <span style={{ ...ghsubMono, fontSize: 9, color: GH.accent, padding: '2px 8px', border: `1px solid ${GH.accent}30` }}>
+                                −{plan.discount}%
+                            </span>
+                            <span style={{ ...ghsubMono, fontSize: 9, color: GH.ink30, padding: '2px 8px', border: ghsubHairline }}>
+                                {plan.hours} ЧАСОВ
+                            </span>
+                            <span style={{ ...ghsubMono, fontSize: 9, color: GH.ink30, padding: '2px 8px', border: ghsubHairline }}>
+                                {plan.duration.toUpperCase()}
+                            </span>
+                        </div>
+
+                        <div style={{ flex: 1, borderTop: ghsubHairline, paddingTop: 12, marginBottom: 16 }}>
+                            {plan.features.map((f, j) => (
+                                <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6 }}>
+                                    <Check size={12} style={{ color: GH.accent, marginTop: 3, flexShrink: 0 }} />
+                                    <span style={{ fontSize: 13, color: GH.ink60 }}>{f}</span>
+                                </div>
+                            ))}
+                            {plan.bonuses.length > 0 && (
+                                <div style={{ marginTop: 12 }}>
+                                    <div style={{ ...ghsubMono, color: GH.ink30, fontSize: 9, marginBottom: 6 }}>БОНУСЫ</div>
+                                    {plan.bonuses.map((b, j) => (
+                                        <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                                            <Gift size={10} style={{ color: GH.accent, marginTop: 3, flexShrink: 0 }} />
+                                            <span style={{ fontSize: 12, color: GH.ink30 }}>{b}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <a
+                            href="https://t.me/UnboxCenter"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                                display: 'block', textAlign: 'center', padding: '10px 0',
+                                background: plan.popular ? GH.ink : 'transparent',
+                                color: plan.popular ? GH.paper : GH.ink,
+                                border: plan.popular ? 'none' : ghsubHairline,
+                                fontWeight: 700, fontSize: 13, fontFamily: GH_SANS, textDecoration: 'none', cursor: 'pointer',
+                            }}
+                        >
+                            Оформить →
+                        </a>
+                    </div>
+                ))}
+            </div>
+
+            {/* Conditions */}
+            <div style={{ marginBottom: 48 }}>
+                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>УСЛОВИЯ</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 0, border: ghsubHairline }}>
+                    {CONDITIONS.map((c, i) => (
+                        <div key={i} style={{ padding: 20, borderRight: i < CONDITIONS.length - 1 ? ghsubHairline : 'none' }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>{c.title}</div>
+                            <p style={{ fontSize: 13, color: GH.ink60, lineHeight: 1.6 }}>{c.description}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* CTA */}
+            <div style={{ textAlign: 'center', padding: '32px 0', borderTop: ghsubHairline }}>
+                <p style={{ fontSize: 15, color: GH.ink60, marginBottom: 16 }}>
+                    Нужно больше часов или особый формат? Мы подберём персональные условия для вашей практики.
+                </p>
+                <a
+                    href="https://t.me/UnboxCenter"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                        padding: '12px 28px', background: GH.ink, color: GH.paper,
+                        fontWeight: 700, fontSize: 14, fontFamily: GH_SANS, textDecoration: 'none',
+                    }}
+                >
+                    <MessageCircle size={16} /> Написать нам
+                </a>
+            </div>
+
+            {/* Footer */}
+            <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ ...ghsubMono, color: GH.ink30 }}>UNBOX · 2026</span>
+                <span style={{ ...ghsubMono, color: GH.ink10 }}>GRID HOUSE</span>
+            </footer>
         </div>
     );
 }

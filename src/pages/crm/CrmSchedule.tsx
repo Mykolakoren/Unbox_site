@@ -7,6 +7,7 @@ import { Clock, Save, Loader2, Trash2, Calendar, MapPin, Video, User } from 'luc
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const LOCATION_OPTIONS = [
@@ -25,6 +26,7 @@ const DEFAULT_DAY: DaySchedule = { enabled: false, start_time: '10:00', end_time
 
 export function CrmSchedule() {
     const currentUser = useUserStore(s => s.currentUser);
+    const gridHouse = useDesignFlag();
     const [specialistId, setSpecialistId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -108,6 +110,32 @@ export function CrmSchedule() {
     }, [appointments]);
 
     if (!currentUser) return null;
+
+    // ─── Grid House variant (behind feature flag) ────────────────────────
+    if (gridHouse) {
+        return (
+            <GridHouseCrmSchedule
+                loading={loading}
+                specialistId={specialistId}
+                days={days}
+                updateDay={updateDay}
+                saving={saving}
+                handleSave={handleSave}
+                upcomingAppointments={upcomingAppointments}
+                onCancelAppt={async (id) => {
+                    if (!specialistId) return;
+                    if (!window.confirm('Отменить запись?')) return;
+                    try {
+                        await specialistsApi.cancelAppointment(specialistId, id);
+                        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a));
+                        toast.success('Запись отменена');
+                    } catch {
+                        toast.error('Ошибка');
+                    }
+                }}
+            />
+        );
+    }
 
     if (loading) {
         return (
@@ -258,6 +286,498 @@ export function CrmSchedule() {
                             </div>
                         ))}
                     </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GRID HOUSE CRM SCHEDULE — newspaper-scheduler variant
+// Rollback: delete this component + the early-return in CrmSchedule.
+// ─────────────────────────────────────────────────────────────────────────
+
+const GH_HAIRLINE = `1px solid ${GH.ink10}`;
+const GH_HAIRLINE_STRONG = `1px solid ${GH.ink}`;
+const GH_MONO_LABEL: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.18em',
+    color: GH.ink60,
+};
+const GH_DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+
+interface GridHouseCrmScheduleProps {
+    loading: boolean;
+    specialistId: string | null;
+    days: DaySchedule[];
+    updateDay: (i: number, patch: Partial<DaySchedule>) => void;
+    saving: boolean;
+    handleSave: () => void;
+    upcomingAppointments: Appointment[];
+    onCancelAppt: (id: string) => Promise<void>;
+}
+
+function GridHouseCrmSchedule({
+    loading,
+    specialistId,
+    days,
+    updateDay,
+    saving,
+    handleSave,
+    upcomingAppointments,
+    onCancelAppt,
+}: GridHouseCrmScheduleProps) {
+    if (loading) {
+        return (
+            <div
+                style={{
+                    fontFamily: GH_MONO,
+                    fontSize: 11,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.18em',
+                    color: GH.ink30,
+                    padding: '80px 0',
+                    textAlign: 'center',
+                }}
+            >
+                Загрузка расписания…
+            </div>
+        );
+    }
+
+    if (!specialistId) {
+        return (
+            <div
+                style={{
+                    border: GH_HAIRLINE,
+                    padding: '56px 32px',
+                    background: GH.paper,
+                    fontFamily: GH_SANS,
+                    textAlign: 'center',
+                }}
+            >
+                <div style={{ ...GH_MONO_LABEL, marginBottom: 16 }}>Нет привязки</div>
+                <div
+                    style={{
+                        fontSize: 'clamp(28px, 3vw, 44px)',
+                        fontWeight: 800,
+                        lineHeight: 1.05,
+                        letterSpacing: '-0.02em',
+                        color: GH.ink,
+                        marginBottom: 16,
+                    }}
+                >
+                    Аккаунт не привязан к анкете.
+                </div>
+                <div style={{ fontSize: 15, color: GH.ink60, lineHeight: 1.5, maxWidth: 460, margin: '0 auto' }}>
+                    Обратитесь к администратору — он свяжет ваш пользовательский профиль с карточкой специалиста в разделе
+                    {' '}Admin · Специалисты.
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div
+            style={{
+                fontFamily: GH_SANS,
+                color: GH.ink,
+                background: GH.paper,
+                maxWidth: 1120,
+            }}
+        >
+            {/* ── Header ── */}
+            <header
+                style={{
+                    borderBottom: GH_HAIRLINE_STRONG,
+                    paddingBottom: 20,
+                    marginBottom: 32,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 16,
+                }}
+            >
+                <div>
+                    <div style={{ ...GH_MONO_LABEL, marginBottom: 8 }}>Раздел · Расписание</div>
+                    <h1
+                        style={{
+                            fontSize: 'clamp(36px, 4.5vw, 56px)',
+                            fontWeight: 800,
+                            lineHeight: 0.95,
+                            letterSpacing: '-0.025em',
+                            margin: 0,
+                        }}
+                    >
+                        Моё расписание.
+                    </h1>
+                    <div style={{ fontSize: 15, color: GH.ink60, marginTop: 8, maxWidth: 520 }}>
+                        Недельный шаблон: когда, где и в каком формате вы принимаете. Клиенты видят только то, что здесь отмечено.
+                    </div>
+                </div>
+
+                <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={{
+                        background: GH.ink,
+                        color: GH.paper,
+                        border: 'none',
+                        padding: '14px 24px',
+                        fontFamily: GH_MONO,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.18em',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        opacity: saving ? 0.5 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        transition: 'opacity 0.15s ease',
+                    }}
+                >
+                    <Save size={14} />
+                    {saving ? 'Сохранение…' : 'Сохранить'}
+                </button>
+            </header>
+
+            {/* ── Weekly template section ── */}
+            <section style={{ marginBottom: 56 }}>
+                <div
+                    style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                        marginBottom: 16,
+                    }}
+                >
+                    <h2 style={{ ...GH_MONO_LABEL, color: GH.ink }}>Недельный шаблон</h2>
+                    <div style={{ ...GH_MONO_LABEL }}>
+                        Активных дней: {String(days.filter(d => d.enabled).length).padStart(2, '0')} / 07
+                    </div>
+                </div>
+
+                {/* Table header */}
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateColumns: '32px 60px 1.4fr 1fr 1fr',
+                        gap: 0,
+                        ...GH_MONO_LABEL,
+                        borderTop: GH_HAIRLINE,
+                        borderBottom: GH_HAIRLINE,
+                        padding: '10px 0',
+                    }}
+                >
+                    <div>#</div>
+                    <div>Вкл</div>
+                    <div>День</div>
+                    <div>Время</div>
+                    <div>Локация</div>
+                </div>
+
+                {/* Rows */}
+                {days.map((day, i) => (
+                    <GridHouseDayRow key={i} index={i} day={day} onUpdate={(patch) => updateDay(i, patch)} />
+                ))}
+            </section>
+
+            {/* ── Upcoming appointments ── */}
+            <section>
+                <div
+                    style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                        marginBottom: 16,
+                    }}
+                >
+                    <h2 style={{ ...GH_MONO_LABEL, color: GH.ink }}>Предстоящие записи</h2>
+                    <div style={GH_MONO_LABEL}>
+                        Всего: {String(upcomingAppointments.length).padStart(2, '0')}
+                    </div>
+                </div>
+
+                {upcomingAppointments.length === 0 ? (
+                    <div
+                        style={{
+                            border: GH_HAIRLINE,
+                            padding: '48px 24px',
+                            textAlign: 'center',
+                            ...GH_MONO_LABEL,
+                        }}
+                    >
+                        Нет предстоящих записей
+                    </div>
+                ) : (
+                    <div style={{ border: GH_HAIRLINE }}>
+                        {/* Header */}
+                        <div
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '32px 88px 1.4fr 1fr 1fr 40px',
+                                gap: 0,
+                                ...GH_MONO_LABEL,
+                                borderBottom: GH_HAIRLINE,
+                                padding: '10px 16px',
+                            }}
+                        >
+                            <div>#</div>
+                            <div>Дата</div>
+                            <div>Клиент</div>
+                            <div>Время</div>
+                            <div>Локация</div>
+                            <div></div>
+                        </div>
+
+                        {upcomingAppointments.map((appt, i) => (
+                            <div
+                                key={appt.id}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '32px 88px 1.4fr 1fr 1fr 40px',
+                                    gap: 0,
+                                    padding: '14px 16px',
+                                    alignItems: 'center',
+                                    borderBottom: i === upcomingAppointments.length - 1 ? 'none' : GH_HAIRLINE,
+                                    fontSize: 14,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        color: GH.ink60,
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                >
+                                    {String(i + 1).padStart(2, '0')}
+                                </div>
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 12,
+                                        fontVariantNumeric: 'tabular-nums',
+                                        textTransform: 'uppercase',
+                                    }}
+                                >
+                                    {format(new Date(appt.date + 'T00:00'), 'dd MMM', { locale: ru })}
+                                </div>
+                                <div>
+                                    <div style={{ fontWeight: 600, color: GH.ink }}>{appt.client_name}</div>
+                                    {appt.client_phone && (
+                                        <div
+                                            style={{
+                                                fontFamily: GH_MONO,
+                                                fontSize: 11,
+                                                color: GH.ink60,
+                                                marginTop: 2,
+                                            }}
+                                        >
+                                            {appt.client_phone}
+                                        </div>
+                                    )}
+                                </div>
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 13,
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                >
+                                    {appt.start_time}
+                                </div>
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.1em',
+                                        color: GH.ink60,
+                                    }}
+                                >
+                                    {appt.location_id ? LOCATIONS.find(l => l.id === appt.location_id)?.name || appt.location_id : 'Онлайн'}
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                    <button
+                                        onClick={() => onCancelAppt(appt.id)}
+                                        title="Отменить запись"
+                                        style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: GH.ink30,
+                                            cursor: 'pointer',
+                                            padding: 4,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                        }}
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </section>
+        </div>
+    );
+}
+
+// ── Single day row ──
+function GridHouseDayRow({
+    index,
+    day,
+    onUpdate,
+}: {
+    index: number;
+    day: DaySchedule;
+    onUpdate: (patch: Partial<DaySchedule>) => void;
+}) {
+    const enabled = day.enabled;
+    return (
+        <div
+            style={{
+                display: 'grid',
+                gridTemplateColumns: '32px 60px 1.4fr 1fr 1fr',
+                gap: 0,
+                padding: '16px 0',
+                alignItems: 'center',
+                borderBottom: GH_HAIRLINE,
+                opacity: enabled ? 1 : 0.6,
+                background: enabled ? 'transparent' : GH.ink5,
+                transition: 'opacity 0.15s ease, background 0.15s ease',
+            }}
+        >
+            {/* # */}
+            <div
+                style={{
+                    fontFamily: GH_MONO,
+                    fontSize: 11,
+                    color: GH.ink60,
+                    fontVariantNumeric: 'tabular-nums',
+                }}
+            >
+                {String(index + 1).padStart(2, '0')}
+            </div>
+
+            {/* Toggle */}
+            <div>
+                <button
+                    onClick={() => onUpdate({ enabled: !enabled })}
+                    style={{
+                        width: 40,
+                        height: 22,
+                        border: `1px solid ${GH.ink}`,
+                        background: enabled ? GH.ink : GH.paper,
+                        position: 'relative',
+                        cursor: 'pointer',
+                        padding: 0,
+                        transition: 'background 0.15s ease',
+                    }}
+                    aria-label={enabled ? 'Выключить день' : 'Включить день'}
+                >
+                    <div
+                        style={{
+                            position: 'absolute',
+                            top: 2,
+                            left: enabled ? 21 : 2,
+                            width: 15,
+                            height: 16,
+                            background: enabled ? GH.paper : GH.ink,
+                            transition: 'left 0.15s ease',
+                        }}
+                    />
+                </button>
+            </div>
+
+            {/* Day label */}
+            <div
+                style={{
+                    fontSize: 16,
+                    fontWeight: enabled ? 600 : 500,
+                    color: GH.ink,
+                }}
+            >
+                {GH_DOW_LABELS[index]}
+            </div>
+
+            {/* Time range */}
+            <div>
+                {enabled ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                            type="time"
+                            value={day.start_time}
+                            onChange={e => onUpdate({ start_time: e.target.value })}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 13,
+                                border: 'none',
+                                borderBottom: `1px solid ${GH.ink30}`,
+                                background: 'transparent',
+                                padding: '4px 2px',
+                                color: GH.ink,
+                                outline: 'none',
+                                width: 82,
+                                fontVariantNumeric: 'tabular-nums',
+                            }}
+                        />
+                        <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
+                        <input
+                            type="time"
+                            value={day.end_time}
+                            onChange={e => onUpdate({ end_time: e.target.value })}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 13,
+                                border: 'none',
+                                borderBottom: `1px solid ${GH.ink30}`,
+                                background: 'transparent',
+                                padding: '4px 2px',
+                                color: GH.ink,
+                                outline: 'none',
+                                width: 82,
+                                fontVariantNumeric: 'tabular-nums',
+                            }}
+                        />
+                    </div>
+                ) : (
+                    <div style={{ ...GH_MONO_LABEL }}>Выходной</div>
+                )}
+            </div>
+
+            {/* Location select */}
+            <div>
+                {enabled ? (
+                    <select
+                        value={day.location_id}
+                        onChange={e => onUpdate({ location_id: e.target.value })}
+                        style={{
+                            fontFamily: GH_MONO,
+                            fontSize: 12,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                            border: 'none',
+                            borderBottom: `1px solid ${GH.ink30}`,
+                            background: 'transparent',
+                            padding: '4px 2px',
+                            color: GH.ink,
+                            outline: 'none',
+                            width: '100%',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        {LOCATION_OPTIONS.map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <div style={GH_MONO_LABEL}>—</div>
                 )}
             </div>
         </div>

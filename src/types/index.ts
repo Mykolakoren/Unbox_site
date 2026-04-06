@@ -5,6 +5,7 @@ export interface Location {
     id: string;
     name: string;
     address: string;
+    description?: string;
     image?: string;
     features?: string[];
     lat?: number;
@@ -64,6 +65,9 @@ export interface PricingResult {
     discountAmount: number;
     discountType: 'none' | 'duration' | 'hot' | 'loyalty' | 'personal';
     finalPrice: number;
+    peakSurcharge: number; // extra amount from peak hours (included in basePrice)
+    peakSlotCount: number; // how many 30-min slots fell in peak hours
+    subscriptionPeakDebt: number; // GEL debt when subscription covers peak hours
 }
 
 export const EXTRAS: ExtraOption[] = [

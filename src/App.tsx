@@ -49,6 +49,7 @@ const CrmFinances = lazy(() => import('./pages/crm/CrmFinances').then(m => ({ de
 const CrmNotes = lazy(() => import('./pages/crm/CrmNotes').then(m => ({ default: m.CrmNotes })));
 const CrmSchedule = lazy(() => import('./pages/crm/CrmSchedule').then(m => ({ default: m.CrmSchedule })));
 const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ default: m.CrmSettings })));
+const CrmProfile = lazy(() => import('./pages/crm/CrmProfile').then(m => ({ default: m.CrmProfile })));
 
 import { glassPanel, glassSummary } from './utils/styles';
 
@@ -186,6 +187,7 @@ function App() {
           <Route path="notes" element={<CrmNotes />} />
           <Route path="schedule" element={<CrmSchedule />} />
           <Route path="settings" element={<CrmSettings />} />
+          <Route path="profile" element={<CrmProfile />} />
         </Route>
 
         <Route path="/admin" element={<ModuleErrorBoundary moduleName="Админ-панель"><AdminLayout /></ModuleErrorBoundary>}>

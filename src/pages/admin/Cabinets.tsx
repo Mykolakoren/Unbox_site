@@ -5,8 +5,29 @@ import { MapPin, Users, Ruler, Settings, ImageOff } from 'lucide-react';
 import clsx from 'clsx';
 import { ResourceModal } from '../../components/admin/ResourceModal';
 import type { Resource } from '../../types';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+
+/* ── Grid House module-scope constants (prefix: ghc) ── */
+const ghcHairline = `1px solid ${GH.ink10}`;
+const ghcMono: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: 10,
+    fontWeight: 500,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase',
+    color: GH.ink60,
+};
+const ghcH1: React.CSSProperties = {
+    fontFamily: GH_SANS,
+    fontWeight: 800,
+    fontSize: 'clamp(28px, 3.5vw, 42px)',
+    lineHeight: 0.95,
+    letterSpacing: '-0.02em',
+    margin: 0,
+};
 
 export function AdminCabinets() {
+    const gridHouse = useDesignFlag();
     const { resources, fetchResources } = useBookingStore();
     const [filterLocation, setFilterLocation] = useState<string | 'all'>('all');
 
@@ -26,6 +47,18 @@ export function AdminCabinets() {
         setEditingResource(resource);
         setIsModalOpen(true);
     };
+
+    if (gridHouse) return (
+        <GridHouseCabinets
+            filteredResources={filteredResources}
+            filterLocation={filterLocation}
+            setFilterLocation={setFilterLocation}
+            handleEdit={handleEdit}
+            editingResource={editingResource}
+            isModalOpen={isModalOpen}
+            setIsModalOpen={setIsModalOpen}
+        />
+    );
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -185,6 +218,318 @@ export function AdminCabinets() {
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
             />
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Grid House variant — Cabinets
+   ═══════════════════════════════════════════════════════════════ */
+
+interface GridHouseCabinetsProps {
+    filteredResources: Resource[];
+    filterLocation: string;
+    setFilterLocation: (v: string) => void;
+    handleEdit: (r: Resource) => void;
+    editingResource: Resource | null;
+    isModalOpen: boolean;
+    setIsModalOpen: (v: boolean) => void;
+}
+
+function GridHouseCabinets({
+    filteredResources,
+    filterLocation,
+    setFilterLocation,
+    handleEdit,
+    editingResource,
+    isModalOpen,
+    setIsModalOpen,
+}: GridHouseCabinetsProps) {
+    const total = String(filteredResources.length).padStart(3, '0');
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
+            {/* ── Header ── */}
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
+                <div style={{ ...ghcMono, marginBottom: 14 }}>Раздел · Кабинеты</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
+                    <h1 style={ghcH1}>Каталог пространств.</h1>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                        {total}
+                    </div>
+                </div>
+                <div style={{ ...ghcMono, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
+                    Показано кабинетов
+                </div>
+            </div>
+
+            {/* ── Location filter tabs ── */}
+            <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghcHairline, display: 'flex', gap: 0, marginBottom: 32, flexWrap: 'wrap' }}>
+                {[{ id: 'all', name: 'Все филиалы' }, ...LOCATIONS].map((loc) => {
+                    const active = filterLocation === loc.id;
+                    return (
+                        <button
+                            key={loc.id}
+                            onClick={() => setFilterLocation(loc.id)}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase' as const,
+                                padding: '18px 24px',
+                                background: active ? GH.ink : 'transparent',
+                                color: active ? GH.paper : GH.ink,
+                                border: 'none',
+                                borderRight: `1px solid ${GH.ink10}`,
+                                cursor: 'pointer',
+                            }}
+                        >
+                            {loc.name}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* ── Grid / Empty state ── */}
+            {filteredResources.length === 0 ? (
+                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghcHairline, padding: '80px 24px', textAlign: 'center' }}>
+                    <div style={{ ...ghcMono, marginBottom: 14 }}>→ Пусто</div>
+                    <h2 style={{ ...ghcH1, fontSize: 'clamp(28px, 3.5vw, 44px)' }}>Нет кабинетов.</h2>
+                </div>
+            ) : (
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                        gap: 0,
+                        borderTop: `2px solid ${GH.ink}`,
+                        borderLeft: `1px solid ${GH.ink10}`,
+                    }}
+                >
+                    {filteredResources.map((resource, idx) => {
+                        const coverPhoto = resource.photos?.[0];
+                        const locationName = LOCATIONS.find((l) => l.id === resource.locationId)?.name;
+                        const resourceServices = (resource.services || [])
+                            .map((id) => CABINET_SERVICES.find((s) => s.id === id))
+                            .filter(Boolean)
+                            .slice(0, 3);
+
+                        return (
+                            <div
+                                key={resource.id}
+                                style={{
+                                    borderBottom: `1px solid ${GH.ink10}`,
+                                    borderRight: `1px solid ${GH.ink10}`,
+                                    background: GH.paper,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                }}
+                            >
+                                {/* Photo / number frame */}
+                                <div style={{ borderBottom: ghcHairline, background: GH.paper, aspectRatio: '16 / 10', overflow: 'hidden', position: 'relative' }}>
+                                    {coverPhoto ? (
+                                        <img src={coverPhoto} alt={resource.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                    ) : (
+                                        <>
+                                            <div
+                                                style={{
+                                                    position: 'absolute',
+                                                    inset: 0,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    fontFamily: GH_SANS,
+                                                    fontWeight: 800,
+                                                    fontSize: 'clamp(80px, 14vw, 140px)',
+                                                    lineHeight: 0.8,
+                                                    letterSpacing: '-0.04em',
+                                                    color: GH.ink,
+                                                    fontVariantNumeric: 'tabular-nums',
+                                                    userSelect: 'none',
+                                                }}
+                                            >
+                                                {String(idx + 1).padStart(2, '0')}
+                                            </div>
+                                            <div style={{ position: 'absolute', top: 10, left: 12, ...ghcMono, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <ImageOff size={10} /> Без фото
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {/* Top badges */}
+                                    <div style={{ position: 'absolute', top: 10, right: 12, display: 'flex', gap: 4 }}>
+                                        <span
+                                            style={{
+                                                fontFamily: GH_MONO,
+                                                fontSize: 10,
+                                                letterSpacing: '0.14em',
+                                                textTransform: 'uppercase',
+                                                color: GH.paper,
+                                                background: GH.ink,
+                                                padding: '3px 8px',
+                                            }}
+                                        >
+                                            {resource.type === 'cabinet' ? 'Кабинет' : 'Капсула'}
+                                        </span>
+                                        {resource.isActive === false && (
+                                            <span
+                                                style={{
+                                                    fontFamily: GH_MONO,
+                                                    fontSize: 10,
+                                                    letterSpacing: '0.14em',
+                                                    textTransform: 'uppercase',
+                                                    color: GH.paper,
+                                                    background: GH.danger,
+                                                    padding: '3px 8px',
+                                                }}
+                                            >
+                                                Скрыт
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {resource.photos && resource.photos.length > 1 && (
+                                        <div style={{ position: 'absolute', bottom: 10, right: 12, ...ghcMono, color: GH.ink60, background: GH.paper, padding: '2px 6px' }}>
+                                            +{resource.photos.length - 1}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Body */}
+                                <div style={{ padding: 20, flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                    <div>
+                                        <div style={{ ...ghcMono, fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>
+                                            {String(idx + 1).padStart(3, '0')}
+                                        </div>
+                                        <div
+                                            style={{
+                                                fontFamily: GH_SANS,
+                                                fontWeight: 700,
+                                                fontSize: 20,
+                                                letterSpacing: '-0.015em',
+                                                lineHeight: 1.15,
+                                                color: GH.ink,
+                                            }}
+                                        >
+                                            {resource.name}
+                                        </div>
+                                        {locationName && (
+                                            <div style={{ ...ghcMono, color: GH.ink60, marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                <MapPin size={10} /> {locationName}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {resource.description && (
+                                        <div
+                                            style={{
+                                                fontFamily: GH_SANS,
+                                                fontSize: 13,
+                                                lineHeight: 1.5,
+                                                color: GH.ink60,
+                                                display: '-webkit-box',
+                                                WebkitLineClamp: 2,
+                                                WebkitBoxOrient: 'vertical',
+                                                overflow: 'hidden',
+                                            }}
+                                        >
+                                            {resource.description}
+                                        </div>
+                                    )}
+
+                                    {resourceServices.length > 0 && (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                            {resourceServices.map(
+                                                (svc) =>
+                                                    svc && (
+                                                        <span
+                                                            key={svc.id}
+                                                            title={svc.label}
+                                                            style={{
+                                                                fontFamily: GH_MONO,
+                                                                fontSize: 10,
+                                                                letterSpacing: '0.08em',
+                                                                textTransform: 'uppercase',
+                                                                padding: '3px 7px',
+                                                                color: GH.ink,
+                                                                border: `1px solid ${GH.ink10}`,
+                                                            }}
+                                                        >
+                                                            {svc.label}
+                                                        </span>
+                                                    )
+                                            )}
+                                            {(resource.services || []).length > 3 && (
+                                                <span style={{ ...ghcMono, padding: '3px 7px' }}>
+                                                    +{(resource.services || []).length - 3}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Card footer stats */}
+                                    <div
+                                        style={{
+                                            marginTop: 'auto',
+                                            paddingTop: 14,
+                                            borderTop: ghcHairline,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            gap: 8,
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', gap: 10, ...ghcMono, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                <Users size={11} /> {resource.capacity}
+                                            </span>
+                                            {resource.area && (
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                    <Ruler size={11} /> {resource.area}м²
+                                                </span>
+                                            )}
+                                            <span style={{ color: GH.ink, fontWeight: 700 }}>
+                                                {resource.hourlyRate}₾/ч
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => handleEdit(resource)}
+                                            style={{
+                                                fontFamily: GH_MONO,
+                                                fontSize: 10,
+                                                fontWeight: 600,
+                                                letterSpacing: '0.14em',
+                                                textTransform: 'uppercase',
+                                                padding: '6px 10px',
+                                                background: 'transparent',
+                                                color: GH.ink,
+                                                border: `1px solid ${GH.ink}`,
+                                                cursor: 'pointer',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: 5,
+                                            }}
+                                        >
+                                            <Settings size={11} /> Править
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* ── Footer ── */}
+            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, padding: '18px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ ...ghcMono, color: GH.ink30 }}>UNBOX ADMIN · 2026</div>
+                <div style={{ ...ghcMono, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                    {total} кабинетов
+                </div>
+            </div>
+
+            <ResourceModal resource={editingResource} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
         </div>
     );
 }

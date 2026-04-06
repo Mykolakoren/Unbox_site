@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import { toast } from 'sonner';
 import type { UserStore, BookingSlice, BookingHistoryItem } from '../types';
 import { bookingsApi } from '../../api/bookings';
 
@@ -18,14 +19,10 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             if (myResult.status === 'fulfilled') {
                 myBookings = myResult.value;
-            } else {
-                console.error("Failed to fetch my bookings", myResult.reason);
             }
 
             if (publicResult.status === 'fulfilled') {
                 publicBookings = publicResult.value;
-            } else {
-                console.error("Failed to fetch public bookings", publicResult.reason);
             }
 
             // 3. Merge: prefer 'myBookings' (more details) over 'publicBookings'
@@ -34,7 +31,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             set({ bookings: [...myBookings, ...uniquePublic] });
         } catch (error) {
-            console.error("Failed to fetch bookings (Critical)", error);
+            toast.error('Не удалось загрузить бронирования');
         }
     },
 
@@ -43,7 +40,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             const bookings = await bookingsApi.getAllBookings();
             set({ bookings });
         } catch (error) {
-            console.error("Failed to fetch all bookings", error);
+            toast.error('Не удалось загрузить бронирования');
         }
     },
 
@@ -66,8 +63,9 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             return newBooking;
 
-        } catch (error) {
-            console.error("Failed to create booking", error);
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            toast.error(detail || 'Не удалось создать бронирование');
             throw error;
         }
     },
@@ -161,9 +159,10 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             // Sync user balance/subscription
             await get().fetchCurrentUser();
 
-        } catch (error) {
-            console.error("Failed to cancel booking", error);
-            throw error; // Propagate error so UI knows it failed
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            toast.error(detail || 'Не удалось отменить бронирование');
+            throw error;
         }
     },
 

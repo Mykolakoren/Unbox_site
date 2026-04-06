@@ -28,3 +28,35 @@ async def upload_file(file: UploadFile = File(...)):
 
     # Return relative URL
     return {"url": f"/uploads/{filename}"}
+
+
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+@router.post("/task-file", response_model=Dict[str, str])
+async def upload_task_file(file: UploadFile = File(...)):
+    """Upload any file type for task attachments (max 20MB)."""
+    # Read and check size
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 20MB)")
+
+    file_ext = os.path.splitext(file.filename)[1] if file.filename else ""
+    unique_name = f"{uuid.uuid4()}{file_ext}"
+
+    # Store in uploads/tasks/ subfolder
+    tasks_dir = os.path.join(UPLOAD_DIR, "tasks")
+    os.makedirs(tasks_dir, exist_ok=True)
+    file_path = os.path.join(tasks_dir, unique_name)
+
+    try:
+        with open(file_path, "wb") as buffer:
+            buffer.write(contents)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
+
+    return {
+        "url": f"/uploads/tasks/{unique_name}",
+        "name": file.filename or unique_name,
+        "size": str(len(contents)),
+    }

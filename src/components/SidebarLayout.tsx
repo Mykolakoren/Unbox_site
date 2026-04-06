@@ -39,35 +39,26 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
 
     return (
         <div className="min-h-screen flex text-unbox-dark relative">
-            {/* Full-page photo background */}
-            <div className="fixed inset-0 z-0">
-                <img
-                    src="/hero-bg.jpg"
-                    alt=""
-                    className="w-full h-full object-cover object-[center_45%]"
-                />
-                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
-            </div>
+            {/* Background */}
+            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
 
             {/* Sidebar (Desktop) */}
             <aside className="w-64 hidden md:flex flex-col fixed h-full z-10 rounded-r-3xl my-2 ml-2"
                 style={{
-                    background: 'rgba(255,255,255,0.55)',
-                    backdropFilter: 'blur(28px) saturate(160%)',
-                    WebkitBackdropFilter: 'blur(28px) saturate(160%)',
-                    border: '1px solid rgba(255,255,255,0.65)',
-                    boxShadow: '4px 0 32px rgba(71,109,107,0.06), inset -1px 0 0 rgba(255,255,255,0.80)',
+                    background: 'rgba(255,255,255,0.92)',
+                    border: '1px solid rgba(0,0,0,0.06)',
+                    boxShadow: '4px 0 24px rgba(0,0,0,0.04)',
                 }}>
                 <div className="p-6 border-b border-unbox-light/50 flex items-center justify-center">
                     <Link to="/" className="group">
-                        <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200" />
+                        <img src="/unbox-logo.png" alt="Unbox" className="h-[50px] sm:h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200" />
                     </Link>
                 </div>
 
                 <div className="px-4 py-4 mb-2">
                     {currentUser && (
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-unbox-dark text-white flex items-center justify-center font-bold shadow-md">
+                            <div className="w-10 h-10 rounded-xl bg-[#476D6B] text-white flex items-center justify-center font-bold shadow-md shadow-unbox-green/15">
                                 {currentUser.name?.[0]?.toUpperCase() ?? '?'}
                             </div>
                             <div className="overflow-hidden">
@@ -80,22 +71,25 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
 
                 {customTopContent && <div className="px-4 mb-2">{customTopContent}</div>}
 
-                <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
-                    {navItems.map((item) => (
-                        <Link
-                            key={item.path}
-                            to={item.path}
-                            className={clsx(
-                                "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-300 font-medium",
-                                isActive(item.path, item.exact)
-                                    ? "bg-unbox-green text-white shadow-md shadow-unbox-green/20 translate-x-1"
-                                    : "text-unbox-grey hover:bg-unbox-light/50 hover:text-unbox-dark"
-                            )}
-                        >
-                            <item.icon size={18} className={isActive(item.path, item.exact) ? "text-white" : "text-unbox-grey"} />
-                            {item.label}
-                        </Link>
-                    ))}
+                <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto custom-scrollbar">
+                    {navItems.map((item) => {
+                        const active = isActive(item.path, item.exact);
+                        return (
+                            <Link
+                                key={item.path}
+                                to={item.path}
+                                className={clsx(
+                                    "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 font-medium text-[13px] relative",
+                                    active
+                                        ? "bg-unbox-green text-white shadow-md shadow-unbox-green/20"
+                                        : "text-unbox-dark/60 hover:bg-white/60 hover:text-unbox-dark"
+                                )}
+                            >
+                                <item.icon size={17} className={active ? "text-white" : "text-unbox-dark/40"} />
+                                {item.label}
+                            </Link>
+                        );
+                    })}
                 </nav>
 
                 <div className="p-4 border-t border-unbox-light/50">
@@ -117,7 +111,7 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
             {/* Mobile Header */}
             <header className="md:hidden fixed top-0 left-0 right-0 h-16 glass z-20 flex items-center justify-between px-4 border-b border-unbox-light/50">
                 <Link to="/" className="group">
-                    <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain group-hover:scale-[1.15] transition-transform duration-200" />
+                    <img src="/unbox-logo.png" alt="Unbox" className="h-[44px] object-contain group-hover:scale-[1.15] transition-transform duration-200" />
                 </Link>
                 <button
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -139,7 +133,7 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
             )}>
                 <div className="p-6 border-b border-unbox-light/50 flex items-center justify-between">
                     <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className="group">
-                        <img src="/unbox-logo.png" alt="Unbox" className="h-[81px] object-contain group-hover:scale-[1.15] transition-transform duration-200" />
+                        <img src="/unbox-logo.png" alt="Unbox" className="h-[50px] object-contain group-hover:scale-[1.15] transition-transform duration-200" />
                     </Link>
                     <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-unbox-light/30 rounded-full text-unbox-grey">
                         <X size={18} />

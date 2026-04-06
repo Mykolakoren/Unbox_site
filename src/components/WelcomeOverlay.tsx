@@ -16,10 +16,7 @@ export function WelcomeOverlay({ onSelect }: Props) {
             className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6"
         >
             {/* Background */}
-            <div className="absolute inset-0">
-                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
-                <div className="absolute inset-0" style={{ background: 'rgba(8,18,12,0.78)' }} />
-            </div>
+            <div className="absolute inset-0" style={{ background: '#1A2420' }} />
 
             {/* Content */}
             <div className="relative z-10 flex flex-col items-center w-full max-w-2xl">

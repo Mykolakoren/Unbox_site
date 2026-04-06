@@ -183,7 +183,7 @@ def quick_pay_session(
             amount=price,
             currency=client.currency,
             account=account,
-            date=ts.date,
+            date=datetime.now(),  # payment date = today, not session date
             session_id=ts.id,
         )
         session.add(payment)

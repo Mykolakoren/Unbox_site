@@ -1,13 +1,46 @@
+import { api } from '../api/client';
+
 /**
- * Fixed exchange rates to GEL.
- * Can be updated in CRM Settings in the future.
+ * Available currencies with display info.
  */
-export const EXCHANGE_RATES: Record<string, number> = {
+export const CURRENCIES = [
+    { code: 'GEL', symbol: '\u20BE', label: 'GEL' },
+    { code: 'USD', symbol: '$', label: 'USD' },
+    { code: 'EUR', symbol: '\u20AC', label: 'EUR' },
+    { code: 'RUB', symbol: '\u20BD', label: 'RUB' },
+    { code: 'USDT', symbol: '\u20AE', label: 'USDT' },
+];
+
+/**
+ * Exchange rates to GEL.
+ * Loaded from backend on init, hardcoded as fallback.
+ */
+export let EXCHANGE_RATES: Record<string, number> = {
     GEL: 1,
-    USD: 2.7,
-    EUR: 2.95,
-    RUB: 0.03,
+    USD: 2.69,
+    EUR: 3.11,
+    RUB: 0.034,
+    USDT: 2.69,
 };
+
+/** Fetch exchange rates from backend and update in-memory cache */
+let _ratesFetched = false;
+export async function fetchExchangeRates(): Promise<Record<string, number>> {
+    if (_ratesFetched) return EXCHANGE_RATES;
+    try {
+        const res = await api.get('/settings/exchange_rates');
+        if (res.data && typeof res.data === 'object') {
+            EXCHANGE_RATES = { ...EXCHANGE_RATES, ...res.data };
+            _ratesFetched = true;
+        }
+    } catch {
+        // Use hardcoded fallback
+    }
+    return EXCHANGE_RATES;
+}
+
+// Auto-fetch on module load (non-blocking)
+fetchExchangeRates();
 
 /** Convert amount to GEL equivalent */
 export function toGel(amount: number, currency: string): number {

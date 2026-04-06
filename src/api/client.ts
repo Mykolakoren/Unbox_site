@@ -51,9 +51,14 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
-        // Show toast for server errors (don't spam for 4xx which are handled by components)
         if (status && status >= 500) {
             toast.error('Ошибка сервера. Попробуйте позже.');
+        } else if (status === 422 && detail) {
+            // Validation errors from backend — show detail
+            const msg = typeof detail === 'string' ? detail : 'Ошибка валидации данных';
+            toast.error(msg);
+        } else if (status === 409 && detail) {
+            toast.error(typeof detail === 'string' ? detail : 'Конфликт данных');
         } else if (!error.response && error.code === 'ECONNABORTED') {
             toast.error('Превышено время ожидания. Проверьте соединение.');
         } else if (!error.response && error.message === 'Network Error') {

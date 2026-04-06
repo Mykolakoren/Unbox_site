@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUserStore, type User } from '../../store/userStore';
 import { Search, Edit, Shield, User as UserIcon, Plus, X, Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -6,8 +6,10 @@ import clsx from 'clsx';
 import { TimelineList } from '../../components/Timeline/TimelineList';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 export function AdminUsers() {
+    const gridHouse = useDesignFlag();
     const { users, updateUserById, fetchUsers } = useUserStore();
     const [search, setSearch] = useState('');
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -21,6 +23,21 @@ export function AdminUsers() {
         (u.name || '').toLowerCase().includes(search.toLowerCase()) ||
         (u.email || '').toLowerCase().includes(search.toLowerCase()) ||
         (u.phone || '').includes(search)
+    );
+
+    if (gridHouse) return (
+        <GridHouseAdminUsers
+            users={users}
+            filteredUsers={filteredUsers}
+            search={search}
+            setSearch={setSearch}
+            selectedUser={selectedUser}
+            setSelectedUser={setSelectedUser}
+            showAddUser={showAddUser}
+            setShowAddUser={setShowAddUser}
+            updateUserById={updateUserById}
+            fetchUsers={fetchUsers}
+        />
     );
 
     return (
@@ -325,7 +342,327 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
 // ── Edit User Modal ──────────────────────────────────────────────────────────
 
-function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () => void, onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GRID HOUSE — AdminUsers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ghMono: React.CSSProperties = {
+    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+};
+const ghHairline = `1px solid ${GH.ink10}`;
+
+interface GHAdminUsersProps {
+    users: User[];
+    filteredUsers: User[];
+    search: string;
+    setSearch: (v: string) => void;
+    selectedUser: User | null;
+    setSelectedUser: (u: User | null) => void;
+    showAddUser: boolean;
+    setShowAddUser: (v: boolean) => void;
+    updateUserById: (id: string, data: Partial<User>) => Promise<void>;
+    fetchUsers: () => Promise<void>;
+}
+
+function GridHouseAdminUsers(props: GHAdminUsersProps) {
+    const {
+        users, filteredUsers, search, setSearch,
+        selectedUser, setSelectedUser,
+        showAddUser, setShowAddUser,
+        updateUserById, fetchUsers,
+    } = props;
+
+    const totalFmt = String(filteredUsers.length).padStart(3, '0');
+    const allFmt = String(users.length).padStart(3, '0');
+
+    const roleLabel = (role: string | undefined) =>
+        role === 'owner' ? 'Владелец'
+        : role === 'senior_admin' ? 'Ст. Админ'
+        : role === 'admin' ? 'Админ'
+        : role === 'specialist' ? 'Специалист'
+        : 'Клиент';
+
+    const monoLabel: React.CSSProperties = {
+        ...ghMono,
+        fontWeight: 500,
+        color: GH.ink60,
+    };
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
+            {/* ── Header ── */}
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
+                <div style={{ ...monoLabel, color: GH.ink30, marginBottom: 14 }}>ADMIN · USERS</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
+                    <h1 style={{
+                        fontFamily: GH_SANS,
+                        fontWeight: 800,
+                        fontSize: 'clamp(28px, 3.5vw, 42px)',
+                        lineHeight: 1.1,
+                        letterSpacing: '-0.02em',
+                        margin: 0,
+                    }}>
+                        Реестр клиентов
+                    </h1>
+                    <button
+                        onClick={() => setShowAddUser(true)}
+                        style={{
+                            background: GH.ink,
+                            color: GH.paper,
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            letterSpacing: '0.18em',
+                            textTransform: 'uppercase',
+                            padding: '14px 22px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 10,
+                        }}
+                    >
+                        <Plus size={14} /> Новый клиент
+                    </button>
+                </div>
+            </div>
+
+            {/* ── KPI strip ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 32, marginBottom: 32, alignItems: 'end' }}>
+                <div>
+                    <p style={{ ...ghMono, color: GH.ink30, marginBottom: 4, margin: 0 }}>ВСЕГО</p>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                        {allFmt}
+                    </span>
+                </div>
+                <div style={{ display: 'flex', gap: 28, paddingBottom: 6, flexWrap: 'wrap' }}>
+                    <div>
+                        <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.accent, fontVariantNumeric: 'tabular-nums' }}>
+                            {totalFmt}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Search ── */}
+            <div style={{ marginBottom: 28 }}>
+                <div style={{ ...monoLabel, marginBottom: 8 }}>ПОИСК</div>
+                <div style={{ position: 'relative', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8 }}>
+                    <Search style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-80%)', width: 16, height: 16, color: GH.ink60 }} />
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Имя, email, телефон"
+                        style={{
+                            width: '100%',
+                            paddingLeft: 28,
+                            paddingRight: 28,
+                            background: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            fontFamily: GH_SANS,
+                            fontSize: 16,
+                            color: GH.ink,
+                        }}
+                    />
+                    {search && (
+                        <button
+                            onClick={() => setSearch('')}
+                            style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-80%)', background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, padding: 4 }}
+                            aria-label="Очистить поиск"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Table ── */}
+            {filteredUsers.length === 0 ? (
+                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghHairline, padding: '80px 24px', textAlign: 'center' }}>
+                    <div style={{ ...monoLabel, marginBottom: 14 }}>ПУСТО</div>
+                    <h2 style={{
+                        fontFamily: GH_SANS,
+                        fontWeight: 800,
+                        fontSize: 'clamp(28px, 3.5vw, 44px)',
+                        lineHeight: 0.95,
+                        letterSpacing: '-0.02em',
+                        margin: 0,
+                    }}>
+                        Никто не найден.
+                    </h2>
+                </div>
+            ) : (
+                <div style={{ borderTop: `2px solid ${GH.ink}` }}>
+                    {/* Column headers */}
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
+                        gap: 16,
+                        padding: '12px 0',
+                        borderBottom: ghHairline,
+                        ...monoLabel,
+                    }}>
+                        <div>#</div>
+                        <div>КЛИЕНТ</div>
+                        <div>РОЛЬ</div>
+                        <div style={{ textAlign: 'right' }}>БАЛАНС</div>
+                        <div style={{ textAlign: 'center' }}>СКИДКА</div>
+                        <div>ТИП ЦЕН</div>
+                        <div style={{ textAlign: 'right' }}></div>
+                    </div>
+
+                    {filteredUsers.map((user, idx) => (
+                        <div
+                            key={user.email}
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
+                                gap: 16,
+                                padding: '18px 0',
+                                borderBottom: ghHairline,
+                                alignItems: 'center',
+                            }}
+                        >
+                            <div style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 11,
+                                letterSpacing: '0.1em',
+                                color: GH.ink60,
+                                fontVariantNumeric: 'tabular-nums',
+                            }}>
+                                {String(idx + 1).padStart(3, '0')}
+                            </div>
+                            <Link
+                                to={`/admin/users/${encodeURIComponent(user.email)}`}
+                                style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+                            >
+                                <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                    {user.name}
+                                    {user.isAdmin && <Shield size={13} color={GH.ink60} />}
+                                </div>
+                                <div style={{ ...monoLabel, color: GH.ink60, marginTop: 3 }}>
+                                    {user.email}{user.phone ? ` · ${user.phone}` : ''}
+                                </div>
+                            </Link>
+                            <button
+                                onClick={() => setSelectedUser(user)}
+                                title="Изменить роль"
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    padding: '5px 9px',
+                                    background: user.role === 'owner' ? GH.ink : 'transparent',
+                                    color: user.role === 'owner' ? GH.paper : GH.ink,
+                                    border: `1px solid ${GH.ink}`,
+                                    cursor: 'pointer',
+                                    justifySelf: 'start',
+                                }}
+                            >
+                                {roleLabel(user.role)}
+                            </button>
+                            <div style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 14,
+                                fontWeight: 600,
+                                textAlign: 'right',
+                                color: user.balance < 0 ? GH.danger : GH.ink,
+                                fontVariantNumeric: 'tabular-nums',
+                            }}>
+                                {user.balance.toFixed(0)} GEL
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                                {user.personalDiscountPercent ? (
+                                    <span style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        padding: '3px 7px',
+                                        color: GH.paper,
+                                        background: GH.ink,
+                                        letterSpacing: '0.05em',
+                                    }}>
+                                        {user.personalDiscountPercent}%
+                                    </span>
+                                ) : (
+                                    <span style={{ ...monoLabel, color: GH.ink30 }}></span>
+                                )}
+                            </div>
+                            <div style={{ ...monoLabel, color: GH.ink }}>
+                                {user.pricingSystem === 'personal' ? 'ПЕРСОНАЛЬНЫЙ' : 'СТАНДАРТ'}
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                                <Link
+                                    to={`/admin/users/${encodeURIComponent(user.email)}`}
+                                    title="Карточка"
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        background: 'transparent',
+                                        border: ghHairline,
+                                        cursor: 'pointer',
+                                        color: GH.ink60,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <UserIcon size={13} />
+                                </Link>
+                                <button
+                                    onClick={() => setSelectedUser(user)}
+                                    title="Быстрые настройки"
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        background: 'transparent',
+                                        border: ghHairline,
+                                        cursor: 'pointer',
+                                        color: GH.ink60,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <Edit size={13} />
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* ── Footer ── */}
+            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, paddingTop: 16 }}>
+                <p style={{ ...ghMono, color: GH.ink30, margin: 0 }}>UNBOX ADMIN · 2026</p>
+            </div>
+
+            {/* Modals (reuse legacy internals) */}
+            {selectedUser && (
+                <UserEditModal
+                    user={selectedUser}
+                    onClose={() => setSelectedUser(null)}
+                    onUpdate={updateUserById}
+                />
+            )}
+            {showAddUser && (
+                <AddUserModal
+                    onClose={() => setShowAddUser(false)}
+                    onCreated={() => { setShowAddUser(false); fetchUsers(); }}
+                />
+            )}
+        </div>
+    );
+}
+
+// ── Edit User Modal ──────────────────────────────────────────────────────────
+
+function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () => void; onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
     const currentUser = useUserStore(s => s.currentUser);
     const isOwner = currentUser?.role === 'owner';
     const isSeniorAdmin = currentUser?.role === 'senior_admin';

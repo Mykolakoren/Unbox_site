@@ -10,18 +10,32 @@ import { Button } from '../ui/Button';
 import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock } from 'lucide-react';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
+import { isPeakTime } from '../../utils/pricing';
 
-export function ChessboardStep() {
+// Hook to detect mobile viewport
+function useIsMobile(breakpoint = 768) {
+    const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < breakpoint);
+    useEffect(() => {
+        const handler = () => setIsMobile(window.innerWidth < breakpoint);
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+    }, [breakpoint]);
+    return isMobile;
+}
+
+export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const {
         locationId, date, setDate, format: bookingFormat, groupSize,
         selectedSlots,
-        setStep
+        setStep,
+        highlightedResourceId, setHighlightedResourceId
     } = useBookingStore();
 
     const { bookings, fetchBookings, fetchAllBookings, currentUser } = useUserStore();
     const bookingForUser = useBookingStore(s => s.bookingForUser);
     const isAdminBooking = !!bookingForUser && !!currentUser?.isAdmin;
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
+    const isMobile = useIsMobile();
 
     // Refresh bookings on mount — admin sees ALL bookings, users see only their own
     useEffect(() => {
@@ -446,6 +460,255 @@ export function ChessboardStep() {
         }
     };
 
+    // ── Mobile: resource selector state ──
+    const [mobileResourceIdx, setMobileResourceIdx] = useState(0);
+    const mobileResource = resources[mobileResourceIdx] || resources[0];
+
+    // Mobile: tap handler — hour tap selects pair (XX:00+XX:30), can extend further
+    const handleMobileTap = (resId: string, timeStr: string, _isHourTap: boolean) => {
+        if (isSlotBlocked(resId, timeStr)) {
+            setWaitlistData({ resourceId: resId, time: timeStr });
+            setIsWaitlistOpen(true);
+            return;
+        }
+
+        const slotId = `${resId}|${timeStr}`;
+        const currentBlock = getBlockForResource(resId);
+        const slotIdx = timeSlots.indexOf(timeStr);
+        const setSlotRange = useBookingStore.getState().setSlotRange;
+
+        if (selectedSlots.includes(slotId)) {
+            setSlotRange(resId, []);
+            return;
+        }
+
+        if (currentBlock) {
+            // Extending existing block — always +1 slot at a time
+            const newStart = Math.min(currentBlock.start, slotIdx);
+            const newEnd = Math.max(currentBlock.end, slotIdx);
+            const slots: string[] = [];
+            for (let i = newStart; i <= newEnd; i++) {
+                if (isSlotBlocked(resId, timeSlots[i])) return;
+                slots.push(timeSlots[i]);
+            }
+            setSlotRange(resId, slots);
+        } else {
+            // First selection — ALWAYS auto-select pair (1h minimum)
+            const pairStart = slotIdx % 2 === 0 ? slotIdx : slotIdx - 1;
+            const pairEnd = pairStart + 1;
+            if (pairEnd >= timeSlots.length) return;
+            const slots: string[] = [];
+            for (let i = pairStart; i <= pairEnd; i++) {
+                if (isSlotBlocked(resId, timeSlots[i])) return;
+                slots.push(timeSlots[i]);
+            }
+            setSlotRange(resId, slots);
+        }
+    };
+
+    // Group timeSlots into hour-pairs for mobile 2-column grid
+    const mobileHourPairs = useMemo(() => {
+        const pairs: [string, string | null][] = [];
+        for (let i = 0; i < timeSlots.length; i += 2) {
+            pairs.push([timeSlots[i], timeSlots[i + 1] ?? null]);
+        }
+        return pairs;
+    }, [timeSlots]);
+
+    // ── MOBILE VIEW ──
+    if (isMobile) {
+        const mobileBlock = mobileResource ? getBlockForResource(mobileResource.id) : null;
+        const mobileBlockStart = mobileBlock ? timeSlots[mobileBlock.start] : null;
+        const mobileBlockEnd = mobileBlock ? (() => {
+            const [h, m] = timeSlots[mobileBlock.end].split(':').map(Number);
+            return format(addMinutes(setMinutes(setHours(startOfToday(), h), m), 30), 'HH:mm');
+        })() : null;
+        const mobileBlockDuration = mobileBlock ? (mobileBlock.end - mobileBlock.start + 1) * 30 : 0;
+
+        return (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 className="text-xl font-bold">Выберите время</h2>
+                        <p className="text-unbox-grey text-sm">
+                            {format(date, 'd MMMM yyyy', { locale: ru })}
+                        </p>
+                    </div>
+                    <button onClick={() => setStep(1)} className="p-2 rounded-xl border border-unbox-light text-unbox-grey">
+                        <ArrowLeft size={18} />
+                    </button>
+                </div>
+
+                {/* Week Picker — compact mobile */}
+                <div className="flex items-center gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"
+                    style={{ background: 'rgba(212,226,225,0.35)' }}>
+                    <button onClick={handlePrevWeek} className="p-1.5 rounded-lg hover:bg-white text-unbox-grey">
+                        <ChevronLeft size={16} />
+                    </button>
+                    <div className="flex-1 grid grid-cols-7 gap-1">
+                        {weekDays.map(day => {
+                            const isSelectedDate = isSameDay(day, date);
+                            return (
+                                <button
+                                    key={day.toISOString()}
+                                    onClick={() => setDate(day)}
+                                    className={clsx(
+                                        "flex flex-col items-center py-2 rounded-xl transition-all text-xs",
+                                        isSelectedDate
+                                            ? "bg-unbox-green text-white shadow-md"
+                                            : "bg-white text-unbox-grey border border-unbox-light/50"
+                                    )}
+                                >
+                                    <span className="text-[9px] font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
+                                    <span className="text-sm font-bold">{format(day, 'd')}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <button onClick={handleNextWeek} className="p-1.5 rounded-lg hover:bg-white text-unbox-grey">
+                        <ChevronRight size={16} />
+                    </button>
+                </div>
+
+                {/* Resource selector — horizontal scroll */}
+                <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
+                    {resources.map((r, idx) => (
+                        <button
+                            key={r.id}
+                            onClick={() => setMobileResourceIdx(idx)}
+                            className={clsx(
+                                "shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
+                                mobileResourceIdx === idx
+                                    ? "bg-unbox-green text-white border-unbox-green shadow-sm"
+                                    : "bg-white text-unbox-grey border-unbox-light hover:border-unbox-green/40"
+                            )}
+                        >
+                            <div className="font-bold text-xs whitespace-nowrap">{r.name}</div>
+                            <div className="text-[10px] opacity-70 whitespace-nowrap">{r.capacity} чел. · {getPrice(r.id)}/ч</div>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Selected block summary */}
+                {mobileBlock && mobileResource && (
+                    <div className="flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3 mb-3">
+                        <div>
+                            <div className="text-sm font-bold text-unbox-dark">{mobileBlockStart} — {mobileBlockEnd}</div>
+                            <div className="text-xs text-unbox-grey">{mobileBlockDuration} мин · {mobileResource.name}</div>
+                        </div>
+                        <button
+                            onClick={() => useBookingStore.getState().setSlotRange(mobileResource.id, [])}
+                            className="p-1.5 rounded-lg bg-red-100 text-red-500 hover:bg-red-200 transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+                )}
+
+                {/* 2-column time grid: XX:00 | XX:30 */}
+                <div className="rounded-2xl bg-white/60 backdrop-blur-sm border border-unbox-light/30 p-2 space-y-1.5">
+                    {mobileResource && mobileHourPairs.map(([left, right]) => (
+                        <div key={left} className="flex gap-1.5">
+                            {[left, right].map((time, colIdx) => {
+                                if (!time) return <div key={`empty-${colIdx}`} className="flex-1" />;
+                                const isHourCol = colIdx === 0;
+                                const blocked = isSlotBlocked(mobileResource.id, time);
+                                const selected = isSelected(mobileResource.id, time);
+                                const bookerName = blocked ? getSlotBookerInfo(mobileResource.id, time) : null;
+
+                                return (
+                                    <button
+                                        key={time}
+                                        onClick={() => {
+                                            if (blocked) {
+                                                setWaitlistData({ resourceId: mobileResource.id, time });
+                                                setIsWaitlistOpen(true);
+                                            } else {
+                                                handleMobileTap(mobileResource.id, time, isHourCol);
+                                            }
+                                        }}
+                                        disabled={blocked && !bookerName}
+                                        className={clsx(
+                                            "flex-1 flex items-center justify-between px-3 py-3 rounded-xl transition-all min-h-[48px]",
+                                            blocked
+                                                ? "bg-gray-50 text-gray-300 cursor-not-allowed"
+                                                : selected
+                                                    ? "bg-unbox-green text-white shadow-sm"
+                                                    : isPeakTime(time)
+                                                        ? "bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]"
+                                                        : "bg-white text-unbox-dark border border-unbox-light/40 active:scale-[0.97]"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className={clsx(
+                                                "text-sm font-bold tabular-nums",
+                                                selected ? "text-white" : blocked ? "text-gray-300" : "text-unbox-dark"
+                                            )}>
+                                                {time}
+                                            </span>
+                                            {blocked && bookerName && (
+                                                <span className="text-[10px] text-gray-400 truncate">{bookerName}</span>
+                                            )}
+                                            {blocked && !bookerName && (
+                                                <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                                                    <Clock size={9} /> Занято
+                                                </span>
+                                            )}
+                                        </div>
+                                        {selected ? (
+                                            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                                            </div>
+                                        ) : !blocked ? (
+                                            <div className="w-5 h-5 rounded-full border-2 border-unbox-light shrink-0" />
+                                        ) : null}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ))}
+                </div>
+
+                {/* Fixed bottom bar */}
+                <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3">
+                    <div
+                        className="rounded-2xl p-3.5 flex items-center justify-between"
+                        style={{
+                            background: 'rgba(255,255,255,0.85)',
+                            backdropFilter: 'blur(24px)',
+                            WebkitBackdropFilter: 'blur(24px)',
+                            border: '1px solid rgba(255,255,255,0.50)',
+                            boxShadow: '0 -4px 20px rgba(0,0,0,0.08)',
+                        }}
+                    >
+                        <div className="text-sm text-unbox-dark">
+                            {selectedSlots.length > 0 ? (
+                                <span><span className="font-bold text-unbox-green">{selectedSlots.length * 30}</span> мин выбрано</span>
+                            ) : (
+                                <span className="text-unbox-grey">Выберите слоты</span>
+                            )}
+                        </div>
+                        <Button disabled={selectedSlots.length === 0} onClick={handleNext} size="sm" className="shadow-md px-6">
+                            Далее <ArrowRight size={14} className="ml-1" />
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Waitlist modal */}
+                <WaitlistModal
+                    isOpen={isWaitlistOpen}
+                    onClose={() => setIsWaitlistOpen(false)}
+                    resourceId={waitlistData?.resourceId || ''}
+                    startTime={waitlistData?.time || ''}
+                    date={date}
+                />
+            </div>
+        );
+    }
+
+    // ── DESKTOP VIEW (original) ──
+
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -456,16 +719,32 @@ export function ChessboardStep() {
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button
-                        variant={showAllLocations ? 'primary' : 'outline'}
-                        size="sm"
-                        onClick={() => setShowAllLocations(!showAllLocations)}
-                    >
-                        {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setStep(1)}>
-                        <ArrowLeft size={16} className="mr-2" /> Назад
-                    </Button>
+                    {!embedded && (
+                        <>
+                            <Button
+                                variant={showAllLocations ? 'primary' : 'outline'}
+                                size="sm"
+                                onClick={() => setShowAllLocations(!showAllLocations)}
+                            >
+                                {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => setStep(1)}>
+                                <ArrowLeft size={16} className="mr-2" /> Назад
+                            </Button>
+                        </>
+                    )}
+                    {highlightedResourceId && locationId && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                setHighlightedResourceId(null);
+                                window.history.back();
+                            }}
+                        >
+                            <ArrowLeft size={16} className="mr-2" /> К выбору кабинетов
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -505,31 +784,38 @@ export function ChessboardStep() {
 
 
             {/* The Grid - Refactored to Horizontal Layout */}
-            <div className="border border-white/30 rounded-2xl overflow-x-auto scrollbar-visible bg-white/40 backdrop-blur-sm shadow-sm isolate">
+            <div className="border border-white/40 rounded-2xl overflow-x-auto scrollbar-visible glass-card isolate">
                 <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
                     <thead className="text-unbox-dark font-medium border-b border-unbox-light/60"
                         style={{ background: 'rgba(212,226,225,0.45)' }}>
                         <tr>
-                            <th className="sticky left-0 backdrop-blur-sm p-4 border-r border-unbox-light/50 z-20 w-40 font-bold text-unbox-dark"
+                            <th className="sticky left-0 backdrop-blur-sm p-3 border-r border-unbox-light/50 z-20 w-32 font-bold text-unbox-dark text-xs"
                                 style={{ background: 'rgba(212,226,225,0.60)' }}>
                                 Кабинет
                             </th>
                             {timeSlots.map(time => (
-                                <th key={time} className="p-2 text-center min-w-[60px] border-r border-unbox-light/40 text-[10px] uppercase font-bold text-unbox-dark/60">
+                                <th key={time} className={clsx(
+                                    "p-1.5 text-center min-w-[48px] border-r border-unbox-light/40 text-[10px] uppercase font-bold",
+                                    isPeakTime(time) ? "text-amber-600 bg-amber-50/40" : "text-unbox-dark/60"
+                                )}>
                                     {time}
                                 </th>
                             ))}
-                            <th className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/50 z-20 w-40 p-2"
-                                style={{ background: 'rgba(212,226,225,0.60)' }} />
+                            {/* no sticky right column */}
                         </tr>
                     </thead>
                     <tbody>
-                        {resources.map(r => (
-                            <tr key={r.id} className="hover:bg-unbox-light/10 group">
-                                <td className="sticky left-0 backdrop-blur-sm p-4 border-r border-unbox-light/40 z-10 shadow-[2px_0_5px_rgba(71,109,107,0.04)]"
-                                    style={{ background: 'rgba(212,226,225,0.50)' }}>
-                                    <div className="font-bold text-unbox-dark">{r.name}</div>
-                                    <div className="text-[10px] text-unbox-grey">{r.capacity} чел. • {getPrice(r.id)}/час</div>
+                        {resources.map(r => {
+                            const isHighlighted = highlightedResourceId === r.id;
+                            return (
+                            <tr key={r.id} className={clsx("hover:bg-unbox-light/10 group", isHighlighted && "bg-unbox-green/[0.06]")}>
+                                <td className={clsx(
+                                    "sticky left-0 backdrop-blur-sm p-3 border-r z-10 shadow-[2px_0_5px_rgba(71,109,107,0.04)] w-32",
+                                    isHighlighted ? "border-r-unbox-green/40" : "border-r-unbox-light/40"
+                                )}
+                                    style={{ background: isHighlighted ? 'rgba(71,109,107,0.12)' : 'rgba(212,226,225,0.50)' }}>
+                                    <div className={clsx("font-bold text-xs leading-tight", isHighlighted ? "text-unbox-green" : "text-unbox-dark")}>{r.name}</div>
+                                    <div className="text-[9px] text-unbox-grey leading-tight">{r.capacity} чел. • {getPrice(r.id)}/час</div>
                                 </td>
                                 {timeSlots.map(time => {
                                     const isBlocked = isSlotBlocked(r.id, time);
@@ -581,7 +867,9 @@ export function ChessboardStep() {
                                                             ? dragModeRef.current === 'move' ? "bg-unbox-green text-white z-10 cursor-grabbing shadow-md" : "bg-unbox-green text-white z-10 cursor-grab shadow-sm"
                                                             : isHovered
                                                                 ? "bg-unbox-green/10 text-unbox-dark cursor-pointer slot-hover-lift font-bold"
-                                                                : "hover:bg-unbox-green/5 text-unbox-dark/50 hover:text-unbox-green cursor-pointer transition-all",
+                                                                : isPeakTime(time)
+                                                                    ? "bg-amber-50/70 hover:bg-amber-100/60 text-amber-600/70 hover:text-amber-700 cursor-pointer transition-all"
+                                                                    : "hover:bg-unbox-green/5 text-unbox-dark/50 hover:text-unbox-green cursor-pointer transition-all",
                                                     selected && !isSingleBlock && !isBlockStart && "border-l border-white/20",
                                                     isBlockStart && "rounded-l-lg",
                                                     isBlockEnd && "rounded-r-lg"
@@ -634,21 +922,10 @@ export function ChessboardStep() {
                                         </td>
                                     );
                                 })}
-                                {/* Sticky right action cell */}
-                                <td className="sticky right-0 backdrop-blur-sm border-l border-unbox-light/40 z-10 h-14 p-2 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]"
-                                    style={{ background: 'rgba(212,226,225,0.50)' }}>
-                                    {getBlockForResource(r.id) ? (
-                                        <button
-                                            onClick={handleNext}
-                                            className="flex items-center gap-1.5 bg-unbox-green text-white text-xs font-bold px-3 py-2 rounded-xl shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap animate-in fade-in zoom-in-90 duration-200 h-full"
-                                        >
-                                            <ArrowRight size={14} className="shrink-0" />
-                                            <span>Продолжить</span>
-                                        </button>
-                                    ) : null}
-                                </td>
+                                {/* no sticky right action cell */}
                             </tr>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -666,11 +943,11 @@ export function ChessboardStep() {
             <div
                 className="rounded-2xl p-4 flex justify-center"
                 style={{
-                    background: 'rgba(255,255,255,0.18)',
+                    background: 'rgba(255,255,255,0.82)',
                     backdropFilter: 'blur(24px) saturate(150%)',
                     WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-                    border: '1px solid rgba(255,255,255,0.30)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+                    border: '1px solid rgba(255,255,255,0.50)',
+                    boxShadow: '0 -4px 24px rgba(0,0,0,0.08)',
                 }}
             >
                 <div className="w-full flex justify-between items-center">
@@ -678,7 +955,7 @@ export function ChessboardStep() {
                         Выбрано: <span className="font-bold text-unbox-green">{selectedSlots.length}</span> слотов
                         {selectedBlocks.length > 1 && <span className="ml-2 text-unbox-grey">({selectedBlocks.length} кабинета)</span>}
                     </div>
-                    <Button disabled={selectedSlots.length === 0} onClick={handleNext} className="shadow-lg px-8">
+                    <Button disabled={selectedSlots.length === 0} onClick={handleNext} className="shadow-lg shadow-unbox-green/20 px-8">
                         Далее <ArrowRight size={16} className="ml-2" />
                     </Button>
                 </div>

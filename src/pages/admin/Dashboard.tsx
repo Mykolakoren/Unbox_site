@@ -1,45 +1,49 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { startOfToday, startOfMonth, endOfMonth, isSameDay, isAfter, format } from 'date-fns';
+import { startOfToday, startOfMonth, endOfMonth, isAfter, format } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
 import { useCashboxStore } from '../../store/cashboxStore';
+import { cashboxApi, type CashboxAnalytics } from '../../api/cashbox';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import type { BookingHistoryItem, User as AppUser } from '../../store/types';
 
 
 export function AdminDashboard() {
     const { bookings, users, fetchUsers, fetchAllBookings } = useUserStore();
-    const { transactions, fetchTransactions, fetchBalance, balance } = useCashboxStore();
+    const { fetchBalance, balance } = useCashboxStore();
+
+    // Local analytics state — avoids polluting the shared store used by Finance page
+    const [monthAnalytics, setMonthAnalytics] = useState<CashboxAnalytics | null>(null);
 
     useEffect(() => {
         fetchUsers();
         fetchAllBookings();
         fetchBalance();
-        // Fetch transactions for current month only (server-side filter, no pagination issue)
-        const now = new Date();
-        fetchTransactions({
-            dateFrom: format(startOfMonth(now), "yyyy-MM-dd'T'00:00:00"),
-            dateTo: format(endOfMonth(now), "yyyy-MM-dd'T'23:59:59"),
-            limit: 1000,
-        });
-    }, [fetchUsers, fetchAllBookings, fetchTransactions, fetchBalance]);
 
-    // 1. Calculate Stats
+        // Fetch accurate server-side SUM for current month
+        const now = new Date();
+        const dateFrom = format(startOfMonth(now), "yyyy-MM-dd'T'00:00:00");
+        const dateTo = format(endOfMonth(now), "yyyy-MM-dd'T'23:59:59");
+        cashboxApi.getAnalytics(dateFrom, dateTo)
+            .then(setMonthAnalytics)
+            .catch(() => {});
+    }, [fetchUsers, fetchAllBookings, fetchBalance]);
+
     const now = new Date();
     const today = startOfToday();
+    const todayStr = format(today, 'yyyy-MM-dd');
+
+    // Server-side accurate totals
+    const monthRevenue = monthAnalytics?.totalIncome ?? 0;
+
+    // Today's income from daily breakdown
+    const todayRevenue = monthAnalytics?.dailyData
+        ?.filter(d => d.date === todayStr)
+        ?.reduce((sum, d) => sum + (d.income || 0), 0) ?? 0;
 
     const confirmedBookings = bookings.filter(b => b.status === 'confirmed');
-
-    // Revenue from cashbox (income transactions)
-    // transactions are pre-filtered to current month by fetchTransactions() above
-    const incomeTransactions = transactions.filter(t => t.type === 'income');
-    const todayRevenue = incomeTransactions
-        .filter(t => isSameDay(new Date(t.date), today))
-        .reduce((sum, t) => sum + (t.amount || 0), 0);
-    // monthRevenue = sum of all income transactions (already pre-filtered to current month by fetchTransactions)
-    const monthRevenue = incomeTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
-
-    // Counts
     const totalUsers = users.length;
     const activeBookingsCount = confirmedBookings.filter(b => isAfter(new Date(b.date), now)).length;
     const reRentedCount = bookings.filter(b => b.status === 're-rented').length;
@@ -47,13 +51,13 @@ export function AdminDashboard() {
     const stats = [
         {
             label: 'Выручка за сегодня',
-            value: `${todayRevenue} ₾`,
+            value: `${todayRevenue.toFixed(2)} ₾`,
             icon: TrendingUp,
             color: 'bg-unbox-light text-unbox-green',
         },
         {
             label: 'Выручка за месяц',
-            value: `${monthRevenue} ₾`,
+            value: `${monthRevenue.toFixed(2)} ₾`,
             icon: CreditCard,
             color: 'bg-unbox-light text-unbox-dark',
         },
@@ -75,6 +79,23 @@ export function AdminDashboard() {
     const recentBookings = [...bookings]
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5);
+
+    // ── Grid House design flag — rollback-safe variant ──
+    if (useDesignFlag()) {
+        return (
+            <GridHouseAdminDashboard
+                todayRevenue={todayRevenue}
+                monthRevenue={monthRevenue}
+                activeBookingsCount={activeBookingsCount}
+                totalUsers={totalUsers}
+                reRentedCount={reRentedCount}
+                balance={balance}
+                recentBookings={recentBookings}
+                users={users}
+                monthAnalytics={monthAnalytics}
+            />
+        );
+    }
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
@@ -142,7 +163,7 @@ export function AdminDashboard() {
                     </div>
                 </div>
 
-                {/* Quick Actions (Future placeholder) */}
+                {/* Quick Stats */}
                 <div className="bg-unbox-dark rounded-2xl p-6 text-white shadow-lg">
                     <h2 className="font-bold text-lg mb-2">Быстрый старт</h2>
                     <p className="text-unbox-light/60 text-sm mb-6">
@@ -153,7 +174,7 @@ export function AdminDashboard() {
                         <div className="flex items-center gap-3 bg-white/10 p-3 rounded-lg border border-white/10">
                             <CreditCard size={20} className="text-unbox-green" />
                             <div className="text-sm">
-                                <div className="font-medium">Общая выручка</div>
+                                <div className="font-medium">Баланс кассы</div>
                                 <div className="text-white/60">{balance.toFixed(0)} ₾ в кассе</div>
                             </div>
                         </div>
@@ -165,6 +186,222 @@ export function AdminDashboard() {
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// GRID HOUSE VARIANT
+// Rollback: delete everything below + the early-return block above.
+// ═════════════════════════════════════════════════════════════════════════
+
+interface GHDashProps {
+    todayRevenue: number;
+    monthRevenue: number;
+    activeBookingsCount: number;
+    totalUsers: number;
+    reRentedCount: number;
+    balance: number;
+    recentBookings: BookingHistoryItem[];
+    users: AppUser[];
+    monthAnalytics: CashboxAnalytics | null;
+}
+
+function GridHouseAdminDashboard({
+    todayRevenue,
+    monthRevenue,
+    activeBookingsCount,
+    totalUsers,
+    reRentedCount,
+    balance,
+    recentBookings,
+    users,
+    monthAnalytics,
+}: GHDashProps) {
+    const hairline = `1px solid ${GH.ink10}`;
+    const monoLabel: React.CSSProperties = {
+        fontFamily: GH_MONO,
+        fontSize: 10,
+        letterSpacing: '0.18em',
+        textTransform: 'uppercase',
+        color: GH.ink60,
+    };
+    const bigNumber: React.CSSProperties = {
+        fontFamily: GH_SANS,
+        fontSize: 44,
+        fontWeight: 800,
+        letterSpacing: '-0.02em',
+        lineHeight: 1,
+        fontVariantNumeric: 'tabular-nums',
+    };
+
+    const fmt = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n);
+
+    const kpi = [
+        { label: 'Выручка · Сегодня', num: `${fmt(todayRevenue)} ₾`, sub: format(new Date(), 'dd MMMM') },
+        { label: 'Выручка · Месяц', num: `${fmt(monthRevenue)} ₾`, sub: format(new Date(), 'LLLL yyyy') },
+        { label: 'Броней · Активных', num: String(activeBookingsCount).padStart(2, '0'), sub: 'Впереди' },
+        { label: 'Клиентов · Всего', num: String(totalUsers).padStart(2, '0'), sub: 'В базе' },
+    ];
+
+    const secondary = [
+        { label: 'Касса', num: `${fmt(balance)} ₾`, sub: 'Текущий баланс' },
+        { label: 'Пересдано', num: String(reRentedCount).padStart(2, '0'), sub: 'Возвратов' },
+        { label: 'Средний день', num: monthAnalytics?.dailyData && monthAnalytics.dailyData.length > 0
+            ? `${fmt(monthRevenue / Math.max(1, monthAnalytics.dailyData.length))} ₾`
+            : '—', sub: 'Выручки за день' },
+    ];
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
+            {/* Header */}
+            <div style={{ marginBottom: 32 }}>
+                <div style={{ ...monoLabel, marginBottom: 10 }}>Админ · Обзор</div>
+                <h1
+                    style={{
+                        fontSize: 'clamp(44px, 5vw, 68px)',
+                        fontWeight: 800,
+                        letterSpacing: '-0.02em',
+                        lineHeight: 0.95,
+                        margin: 0,
+                        textTransform: 'capitalize',
+                    }}
+                >
+                    {format(new Date(), 'LLLL yyyy')}
+                </h1>
+            </div>
+
+            {/* KPI strip 1 */}
+            <div
+                style={{
+                    border: hairline,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    marginBottom: 0,
+                }}
+            >
+                {kpi.map((c, i) => (
+                    <div
+                        key={c.label}
+                        style={{
+                            padding: '28px 24px',
+                            borderRight: i < kpi.length - 1 ? hairline : undefined,
+                        }}
+                    >
+                        <div style={{ ...monoLabel, marginBottom: 14 }}>{c.label}</div>
+                        <div style={bigNumber}>{c.num}</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 10, textTransform: 'capitalize' }}>{c.sub}</div>
+                    </div>
+                ))}
+            </div>
+
+            {/* KPI strip 2 */}
+            <div
+                style={{
+                    border: hairline,
+                    borderTop: 'none',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    marginBottom: 40,
+                }}
+            >
+                {secondary.map((c, i) => (
+                    <div
+                        key={c.label}
+                        style={{
+                            padding: '22px 24px',
+                            borderRight: i < secondary.length - 1 ? hairline : undefined,
+                        }}
+                    >
+                        <div style={{ ...monoLabel, marginBottom: 12 }}>{c.label}</div>
+                        <div style={{ ...bigNumber, fontSize: 28 }}>{c.num}</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 8 }}>{c.sub}</div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Analytics charts — wrapped in hairline frame (legacy internals) */}
+            <div style={{ border: hairline, padding: 28, marginBottom: 40 }}>
+                <div style={{ ...monoLabel, marginBottom: 20 }}>Аналитика · Бронирования</div>
+                <AnalyticsCharts bookings={recentBookings.length > 0 ? useUserStore.getState().bookings : []} />
+            </div>
+
+            {/* Recent bookings */}
+            <div style={{ marginBottom: 40 }}>
+                <div style={{ ...monoLabel, marginBottom: 14 }}>Последние бронирования</div>
+                <h2
+                    style={{
+                        fontSize: 28,
+                        fontWeight: 800,
+                        letterSpacing: '-0.01em',
+                        margin: 0,
+                        marginBottom: 20,
+                    }}
+                >
+                    Входящий поток
+                </h2>
+                <div style={{ border: hairline }}>
+                    {/* Header */}
+                    <div
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: '64px 120px 1fr 140px 120px',
+                            padding: '12px 20px',
+                            borderBottom: hairline,
+                            background: GH.ink5,
+                            ...monoLabel,
+                        }}
+                    >
+                        <div>№</div>
+                        <div>Дата · Время</div>
+                        <div>Клиент</div>
+                        <div>Статус</div>
+                        <div style={{ textAlign: 'right' }}>Сумма</div>
+                    </div>
+                    {recentBookings.length === 0 && (
+                        <div style={{ padding: 32, textAlign: 'center', color: GH.ink60, ...monoLabel }}>
+                            Нет бронирований
+                        </div>
+                    )}
+                    {recentBookings.map((b, i) => {
+                        const clientName = users.find(u => u.email === b.userId)?.name || b.userId;
+                        const statusColor = b.status === 'confirmed' ? GH.accent : b.status === 'cancelled' ? GH.ink30 : b.status === 're-rented' ? GH.ink : GH.ink60;
+                        const statusText = b.status === 'confirmed' ? 'Подтверждено' : b.status === 'cancelled' ? 'Отменено' : b.status === 're-rented' ? 'Пересдано' : b.status;
+                        return (
+                            <div
+                                key={b.id}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '64px 120px 1fr 140px 120px',
+                                    padding: '16px 20px',
+                                    borderBottom: i < recentBookings.length - 1 ? hairline : undefined,
+                                    alignItems: 'center',
+                                }}
+                            >
+                                <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
+                                    {String(i + 1).padStart(2, '0')}
+                                </div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 13, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                    {format(new Date(b.date), 'dd.MM')} · {b.startTime}
+                                </div>
+                                <div style={{ fontSize: 14, color: GH.ink }}>{clientName}</div>
+                                <div style={{ ...monoLabel, color: statusColor, fontSize: 10 }}>{statusText}</div>
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 14,
+                                        fontWeight: 600,
+                                        textAlign: 'right',
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                >
+                                    {b.paymentMethod === 'subscription' ? 'Абн.' : `${b.finalPrice} ₾`}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         </div>

@@ -2,19 +2,15 @@ import { motion } from 'framer-motion';
 import { ArrowRight, Building2, Users, UserCheck, MessageCircle } from 'lucide-react';
 
 const glassPanel: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.52)',
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    border: '1px solid rgba(255,255,255,0.72)',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.60)',
+    background: 'rgba(255,255,255,0.92)',
+    border: '1px solid rgba(0,0,0,0.06)',
+    boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
 };
 
 const glassStep: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.62)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255,255,255,0.78)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
+    background: 'rgba(255,255,255,0.80)',
+    border: '1px solid rgba(0,0,0,0.05)',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.03)',
 };
 
 const STEPS = [

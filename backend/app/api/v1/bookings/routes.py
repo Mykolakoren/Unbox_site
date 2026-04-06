@@ -403,6 +403,11 @@ def create_booking(
         booking_in.discount_percent = quote.discount_percent
         booking_in.hours_deducted = quote.hours_deducted
 
+        # Peak hours subscription debt: deduct from balance (goes negative = debt)
+        peak_debt = quote.subscription_peak_debt
+        if peak_debt > 0 and booking_in.payment_method == "subscription":
+            booking_owner.balance -= peak_debt
+
         # ── Hot Booking Approval Gate ──
         # If booking is within 12 hours AND user is NOT admin/owner → require admin approval
         HOT_BOOKING_THRESHOLD_HOURS = 12
@@ -440,6 +445,37 @@ def create_booking(
         session.commit()
         session.refresh(booking)
 
+        # Peak hours subscription debt notification
+        if peak_debt > 0 and booking_in.payment_method == "subscription":
+            try:
+                from app.models.notification import Notification
+                resource_name = booking_in.resource_id
+                try:
+                    from app.models.resource import Resource as ResModel
+                    res_obj = session.get(ResModel, booking_in.resource_id)
+                    if res_obj:
+                        resource_name = res_obj.name or booking_in.resource_id
+                except Exception:
+                    pass
+                peak_hours_count = quote.peak_slot_count / 2.0
+                notif = Notification(
+                    type="peak_hours_debt",
+                    title="Доплата за пиковые часы",
+                    description=(
+                        f"Абонемент покрывает стандартные часы. "
+                        f"Бронь {resource_name} {booking.date.strftime('%d.%m')} {booking.start_time} включает "
+                        f"{peak_hours_count:.0f} ч. пиковых часов (9–10, 20–22) — "
+                        f"доплата {peak_debt:.0f} ₾ (5 ₾/ч) списана со счёта."
+                    ),
+                    recipient_id=str(booking_owner.id),
+                    icon="Clock",
+                    link="/bookings",
+                )
+                session.add(notif)
+                session.commit()
+            except Exception as e:
+                logger.warning(f"[Peak debt notification] Error: {e}")
+
         # Google Calendar Sync
         gcal_sync_ok = False
         try:
@@ -464,6 +500,309 @@ def create_booking(
     except Exception as e:
         logger.error(f"Booking Creation Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── Recurring bookings ──────────────────────────────────────────────────────
+# IMPORTANT: These must be registered BEFORE /{booking_id} routes so FastAPI
+# matches "/recurring" and "/recurring-groups" exactly instead of treating
+# them as a booking_id path parameter.
+
+class RecurringBookingRequest(PydanticBaseModel):
+    resource_id: str
+    location_id: str = "unbox_one"
+    start_time: str          # "HH:MM"
+    duration: int = 60       # minutes
+    format: str = "individual"
+    payment_method: str = "balance"
+    first_date: str          # "YYYY-MM-DD"
+    weeks: int = 12          # kept for backward compat; use occurrences instead
+    occurrences: Optional[int] = None   # number of repetitions (overrides weeks if set)
+    pattern: str = "weekly"  # "weekly" | "biweekly" | "monthly"
+    target_user_id: Optional[str] = None
+    crm_client_id: Optional[str] = None
+
+
+@router.post("/recurring")
+def create_recurring_booking(
+    *,
+    session: Session = Depends(deps.get_session),
+    data: RecurringBookingRequest,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Create recurring bookings (weekly/biweekly/monthly). Admin can book for another user."""
+    from app.services.pricing import PricingService
+    from uuid import uuid4 as gen_uuid4
+
+    # Determine booking owner
+    booking_owner = current_user
+    if current_user.role in ADMIN_ROLES and data.target_user_id:
+        target = None
+        try:
+            target = session.get(User, UUID(data.target_user_id))
+        except ValueError:
+            pass
+        if not target:
+            target = session.exec(select(User).where(User.email == data.target_user_id)).first()
+        if target:
+            booking_owner = target
+
+    # Generate dates
+    try:
+        first = datetime.strptime(data.first_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+
+    n = data.occurrences if data.occurrences is not None else data.weeks
+
+    pattern = data.pattern.lower()
+    if pattern == "biweekly":
+        dates = [first + timedelta(weeks=i * 2) for i in range(n)]
+    elif pattern == "monthly":
+        try:
+            from dateutil.relativedelta import relativedelta as rdelta
+            dates = [first + rdelta(months=i) for i in range(n)]
+        except ImportError:
+            dates = [first + timedelta(weeks=i * 4) for i in range(n)]
+    else:  # weekly (default)
+        dates = [first + timedelta(weeks=i) for i in range(n)]
+
+    # Check availability for ALL dates
+    conflicts = []
+    for d in dates:
+        available, reason = check_availability(
+            session=session,
+            resource_id=data.resource_id,
+            date=d,
+            start_time=data.start_time,
+            duration=data.duration,
+        )
+        if not available:
+            conflicts.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "day": d.strftime("%A"),
+                "reason": reason,
+            })
+
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Конфликт в {len(conflicts)} из {len(dates)} дат",
+                "conflicts": conflicts,
+            },
+        )
+
+    # All slots available — create bookings
+    recurring_group_id = str(gen_uuid4())
+    created_bookings = []
+    total_cost = 0.0
+
+    for d in dates:
+        try:
+            h, m = map(int, data.start_time.split(":"))
+            start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            start_dt = d
+
+        pricing_service = PricingService(session)
+        quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=data.resource_id,
+            start_time=start_dt,
+            duration_minutes=data.duration,
+            format_type=data.format,
+        )
+
+        # Deduct payment per booking
+        if data.payment_method == "subscription":
+            if quote.applied_rule != "SUBSCRIPTION":
+                raise HTTPException(
+                    400, f"Subscription insufficient for {d.strftime('%Y-%m-%d')}"
+                )
+            if booking_owner.subscription:
+                new_sub = booking_owner.subscription.copy()
+                rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
+                new_sub["remaining_hours"] = max(0, float(rem) - quote.hours_deducted)
+                used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
+                new_sub["used_hours"] = float(used) + quote.hours_deducted
+                if "remainingHours" in new_sub:
+                    del new_sub["remainingHours"]
+                if "usedHours" in new_sub:
+                    del new_sub["usedHours"]
+                booking_owner.subscription = new_sub
+        else:
+            available_funds = booking_owner.balance + booking_owner.credit_limit
+            if available_funds < quote.final_price:
+                raise HTTPException(
+                    400,
+                    f"Insufficient funds for {d.strftime('%Y-%m-%d')}. Required: {quote.final_price}, Available: {available_funds}",
+                )
+            booking_owner.balance -= quote.final_price
+
+        session.add(booking_owner)
+
+        booking = Booking(
+            resource_id=data.resource_id,
+            location_id=data.location_id,
+            date=d,
+            start_time=data.start_time,
+            duration=data.duration,
+            status="confirmed",
+            final_price=quote.final_price,
+            base_price=quote.base_price,
+            applied_rule=quote.applied_rule,
+            discount_amount=quote.discount_amount,
+            discount_percent=quote.discount_percent,
+            hours_deducted=quote.hours_deducted if data.payment_method == "subscription" else None,
+            payment_method=data.payment_method,
+            format=data.format,
+            extras=[],
+            user_id=booking_owner.email,
+            user_uuid=booking_owner.id,
+            crm_client_id=data.crm_client_id,
+            recurring_group_id=recurring_group_id,
+        )
+        session.add(booking)
+        session.flush()
+
+        # GCal sync
+        try:
+            event_id = gcal_service.create_event(booking, user_name=booking_owner.name)
+            if event_id:
+                booking.gcal_event_id = event_id
+                session.add(booking)
+        except Exception as e:
+            logger.warning(f"GCal sync failed for recurring {d}: {e}")
+
+        total_cost += quote.final_price
+        created_bookings.append(str(booking.id))
+
+    session.commit()
+
+    return {
+        "ok": True,
+        "recurring_group_id": recurring_group_id,
+        "created": len(created_bookings),
+        "total_cost": round(total_cost, 2),
+        "booking_ids": created_bookings,
+        "dates": [d.strftime("%Y-%m-%d") for d in dates],
+    }
+
+
+@router.get("/recurring-groups")
+def get_recurring_groups(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Return a summary of recurring series for the current user (or all if admin)."""
+    from collections import defaultdict
+
+    query = select(Booking).where(
+        Booking.recurring_group_id.is_not(None),
+        Booking.status == "confirmed",
+    )
+    if current_user.role not in ADMIN_ROLES:
+        query = query.where(
+            (Booking.user_uuid == current_user.id) | (Booking.user_id == current_user.email)
+        )
+    bookings = session.exec(query.order_by(Booking.date)).all()
+
+    now = datetime.now()
+    groups: dict[str, dict] = {}
+    group_dates: dict[str, list[datetime]] = defaultdict(list)
+
+    for b in bookings:
+        gid = b.recurring_group_id
+        group_dates[gid].append(b.date)
+        if gid not in groups:
+            groups[gid] = {
+                "recurring_group_id": gid,
+                "resource_id": b.resource_id,
+                "location_id": b.location_id,
+                "start_time": b.start_time,
+                "duration": b.duration,
+                "crm_client_id": b.crm_client_id,
+                "payment_method": b.payment_method,
+                "future_count": 0,
+                "total_count": 0,
+                "next_date": None,
+                "pattern": "weekly",
+            }
+        groups[gid]["total_count"] += 1
+        if b.date >= now:
+            groups[gid]["future_count"] += 1
+            if groups[gid]["next_date"] is None or b.date < groups[gid]["next_date"]:
+                groups[gid]["next_date"] = b.date
+
+    # Detect pattern from intervals between consecutive dates
+    for gid, g in groups.items():
+        dates_sorted = sorted(group_dates[gid])
+        if len(dates_sorted) >= 2:
+            delta = (dates_sorted[1] - dates_sorted[0]).days
+            if delta <= 8:
+                g["pattern"] = "weekly"
+            elif delta <= 16:
+                g["pattern"] = "biweekly"
+            else:
+                g["pattern"] = "monthly"
+        if g["next_date"]:
+            g["next_date"] = g["next_date"].strftime("%Y-%m-%d")
+
+    result = [g for g in groups.values() if g["future_count"] > 0]
+    result.sort(key=lambda g: g["next_date"] or "")
+    return result
+
+
+@router.delete("/recurring/{group_id}")
+def cancel_recurring_bookings(
+    group_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Cancel all future bookings in a recurring group."""
+    now = datetime.now()
+    bookings = session.exec(
+        select(Booking).where(
+            Booking.recurring_group_id == group_id,
+            Booking.status == "confirmed",
+            Booking.date >= now,
+        )
+    ).all()
+
+    if not bookings:
+        raise HTTPException(404, "No future bookings found in this group")
+
+    # Verify ownership or admin
+    first = bookings[0]
+    is_owner = (first.user_uuid and first.user_uuid == current_user.id) or (
+        first.user_id == current_user.email
+    )
+    if not is_owner and current_user.role not in ADMIN_ROLES:
+        raise HTTPException(403, "Not authorized")
+
+    cancelled = 0
+    for b in bookings:
+        # Refund via shared helper (handles balance + subscription)
+        booking_owner = _resolve_booking_owner(session, b)
+        if booking_owner:
+            _refund_booking_to_owner(session, b, booking_owner)
+
+        # GCal delete
+        if b.gcal_event_id:
+            try:
+                gcal_service.delete_event(b.gcal_event_id, b.resource_id)
+            except Exception:
+                pass
+
+        b.status = "cancelled"
+        b.cancellation_reason = "Series cancelled"
+        b.cancelled_by = current_user.email
+        session.add(b)
+        cancelled += 1
+
+    session.commit()
+
+    return {"ok": True, "cancelled": cancelled, "group_id": group_id}
 
 
 # ─── Cancel booking ──────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
     Home,
     Loader2,
     AlertCircle,
+    Repeat,
 } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { googleCalendarService } from '../../services/googleCalendarMock';
@@ -40,6 +41,8 @@ export function ConfirmationStep() {
     const shouldResetOnUnmount = useRef(false);
 
     const [activeBonuses, setActiveBonuses] = useState<Bonus[]>([]);
+    const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
+    const [recurringOccurrences, setRecurringOccurrences] = useState(12);
 
     // Fetch CRM clients and bonuses
     useEffect(() => {
@@ -221,6 +224,43 @@ export function ConfirmationStep() {
         try {
             if (cartDetails.length === 0) {
                 toast.error("Ошибка: Корзина пуста. Пожалуйста, выберите время.");
+                return;
+            }
+
+            // ── Recurring booking flow ──
+            if (recurringPattern && cartDetails.length > 0 && !isRescheduling) {
+                const item = cartDetails[0];
+                const resource = RESOURCES.find(r => r.id === item.resourceId);
+                try {
+                    const result = await bookingsApi.createRecurringBooking({
+                        resourceId: item.resourceId,
+                        locationId: state.locationId || resource?.locationId || 'unbox_one',
+                        startTime: item.startTime,
+                        duration: item.duration,
+                        format: state.format || 'individual',
+                        paymentMethod: state.paymentMethod === 'subscription' ? 'subscription' : 'balance',
+                        firstDate: format(new Date(state.date), 'yyyy-MM-dd'),
+                        occurrences: recurringOccurrences,
+                        pattern: recurringPattern,
+                        crmClientId: selectedCrmClientId || undefined,
+                        targetUserId: state.bookingForUser || undefined,
+                    });
+                    const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+                    toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
+                    await fetchCurrentUser();
+                    setConfirmed(true);
+                    shouldResetOnUnmount.current = true;
+                    setTimeout(() => {
+                        navigate('/dashboard/bookings', { state: { targetDate: new Date(state.date).toISOString() } });
+                    }, 2000);
+                } catch (e: any) {
+                    const detail = e?.response?.data?.detail;
+                    if (typeof detail === 'object' && detail?.conflicts) {
+                        toast.error(`Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+                    } else {
+                        toast.error(typeof detail === 'string' ? detail : e.message || 'Ошибка создания серии');
+                    }
+                }
                 return;
             }
 
@@ -608,16 +648,16 @@ export function ConfirmationStep() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.5 }}
-            className="space-y-8"
+            className="space-y-4 sm:space-y-8"
         >
             <div>
-                <h2 className="text-2xl font-bold mb-2">Подтверждение</h2>
-                <p className="text-unbox-grey">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
+                <h2 className="text-xl sm:text-2xl font-bold mb-1 sm:mb-2">Подтверждение</h2>
+                <p className="text-unbox-grey text-sm sm:text-base">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
             </div>
 
-            <div className="space-y-4 max-w-md">
+            <div className="space-y-3 sm:space-y-4 max-w-md">
                 {effectiveUser ? (
-                    <div className="p-4 rounded-xl"
+                    <div className="p-3 sm:p-4 rounded-xl"
                         style={{
                             background: 'rgba(255,255,255,0.35)',
                             backdropFilter: 'blur(24px) saturate(150%)',
@@ -625,11 +665,11 @@ export function ConfirmationStep() {
                             border: '1px solid rgba(255,255,255,0.55)',
                             boxShadow: '0 4px 16px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.70)',
                         }}>
-                        <div className="text-sm text-unbox-grey mb-1">Бронирование на имя:</div>
-                        <div className="font-bold text-unbox-dark">{effectiveUser.name}</div>
-                        <div className="text-sm text-unbox-grey mt-2">Контакты:</div>
-                        <div className="text-unbox-dark">{effectiveUser.phone}</div>
-                        <div className="text-unbox-dark">{effectiveUser.email}</div>
+                        <div className="text-xs sm:text-sm text-unbox-grey mb-0.5">Бронирование на имя:</div>
+                        <div className="font-bold text-sm sm:text-base text-unbox-dark">{effectiveUser.name}</div>
+                        <div className="text-xs sm:text-sm text-unbox-grey mt-1.5 sm:mt-2">Контакты:</div>
+                        <div className="text-sm text-unbox-dark">{effectiveUser.phone}</div>
+                        <div className="text-sm text-unbox-dark">{effectiveUser.email}</div>
                     </div>
                 ) : (
                     <>
@@ -651,14 +691,14 @@ export function ConfirmationStep() {
 
             {/* CRM Client Selector (for specialists) */}
             {crmClients.length > 0 && (
-                <div className="space-y-3 pt-4 border-t border-unbox-light">
-                    <h3 className="font-bold text-lg text-unbox-dark flex items-center gap-2">
-                        <UserIcon size={18} /> Привязать клиента
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark flex items-center gap-2">
+                        <UserIcon size={16} /> Привязать клиента
                     </h3>
                     <select
                         value={selectedCrmClientId}
                         onChange={(e) => setSelectedCrmClientId(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-unbox-dark bg-white"
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm sm:text-base text-unbox-dark bg-white"
                     >
                         <option value="">— Без привязки к клиенту —</option>
                         {crmClients.map(c => (
@@ -673,14 +713,14 @@ export function ConfirmationStep() {
 
             {/* Payment Method Selector */}
             {effectiveUser && (
-                <div className="space-y-3 pt-4 border-t border-unbox-light">
-                    <h3 className="font-bold text-lg text-unbox-dark">Способ оплаты</h3>
-                    <div className="grid gap-3">
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark">Способ оплаты</h3>
+                    <div className="grid gap-2 sm:gap-3">
                         {/* Option: Bonus */}
                         {totalBonusHours > 0 && (
                             <div
                                 className={`
-                                    relative p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                    relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                     ${state.paymentMethod === 'bonus'
                                         ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-400'
                                         : 'border-amber-200 hover:border-amber-300 bg-amber-50/50'}
@@ -708,7 +748,7 @@ export function ConfirmationStep() {
                         {/* Option: Subscription */}
                         <div
                             className={`
-                                relative p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                 ${state.paymentMethod === 'subscription'
                                     ? 'border-unbox-green bg-unbox-light/50 ring-1 ring-unbox-green'
                                     : 'border-gray-300 hover:border-gray-400 bg-white'}
@@ -738,7 +778,7 @@ export function ConfirmationStep() {
                         {/* Option: Balance/Deposit */}
                         <div
                             className={`
-                                relative p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                 ${state.paymentMethod === 'balance'
                                     ? 'border-unbox-green bg-unbox-light/50 ring-1 ring-unbox-green'
                                     : 'border-gray-300 hover:border-gray-400 bg-white'}
@@ -762,7 +802,60 @@ export function ConfirmationStep() {
                 </div>
             )}
 
-            <div className="pt-8 border-t border-unbox-light">
+            {/* Recurring Booking Selector */}
+            {effectiveUser && !isRescheduling && !isEditing && (
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark flex items-center gap-2">
+                        <Repeat size={16} /> Повторение
+                    </h3>
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {([
+                            { id: '' as const, label: 'Разово' },
+                            { id: 'weekly' as const, label: 'Кажд. неделю' },
+                            { id: 'biweekly' as const, label: 'Раз в 2 нед.' },
+                            { id: 'monthly' as const, label: 'Ежемесячно' },
+                        ]).map(p => (
+                            <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => setRecurringPattern(p.id)}
+                                className={`py-2 sm:py-2.5 rounded-xl border text-xs font-semibold transition-colors text-center ${
+                                    recurringPattern === p.id
+                                        ? 'bg-unbox-green text-white border-unbox-green shadow-sm'
+                                        : 'border-gray-200 text-gray-500 hover:border-unbox-green hover:text-unbox-green'
+                                }`}
+                            >
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
+                    {recurringPattern && (
+                        <div className="flex items-center gap-2.5 bg-unbox-light/30 rounded-xl px-3 py-2.5">
+                            <input
+                                type="number"
+                                value={recurringOccurrences}
+                                onChange={e => {
+                                    const max = recurringPattern === 'monthly' ? 24 : 52;
+                                    setRecurringOccurrences(Math.max(2, Math.min(max, Number(e.target.value))));
+                                }}
+                                min={2}
+                                max={recurringPattern === 'monthly' ? 24 : 52}
+                                className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green bg-white"
+                            />
+                            <span className="text-xs text-gray-500">
+                                повторений · {recurringPattern === 'monthly'
+                                    ? `≈ ${recurringOccurrences} мес.`
+                                    : recurringPattern === 'biweekly'
+                                        ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
+                                        : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
+                                {totalPrice > 0 && ` · ≈ ${(totalPrice * recurringOccurrences).toFixed(0)} ₾ всего`}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className="pt-4 sm:pt-8 border-t border-unbox-light">
                 {isRescheduling && oldBooking && (
                     <div className="mb-6 p-4 rounded-xl"
                         style={{
@@ -825,7 +918,7 @@ export function ConfirmationStep() {
                     <button
                         type="button"
                         onClick={() => state.setStep(state.step - 1)}
-                        className="px-6 py-3 rounded-xl border-2 border-unbox-light text-unbox-dark font-bold hover:bg-unbox-light/50 transition-colors cursor-pointer"
+                        className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl border-2 border-unbox-light text-unbox-dark font-bold text-sm sm:text-base hover:bg-unbox-light/50 transition-colors cursor-pointer"
                     >
                         ← Назад
                     </button>
@@ -836,11 +929,13 @@ export function ConfirmationStep() {
                                 ? 'Подтвердить перенос'
                                 : isEditing
                                     ? 'Сохранить изменения'
-                                    : state.paymentMethod === 'bonus'
-                                        ? 'Забронировать бесплатно'
-                                        : state.paymentMethod === 'subscription'
-                                            ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
-                                            : `Оплатить ${totalPrice.toFixed(1)} ₾`
+                                    : recurringPattern
+                                        ? `Создать серию · ${recurringOccurrences} бронирований`
+                                        : state.paymentMethod === 'bonus'
+                                            ? 'Забронировать бесплатно'
+                                            : state.paymentMethod === 'subscription'
+                                                ? `Списать ${cartDetails.reduce((sum, i) => sum + i.duration / 60, 0)} ч`
+                                                : `Оплатить ${totalPrice.toFixed(1)} ₾`
                         }
                     </Button>
                 </div>

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.db.session import get_session
 from app.models.specialist import Specialist, SpecialistRead, SpecialistCreate, SpecialistUpdate
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_specialist
 from app.models.user import User
 
 router = APIRouter()
@@ -69,6 +69,21 @@ def update_specialist_admin(
         raise HTTPException(status_code=404, detail="Specialist not found")
 
     update_data = specialist_in.model_dump(exclude_unset=True)
+
+    # If user_id is being changed, unlink it from any other specialist first
+    # (user_id has a UNIQUE constraint, so we must clear the old link before assigning)
+    if "user_id" in update_data and update_data["user_id"] is not None:
+        new_user_id = update_data["user_id"]
+        existing = session.exec(
+            select(Specialist).where(
+                Specialist.user_id == new_user_id,
+                Specialist.id != specialist_id
+            )
+        ).first()
+        if existing:
+            existing.user_id = None  # type: ignore
+            session.add(existing)
+
     for key, value in update_data.items():
         setattr(specialist, key, value)
 
@@ -82,15 +97,18 @@ class ReorderItem(BaseModel):
     id: UUID
     sort_order: int
 
+class ReorderRequest(BaseModel):
+    items: List[ReorderItem]
+
 @router.post("/admin/reorder")
 def reorder_specialists(
     *,
-    items: List[ReorderItem],
+    data: ReorderRequest,
     session: Session = Depends(get_session),
     _admin: User = Depends(require_admin)
 ):
     """Admin: bulk update sort_order for specialists."""
-    for item in items:
+    for item in data.items:
         specialist = session.get(Specialist, item.id)
         if specialist:
             specialist.sort_order = item.sort_order
@@ -114,6 +132,49 @@ def delete_specialist(
     session.delete(specialist)
     session.commit()
     return {"ok": True, "id": str(specialist_id)}
+
+
+@router.get("/me", response_model=SpecialistRead)
+def get_my_specialist_profile(
+    *,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_specialist)
+):
+    """Specialist: get own profile."""
+    specialist = session.exec(
+        select(Specialist).where(Specialist.user_id == current_user.id)
+    ).first()
+    if not specialist:
+        raise HTTPException(status_code=404, detail="Specialist profile not found")
+    return specialist
+
+
+@router.patch("/me", response_model=SpecialistRead)
+def update_my_specialist_profile(
+    *,
+    specialist_in: SpecialistUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_specialist)
+):
+    """Specialist: update own profile. Admin-only fields (user_id, is_verified, category, sort_order) are ignored."""
+    specialist = session.exec(
+        select(Specialist).where(Specialist.user_id == current_user.id)
+    ).first()
+    if not specialist:
+        raise HTTPException(status_code=404, detail="Specialist profile not found")
+
+    update_data = specialist_in.model_dump(exclude_unset=True)
+    # Prevent specialist from self-granting admin-only fields
+    for restricted in ("user_id", "is_verified", "category", "sort_order"):
+        update_data.pop(restricted, None)
+
+    for key, value in update_data.items():
+        setattr(specialist, key, value)
+
+    session.add(specialist)
+    session.commit()
+    session.refresh(specialist)
+    return specialist
 
 
 @router.get("/{specialist_id}", response_model=SpecialistRead)

@@ -9,6 +9,7 @@ import { ru } from 'date-fns/locale';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { RESOURCES, SUBSCRIPTION_PLANS } from '../../utils/data';
 import { UserTags } from '../../components/admin/UserTags';
 import { UserTasks } from '../../components/admin/UserTasks';
@@ -28,7 +29,12 @@ import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLi
 import { api } from '../../api/client';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 
+const ghudMono: React.CSSProperties = {
+    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+};
+
 export function AdminUserDetails() {
+    const gridHouse = useDesignFlag();
     const { email } = useParams<{ email: string }>();
     const navigate = useNavigate();
     const { users, updateUserById, bookings, addTransaction, currentUser, cancelBooking } = useUserStore();
@@ -269,7 +275,8 @@ export function AdminUserDetails() {
     const currentStatusConfig = STATUS_CONFIG[clientStatus] || STATUS_CONFIG.new;
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+        <div className={gridHouse ? '' : "space-y-6 animate-in fade-in slide-in-from-right-4 duration-300"}
+             style={gridHouse ? { fontFamily: GH_SANS, color: GH.ink } : undefined}>
             {/* ... Modals ... */}
             <AddFundsModal
                 isOpen={isAddFundsOpen}
@@ -291,6 +298,39 @@ export function AdminUserDetails() {
             />
 
             {/* Header */}
+            {gridHouse ? (
+                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 28 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                        <button onClick={() => navigate('/admin/users')}
+                            style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30, marginTop: 4 }}>
+                            <ArrowLeft size={18} />
+                        </button>
+                        <div style={{ flex: 1 }}>
+                            <p style={{ ...ghudMono, color: GH.ink30, marginBottom: 6 }}>CLIENT PROFILE</p>
+                            <h1 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0, marginBottom: 8 }}>
+                                {user.name}
+                            </h1>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px', background: GH.ink5, color: GH.ink60 }}>
+                                    {(user.role || 'user').toUpperCase()}
+                                </span>
+                                <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px',
+                                    background: clientStatus === 'active' ? 'rgba(71,109,107,0.12)' : clientStatus === 'vip' ? 'rgba(147,51,234,0.12)' : GH.ink5,
+                                    color: clientStatus === 'active' ? GH.accent : clientStatus === 'vip' ? '#9333ea' : GH.ink30,
+                                }}>
+                                    {currentStatusConfig.label.toUpperCase()}
+                                </span>
+                                {user.email && <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>{user.email}</span>}
+                                {user.registrationDate && (
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+                                        с {format(new Date(user.registrationDate), 'd.MM.yyyy')}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
             <div className="flex items-center gap-4">
                 <button
                     onClick={() => navigate('/admin/users')}
@@ -424,8 +464,31 @@ export function AdminUserDetails() {
                     </div>
                 </div>
             </div>
+            )}
 
             {/* Tabs */}
+            {gridHouse ? (
+                <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 24 }}>
+                    {([
+                        ['overview', 'ОБЗОР'],
+                        ['bookings', 'БРОНИРОВАНИЯ'],
+                        ['finance', 'ФИНАНСЫ'],
+                        ['timeline', 'ИСТОРИЯ'],
+                    ] as const).map(([key, label]) => (
+                        <button key={key} onClick={() => setActiveTab(key as any)}
+                            style={{
+                                padding: '10px 18px', border: 'none', cursor: 'pointer',
+                                fontFamily: GH_SANS, fontSize: 12, fontWeight: 600,
+                                background: 'transparent',
+                                color: activeTab === key ? GH.ink : GH.ink30,
+                                borderBottom: activeTab === key ? `2px solid ${GH.ink}` : '2px solid transparent',
+                                marginBottom: -1, letterSpacing: '0.04em',
+                            }}>
+                            {label}
+                        </button>
+                    ))}
+                </div>
+            ) : (
             <div className="flex gap-1 border-b border-unbox-light">
                 <button
                     onClick={() => setActiveTab('overview')}
@@ -452,6 +515,7 @@ export function AdminUserDetails() {
                     История событий
                 </button>
             </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left Column: Profile & Info */}

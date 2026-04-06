@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAdminTaskStore, type TaskStatus, type TaskPriority } from '../../store/adminTaskStore';
 import type { AdminTask } from '../../api/adminTasks';
-import { adminTasksApi, type AdminTaskComment, type ChecklistItem } from '../../api/adminTasks';
+import { adminTasksApi, type AdminTaskComment, type ChecklistItem, type TaskAttachment } from '../../api/adminTasks';
 import { useUserStore } from '../../store/userStore';
 import {
     GripVertical, User, Users, Clock, Trash2, Plus, Search,
     X, MessageSquare, CheckSquare, Square, Tag, Send, Loader2,
-    Archive,
+    Archive, Link2, Paperclip, Upload, FileText,
 } from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, differenceInDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -14,11 +14,14 @@ import clsx from 'clsx';
 import { Button } from '../../components/ui/Button';
 import { toast } from 'sonner';
 import {
-    DndContext, closestCorners, PointerSensor, TouchSensor,
-    KeyboardSensor, useSensor, useSensors, type DragEndEvent, DragOverlay,
+    DndContext, PointerSensor, TouchSensor,
+    KeyboardSensor, useSensor, useSensors, type DragEndEvent,
+    DragOverlay, useDroppable, pointerWithin, rectIntersection,
+    type CollisionDetection,
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -47,6 +50,7 @@ const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function AdminTasksBoard() {
+    const gridHouse = useDesignFlag();
     const { tasks, loading, fetchTasks, addTask, updateTask, deleteTask, moveTask } = useAdminTaskStore();
     const { users } = useUserStore();
     const admins = useMemo(() => users.filter(u => ['admin', 'senior_admin', 'owner'].includes(u.role || '')), [users]);
@@ -92,16 +96,38 @@ export function AdminTasksBoard() {
     , [filteredTasks]);
 
     const handleDragStart = (event: any) => setActiveId(event.active.id as string);
+
     const handleDragEnd = (event: DragEndEvent) => {
         setActiveId(null);
         const { active, over } = event;
         if (!over) return;
+
         const taskId = active.id as string;
         const overId = over.id as string;
-        const targetCol = COLUMNS.find(c => c.id === overId);
-        if (targetCol) { moveTask(taskId, targetCol.id); return; }
+        const activeTask = tasks.find(t => t.id === taskId);
+        if (!activeTask) return;
+
+        // 1. Dropped over a column droppable zone?
+        const targetCol = COLUMNS.find(c => `column-${c.id}` === overId);
+        if (targetCol && activeTask.status !== targetCol.id) {
+            moveTask(taskId, targetCol.id);
+            return;
+        }
+
+        // 2. Dropped over another task?
         const overTask = tasks.find(t => t.id === overId);
-        if (overTask) moveTask(taskId, overTask.status as TaskStatus);
+        if (overTask && activeTask.status !== overTask.status) {
+            moveTask(taskId, overTask.status as TaskStatus);
+        }
+    };
+
+    // Custom collision detection: prefer droppable columns, fall back to rect intersection
+    const collisionDetection: CollisionDetection = (args) => {
+        // First check pointer-within for droppable columns
+        const pointerCollisions = pointerWithin(args);
+        if (pointerCollisions.length > 0) return pointerCollisions;
+        // Fallback to rect intersection
+        return rectIntersection(args);
     };
 
     const handleQuickAdd = async (status: TaskStatus) => {
@@ -114,7 +140,38 @@ export function AdminTasksBoard() {
 
     const activeTask = activeId ? tasks.find(t => t.id === activeId) : null;
     const hasFilters = !!searchQuery || !!filterPriority || !!filterAssignee;
-    const emptyNewTask = { id: '', title: '', description: '', status: 'TODO', priority: 'MEDIUM', labels: [], checklist: [], participants: [], sortOrder: 0, createdBy: '', createdByName: '', createdAt: '', updatedAt: '' } as AdminTask;
+    const emptyNewTask = { id: '', title: '', description: '', status: 'TODO', priority: 'MEDIUM', labels: [], checklist: [], attachments: [], participants: [], sortOrder: 0, createdBy: '', createdByName: '', createdAt: '', updatedAt: '' } as AdminTask;
+
+    if (gridHouse) {
+        return (
+            <GridHouseAdminTasksBoard
+                tasks={tasks}
+                loading={loading}
+                admins={admins}
+                editingTask={editingTask} setEditingTask={setEditingTask}
+                quickAddCol={quickAddCol} setQuickAddCol={setQuickAddCol}
+                quickAddTitle={quickAddTitle} setQuickAddTitle={setQuickAddTitle}
+                searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                filterPriority={filterPriority} setFilterPriority={setFilterPriority}
+                filterAssignee={filterAssignee} setFilterAssignee={setFilterAssignee}
+                showArchive={showArchive} setShowArchive={setShowArchive}
+                activeTask={activeTask}
+                sensors={sensors}
+                collisionDetection={collisionDetection}
+                handleDragStart={handleDragStart}
+                handleDragEnd={handleDragEnd}
+                handleQuickAdd={handleQuickAdd}
+                getColumnTasks={getColumnTasks}
+                archivedCount={archivedCount}
+                hasFilters={hasFilters}
+                deleteTask={deleteTask}
+                moveTask={moveTask}
+                updateTask={updateTask}
+                addTask={addTask}
+                emptyNewTask={emptyNewTask}
+            />
+        );
+    }
 
     return (
         <div className="h-full flex flex-col">
@@ -157,13 +214,13 @@ export function AdminTasksBoard() {
             {loading ? (
                 <div className="flex-1 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-unbox-green" /></div>
             ) : (
-                <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
                     <div className="flex-1 overflow-x-auto pb-4">
                         <div className="flex gap-4 min-w-max h-full items-stretch">
                             {COLUMNS.map(col => {
                                 const colTasks = getColumnTasks(col.id);
                                 return (
-                                    <div key={col.id} id={col.id} className={clsx('w-[320px] rounded-2xl border bg-gray-50/50 flex flex-col', col.color)}>
+                                    <DroppableColumn key={col.id} colId={col.id} className={clsx('w-[320px] rounded-2xl border bg-gray-50/50 flex flex-col', col.color)}>
                                         <div className={clsx('flex items-center justify-between px-4 py-3 rounded-t-2xl', col.headerBg)}>
                                             <div className="flex items-center gap-2">
                                                 <h3 className={clsx('font-bold text-sm', col.headerColor)}>{col.title}</h3>
@@ -190,7 +247,8 @@ export function AdminTasksBoard() {
                                                 {colTasks.map(task => (
                                                     <SortableTaskCard key={task.id} task={task}
                                                         onEdit={() => setEditingTask(task)}
-                                                        onDelete={() => { deleteTask(task.id); toast.success('Удалено'); }} />
+                                                        onDelete={() => { deleteTask(task.id); toast.success('Удалено'); }}
+                                                        onMove={(status) => { moveTask(task.id, status); toast.success(`Перемещено в "${COLUMNS.find(c => c.id === status)?.title}"`); }} />
                                                 ))}
                                                 {colTasks.length === 0 && (
                                                     <div className="flex-1 flex items-center justify-center text-gray-300 text-sm italic py-8 border-2 border-dashed border-gray-200 rounded-xl">
@@ -206,7 +264,7 @@ export function AdminTasksBoard() {
                                                 <Archive size={12} />{showArchive ? 'Скрыть архив' : `Показать архив (${archivedCount})`}
                                             </button>
                                         )}
-                                    </div>
+                                    </DroppableColumn>
                                 );
                             })}
                         </div>
@@ -229,24 +287,38 @@ export function AdminTasksBoard() {
     );
 }
 
-// ── Sortable Card ────────────────────────────────────────────────────────────
+// ── Droppable Column ─────────────────────────────────────────────────────────
 
-function SortableTaskCard({ task, onEdit, onDelete }: { task: AdminTask; onEdit: () => void; onDelete: () => void }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
-    const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+function DroppableColumn({ colId, children, className }: { colId: string; children: React.ReactNode; className?: string }) {
+    const { setNodeRef, isOver } = useDroppable({ id: `column-${colId}` });
     return (
-        <div ref={setNodeRef} style={style} {...attributes}>
-            <TaskCardView task={task} onEdit={onEdit} onDelete={onDelete} dragListeners={listeners} />
+        <div ref={setNodeRef} className={clsx(className, isOver && 'ring-2 ring-unbox-green/40 bg-unbox-light/20')}>
+            {children}
         </div>
     );
 }
 
-function TaskCardView({ task, onEdit, onDelete, dragListeners, isDragging }: {
-    task: AdminTask; onEdit?: () => void; onDelete?: () => void; dragListeners?: any; isDragging?: boolean;
+// ── Sortable Card ────────────────────────────────────────────────────────────
+
+function SortableTaskCard({ task, onEdit, onDelete, onMove }: { task: AdminTask; onEdit: () => void; onDelete: () => void; onMove: (status: TaskStatus) => void }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+    const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+    return (
+        <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+            <TaskCardView task={task} onEdit={onEdit} onDelete={onDelete} onMove={onMove} dragListeners={listeners} />
+        </div>
+    );
+}
+
+function TaskCardView({ task, onEdit, onDelete, onMove, dragListeners, isDragging }: {
+    task: AdminTask; onEdit?: () => void; onDelete?: () => void; onMove?: (status: TaskStatus) => void; dragListeners?: any; isDragging?: boolean;
 }) {
     const pri = PRIORITY_LABELS[task.priority] || PRIORITY_LABELS.MEDIUM;
     const clDone = (task.checklist || []).filter(c => c.done).length;
     const clTotal = (task.checklist || []).length;
+
+    // Quick move buttons — show the two OTHER columns
+    const moveTargets = COLUMNS.filter(c => c.id !== task.status);
 
     return (
         <div onClick={onEdit} className={clsx(
@@ -262,6 +334,22 @@ function TaskCardView({ task, onEdit, onDelete, dragListeners, isDragging }: {
                     })}
                 </div>
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Quick move buttons */}
+                    {onMove && moveTargets.map(col => (
+                        <button
+                            key={col.id}
+                            onClick={e => { e.stopPropagation(); onMove(col.id); }}
+                            title={`Переместить в "${col.title}"`}
+                            className={clsx(
+                                'text-[9px] font-bold px-1.5 py-0.5 rounded-md border transition-colors',
+                                col.id === 'TODO' ? 'text-slate-500 border-slate-200 hover:bg-slate-100' :
+                                col.id === 'IN_PROGRESS' ? 'text-blue-500 border-blue-200 hover:bg-blue-50' :
+                                'text-emerald-500 border-emerald-200 hover:bg-emerald-50'
+                            )}
+                        >
+                            {col.id === 'TODO' ? 'TODO' : col.id === 'IN_PROGRESS' ? 'WIP' : 'DONE'}
+                        </button>
+                    ))}
                     <div {...dragListeners} className="text-gray-300 hover:text-gray-500 p-1 cursor-grab active:cursor-grabbing" onClick={e => e.stopPropagation()}>
                         <GripVertical size={14} />
                     </div>
@@ -282,6 +370,13 @@ function TaskCardView({ task, onEdit, onDelete, dragListeners, isDragging }: {
                     <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
                         <div className="h-full bg-unbox-green rounded-full transition-all" style={{ width: `${(clDone / clTotal) * 100}%` }} />
                     </div>
+                </div>
+            )}
+
+            {(task.attachments?.length > 0) && (
+                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-400">
+                    <Paperclip size={12} />
+                    <span>{task.attachments.length} вложени{task.attachments.length === 1 ? 'е' : task.attachments.length < 5 ? 'я' : 'й'}</span>
                 </div>
             )}
 
@@ -332,6 +427,10 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
     const [labels, setLabels] = useState<string[]>(task.labels || []);
     const [checklist, setChecklist] = useState<ChecklistItem[]>(task.checklist || []);
     const [newCheckItem, setNewCheckItem] = useState('');
+    const [attachments, setAttachments] = useState<TaskAttachment[]>(task.attachments || []);
+    const [newLinkUrl, setNewLinkUrl] = useState('');
+    const [newLinkName, setNewLinkName] = useState('');
+    const [uploadingFile, setUploadingFile] = useState(false);
     const [comments, setComments] = useState<AdminTaskComment[]>([]);
     const [newComment, setNewComment] = useState('');
     const [saving, setSaving] = useState(false);
@@ -349,7 +448,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
         setSaving(true);
         await onSave({ title: title.trim(), description, status, priority, assigneeId: assigneeId || undefined, assigneeName: assigneeName || undefined,
             participants, startDate: startDate ? new Date(startDate + 'T00:00:00').toISOString() : null,
-            deadline: deadline ? new Date(deadline + 'T23:59:59').toISOString() : null, labels, checklist });
+            deadline: deadline ? new Date(deadline + 'T23:59:59').toISOString() : null, labels, checklist, attachments });
         setSaving(false);
     };
 
@@ -357,6 +456,35 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
     const addCheckItem = () => { if (!newCheckItem.trim()) return; setChecklist(prev => [...prev, { id: Math.random().toString(36).slice(2, 8), text: newCheckItem.trim(), done: false }]); setNewCheckItem(''); };
     const toggleCheckItem = (id: string) => setChecklist(prev => prev.map(c => c.id === id ? { ...c, done: !c.done } : c));
     const removeCheckItem = (id: string) => setChecklist(prev => prev.filter(c => c.id !== id));
+    const removeAttachment = (id: string) => setAttachments(prev => prev.filter(a => a.id !== id));
+    const addLink = () => {
+        if (!newLinkUrl.trim()) return;
+        let url = newLinkUrl.trim();
+        if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+        const name = newLinkName.trim() || url.replace(/^https?:\/\//i, '').slice(0, 40);
+        setAttachments(prev => [...prev, { id: Math.random().toString(36).slice(2, 8), type: 'link', name, url, createdAt: new Date().toISOString() }]);
+        setNewLinkUrl(''); setNewLinkName('');
+    };
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.size > 20 * 1024 * 1024) { toast.error('Файл слишком большой (макс. 20 МБ)'); return; }
+        setUploadingFile(true);
+        try {
+            const res = await adminTasksApi.uploadFile(file);
+            setAttachments(prev => [...prev, {
+                id: Math.random().toString(36).slice(2, 8),
+                type: 'file',
+                name: res.name || file.name,
+                url: res.url,
+                size: file.size,
+                createdAt: new Date().toISOString(),
+            }]);
+            toast.success('Файл загружен');
+        } catch { toast.error('Ошибка загрузки файла'); }
+        setUploadingFile(false);
+        e.target.value = '';
+    };
     const handleAddComment = async () => { if (!newComment.trim() || !task.id) return; const c = await adminTasksApi.addComment(task.id, newComment.trim()); setComments(prev => [c, ...prev]); setNewComment(''); };
     const handleAssigneeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value; setAssigneeId(val);
@@ -474,6 +602,42 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                             <button onClick={addCheckItem} className="px-3 py-1.5 text-sm font-medium text-unbox-green hover:bg-unbox-light rounded-lg"><Plus size={14} /></button>
                         </div>
                     </div>
+                    {/* Attachments */}
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-2"><Paperclip size={12} className="inline mr-1" />Вложения</label>
+                        {attachments.length > 0 && (
+                            <div className="space-y-1.5 mb-3">
+                                {attachments.map(att => (
+                                    <div key={att.id} className="flex items-center gap-2 group/att bg-gray-50 rounded-lg px-3 py-2">
+                                        {att.type === 'link' ? <Link2 size={14} className="text-blue-500 flex-shrink-0" /> : <FileText size={14} className="text-gray-400 flex-shrink-0" />}
+                                        <a href={att.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                                            className="flex-1 text-sm text-blue-600 hover:underline truncate">{att.name}</a>
+                                        {att.size != null && <span className="text-[10px] text-gray-400 flex-shrink-0">{(att.size / 1024).toFixed(0)} KB</span>}
+                                        <button onClick={() => removeAttachment(att.id)}
+                                            className="text-gray-200 hover:text-red-400 opacity-0 group-hover/att:opacity-100 transition-opacity flex-shrink-0"><X size={14} /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {/* Add link */}
+                        <div className="flex gap-2 mb-2">
+                            <input value={newLinkUrl} onChange={e => setNewLinkUrl(e.target.value)} placeholder="https://..."
+                                onKeyDown={e => { if (e.key === 'Enter') addLink(); }}
+                                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none" />
+                            <input value={newLinkName} onChange={e => setNewLinkName(e.target.value)} placeholder="Название (необяз.)"
+                                onKeyDown={e => { if (e.key === 'Enter') addLink(); }}
+                                className="w-36 px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none" />
+                            <button onClick={addLink} disabled={!newLinkUrl.trim()} className="px-3 py-1.5 text-sm font-medium text-blue-500 hover:bg-blue-50 rounded-lg disabled:opacity-30"><Link2 size={14} /></button>
+                        </div>
+                        {/* Upload file */}
+                        <label className={clsx(
+                            'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg cursor-pointer transition-colors',
+                            uploadingFile ? 'text-gray-400 bg-gray-50' : 'text-gray-500 hover:bg-gray-100 border border-dashed border-gray-300'
+                        )}>
+                            {uploadingFile ? <><Loader2 size={14} className="animate-spin" /> Загрузка...</> : <><Upload size={14} /> Загрузить файл</>}
+                            <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploadingFile} />
+                        </label>
+                    </div>
                     {task.id && (
                         <div>
                             <label className="block text-xs font-semibold text-gray-500 mb-2"><MessageSquare size={12} className="inline mr-1" />Комментарии</label>
@@ -505,6 +669,422 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                         <Button onClick={handleSave} disabled={saving}>{saving ? <><Loader2 size={14} className="animate-spin mr-1" />Сохранение...</> : isNew ? 'Создать' : 'Сохранить'}</Button>
                     </div>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================================================
+// Grid House variant — Vignelli/Bierut task index
+// ============================================================================
+
+type GHTBProps = {
+    tasks: AdminTask[];
+    loading: boolean;
+    admins: any[];
+    editingTask: AdminTask | null; setEditingTask: (t: AdminTask | null) => void;
+    quickAddCol: TaskStatus | null; setQuickAddCol: (s: TaskStatus | null) => void;
+    quickAddTitle: string; setQuickAddTitle: (v: string) => void;
+    searchQuery: string; setSearchQuery: (v: string) => void;
+    filterPriority: string; setFilterPriority: (v: string) => void;
+    filterAssignee: string; setFilterAssignee: (v: string) => void;
+    showArchive: boolean; setShowArchive: (v: boolean) => void;
+    activeTask: AdminTask | null | undefined;
+    sensors: any;
+    collisionDetection: CollisionDetection;
+    handleDragStart: (e: any) => void;
+    handleDragEnd: (e: DragEndEvent) => void;
+    handleQuickAdd: (status: TaskStatus) => Promise<void>;
+    getColumnTasks: (status: TaskStatus) => AdminTask[];
+    archivedCount: number;
+    hasFilters: boolean;
+    deleteTask: (id: string) => void;
+    moveTask: (id: string, status: TaskStatus) => void;
+    updateTask: (id: string, data: any) => Promise<any>;
+    addTask: (data: any) => Promise<any>;
+    emptyNewTask: AdminTask;
+};
+
+const GH_COLUMNS: { id: TaskStatus; num: string; title: string }[] = [
+    { id: 'TODO', num: '01', title: 'К выполнению' },
+    { id: 'IN_PROGRESS', num: '02', title: 'В процессе' },
+    { id: 'DONE', num: '03', title: 'Готово' },
+];
+
+function GridHouseAdminTasksBoard(p: GHTBProps) {
+    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+
+    return (
+        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ maxWidth: 1600, width: '100%', margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                {/* HEAD */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 20, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 32 }}>
+                    <div>
+                        <div style={{ ...eyebrow, marginBottom: 12 }}>Раздел · Задачи</div>
+                        <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
+                            Рабочая доска.
+                        </h1>
+                        <div style={{ ...eyebrow, marginTop: 12 }}>
+                            {p.tasks.length} задач · {p.tasks.filter(t => t.status === 'DONE').length} завершено
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => p.setEditingTask(p.emptyNewTask)}
+                        style={{
+                            fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+                            background: GH.ink, color: GH.paper, border: `1px solid ${GH.ink}`, padding: '14px 22px', cursor: 'pointer',
+                        }}
+                    >
+                        <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 8 }} />
+                        Новая задача
+                    </button>
+                </div>
+
+                {/* FILTERS */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 24, marginBottom: 32, paddingBottom: 16, borderBottom: `1px solid ${GH.ink10}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 220, maxWidth: 400 }}>
+                        <Search size={14} color={GH.ink60} />
+                        <input
+                            value={p.searchQuery}
+                            onChange={e => p.setSearchQuery(e.target.value)}
+                            placeholder="Поиск задач…"
+                            style={{ flex: 1, fontFamily: GH_SANS, fontSize: 14, background: 'transparent', border: 'none', outline: 'none', padding: '6px 0', color: GH.ink }}
+                        />
+                    </div>
+                    <select
+                        value={p.filterPriority}
+                        onChange={e => p.setFilterPriority(e.target.value)}
+                        style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', outline: 'none', cursor: 'pointer' }}
+                    >
+                        <option value="">Все приоритеты</option>
+                        <option value="HIGH">Срочно</option>
+                        <option value="MEDIUM">Средний</option>
+                        <option value="LOW">Низкий</option>
+                    </select>
+                    <select
+                        value={p.filterAssignee}
+                        onChange={e => p.setFilterAssignee(e.target.value)}
+                        style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', outline: 'none', cursor: 'pointer' }}
+                    >
+                        <option value="">Все ответственные</option>
+                        {p.admins.map((a: any) => (
+                            <option key={a.email} value={String(a.id || a.email)}>{a.name}</option>
+                        ))}
+                    </select>
+                    {p.hasFilters && (
+                        <button
+                            onClick={() => { p.setSearchQuery(''); p.setFilterPriority(''); p.setFilterAssignee(''); }}
+                            style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', background: 'transparent', color: GH.danger, border: `1px solid ${GH.danger}`, padding: '8px 14px', cursor: 'pointer' }}
+                        >
+                            <X size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                            Сбросить
+                        </button>
+                    )}
+                </div>
+
+                {/* BOARD */}
+                {p.loading ? (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Loader2 className="animate-spin" size={24} color={GH.ink60} />
+                    </div>
+                ) : (
+                    <DndContext sensors={p.sensors} collisionDetection={p.collisionDetection} onDragStart={p.handleDragStart} onDragEnd={p.handleDragEnd}>
+                        <div style={{ flex: 1, overflowX: 'auto', paddingBottom: 16 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(320px, 1fr))', gap: 0, border: `2px solid ${GH.ink}`, minWidth: 'max-content', height: '100%' }}>
+                                {GH_COLUMNS.map((col, colIdx) => {
+                                    const colTasks = p.getColumnTasks(col.id);
+                                    return (
+                                        <GHDroppableColumn key={col.id} colId={col.id} borderLeft={colIdx > 0}>
+                                            {/* Column head */}
+                                            <div style={{ padding: '16px 16px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <div>
+                                                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                                                        {col.num}
+                                                    </div>
+                                                    <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', marginTop: 2 }}>
+                                                        {col.title}
+                                                    </div>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                                                        {colTasks.length}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => { p.setQuickAddCol(col.id); p.setQuickAddTitle(''); }}
+                                                        style={{ width: 28, height: 28, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                    >
+                                                        <Plus size={14} />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Quick add */}
+                                            {p.quickAddCol === col.id && (
+                                                <div style={{ margin: 12, border: `2px solid ${GH.ink}`, padding: 10, background: GH.paper }}>
+                                                    <input
+                                                        autoFocus
+                                                        value={p.quickAddTitle}
+                                                        onChange={e => p.setQuickAddTitle(e.target.value)}
+                                                        onKeyDown={e => { if (e.key === 'Enter') p.handleQuickAdd(col.id); if (e.key === 'Escape') p.setQuickAddCol(null); }}
+                                                        placeholder="Название задачи…"
+                                                        style={{ width: '100%', fontFamily: GH_SANS, fontSize: 14, background: 'transparent', border: 'none', outline: 'none', padding: '6px 0', color: GH.ink }}
+                                                    />
+                                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
+                                                        <button
+                                                            onClick={() => p.setQuickAddCol(null)}
+                                                            style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, background: 'transparent', border: 'none', padding: '4px 10px', cursor: 'pointer' }}
+                                                        >
+                                                            Отмена
+                                                        </button>
+                                                        <button
+                                                            onClick={() => p.handleQuickAdd(col.id)}
+                                                            style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.paper, background: GH.ink, border: 'none', padding: '4px 12px', cursor: 'pointer' }}
+                                                        >
+                                                            Создать
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <SortableContext items={colTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                                                <div style={{ flex: 1, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 200 }}>
+                                                    {colTasks.map((task, i) => (
+                                                        <GHSortableTaskCard
+                                                            key={task.id}
+                                                            task={task}
+                                                            index={i}
+                                                            onEdit={() => p.setEditingTask(task)}
+                                                            onDelete={() => { p.deleteTask(task.id); toast.success('Удалено'); }}
+                                                            onMove={(status) => { p.moveTask(task.id, status); toast.success(`Перемещено в "${GH_COLUMNS.find(c => c.id === status)?.title}"`); }}
+                                                        />
+                                                    ))}
+                                                    {colTasks.length === 0 && (
+                                                        <div style={{ padding: '40px 16px', border: `1px dashed ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: GH.ink60, textAlign: 'center' }}>
+                                                            Пусто
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </SortableContext>
+
+                                            {col.id === 'DONE' && p.archivedCount > 0 && (
+                                                <button
+                                                    onClick={() => p.setShowArchive(!p.showArchive)}
+                                                    style={{ margin: 12, padding: '10px 12px', border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                                                >
+                                                    <Archive size={12} />
+                                                    {p.showArchive ? 'Скрыть архив' : `Архив · ${p.archivedCount}`}
+                                                </button>
+                                            )}
+                                        </GHDroppableColumn>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <DragOverlay>{p.activeTask && <GHTaskCardView task={p.activeTask} index={0} isDragging />}</DragOverlay>
+                    </DndContext>
+                )}
+
+                {/* Footer */}
+                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 16, marginTop: 24, display: 'flex', justifyContent: 'space-between', ...eyebrow }}>
+                    <span>Unbox · Задачи · {new Date().getFullYear()}</span>
+                    <span>{p.tasks.length} позиций</span>
+                </div>
+            </div>
+
+            {p.editingTask && (
+                <TaskEditModal
+                    task={p.editingTask}
+                    admins={p.admins}
+                    onClose={() => p.setEditingTask(null)}
+                    onSave={async (data) => {
+                        if (p.editingTask!.id) { await p.updateTask(p.editingTask!.id, data); toast.success('Обновлено'); }
+                        else { await p.addTask(data as any); toast.success('Создано'); }
+                        p.setEditingTask(null);
+                    }}
+                    onDelete={p.editingTask.id ? async () => { await p.deleteTask(p.editingTask!.id); p.setEditingTask(null); toast.success('Удалено'); } : undefined}
+                />
+            )}
+        </div>
+    );
+}
+
+function GHDroppableColumn({ colId, children, borderLeft }: { colId: string; children: React.ReactNode; borderLeft: boolean }) {
+    const { setNodeRef, isOver } = useDroppable({ id: `column-${colId}` });
+    return (
+        <div
+            ref={setNodeRef}
+            style={{
+                display: 'flex',
+                flexDirection: 'column',
+                borderLeft: borderLeft ? `1px solid ${GH.ink10}` : 'none',
+                background: isOver ? GH.ink5 : 'transparent',
+                transition: 'background 150ms',
+                minHeight: 500,
+            }}
+        >
+            {children}
+        </div>
+    );
+}
+
+function GHSortableTaskCard({ task, index, onEdit, onDelete, onMove }: {
+    task: AdminTask; index: number; onEdit: () => void; onDelete: () => void; onMove: (status: TaskStatus) => void;
+}) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+    const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+    return (
+        <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+            <GHTaskCardView task={task} index={index} onEdit={onEdit} onDelete={onDelete} onMove={onMove} dragListeners={listeners} />
+        </div>
+    );
+}
+
+function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, isDragging }: {
+    task: AdminTask; index: number; onEdit?: () => void; onDelete?: () => void; onMove?: (status: TaskStatus) => void; dragListeners?: any; isDragging?: boolean;
+}) {
+    const priColor = task.priority === 'HIGH' ? GH.danger : task.priority === 'LOW' ? GH.ink60 : GH.ink;
+    const priLabel = task.priority === 'HIGH' ? 'Срочно' : task.priority === 'MEDIUM' ? 'Средний' : 'Низкий';
+    const clDone = (task.checklist || []).filter(c => c.done).length;
+    const clTotal = (task.checklist || []).length;
+
+    const moveTargets = GH_COLUMNS.filter(c => c.id !== task.status);
+
+    return (
+        <div
+            onClick={onEdit}
+            style={{
+                background: GH.paper,
+                border: `1px solid ${isDragging ? GH.ink : GH.ink10}`,
+                padding: 14,
+                cursor: 'pointer',
+                position: 'relative',
+                boxShadow: isDragging ? `4px 4px 0 ${GH.ink}` : 'none',
+                transition: 'border-color 120ms, box-shadow 120ms',
+            }}
+            onMouseEnter={(e) => { if (!isDragging) e.currentTarget.style.borderColor = GH.ink; }}
+            onMouseLeave={(e) => { if (!isDragging) e.currentTarget.style.borderColor = GH.ink10; }}
+        >
+            {/* Top row: index + priority + move buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
+                        №{String(index + 1).padStart(3, '0')}
+                    </span>
+                    <span style={{
+                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
+                        color: priColor, border: `1px solid ${priColor}`, padding: '2px 6px',
+                    }}>
+                        {priLabel}
+                    </span>
+                    {(task.labels || []).slice(0, 2).map(l => {
+                        const opt = LABEL_OPTIONS.find(o => o.value === l);
+                        return opt ? (
+                            <span key={l} style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                color: GH.ink60, border: `1px solid ${GH.ink10}`, padding: '2px 6px',
+                            }}>
+                                {opt.label}
+                            </span>
+                        ) : null;
+                    })}
+                </div>
+                <div style={{ display: 'flex', gap: 2 }} onClick={e => e.stopPropagation()}>
+                    {onMove && moveTargets.map(col => (
+                        <button
+                            key={col.id}
+                            onClick={e => { e.stopPropagation(); onMove(col.id); }}
+                            title={`→ ${col.title}`}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', fontWeight: 700,
+                                color: GH.ink60, background: 'transparent', border: `1px solid ${GH.ink10}`,
+                                padding: '3px 6px', cursor: 'pointer',
+                            }}
+                        >
+                            {col.id === 'TODO' ? 'TODO' : col.id === 'IN_PROGRESS' ? 'WIP' : 'DONE'}
+                        </button>
+                    ))}
+                    <div {...dragListeners} style={{ padding: 3, cursor: 'grab', color: GH.ink60 }} onClick={e => e.stopPropagation()}>
+                        <GripVertical size={12} />
+                    </div>
+                    {onDelete && (
+                        <button
+                            onClick={e => { e.stopPropagation(); onDelete(); }}
+                            style={{ padding: 3, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}
+                            onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
+                            onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
+                        >
+                            <Trash2 size={12} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Title */}
+            <div style={{
+                fontFamily: GH_SANS,
+                fontSize: 14,
+                fontWeight: 700,
+                lineHeight: 1.3,
+                color: task.status === 'DONE' ? GH.ink60 : GH.ink,
+                textDecoration: task.status === 'DONE' ? 'line-through' : 'none',
+            }}>
+                {task.title}
+            </div>
+            {task.description && (
+                <div style={{ fontFamily: GH_SANS, fontSize: 12, lineHeight: 1.4, color: GH.ink60, marginTop: 6, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {task.description}
+                </div>
+            )}
+
+            {/* Checklist progress */}
+            {clTotal > 0 && (
+                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CheckSquare size={12} color={clDone === clTotal ? GH.ink : GH.ink60} />
+                    <span style={{ fontFamily: GH_MONO, fontSize: 10, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                        {clDone}/{clTotal}
+                    </span>
+                    <div style={{ flex: 1, height: 2, background: GH.ink10, position: 'relative' }}>
+                        <div style={{ position: 'absolute', inset: 0, width: `${(clDone / clTotal) * 100}%`, background: GH.ink }} />
+                    </div>
+                </div>
+            )}
+
+            {(task.attachments?.length > 0) && (
+                <div style={{ marginTop: 8, fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Paperclip size={11} />
+                    <span>{task.attachments.length} вложений</span>
+                </div>
+            )}
+
+            {/* Footer row: assignee + deadline */}
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${GH.ink10}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {task.assigneeName && (
+                        <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <User size={10} />
+                            {task.assigneeName}
+                        </span>
+                    )}
+                    {(task.participants?.length > 0) && (
+                        <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', color: GH.ink60, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Users size={10} />+{task.participants.length}
+                        </span>
+                    )}
+                </div>
+                {task.deadline && (() => {
+                    const d = new Date(task.deadline);
+                    let color: string = GH.ink60;
+                    if (task.status !== 'DONE') {
+                        if (isPast(d) && !isToday(d)) color = GH.danger;
+                        else if (isToday(d)) color = GH.ink;
+                    }
+                    return (
+                        <span style={{ fontFamily: GH_MONO, fontSize: 10, fontVariantNumeric: 'tabular-nums', color, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Clock size={10} />
+                            {format(d, 'd MMM · HH:mm', { locale: ru })}
+                        </span>
+                    );
+                })()}
             </div>
         </div>
     );

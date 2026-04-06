@@ -5,6 +5,16 @@ from .timeline import TimelineEvent
 from .resource import Resource, ResourceCreate, ResourceRead, ResourceUpdate
 from .location import Location, LocationCreate, LocationRead, LocationUpdate
 from .specialist import Specialist, SpecialistCreate, SpecialistRead
+from .specialist_schedule import (
+    SpecialistSchedule,
+    SpecialistScheduleRead,
+    SpecialistScheduleCreate,
+)
+from .specialist_appointment import (
+    SpecialistAppointment,
+    SpecialistAppointmentRead,
+    SpecialistAppointmentCreate,
+)
 
 # CRM models for specialists
 from .therapist_client import TherapistClient, TherapistClientCreate, TherapistClientRead, TherapistClientUpdate

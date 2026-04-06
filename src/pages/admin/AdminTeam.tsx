@@ -3,6 +3,26 @@ import { Plus, Pencil, Trash2, X, Eye, EyeOff, GripVertical } from 'lucide-react
 import { toast } from 'sonner';
 import { teamApi, type TeamMember, type TeamMemberCreate } from '../../api/team';
 import { createPortal } from 'react-dom';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+
+/* ── Grid House module-scope constants (prefix: ght) ── */
+const ghtHairline = `1px solid ${GH.ink10}`;
+const ghtMono: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: 10,
+    fontWeight: 500,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase',
+    color: GH.ink60,
+};
+const ghtH1: React.CSSProperties = {
+    fontFamily: GH_SANS,
+    fontWeight: 800,
+    fontSize: 'clamp(28px, 3.5vw, 42px)',
+    lineHeight: 0.95,
+    letterSpacing: '-0.02em',
+    margin: 0,
+};
 
 const ROLE_TYPES = [
     { value: 'founder', label: 'Основатель' },
@@ -209,6 +229,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
 }
 
 export function AdminTeam() {
+    const gridHouse = useDesignFlag();
     const [members, setMembers] = useState<TeamMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [editMember, setEditMember] = useState<TeamMember | null | undefined>(undefined); // undefined = closed, null = new
@@ -258,6 +279,19 @@ export function AdminTeam() {
         admin: 'bg-gray-100 text-gray-600',
         other: 'bg-gray-50 text-gray-500',
     };
+
+    if (gridHouse) return (
+        <GridHouseTeam
+            members={members}
+            loading={loading}
+            ROLE_LABEL={ROLE_LABEL}
+            setEditMember={setEditMember}
+            handleToggleActive={handleToggleActive}
+            handleDelete={handleDelete}
+            editMember={editMember}
+            load={load}
+        />
+    );
 
     return (
         <div className="space-y-6">
@@ -354,6 +388,289 @@ export function AdminTeam() {
                     </button>
                 </div>
             )}
+
+            {editMember !== undefined && (
+                <MemberModal
+                    member={editMember}
+                    onClose={() => setEditMember(undefined)}
+                    onSaved={load}
+                />
+            )}
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Grid House variant — Team
+   ═══════════════════════════════════════════════════════════════ */
+
+interface GridHouseTeamProps {
+    members: TeamMember[];
+    loading: boolean;
+    ROLE_LABEL: Record<string, string>;
+    setEditMember: (m: TeamMember | null | undefined) => void;
+    handleToggleActive: (m: TeamMember) => void;
+    handleDelete: (m: TeamMember) => void;
+    editMember: TeamMember | null | undefined;
+    load: () => void;
+}
+
+function GridHouseTeam({
+    members,
+    loading,
+    ROLE_LABEL,
+    setEditMember,
+    handleToggleActive,
+    handleDelete,
+    editMember,
+    load,
+}: GridHouseTeamProps) {
+    const total = String(members.length).padStart(3, '0');
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
+            {/* ── Header ── */}
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
+                <div style={{ ...ghtMono, marginBottom: 14 }}>Раздел · Команда</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
+                    <h1 style={ghtH1}>Команда на витрине.</h1>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                        {total}
+                    </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+                    <div style={{ ...ghtMono, color: GH.ink30 }}>
+                        Карточки показываются на главной странице сайта
+                    </div>
+                    <button
+                        onClick={() => setEditMember(null)}
+                        style={{
+                            background: GH.ink,
+                            color: GH.paper,
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            letterSpacing: '0.18em',
+                            textTransform: 'uppercase' as const,
+                            padding: '14px 22px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 10,
+                        }}
+                    >
+                        <Plus size={14} /> Добавить
+                    </button>
+                </div>
+            </div>
+
+            {/* ── Content ── */}
+            {loading ? (
+                <div style={{ padding: '120px 0', textAlign: 'center', ...ghtMono }}>
+                    Загрузка команды...
+                </div>
+            ) : members.length === 0 ? (
+                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghtHairline, padding: '80px 24px', textAlign: 'center' }}>
+                    <div style={{ ...ghtMono, marginBottom: 14 }}>→ Пусто</div>
+                    <h2 style={{ ...ghtH1, fontSize: 'clamp(28px, 3.5vw, 44px)' }}>Команда пока не собрана.</h2>
+                </div>
+            ) : (
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                        gap: 0,
+                        borderTop: `2px solid ${GH.ink}`,
+                        borderLeft: ghtHairline,
+                    }}
+                >
+                    {members.map((m, idx) => (
+                        <div
+                            key={m.id}
+                            style={{
+                                borderRight: ghtHairline,
+                                borderBottom: ghtHairline,
+                                background: GH.paper,
+                                opacity: m.isActive ? 1 : 0.5,
+                                display: 'flex',
+                                flexDirection: 'column',
+                            }}
+                        >
+                            {/* Photo / initial */}
+                            <div style={{ borderBottom: ghtHairline, aspectRatio: '3 / 4', position: 'relative', background: GH.paper, overflow: 'hidden' }}>
+                                {m.photoUrl ? (
+                                    <img src={m.photoUrl} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                ) : (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 0,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            fontFamily: GH_SANS,
+                                            fontWeight: 800,
+                                            fontSize: 'clamp(80px, 12vw, 140px)',
+                                            lineHeight: 0.8,
+                                            letterSpacing: '-0.04em',
+                                            color: GH.ink,
+                                            userSelect: 'none',
+                                        }}
+                                    >
+                                        {m.name[0]}
+                                    </div>
+                                )}
+                                <div style={{ position: 'absolute', top: 10, left: 12, ...ghtMono, color: GH.ink60, background: GH.paper, padding: '2px 6px', fontVariantNumeric: 'tabular-nums' }}>
+                                    {String(idx + 1).padStart(2, '0')}
+                                </div>
+                                <div style={{ position: 'absolute', top: 10, right: 12, ...ghtMono, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <GripVertical size={11} /> {m.sortOrder}
+                                </div>
+                                {!m.isActive && (
+                                    <div style={{ position: 'absolute', bottom: 10, left: 12, ...ghtMono, background: GH.ink, color: GH.paper, padding: '3px 7px' }}>
+                                        Скрыт
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Body */}
+                            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                                <div>
+                                    <div style={{ fontFamily: GH_SANS, fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, lineHeight: 1.15 }}>
+                                        {m.name}
+                                    </div>
+                                    <div style={{ fontFamily: GH_SANS, fontSize: 13, color: GH.ink60, marginTop: 3, letterSpacing: '-0.005em' }}>
+                                        {m.role}
+                                    </div>
+                                </div>
+                                <div>
+                                    <span
+                                        style={{
+                                            fontFamily: GH_MONO,
+                                            fontSize: 10,
+                                            fontWeight: 600,
+                                            letterSpacing: '0.14em',
+                                            textTransform: 'uppercase',
+                                            padding: '4px 8px',
+                                            color: m.roleType === 'founder' ? GH.paper : GH.ink,
+                                            background: m.roleType === 'founder' ? GH.ink : 'transparent',
+                                            border: `1px solid ${GH.ink}`,
+                                        }}
+                                    >
+                                        {ROLE_LABEL[m.roleType] ?? m.roleType}
+                                    </span>
+                                </div>
+                                {m.bio && (
+                                    <div
+                                        style={{
+                                            fontSize: 12,
+                                            lineHeight: 1.45,
+                                            color: GH.ink60,
+                                            display: '-webkit-box',
+                                            WebkitLineClamp: 2,
+                                            WebkitBoxOrient: 'vertical',
+                                            overflow: 'hidden',
+                                        }}
+                                    >
+                                        {m.bio}
+                                    </div>
+                                )}
+                                <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: ghtHairline, display: 'flex', gap: 4 }}>
+                                    <button
+                                        onClick={() => setEditMember(m)}
+                                        title="Править"
+                                        style={{
+                                            flex: 1,
+                                            height: 30,
+                                            background: 'transparent',
+                                            border: `1px solid ${GH.ink10}`,
+                                            cursor: 'pointer',
+                                            color: GH.ink60,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                    >
+                                        <Pencil size={12} />
+                                    </button>
+                                    <button
+                                        onClick={() => handleToggleActive(m)}
+                                        title={m.isActive ? 'Скрыть' : 'Показать'}
+                                        style={{
+                                            flex: 1,
+                                            height: 30,
+                                            background: 'transparent',
+                                            border: `1px solid ${GH.ink10}`,
+                                            cursor: 'pointer',
+                                            color: GH.ink60,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                    >
+                                        {m.isActive ? <EyeOff size={12} /> : <Eye size={12} />}
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(m)}
+                                        title="Удалить"
+                                        style={{
+                                            flex: 1,
+                                            height: 30,
+                                            background: 'transparent',
+                                            border: `1px solid ${GH.ink10}`,
+                                            cursor: 'pointer',
+                                            color: GH.ink60,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = GH.danger; e.currentTarget.style.color = GH.danger; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = GH.ink10; e.currentTarget.style.color = GH.ink60; }}
+                                    >
+                                        <Trash2 size={12} />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Add slot */}
+                    <button
+                        onClick={() => setEditMember(null)}
+                        style={{
+                            borderRight: ghtHairline,
+                            borderBottom: ghtHairline,
+                            background: GH.ink5,
+                            minHeight: 260,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 14,
+                            cursor: 'pointer',
+                            color: GH.ink60,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = GH.paper; e.currentTarget.style.color = GH.ink; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = GH.ink5; e.currentTarget.style.color = GH.ink60; }}
+                    >
+                        <div style={{ width: 44, height: 44, border: '2px dashed currentColor', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Plus size={20} />
+                        </div>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                            → Добавить
+                        </div>
+                    </button>
+                </div>
+            )}
+
+            {/* ── Footer ── */}
+            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, padding: '18px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ ...ghtMono, color: GH.ink30 }}>UNBOX ADMIN · 2026</div>
+                <div style={{ ...ghtMono, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                    {total} участников
+                </div>
+            </div>
 
             {editMember !== undefined && (
                 <MemberModal

@@ -13,6 +13,9 @@ export interface PriceBreakdown {
     finalPrice: number;
     isNonRefundable: boolean;
     isNonReschedulable: boolean;
+    peakSurcharge?: number;
+    peakSlotCount?: number;
+    subscriptionPeakDebt?: number;
 }
 
 export interface Subscription {
