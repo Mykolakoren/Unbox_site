@@ -190,9 +190,18 @@ def sync_from_calendar(
             "unmatched": [...],  # events that couldn't be matched
         }
     """
-    now = datetime.now()
-    time_min = now - timedelta(days=months_back * 30)
-    time_max = now + timedelta(days=months_forward * 30)
+    # Use explicit UTC so naive datetimes are consistent with _parse_event_dt
+    TZ_TBILISI = timezone(timedelta(hours=4))
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
+
+    if months_back == 0:
+        # "current month only" → from 1st of this month in Tbilisi time
+        now_tb = datetime.now(TZ_TBILISI)
+        month_start_tb = now_tb.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        time_min = month_start_tb.astimezone(timezone.utc).replace(tzinfo=None)
+    else:
+        time_min = now_utc - timedelta(days=months_back * 30)
+    time_max = now_utc + timedelta(days=months_forward * 30)
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)
 
@@ -241,10 +250,9 @@ def sync_from_calendar(
                         client_id = cid
                         break
 
-        # Use Tbilisi timezone (UTC+4) for status comparison
-        now_local = datetime.now()
+        # Compare in UTC: start_dt is naive UTC, so use now_utc
         session_status = "CANCELLED_CLIENT" if event_status == "cancelled" else (
-            "COMPLETED" if start_dt < now_local else "PLANNED"
+            "COMPLETED" if start_dt < now_utc else "PLANNED"
         )
 
         entry = {
@@ -282,9 +290,9 @@ def sync_client_history(
     Fetch events for a specific client by alias codes and/or name.
     Supports merged clients with multiple alias codes.
     """
-    now = datetime.now()
-    time_min = now - timedelta(days=int(years_back * 365))
-    time_max = now + timedelta(days=months_forward * 30)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
+    time_min = now_utc - timedelta(days=int(years_back * 365))
+    time_max = now_utc + timedelta(days=months_forward * 30)
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)
 
@@ -345,10 +353,9 @@ def sync_client_history(
             duration = max(30, int((end_dt - start_dt).total_seconds() / 60))
 
         event_status = ev.get("status", "confirmed")
-        # Use Tbilisi timezone (UTC+4) for status comparison
-        now_local = datetime.now()
+        # Compare in UTC: start_dt is naive UTC
         session_status = "CANCELLED_CLIENT" if event_status == "cancelled" else (
-            "COMPLETED" if start_dt < now_local else "PLANNED"
+            "COMPLETED" if start_dt < now_utc else "PLANNED"
         )
 
         sessions.append({

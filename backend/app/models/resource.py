@@ -9,6 +9,7 @@ class ResourceBase(SQLModel):
     type: str # 'cabinet' or 'capsule'
     location_id: str
     hourly_rate: float
+    group_rate: Optional[float] = None  # цена для групповых занятий
     capacity: int
     area: int
     min_booking_hours: int = 1
@@ -35,6 +36,7 @@ class ResourceRead(ResourceBase):
 class ResourceUpdate(SQLModel):
     name: Optional[str] = None
     hourly_rate: Optional[float] = None
+    group_rate: Optional[float] = None
     capacity: Optional[int] = None
     area: Optional[int] = None
     min_booking_hours: Optional[int] = None

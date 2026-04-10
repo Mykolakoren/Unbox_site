@@ -364,6 +364,15 @@ interface GHAdminUsersProps {
     fetchUsers: () => Promise<void>;
 }
 
+type SortMode = 'name' | 'balance' | 'date';
+type FilterMode = 'all' | 'debtors';
+
+function useNarrow(bp = 768) {
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    React.useEffect(() => { const h = () => setNarrow(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return narrow;
+}
+
 function GridHouseAdminUsers(props: GHAdminUsersProps) {
     const {
         users, filteredUsers, search, setSearch,
@@ -372,8 +381,26 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
         updateUserById, fetchUsers,
     } = props;
 
-    const totalFmt = String(filteredUsers.length).padStart(3, '0');
+    const [sortMode, setSortMode] = useState<SortMode>('name');
+    const [filterMode, setFilterMode] = useState<FilterMode>('all');
+    const narrow = useNarrow();
+
+    // Apply filter
+    const filtered = filterMode === 'debtors'
+        ? filteredUsers.filter(u => u.balance < 0)
+        : filteredUsers;
+
+    // Apply sort
+    const sorted = [...filtered].sort((a, b) => {
+        if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '', 'ru');
+        if (sortMode === 'balance') return a.balance - b.balance; // debtors first
+        if (sortMode === 'date') return (b.registrationDate || '').localeCompare(a.registrationDate || ''); // newest first
+        return 0;
+    });
+
+    const totalFmt = String(sorted.length).padStart(3, '0');
     const allFmt = String(users.length).padStart(3, '0');
+    const debtorCount = filteredUsers.filter(u => u.balance < 0).length;
 
     const roleLabel = (role: string | undefined) =>
         role === 'owner' ? 'Владелец'
@@ -388,16 +415,24 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
         color: GH.ink60,
     };
 
+    const sortBtn = (mode: SortMode, label: string): React.CSSProperties => ({
+        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+        padding: '6px 10px', border: `1px solid ${sortMode === mode ? GH.ink : GH.ink10}`,
+        background: sortMode === mode ? GH.ink : 'transparent',
+        color: sortMode === mode ? GH.paper : GH.ink60,
+        cursor: 'pointer', whiteSpace: 'nowrap',
+    });
+
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
-                <div style={{ ...monoLabel, color: GH.ink30, marginBottom: 14 }}>ADMIN · USERS</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
+                <div style={{ ...monoLabel, color: GH.ink30, marginBottom: narrow ? 8 : 14 }}>ADMIN · USERS</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
                     <h1 style={{
                         fontFamily: GH_SANS,
                         fontWeight: 800,
-                        fontSize: 'clamp(28px, 3.5vw, 42px)',
+                        fontSize: 'clamp(24px, 3.5vw, 42px)',
                         lineHeight: 1.1,
                         letterSpacing: '-0.02em',
                         margin: 0,
@@ -410,39 +445,45 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                             background: GH.ink,
                             color: GH.paper,
                             fontFamily: GH_MONO,
-                            fontSize: 11,
+                            fontSize: narrow ? 9 : 11,
                             fontWeight: 600,
                             letterSpacing: '0.18em',
                             textTransform: 'uppercase',
-                            padding: '14px 22px',
+                            padding: narrow ? '10px 14px' : '14px 22px',
                             border: 'none',
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 10,
+                            gap: 8,
                         }}
                     >
-                        <Plus size={14} /> Новый клиент
+                        <Plus size={narrow ? 12 : 14} /> {narrow ? '+ Новый' : 'Новый клиент'}
                     </button>
                 </div>
             </div>
 
             {/* ── KPI strip ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 32, marginBottom: 32, alignItems: 'end' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 20 : 32, marginBottom: narrow ? 16 : 32, flexWrap: 'wrap' }}>
                 <div>
                     <p style={{ ...ghMono, color: GH.ink30, marginBottom: 4, margin: 0 }}>ВСЕГО</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
                         {allFmt}
                     </span>
                 </div>
-                <div style={{ display: 'flex', gap: 28, paddingBottom: 6, flexWrap: 'wrap' }}>
+                <div>
+                    <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
+                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.accent, fontVariantNumeric: 'tabular-nums' }}>
+                        {totalFmt}
+                    </span>
+                </div>
+                {debtorCount > 0 && (
                     <div>
-                        <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.accent, fontVariantNumeric: 'tabular-nums' }}>
-                            {totalFmt}
+                        <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ДОЛЖНИКИ</p>
+                        <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger, fontVariantNumeric: 'tabular-nums' }}>
+                            {String(debtorCount).padStart(3, '0')}
                         </span>
                     </div>
-                </div>
+                )}
             </div>
 
             {/* ── Search ── */}
@@ -479,8 +520,30 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                 </div>
             </div>
 
-            {/* ── Table ── */}
-            {filteredUsers.length === 0 ? (
+            {/* ── Sort / Filter controls ── */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+                <span style={{ ...monoLabel, marginRight: 4 }}>СОРТ:</span>
+                <button onClick={() => setSortMode('name')} style={sortBtn('name', 'Имя')}>Имя</button>
+                <button onClick={() => setSortMode('balance')} style={sortBtn('balance', 'Баланс')}>Баланс</button>
+                <button onClick={() => setSortMode('date')} style={sortBtn('date', 'Дата')}>Дата</button>
+                <div style={{ width: 1, height: 20, background: GH.ink10, margin: '0 4px' }} />
+                <button
+                    onClick={() => setFilterMode(filterMode === 'debtors' ? 'all' : 'debtors')}
+                    style={{
+                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                        padding: '6px 10px',
+                        border: `1px solid ${filterMode === 'debtors' ? GH.danger : GH.ink10}`,
+                        background: filterMode === 'debtors' ? GH.danger : 'transparent',
+                        color: filterMode === 'debtors' ? GH.paper : GH.ink60,
+                        cursor: 'pointer', whiteSpace: 'nowrap' as const,
+                    }}
+                >
+                    Должники{debtorCount > 0 ? ` (${debtorCount})` : ''}
+                </button>
+            </div>
+
+            {/* ── List ── */}
+            {sorted.length === 0 ? (
                 <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghHairline, padding: '80px 24px', textAlign: 'center' }}>
                     <div style={{ ...monoLabel, marginBottom: 14 }}>ПУСТО</div>
                     <h2 style={{
@@ -494,8 +557,86 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                         Никто не найден.
                     </h2>
                 </div>
-            ) : (
+            ) : narrow ? (
+                /* ── Mobile compact cards ── */
                 <div style={{ borderTop: `2px solid ${GH.ink}` }}>
+                    {sorted.map((user, idx) => (
+                        <Link
+                            key={user.email}
+                            to={`/admin/users/${encodeURIComponent(user.email)}`}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 12,
+                                padding: '14px 0',
+                                borderBottom: ghHairline,
+                                textDecoration: 'none',
+                                color: 'inherit',
+                            }}
+                        >
+                            {/* Avatar */}
+                            <div style={{
+                                width: 40, height: 40, minWidth: 40,
+                                borderRadius: '50%',
+                                background: GH.ink,
+                                color: GH.paper,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontFamily: GH_SANS, fontWeight: 700, fontSize: 16,
+                            }}>
+                                {(user.name || '?').charAt(0).toUpperCase()}
+                            </div>
+                            {/* Info */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                }}>
+                                    <span style={{
+                                        fontFamily: GH_SANS, fontWeight: 700, fontSize: 15, letterSpacing: '-0.01em',
+                                        color: GH.ink,
+                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                                    }}>
+                                        {user.name}
+                                    </span>
+                                    {user.isAdmin && <Shield size={12} color={GH.ink60} />}
+                                    {user.role && user.role !== 'user' && (
+                                        <span style={{
+                                            fontFamily: GH_MONO, fontSize: 8, fontWeight: 600,
+                                            letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                                            padding: '2px 5px',
+                                            background: user.role === 'owner' ? GH.ink : `${GH.accent}18`,
+                                            color: user.role === 'owner' ? GH.paper : GH.accent,
+                                            border: user.role === 'owner' ? 'none' : `1px solid ${GH.accent}30`,
+                                            whiteSpace: 'nowrap' as const,
+                                        }}>
+                                            {roleLabel(user.role)}
+                                        </span>
+                                    )}
+                                </div>
+                                <div style={{
+                                    fontFamily: GH_MONO, fontSize: 10, color: GH.ink30,
+                                    letterSpacing: '0.05em', marginTop: 2,
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                                }}>
+                                    {user.email}
+                                </div>
+                            </div>
+                            {/* Balance */}
+                            <div style={{
+                                fontFamily: GH_MONO, fontSize: 13, fontWeight: 700,
+                                color: user.balance < 0 ? GH.danger : GH.ink,
+                                fontVariantNumeric: 'tabular-nums',
+                                whiteSpace: 'nowrap' as const,
+                                textAlign: 'right',
+                                minWidth: 56,
+                            }}>
+                                {user.balance.toFixed(0)} ₾
+                            </div>
+                        </Link>
+                    ))}
+                </div>
+            ) : (
+                /* ── Desktop table ── */
+                <div style={{ borderTop: `2px solid ${GH.ink}`, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     {/* Column headers */}
                     <div style={{
                         display: 'grid',
@@ -503,6 +644,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                         gap: 16,
                         padding: '12px 0',
                         borderBottom: ghHairline,
+                        minWidth: 720,
                         ...monoLabel,
                     }}>
                         <div>#</div>
@@ -514,13 +656,14 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                         <div style={{ textAlign: 'right' }}></div>
                     </div>
 
-                    {filteredUsers.map((user, idx) => (
+                    {sorted.map((user, idx) => (
                         <div
                             key={user.email}
                             style={{
                                 display: 'grid',
                                 gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
                                 gap: 16,
+                                minWidth: 720,
                                 padding: '18px 0',
                                 borderBottom: ghHairline,
                                 alignItems: 'center',

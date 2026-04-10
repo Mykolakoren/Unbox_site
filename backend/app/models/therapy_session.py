@@ -14,6 +14,8 @@ class TherapySessionBase(SQLModel):
     duration_minutes: int = Field(default=60)
     status: str = Field(default="PLANNED", index=True)  # PLANNED, COMPLETED, CANCELLED_CLIENT, CANCELLED_THERAPIST
     price: Optional[float] = None  # Override price for this session; None → use client.base_price
+    currency: Optional[str] = None  # Frozen at payment time; None → use client.currency
+    account: Optional[str] = None   # Frozen at payment time; None → use client.default_account
     is_paid: bool = Field(default=False, index=True)
     is_booked: bool = Field(default=False)  # Room/cabinet booked for this session
     notes: Optional[str] = None  # Inline notes for this session

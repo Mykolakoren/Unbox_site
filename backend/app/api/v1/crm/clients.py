@@ -190,13 +190,22 @@ def get_client_balance(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
-    """Calculate client's financial balance: debt, prepayment, totals."""
+    """Calculate client's financial balance: debt, prepayment, totals — grouped by currency."""
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Client not found")
 
     uid = str(current_user.id)
     base = client.base_price or 0
+    default_cur = client.currency or "GEL"
+
+    def _group_by_currency(sessions_list):
+        totals = {}
+        for s in sessions_list:
+            cur = s.currency or default_cur
+            price = s.price if s.price is not None else base
+            totals[cur] = round(totals.get(cur, 0) + price, 2)
+        return totals
 
     # Unpaid COMPLETED sessions only (future PLANNED sessions are not debt)
     unpaid_sessions = session.exec(
@@ -208,10 +217,10 @@ def get_client_balance(
         )
     ).all()
 
-    debt = sum((s.price if s.price is not None else base) for s in unpaid_sessions)
+    debt_by_currency = _group_by_currency(unpaid_sessions)
+    debt = sum(debt_by_currency.values())
 
-    # LTV = sum of completed+paid sessions (price or base_price fallback)
-    # This is more reliable than summing payments, especially after merges
+    # LTV = sum of completed+paid sessions
     paid_sessions = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,
@@ -220,7 +229,8 @@ def get_client_balance(
             TherapySession.is_paid == True,
         )
     ).all()
-    total_paid = sum((s.price if s.price is not None else base) for s in paid_sessions)
+    paid_by_currency = _group_by_currency(paid_sessions)
+    total_paid = sum(paid_by_currency.values())
 
     # Total expected (all non-cancelled sessions)
     all_sessions = session.exec(
@@ -234,8 +244,10 @@ def get_client_balance(
 
     return {
         "total_paid": round(total_paid, 2),
+        "paid_by_currency": paid_by_currency,
         "total_expected": round(total_expected, 2),
         "debt": round(debt, 2),
+        "debt_by_currency": debt_by_currency,
         "prepayment": round(max(0, total_paid - total_expected), 2),
         "unpaid_sessions_count": len(unpaid_sessions),
     }
@@ -261,6 +273,7 @@ def create_client(
 def update_client(
     client_id: str,
     data: TherapistClientUpdate,
+    apply_price_to: Optional[str] = Query(None),  # "all_unpaid" | "future_only"
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
@@ -269,9 +282,34 @@ def update_client(
         raise HTTPException(404, "Client not found")
 
     update_data = data.model_dump(exclude_unset=True)
+    new_price = update_data.get("base_price")
+    new_currency = update_data.get("currency")
+    new_account = update_data.get("default_account")
+
     for key, value in update_data.items():
         setattr(client, key, value)
     client.updated_at = datetime.now()
+
+    # Apply new price/currency/account to existing unpaid sessions
+    if apply_price_to in ("all_unpaid", "future_only"):
+        uid = str(current_user.id)
+        q = select(TherapySession).where(
+            TherapySession.specialist_id == uid,
+            TherapySession.client_id == client_id,
+            TherapySession.is_paid == False,
+        )
+        if apply_price_to == "future_only":
+            q = q.where(TherapySession.status == "PLANNED")
+        unpaid = session.exec(q).all()
+        for ts in unpaid:
+            if new_price is not None:
+                ts.price = new_price
+            if new_currency is not None:
+                ts.currency = new_currency
+            if new_account is not None:
+                ts.account = new_account
+            ts.updated_at = datetime.now()
+            session.add(ts)
 
     session.add(client)
     session.commit()

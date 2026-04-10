@@ -384,6 +384,13 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
         approvingId, rejectingId,
     } = props;
 
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 768);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+
     const MONO_LABEL: React.CSSProperties = {
         ...ghabMono,
         fontWeight: 500,
@@ -412,12 +419,12 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 20, marginBottom: 32 }}>
-                <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 8 }}>ADMIN · BOOKINGS</p>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 14 : 20, marginBottom: narrow ? 16 : 32 }}>
+                <p style={{ ...ghabMono, color: GH.ink30, marginBottom: narrow ? 6 : 8 }}>ADMIN · BOOKINGS</p>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
                     <h1
                         style={{
-                            fontSize: 'clamp(28px, 3.5vw, 42px)',
+                            fontSize: narrow ? 24 : 'clamp(28px, 3.5vw, 42px)',
                             fontWeight: 800,
                             letterSpacing: '-0.02em',
                             lineHeight: 1.1,
@@ -431,8 +438,13 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                         {(['list', 'grid'] as const).map((m, i) => (
                             <button key={m} onClick={() => setViewMode(m)}
                                 style={{
-                                    padding: '6px 16px', border: 'none', cursor: 'pointer',
-                                    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                    padding: narrow ? '5px 10px' : '6px 16px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontFamily: GH_MONO,
+                                    fontSize: narrow ? 9 : 10,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
                                     background: viewMode === m ? GH.ink : 'transparent',
                                     color: viewMode === m ? GH.paper : GH.ink60,
                                     borderTop: ghabHairline, borderBottom: ghabHairline,
@@ -440,7 +452,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                     borderRight: i === 1 ? ghabHairline : 'none',
                                     display: 'inline-flex', alignItems: 'center', gap: 6,
                                 }}>
-                                {m === 'list' ? <><List size={10} /> СПИСОК</> : <><LayoutGrid size={10} /> ШАХМАТКА</>}
+                                {m === 'list' ? <><List size={10} /> {narrow ? 'СПИСОК' : 'СПИСОК'}</> : <><LayoutGrid size={10} /> {narrow ? 'ШАХ.' : 'ШАХМАТКА'}</>}
                             </button>
                         ))}
                     </div>
@@ -448,25 +460,23 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
             </div>
 
             {/* ── KPI strip ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 32, marginBottom: 32, alignItems: 'end' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 18 : 32, marginBottom: narrow ? 18 : 32, flexWrap: 'wrap' }}>
                 <div>
                     <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 4 }}>ВСЕГО</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
                         {totalFmt}
                     </span>
                 </div>
-                <div style={{ display: 'flex', gap: 28, paddingBottom: 6, flexWrap: 'wrap' }}>
-                    <div>
-                        <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 2 }}>АКТИВ</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.accent }}>{String(activeCount).padStart(3, '0')}</span>
-                    </div>
-                    {pendingCount > 0 && (
-                        <div>
-                            <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 2 }}>ОЖИДАЕТ</p>
-                            <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.danger }}>{String(pendingCount).padStart(3, '0')}</span>
-                        </div>
-                    )}
+                <div>
+                    <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 2 }}>АКТИВ</p>
+                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.accent }}>{String(activeCount).padStart(3, '0')}</span>
                 </div>
+                {pendingCount > 0 && (
+                    <div>
+                        <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 2 }}>ОЖИДАЕТ</p>
+                        <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger }}>{String(pendingCount).padStart(3, '0')}</span>
+                    </div>
+                )}
             </div>
 
             {/* ── Grid view = chessboard (legacy component) ── */}
@@ -481,7 +491,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
             {viewMode === 'list' && (
                 <>
                     {/* Filters */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 24, alignItems: 'end', marginBottom: 28 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: narrow ? 12 : 18, marginBottom: narrow ? 16 : 28 }}>
                         <div>
                             <div style={{ ...MONO_LABEL, marginBottom: 8 }}>ПОИСК</div>
                             <div style={{ position: 'relative', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8 }}>
@@ -513,7 +523,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 )}
                             </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 0, border: `1px solid ${GH.ink}` }}>
+                        <div style={{ display: 'flex', gap: 0, border: `1px solid ${GH.ink}`, flexWrap: 'wrap', overflowX: 'auto' }}>
                             {statusOptions.map((o) => {
                                 const active = filterStatus === o.value;
                                 return (
@@ -522,16 +532,18 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         onClick={() => setFilterStatus(o.value)}
                                         style={{
                                             fontFamily: GH_MONO,
-                                            fontSize: 10,
+                                            fontSize: narrow ? 9 : 10,
                                             fontWeight: 600,
                                             letterSpacing: '0.12em',
                                             textTransform: 'uppercase',
-                                            padding: '10px 14px',
+                                            padding: narrow ? '8px 10px' : '10px 14px',
                                             background: active ? GH.ink : 'transparent',
                                             color: active ? GH.paper : GH.ink,
                                             border: 'none',
                                             borderRight: `1px solid ${GH.ink10}`,
                                             cursor: 'pointer',
+                                            flex: narrow ? 1 : undefined,
+                                            whiteSpace: 'nowrap',
                                         }}
                                     >
                                         {o.label}
@@ -555,6 +567,145 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                             >
                                 Броней не найдено.
                             </h2>
+                        </div>
+                    ) : narrow ? (
+                        /* ── Mobile card list ── */
+                        <div style={{ borderTop: `2px solid ${GH.ink}` }}>
+                            {filteredBookings.map((booking, idx) => {
+                                const resourceName = RESOURCES.find((r) => r.id === booking.resourceId)?.name || booking.resourceId;
+                                const statusColor =
+                                    booking.status === 'confirmed' ? GH.ink
+                                    : booking.status === 'pending_approval' ? GH.danger
+                                    : booking.status === 're-rented' ? GH.accent
+                                    : GH.ink30;
+                                return (
+                                    <div
+                                        key={booking.id}
+                                        style={{
+                                            padding: '14px 0',
+                                            borderBottom: ghabHairline,
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: 8,
+                                        }}
+                                    >
+                                        {/* Top row: index, date, status, price */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                                <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                                                    {String(idx + 1).padStart(3, '0')}
+                                                </span>
+                                                <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                                    {format(booking.date, 'dd.MM')} · {booking.startTime}
+                                                </span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                                <span
+                                                    style={{
+                                                        fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
+                                                        letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                                                        padding: '3px 6px', color: statusColor,
+                                                        border: `1px solid ${statusColor}`,
+                                                    }}
+                                                >
+                                                    {statusText(booking.status)}
+                                                </span>
+                                                <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                                    {booking.paymentMethod === 'subscription' ? 'Абон.' : `${booking.finalPrice}₾`}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        {/* Client */}
+                                        <div
+                                            onClick={() => navigate(`/admin/users/${encodeURIComponent(booking.userId)}`)}
+                                            style={{ cursor: 'pointer' }}
+                                        >
+                                            <div style={{ fontSize: 14, fontWeight: 700, color: GH.ink, letterSpacing: '-0.005em' }}>
+                                                {getUserName(booking.userId)}
+                                            </div>
+                                            <div style={{ ...ghabMono, color: GH.ink60, marginTop: 2 }}>
+                                                {resourceName} · {booking.locationId === 'unbox_one' ? 'One' : 'Uni'} · {(booking.duration ?? 0) / 60}ч
+                                            </div>
+                                        </div>
+                                        {/* Actions */}
+                                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                            {booking.status === 'pending_approval' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleApprove(booking.id)}
+                                                        disabled={approvingId === booking.id}
+                                                        style={{
+                                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
+                                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                                                            padding: '6px 12px', background: GH.ink, color: GH.paper,
+                                                            border: 'none', cursor: 'pointer',
+                                                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                                                        }}
+                                                    >
+                                                        {approvingId === booking.id ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                                                        Принять
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleReject(booking.id)}
+                                                        disabled={rejectingId === booking.id}
+                                                        style={{
+                                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
+                                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                                                            padding: '6px 12px', background: 'transparent', color: GH.danger,
+                                                            border: `1px solid ${GH.danger}`, cursor: 'pointer',
+                                                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                                                        }}
+                                                    >
+                                                        <X size={10} /> Отклонить
+                                                    </button>
+                                                </>
+                                            )}
+                                            {booking.status === 'confirmed' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
+                                                        style={{
+                                                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em',
+                                                            textTransform: 'uppercase' as const,
+                                                            background: 'transparent', color: GH.ink60,
+                                                            border: `1px solid ${GH.ink10}`, cursor: 'pointer',
+                                                            padding: '5px 10px',
+                                                        }}
+                                                    >
+                                                        Цена
+                                                    </button>
+                                                    {!booking.isReRentListed && (
+                                                        <button
+                                                            onClick={() => handleReRent(booking.id)}
+                                                            style={{
+                                                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em',
+                                                                textTransform: 'uppercase' as const,
+                                                                background: 'transparent', color: GH.ink60,
+                                                                border: `1px solid ${GH.ink10}`, cursor: 'pointer',
+                                                                padding: '5px 10px',
+                                                            }}
+                                                        >
+                                                            Пересдать
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleCancel(booking.id)}
+                                                        style={{
+                                                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em',
+                                                            textTransform: 'uppercase' as const,
+                                                            background: 'transparent', color: GH.danger,
+                                                            border: `1px solid ${GH.danger}30`, cursor: 'pointer',
+                                                            padding: '5px 10px',
+                                                        }}
+                                                    >
+                                                        Отмена
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     ) : (
                         <div style={{ borderTop: `2px solid ${GH.ink}`, overflowX: 'auto' }}>

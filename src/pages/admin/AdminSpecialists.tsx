@@ -1051,12 +1051,13 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                 </>
                             ) : (
                                 /* ── GH Dense Table ── */
-                                <div>
+                                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                                     <div style={{
                                         display: 'grid',
                                         gridTemplateColumns: '48px 1fr 140px 160px 72px 72px 56px',
                                         borderBottom: `2px solid ${GH.ink}`,
                                         padding: '8px 0',
+                                        minWidth: 700,
                                     }}>
                                         {['№', 'СПЕЦИАЛИСТ', 'КАТЕГОРИЯ', 'СПЕЦИАЛИЗАЦИИ', 'ЦЕНА', 'ПОКАЗ', ''].map((h, i) => (
                                             <span key={i} style={{ ...ghaMono, color: GH.ink30, padding: '0 8px' }}>{h}</span>
@@ -1124,6 +1125,7 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
         alignItems: 'center',
         borderBottom: ghaHairline,
         padding: '10px 0',
+        minWidth: 700,
     };
 
     const categoryLabel = CATEGORIES.find(c => c.value === (specialist.category ?? ''))?.label ?? '—';

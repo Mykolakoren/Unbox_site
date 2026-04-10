@@ -37,6 +37,7 @@ const PAGE_BG: React.CSSProperties = {
     fontFamily: GH_SANS,
     minHeight: '100vh',
     WebkitFontSmoothing: 'antialiased',
+    overflowX: 'hidden',
 };
 const HAIRLINE = `1px solid ${GH.ink10}`;
 const MONO_LABEL: React.CSSProperties = {
@@ -86,7 +87,7 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
             <div
                 style={{
                     borderBottom: HAIRLINE,
-                    padding: '20px 32px',
+                    padding: '20px clamp(16px, 4vw, 32px)',
                     display: 'flex',
                     alignItems: 'baseline',
                     gap: 16,
@@ -132,7 +133,7 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
             <div
                 style={{
                     borderTop: HAIRLINE,
-                    padding: '16px 32px',
+                    padding: '16px clamp(16px, 4vw, 32px)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -176,7 +177,7 @@ function GateColumn({
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                padding: 'clamp(40px, 6vw, 72px) clamp(32px, 5vw, 56px)',
+                padding: 'clamp(40px, 6vw, 72px) clamp(16px, 5vw, 56px)',
                 borderRight: borderRight ? HAIRLINE : undefined,
                 borderBottom: borderBottom ? HAIRLINE : undefined,
                 background: hover ? GH.ink : GH.paper,
@@ -265,7 +266,7 @@ function Masthead({
                 style={{
                     maxWidth: 1280,
                     margin: '0 auto',
-                    padding: '18px 32px',
+                    padding: '18px clamp(16px, 4vw, 32px)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 20,
@@ -298,7 +299,7 @@ function Masthead({
 
                 {/* Right: nav */}
                 <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-                    <NavLink to="#specialists" label="Индекс" />
+                    <NavLink to="/specialists" label="Специалисты" />
                     <NavDivider />
                     <NavLink to="/#cabinets" label="Кабинеты" />
                     <NavDivider />
@@ -361,10 +362,24 @@ function NavLink({
         padding: '4px 12px',
         textDecoration: 'none',
         whiteSpace: 'nowrap',
+        cursor: 'pointer',
     };
     if (isHash) {
+        const handleClick = (e: React.MouseEvent) => {
+            const hash = to.includes('#') ? '#' + to.split('#')[1] : to;
+            const el = document.getElementById(hash.slice(1));
+            if (el) {
+                e.preventDefault();
+                el.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                // Section not on this page — reset visitor mode & force full navigation
+                e.preventDefault();
+                localStorage.setItem('unbox_visitor_mode', 'client');
+                window.location.href = to;
+            }
+        };
         return (
-            <a href={to} style={baseStyle}>
+            <a href={to} style={baseStyle} onClick={handleClick}>
                 {label}
             </a>
         );
@@ -432,7 +447,7 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
             style={{
                 maxWidth: 1280,
                 margin: '0 auto',
-                padding: 'clamp(56px, 9vw, 120px) 32px clamp(40px, 6vw, 80px)',
+                padding: 'clamp(56px, 9vw, 120px) clamp(16px, 4vw, 32px) clamp(40px, 6vw, 80px)',
                 borderBottom: HAIRLINE,
             }}
         >
@@ -441,13 +456,15 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
             </div>
             <h1
                 style={{
-                    fontSize: 'clamp(56px, 8vw, 124px)',
+                    fontSize: 'clamp(36px, 8vw, 124px)',
                     fontWeight: 800,
                     lineHeight: 0.92,
                     letterSpacing: '-0.025em',
                     margin: 0,
                     marginBottom: 36,
                     maxWidth: 1100,
+                    overflowWrap: 'break-word',
+                    wordBreak: 'break-word',
                 }}
             >
                 {totalSpecialists || 17} специалистов
@@ -471,8 +488,8 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
 
             {/* CTA row */}
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                <HeroCta to="#specialists" primary>
-                    Смотреть индекс специалистов →
+                <HeroCta to="/specialists" primary>
+                    Смотреть специалистов →
                 </HeroCta>
                 <HeroCta to="#cabinets">Кабинеты Unbox →</HeroCta>
             </div>
@@ -498,10 +515,18 @@ function HeroCta({ to, primary, children }: { to: string; primary?: boolean; chi
         cursor: 'pointer',
         display: 'inline-block',
     };
+    const isHash = to.startsWith('#') || to.includes('#');
+    if (isHash) {
+        return (
+            <a href={to} style={style} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+                {children}
+            </a>
+        );
+    }
     return (
-        <a href={to} style={style} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+        <Link to={to} style={style} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
             {children}
-        </a>
+        </Link>
     );
 }
 
@@ -519,7 +544,7 @@ function StatStrip({ totalSpecialists, totalLocations }: { totalSpecialists: num
             style={{
                 maxWidth: 1280,
                 margin: '0 auto',
-                padding: '0 32px',
+                padding: '0 clamp(16px, 4vw, 32px)',
                 borderBottom: HAIRLINE,
             }}
         >
@@ -577,7 +602,7 @@ function CategoryStrip({
             style={{
                 maxWidth: 1280,
                 margin: '0 auto',
-                padding: '56px 32px 0',
+                padding: '56px clamp(16px, 4vw, 32px) 0',
             }}
         >
             <div style={{ ...MONO_LABEL, marginBottom: 20 }}>Фильтр · Категория</div>
@@ -691,7 +716,7 @@ function SpecialistIndex({
     const narrow = useNarrow(760);
 
     return (
-        <section style={{ maxWidth: 1280, margin: '0 auto', padding: '56px 32px 0' }}>
+        <section style={{ maxWidth: 1280, margin: '0 auto', padding: '56px clamp(16px, 4vw, 32px) 0' }}>
             <div
                 style={{
                     display: 'flex',
@@ -703,7 +728,7 @@ function SpecialistIndex({
                 }}
             >
                 <div>
-                    <div style={{ ...MONO_LABEL, marginBottom: 12 }}>Индекс · Резиденты Unbox</div>
+                    <div style={{ ...MONO_LABEL, marginBottom: 12 }}>Индекс · Специалисты Unbox</div>
                     <h2
                         style={{
                             fontSize: 'clamp(36px, 4.5vw, 64px)',
@@ -715,7 +740,7 @@ function SpecialistIndex({
                     >
                         {categoryFilter
                             ? CATEGORIES.find((c) => c.value === categoryFilter)?.label ?? 'Специалисты'
-                            : 'Резиденты Unbox'}
+                            : 'Специалисты Unbox'}
                     </h2>
                 </div>
                 <div style={{ ...MONO_LABEL_INK, fontVariantNumeric: 'tabular-nums' }}>
@@ -755,7 +780,7 @@ function SpecialistIndex({
                             ...MONO_LABEL,
                         }}
                     >
-                        Загрузка индекса…
+                        Загрузка специалистов…
                     </div>
                 )}
 
@@ -913,7 +938,7 @@ function CabinetsBlock({ locations }: { locations: Location[] }) {
     if (active.length === 0) return null;
 
     return (
-        <section id="cabinets" style={{ maxWidth: 1280, margin: '0 auto', padding: '80px 32px 0' }}>
+        <section id="cabinets" style={{ maxWidth: 1280, margin: '0 auto', padding: '80px clamp(16px, 4vw, 32px) 0' }}>
             <div style={{ ...MONO_LABEL, marginBottom: 12 }}>Филиалы · Кабинеты</div>
             <h2
                 style={{
@@ -1085,11 +1110,11 @@ function ContactFooter() {
             style={{
                 maxWidth: 1280,
                 margin: '80px auto 0',
-                padding: '48px 32px 40px',
+                padding: '48px clamp(16px, 4vw, 32px) 40px',
                 borderTop: HAIRLINE,
             }}
         >
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 32, marginBottom: 40 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 32, marginBottom: 40 }}>
                 <ContactBlock label="Адрес" value={<>ул. Шерифа Химшиашвили, 13<br/>Батуми, Грузия</>} />
                 <ContactBlock label="Телефон" value="+995 555 123 456" />
                 <ContactBlock label="Почта" value="hello@unbox.com.ge" />
@@ -1128,111 +1153,126 @@ function ContactBlock({ label, value }: { label: string; value: React.ReactNode 
 function SpecialistRoute({ onReset }: { onReset: () => void }) {
     const { currentUser } = useUserStore();
     const navigate = useNavigate();
+    const { data: locations = [] } = useLocations();
+    const isSpecialist = Boolean(currentUser && ['specialist', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
 
     return (
         <div style={PAGE_BG}>
             <Masthead mode="specialist" onReset={onReset} />
-            <main style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(56px, 8vw, 112px) 32px' }}>
-                <div style={{ ...MONO_LABEL, marginBottom: 32 }}>
-                    Издание 01 · Портал специалиста
-                </div>
-                <h1
-                    style={{
-                        fontSize: 'clamp(48px, 7vw, 104px)',
-                        fontWeight: 800,
-                        lineHeight: 0.92,
-                        letterSpacing: '-0.025em',
-                        margin: 0,
-                        marginBottom: 36,
-                        maxWidth: 1100,
-                    }}
-                >
-                    {currentUser ? (
-                        <>
-                            {currentUser.name?.split(' ')[0] ?? 'Специалист'},
-                            <br />
-                            добро пожаловать.
-                        </>
-                    ) : (
-                        <>
-                            Работайте в&nbsp;Unbox
-                            <br />
-                            на&nbsp;своих условиях.
-                        </>
-                    )}
-                </h1>
-                <p
-                    style={{
-                        fontSize: 'clamp(17px, 1.3vw, 20px)',
-                        lineHeight: 1.55,
-                        color: GH.ink60,
-                        maxWidth: 640,
-                        margin: 0,
-                        marginBottom: 44,
-                    }}
-                >
-                    {currentUser
-                        ? 'CRM для ведения практики: клиенты, сессии, расписание, финансы. Перейдите в кабинет, чтобы продолжить.'
-                        : 'Аренда кабинетов по часам, собственная страница в индексе Unbox, CRM для ведения практики. Подайте заявку, чтобы начать.'}
-                </p>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                    {currentUser ? (
-                        <HeroCta to="/crm" primary>
-                            → В кабинет CRM
-                        </HeroCta>
-                    ) : (
-                        <>
-                            <button
-                                type="button"
-                                onClick={() => navigate('/login')}
+            <main>
+                <section style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(56px, 8vw, 112px) clamp(16px, 4vw, 32px)' }}>
+                    <div style={{ ...MONO_LABEL, marginBottom: 32 }}>
+                        Издание 01 · Портал специалиста
+                    </div>
+                    <h1
+                        style={{
+                            fontSize: 'clamp(48px, 7vw, 104px)',
+                            fontWeight: 800,
+                            lineHeight: 0.92,
+                            letterSpacing: '-0.025em',
+                            margin: 0,
+                            marginBottom: 36,
+                            maxWidth: 1100,
+                        }}
+                    >
+                        {currentUser ? (
+                            <>
+                                {currentUser.name?.split(' ')[0] ?? 'Специалист'},
+                                <br />
+                                добро пожаловать.
+                            </>
+                        ) : (
+                            <>
+                                Работайте в&nbsp;Unbox
+                                <br />
+                                на&nbsp;своих условиях.
+                            </>
+                        )}
+                    </h1>
+                    <p
+                        style={{
+                            fontSize: 'clamp(17px, 1.3vw, 20px)',
+                            lineHeight: 1.55,
+                            color: GH.ink60,
+                            maxWidth: 640,
+                            margin: 0,
+                            marginBottom: 44,
+                        }}
+                    >
+                        {currentUser
+                            ? 'Аренда кабинетов, собственная страница, CRM для ведения практики. Выберите кабинет или перейдите в CRM.'
+                            : 'Аренда кабинетов по часам, собственная страница на сайте Unbox, CRM для ведения практики. Подайте заявку, чтобы начать.'}
+                    </p>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                        {currentUser ? (
+                            <>
+                                <HeroCta to="#cabinets" primary>
+                                    Кабинеты Unbox →
+                                </HeroCta>
+                                {isSpecialist && (
+                                    <HeroCta to="/crm">
+                                        → В кабинет CRM
+                                    </HeroCta>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/login')}
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 12,
+                                        letterSpacing: '0.18em',
+                                        textTransform: 'uppercase',
+                                        padding: '18px 28px',
+                                        border: `1px solid ${GH.ink}`,
+                                        background: GH.ink,
+                                        color: GH.paper,
+                                        cursor: 'pointer',
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    → Войти
+                                </button>
+                                <HeroCta to="#cabinets">Кабинеты Unbox →</HeroCta>
+                                <HeroCta to="/login?register=1">Подать заявку →</HeroCta>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Info strip */}
+                    <div
+                        style={{
+                            marginTop: 96,
+                            border: HAIRLINE,
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+                        }}
+                    >
+                        {[
+                            { num: '01', label: 'Кабинеты', body: '2 локации в центре Батуми, почасовая аренда, полная комплектация.' },
+                            { num: '02', label: 'Практика', body: 'Собственная страница, расписание, запись клиентов через сайт.' },
+                            { num: '03', label: 'CRM', body: 'Клиенты, сессии, заметки, финансы — в одном рабочем пространстве.' },
+                        ].map((cell, i, arr) => (
+                            <div
+                                key={cell.num}
                                 style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    letterSpacing: '0.18em',
-                                    textTransform: 'uppercase',
-                                    padding: '18px 28px',
-                                    border: `1px solid ${GH.ink}`,
-                                    background: GH.ink,
-                                    color: GH.paper,
-                                    cursor: 'pointer',
-                                    fontWeight: 600,
+                                    padding: '28px 24px',
+                                    borderRight: i < arr.length - 1 ? HAIRLINE : undefined,
                                 }}
                             >
-                                → Войти
-                            </button>
-                            <HeroCta to="#apply">Подать заявку →</HeroCta>
-                        </>
-                    )}
-                </div>
-
-                {/* Info strip */}
-                <div
-                    style={{
-                        marginTop: 96,
-                        border: HAIRLINE,
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    }}
-                >
-                    {[
-                        { num: '01', label: 'Кабинеты', body: '2 локации в центре Батуми, почасовая аренда, полная комплектация.' },
-                        { num: '02', label: 'Практика', body: 'Собственная страница, расписание, запись клиентов через сайт.' },
-                        { num: '03', label: 'CRM', body: 'Клиенты, сессии, заметки, финансы — в одном рабочем пространстве.' },
-                    ].map((cell, i, arr) => (
-                        <div
-                            key={cell.num}
-                            style={{
-                                padding: '28px 24px',
-                                borderRight: i < arr.length - 1 ? HAIRLINE : undefined,
-                            }}
-                        >
-                            <div style={{ ...MONO_LABEL, marginBottom: 14 }}>
-                                {cell.num} · {cell.label}
+                                <div style={{ ...MONO_LABEL, marginBottom: 14 }}>
+                                    {cell.num} · {cell.label}
+                                </div>
+                                <div style={{ fontSize: 15, lineHeight: 1.5, color: GH.ink }}>{cell.body}</div>
                             </div>
-                            <div style={{ fontSize: 15, lineHeight: 1.5, color: GH.ink }}>{cell.body}</div>
-                        </div>
-                    ))}
-                </div>
+                        ))}
+                    </div>
+                </section>
+
+                {/* Cabinets section — same as client landing */}
+                <CabinetsBlock locations={locations} />
             </main>
             <ContactFooter />
         </div>

@@ -1338,7 +1338,14 @@ interface GHSessionsProps {
 const ghsMono = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const, color: GH.ink60 };
 const ghsHairline = `1px solid ${GH.ink10}`;
 
+function useGHNarrow(bp = 768) {
+    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return n;
+}
+
 function GridHouseCrmSessions(p: GHSessionsProps) {
+    const ghNarrow = useGHNarrow();
     const VIEW_MODES: { key: ViewMode; label: string }[] = [
         { key: 'list', label: 'Список' },
         { key: 'week', label: 'Неделя' },
@@ -1357,13 +1364,13 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
             {/* ── Head ── */}
-            <div style={{ padding: '48px 32px 0' }}>
+            <div style={{ padding: '48px clamp(16px, 4vw, 32px) 0' }}>
                 <div style={ghsMono}>CRM · Сессии</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-                    <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: '8px 0 0' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
+                    <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
                         Сессии.
                     </h1>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                         <button
                             onClick={() => p.setShowSyncModal(true)}
                             style={{ ...ghsMono, padding: '10px 16px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 }}
@@ -1383,7 +1390,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             {/* ── Anchor KPI + secondary ── */}
             <div style={{
                 display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-                padding: '32px 32px 24px', flexWrap: 'wrap', gap: 24,
+                padding: '24px clamp(16px, 4vw, 32px) 24px', flexWrap: 'wrap', gap: 16,
             }}>
                 <div>
                     <div style={{ fontSize: 'clamp(48px, 5vw, 72px)', fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
@@ -1393,14 +1400,14 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         завершено · {format(p.currentMonth, 'LLLL', { locale: ru })}
                     </div>
                 </div>
-                <div style={{ display: 'flex', gap: 24 }}>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     {[
                         { label: 'Запланировано', value: p.stats.planned },
                         { label: 'Не оплачено', value: p.stats.unpaidCount, color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel },
                         { label: 'Получено', value: p.stats.revenueLabel, color: GH.accent, sub: p.stats.revenueGel },
                     ].map(kpi => (
                         <div key={kpi.label} style={{ textAlign: 'right' as const }}>
-                            <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink }}>
+                            <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink, whiteSpace: 'nowrap' }}>
                                 {kpi.value}
                             </div>
                             <div style={{ ...ghsMono, fontSize: 9 }}>{kpi.label}</div>
@@ -1411,7 +1418,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             </div>
 
             {/* ── View mode tabs ── */}
-            <div style={{ display: 'flex', margin: '0 32px', borderBottom: `2px solid ${GH.ink}` }}>
+            <div style={{ display: 'flex', margin: '0 clamp(16px, 4vw, 32px)', borderBottom: `2px solid ${GH.ink}` }}>
                 {VIEW_MODES.map(v => (
                     <button
                         key={v.key}
@@ -1433,7 +1440,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             </div>
 
             {/* ── Content ── */}
-            <div style={{ padding: '0 32px 64px' }}>
+            <div style={{ padding: '0 clamp(16px, 4vw, 32px) 64px' }}>
                 {/* Legacy session form */}
                 {p.showForm && (
                     <div style={{ marginTop: 24 }}>
@@ -1523,7 +1530,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         </div>
 
                         {/* Table header */}
-                        {!p.loading && allRows.length > 0 && (
+                        {!p.loading && allRows.length > 0 && !ghNarrow && (
                             <div style={{
                                 display: 'grid', gridTemplateColumns: '70px 1fr 80px 100px 100px 120px',
                                 padding: '8px 0', borderBottom: ghsHairline,
@@ -1573,6 +1580,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                                     quickPaySession={p.quickPaySession}
                                                     onBookCab={p.handleBookCab}
                                                     navigate={p.navigate}
+                                                    narrow={ghNarrow}
                                                 />
                                             ))}
                                     </div>
@@ -1584,7 +1592,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             </div>
 
             {/* Footer */}
-            <div style={{ borderTop: ghsHairline, padding: '16px 32px', textAlign: 'center' }}>
+            <div style={{ borderTop: ghsHairline, padding: '16px clamp(16px, 4vw, 32px)', textAlign: 'center' }}>
                 <span style={ghsMono}>Unbox · CRM · Сессии · {new Date().getFullYear()}</span>
             </div>
 
@@ -1651,7 +1659,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
 
 // ─── GH: Строка сессии ───────────────────────────────────────────────────────
 
-function GHSessionRow({ session, client, isEditing, setEditingId, updateSession, deleteSession, quickPaySession, onBookCab, navigate }: {
+function GHSessionRow({ session, client, isEditing, setEditingId, updateSession, deleteSession, quickPaySession, onBookCab, navigate, narrow }: {
     session: CrmSession; client?: CrmClient;
     isEditing: boolean; setEditingId: (id: string | null) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
@@ -1659,90 +1667,95 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookCab: (session: CrmSession, clientName: string) => void;
     navigate: ReturnType<typeof useNavigate>;
+    narrow?: boolean;
 }) {
     const dt = parseSessionDate(session.date);
     const effectiveStatus = getEffectiveStatus(session);
     const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
     const statusColor: string = isCancelled ? GH.danger : effectiveStatus === 'COMPLETED' ? GH.accent : GH.ink60;
 
+    const actionBtnStyle: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', padding: '4px 8px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 };
+
     return (
         <>
-            <div
-                style={{
-                    display: 'grid', gridTemplateColumns: '70px 1fr 80px 100px 100px 120px',
-                    alignItems: 'center', padding: '10px 0', borderBottom: ghsHairline,
-                    opacity: isCancelled ? 0.4 : 1, transition: 'background 120ms',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-                {/* Time */}
-                <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                    {format(dt, 'HH:mm')}
+            {narrow ? (
+                /* ── Mobile: stacked card ── */
+                <div style={{ padding: '12px 0', borderBottom: ghsHairline, opacity: isCancelled ? 0.4 : 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                                <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{format(dt, 'HH:mm')}</span>
+                                <span
+                                    style={{ fontSize: 13, fontWeight: 600, cursor: session.clientId ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                    onClick={() => session.clientId && navigate(`/crm/clients/${session.clientId}`)}
+                                >
+                                    {client?.name || 'Клиент'}
+                                </span>
+                                {session.isBooked && <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', color: GH.accent, textTransform: 'uppercase' }}>Каб</span>}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60 }}>{session.durationMinutes}′</span>
+                                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{session.price ?? client?.basePrice ?? '—'} {client?.currency || '₾'}</span>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: statusColor }}>
+                                    {session.isPaid ? 'Оплачено' : STATUS_LABELS[effectiveStatus] || effectiveStatus}
+                                </span>
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 3, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 120 }}>
+                            {!session.isPaid && !isCancelled && (
+                                <button onClick={async () => { try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); } }}
+                                    style={{ ...actionBtnStyle, background: GH.accent, color: GH.paper, border: 'none' }}>Pay</button>
+                            )}
+                            {!session.isBooked && !isCancelled && (
+                                <button onClick={() => onBookCab(session, client?.name || 'Клиент')} style={actionBtnStyle}>+Каб</button>
+                            )}
+                            <button onClick={() => setEditingId(isEditing ? null : session.id)}
+                                style={{ ...actionBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>Ред.</button>
+                            <button onClick={async () => { if (!confirm('Удалить сессию?')) return; try { await deleteSession(session.id); toast.success('Удалена'); } catch { toast.error('Ошибка'); } }}
+                                style={{ ...actionBtnStyle, border: `1px solid ${GH.danger}`, color: GH.danger }}>Уд.</button>
+                        </div>
+                    </div>
                 </div>
-
-                {/* Client */}
-                <div>
-                    <span
-                        style={{ fontSize: 13, fontWeight: 600, cursor: session.clientId ? 'pointer' : 'default' }}
-                        onClick={() => session.clientId && navigate(`/crm/clients/${session.clientId}`)}
-                        onMouseEnter={e => (e.currentTarget.style.color = GH.accent)}
-                        onMouseLeave={e => (e.currentTarget.style.color = GH.ink)}
-                    >
-                        {client?.name || 'Клиент'}
-                    </span>
-                    {session.isBooked && (
-                        <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', color: GH.accent, marginLeft: 8, textTransform: 'uppercase' as const }}>Каб</span>
-                    )}
+            ) : (
+                /* ── Desktop: grid row ── */
+                <div
+                    style={{
+                        display: 'grid', gridTemplateColumns: '70px 1fr 80px 100px 100px 120px',
+                        alignItems: 'center', padding: '10px 0', borderBottom: ghsHairline,
+                        opacity: isCancelled ? 0.4 : 1, transition: 'background 120ms',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                    <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{format(dt, 'HH:mm')}</div>
+                    <div>
+                        <span style={{ fontSize: 13, fontWeight: 600, cursor: session.clientId ? 'pointer' : 'default' }}
+                            onClick={() => session.clientId && navigate(`/crm/clients/${session.clientId}`)}
+                            onMouseEnter={e => (e.currentTarget.style.color = GH.accent)} onMouseLeave={e => (e.currentTarget.style.color = GH.ink)}>
+                            {client?.name || 'Клиент'}
+                        </span>
+                        {session.isBooked && <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', color: GH.accent, marginLeft: 8, textTransform: 'uppercase' as const }}>Каб</span>}
+                    </div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60 }}>{session.durationMinutes}′</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{session.price ?? client?.basePrice ?? '—'} {client?.currency || '₾'}</div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: statusColor }}>
+                        {session.isPaid ? 'Оплачено' : STATUS_LABELS[effectiveStatus] || effectiveStatus}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        {!session.isPaid && !isCancelled && (
+                            <button onClick={async () => { try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); } }}
+                                style={{ ...actionBtnStyle, background: GH.accent, color: GH.paper, border: 'none' }}>Pay</button>
+                        )}
+                        {!session.isBooked && !isCancelled && (
+                            <button onClick={() => onBookCab(session, client?.name || 'Клиент')} style={actionBtnStyle}>+Каб</button>
+                        )}
+                        <button onClick={() => setEditingId(isEditing ? null : session.id)}
+                            style={{ ...actionBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>Ред.</button>
+                        <button onClick={async () => { if (!confirm('Удалить сессию?')) return; try { await deleteSession(session.id); toast.success('Удалена'); } catch { toast.error('Ошибка'); } }}
+                            style={{ ...actionBtnStyle, border: `1px solid ${GH.danger}`, color: GH.danger }}>Уд.</button>
+                    </div>
                 </div>
-
-                {/* Duration */}
-                <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60 }}>
-                    {session.durationMinutes}\u2032
-                </div>
-
-                {/* Price */}
-                <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                    {session.price ?? client?.basePrice ?? '—'} {client?.currency || '\u20BE'}
-                </div>
-
-                {/* Status */}
-                <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: statusColor }}>
-                    {session.isPaid ? 'Оплачено' : STATUS_LABELS[effectiveStatus] || effectiveStatus}
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                    {!session.isPaid && !isCancelled && (
-                        <button
-                            onClick={async () => { try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); } }}
-                            style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '4px 8px', background: GH.accent, color: GH.paper, border: 'none', cursor: 'pointer' }}
-                        >
-                            Pay
-                        </button>
-                    )}
-                    {!session.isBooked && !isCancelled && (
-                        <button
-                            onClick={() => onBookCab(session, client?.name || 'Клиент')}
-                            style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '4px 8px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 }}
-                        >
-                            +Каб
-                        </button>
-                    )}
-                    <button
-                        onClick={() => setEditingId(isEditing ? null : session.id)}
-                        style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '4px 8px', background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline, cursor: 'pointer' }}
-                    >
-                        Ред.
-                    </button>
-                    <button
-                        onClick={async () => { if (!confirm('Удалить сессию?')) return; try { await deleteSession(session.id); toast.success('Удалена'); } catch { toast.error('Ошибка'); } }}
-                        style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '4px 8px', background: 'transparent', border: `1px solid ${GH.danger}`, cursor: 'pointer', color: GH.danger }}
-                    >
-                        Уд.
-                    </button>
-                </div>
-            </div>
+            )}
             {/* Legacy edit panel */}
             {isEditing && (
                 <SessionEditPanel

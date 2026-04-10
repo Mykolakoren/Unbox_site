@@ -80,6 +80,13 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     fetchResources: async () => {
         try {
             const data = await resourcesApi.getAll();
+            // Merge photos from static data if API doesn't return them
+            const staticMap = new Map(RESOURCES.map(r => [r.id, r]));
+            for (const r of data) {
+                if ((!r.photos || r.photos.length === 0) && staticMap.has(r.id)) {
+                    r.photos = staticMap.get(r.id)!.photos;
+                }
+            }
             data.sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
             set({ resources: data });
         } catch (error) {

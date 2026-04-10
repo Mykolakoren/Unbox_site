@@ -119,6 +119,11 @@ export const cashboxApi = {
         await api.delete(`/cashbox/transactions/${id}`);
     },
 
+    updateTransaction: async (id: string, payload: Partial<CashboxTransactionCreate>): Promise<CashboxTransaction> => {
+        const { data } = await api.patch(`/cashbox/transactions/${id}`, payload);
+        return data;
+    },
+
     getCategories: async (): Promise<ExpenseCategory[]> => {
         const { data } = await api.get('/cashbox/categories');
         return data;

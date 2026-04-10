@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, Loader2, Filter, X } from 'lucide-react';
 import { SpecialistCard } from '../components/Specialists/SpecialistCard';
 import type { Specialist } from '../components/Specialists/SpecialistCard';
+import { useUserStore } from '../store/userStore';
 import { api } from '../api/client';
 import { Layout } from '../components/Layout';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
@@ -27,6 +29,7 @@ export function SpecialistsPage() {
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [formatFilter, setFormatFilter] = useState('all');
+    const [roleFilter, setRoleFilter] = useState('all');
 
     useEffect(() => {
         const fetchSpecialists = async () => {
@@ -44,9 +47,23 @@ export function SpecialistsPage() {
         fetchSpecialists();
     }, []);
 
+    // Extract unique roles from taglines (e.g. "Психолог, арт-терапевт" → "Психолог")
+    const roleFilters = useMemo(() => {
+        const roles = new Map<string, number>();
+        specialists.forEach(s => {
+            const role = s.tagline?.split(',')[0]?.trim();
+            if (role) roles.set(role, (roles.get(role) || 0) + 1);
+        });
+        return Array.from(roles.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(([role]) => role);
+    }, [specialists]);
+
     const filteredSpecialists = specialists.filter(s => {
         // Format filter
         if (formatFilter !== 'all' && !s.formats.includes(formatFilter)) return false;
+        // Role filter
+        if (roleFilter !== 'all' && !s.tagline?.toLowerCase().startsWith(roleFilter.toLowerCase())) return false;
         // Search
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
@@ -64,6 +81,8 @@ export function SpecialistsPage() {
             isLoading={isLoading} error={error}
             searchQuery={searchQuery} setSearchQuery={setSearchQuery}
             formatFilter={formatFilter} setFormatFilter={setFormatFilter}
+            roleFilter={roleFilter} setRoleFilter={setRoleFilter}
+            roleFilters={roleFilters}
         />
     );
 
@@ -88,7 +107,7 @@ export function SpecialistsPage() {
                                 <p className="text-unbox-green text-xs font-bold uppercase tracking-widest">Специалисты</p>
                             </div>
                             <h1 className="text-3xl md:text-4xl font-bold text-unbox-dark mb-3 tracking-tight">
-                                Наши резиденты
+                                Наши специалисты
                             </h1>
                             <p className="text-unbox-dark/60 text-base sm:text-lg leading-relaxed">
                                 Найдите своего специалиста среди профессионалов, принимающих в пространствах Unbox или онлайн.
@@ -150,6 +169,43 @@ export function SpecialistsPage() {
                                     </button>
                                 ))}
                             </div>
+
+                            {/* Role filter pills */}
+                            {roleFilters.length > 1 && (
+                                <div className="flex items-center justify-center gap-2 flex-wrap">
+                                    <button
+                                        onClick={() => setRoleFilter('all')}
+                                        className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
+                                            roleFilter === 'all'
+                                                ? 'bg-unbox-green text-white shadow-sm'
+                                                : 'text-unbox-dark/70 hover:bg-white/70'
+                                        }`}
+                                        style={roleFilter !== 'all' ? {
+                                            background: 'rgba(255,255,255,0.45)',
+                                            border: '1px solid rgba(255,255,255,0.50)',
+                                        } : undefined}
+                                    >
+                                        Все профили
+                                    </button>
+                                    {roleFilters.map(role => (
+                                        <button
+                                            key={role}
+                                            onClick={() => setRoleFilter(role)}
+                                            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
+                                                roleFilter === role
+                                                    ? 'bg-unbox-green text-white shadow-sm'
+                                                    : 'text-unbox-dark/70 hover:bg-white/70'
+                                            }`}
+                                            style={roleFilter !== role ? {
+                                                background: 'rgba(255,255,255,0.45)',
+                                                border: '1px solid rgba(255,255,255,0.50)',
+                                            } : undefined}
+                                        >
+                                            {role}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </motion.div>
                     </div>
                 </div>
@@ -227,107 +283,174 @@ interface GridHouseSpecialistsPageProps {
     setSearchQuery: (q: string) => void;
     formatFilter: string;
     setFormatFilter: (f: string) => void;
+    roleFilter: string;
+    setRoleFilter: (r: string) => void;
+    roleFilters: string[];
 }
 
 function GridHouseSpecialistsPage({
     specialists, filteredSpecialists, isLoading, error,
     searchQuery, setSearchQuery, formatFilter, setFormatFilter,
+    roleFilter, setRoleFilter, roleFilters,
 }: GridHouseSpecialistsPageProps) {
+    const { currentUser, logout } = useUserStore();
+    const navigate = useNavigate();
+    const isAdmin = Boolean(currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
+
     return (
-        <Layout>
-            <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', paddingBottom: 80 }}>
-                {/* Header */}
-                <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px 0' }}>
-                    <div style={{ ...ghspMono, color: GH.ink30, marginBottom: 8 }}>СПЕЦИАЛИСТЫ</div>
-                    <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
-                        Наши резиденты
-                    </h1>
-                    <p style={{ fontSize: 15, color: GH.ink60, marginBottom: 24 }}>
-                        Найдите своего специалиста среди профессионалов, принимающих в пространствах Unbox или онлайн.
-                    </p>
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', background: GH.paper }}>
+            {/* ── GH Header ── */}
+            <header style={{ borderBottom: ghspHairline, background: GH.paper, position: 'sticky', top: 0, zIndex: 40 }}>
+                <div style={{ maxWidth: 1200, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
+                    <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                        <span style={{ ...ghspMono, padding: '4px 12px', color: GH.ink, fontWeight: 700 }}>Специалисты</span>
+                        <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
+                        <Link to="/#cabinets" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Кабинеты</Link>
+                        <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
+                        <Link to="/subscriptions" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Тарифы</Link>
+                        {isAdmin && (
+                            <>
+                                <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
+                                <Link to="/admin" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Админ</Link>
+                            </>
+                        )}
+                        <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
+                        {currentUser ? (
+                            <>
+                                <Link to="/dashboard" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>{currentUser.name ?? 'Кабинет'}</Link>
+                                <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
+                                <button onClick={() => { logout(); navigate('/'); }} style={{ ...ghspMono, padding: '4px 12px', color: GH.danger, background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 400 }}>Выйти</button>
+                            </>
+                        ) : (
+                            <Link to="/login" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Войти</Link>
+                        )}
+                    </nav>
+                </div>
+            </header>
 
-                    {/* Search + filters */}
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-                        <div style={{ position: 'relative', flex: '1 1 300px' }}>
-                            <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: GH.ink30 }} />
-                            <input
-                                type="text"
-                                placeholder="Поиск по имени, запросу или методу..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+            {/* ── Content ── */}
+            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '48px clamp(16px, 4vw, 24px) 0' }}>
+                <div style={{ ...ghspMono, color: GH.ink30, marginBottom: 8 }}>СПЕЦИАЛИСТЫ</div>
+                <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
+                    Наши специалисты
+                </h1>
+                <p style={{ fontSize: 15, color: GH.ink60, marginBottom: 24 }}>
+                    Найдите своего специалиста среди профессионалов, принимающих в пространствах Unbox или онлайн.
+                </p>
+
+                {/* Search + filters */}
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+                    <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 0 }}>
+                        <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: GH.ink30 }} />
+                        <input
+                            type="text"
+                            placeholder="Поиск по имени, запросу или методу..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            style={{
+                                width: '100%', padding: '10px 36px 10px 36px', fontSize: 14, fontFamily: GH_SANS,
+                                border: ghspHairline, background: 'transparent', color: GH.ink, outline: 'none',
+                            }}
+                        />
+                        {searchQuery && (
+                            <button
+                                onClick={() => setSearchQuery('')}
+                                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: GH.ink30 }}
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {FORMAT_FILTERS.map(f => (
+                            <button
+                                key={f.key}
+                                onClick={() => setFormatFilter(f.key)}
                                 style={{
-                                    width: '100%', padding: '10px 36px 10px 36px', fontSize: 14, fontFamily: GH_SANS,
-                                    border: ghspHairline, background: 'transparent', color: GH.ink, outline: 'none',
+                                    padding: '8px 12px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
+                                    border: formatFilter === f.key ? `1px solid ${GH.ink}` : ghspHairline,
+                                    background: formatFilter === f.key ? GH.ink : 'transparent',
+                                    color: formatFilter === f.key ? GH.paper : GH.ink60,
                                 }}
-                            />
-                            {searchQuery && (
-                                <button
-                                    onClick={() => setSearchQuery('')}
-                                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: GH.ink30 }}
-                                >
-                                    <X size={14} />
-                                </button>
-                            )}
-                        </div>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                            {FORMAT_FILTERS.map(f => (
-                                <button
-                                    key={f.key}
-                                    onClick={() => setFormatFilter(f.key)}
-                                    style={{
-                                        padding: '8px 16px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
-                                        border: formatFilter === f.key ? `1px solid ${GH.ink}` : ghspHairline,
-                                        background: formatFilter === f.key ? GH.ink : 'transparent',
-                                        color: formatFilter === f.key ? GH.paper : GH.ink60,
-                                    }}
-                                >
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ ...ghspMono, color: GH.ink30 }}>
-                            {filteredSpecialists.length === specialists.length
-                                ? `${specialists.length} СПЕЦИАЛИСТОВ`
-                                : `${filteredSpecialists.length} ИЗ ${specialists.length}`
-                            }
-                        </span>
+                            >
+                                {f.label}
+                            </button>
+                        ))}
                     </div>
                 </div>
 
-                {/* Content */}
-                <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px' }}>
-                    {isLoading ? (
-                        <div style={{ textAlign: 'center', padding: '80px 0', color: GH.ink30 }}>
-                            <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-                            <p style={{ fontSize: 13 }}>Загрузка специалистов...</p>
-                        </div>
-                    ) : error ? (
-                        <div style={{ textAlign: 'center', padding: '60px 0', color: GH.danger, fontSize: 14 }}>
-                            {error}
-                        </div>
-                    ) : filteredSpecialists.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink30 }}>
-                            <p style={{ fontSize: 15, fontWeight: 600 }}>Ничего не найдено</p>
-                            <p style={{ fontSize: 13, color: GH.ink30 }}>Попробуйте изменить параметры поиска</p>
-                        </div>
-                    ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
-                            {filteredSpecialists.map(specialist => (
-                                <SpecialistCard key={specialist.id} specialist={specialist} />
-                            ))}
-                        </div>
-                    )}
-                </div>
+                {/* Role filter pills */}
+                {roleFilters.length > 1 && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <button
+                            onClick={() => setRoleFilter('all')}
+                            style={{
+                                padding: '6px 12px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
+                                border: roleFilter === 'all' ? `1px solid ${GH.accent}` : ghspHairline,
+                                background: roleFilter === 'all' ? GH.accent : 'transparent',
+                                color: roleFilter === 'all' ? GH.paper : GH.ink60,
+                            }}
+                        >
+                            Все профили
+                        </button>
+                        {roleFilters.map(role => (
+                            <button
+                                key={role}
+                                onClick={() => setRoleFilter(role)}
+                                style={{
+                                    padding: '6px 12px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
+                                    border: roleFilter === role ? `1px solid ${GH.accent}` : ghspHairline,
+                                    background: roleFilter === role ? GH.accent : 'transparent',
+                                    color: roleFilter === role ? GH.paper : GH.ink60,
+                                }}
+                            >
+                                {role}
+                            </button>
+                        ))}
+                    </div>
+                )}
 
-                {/* Footer */}
-                <footer style={{ maxWidth: 1200, margin: '0 auto', borderTop: `2px solid ${GH.ink}`, padding: '16px 24px', marginTop: 64, display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ ...ghspMono, color: GH.ink30 }}>UNBOX · 2026</span>
-                    <span style={{ ...ghspMono, color: GH.ink10 }}>GRID HOUSE</span>
-                </footer>
+                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ ...ghspMono, color: GH.ink30 }}>
+                        {filteredSpecialists.length === specialists.length
+                            ? `${specialists.length} СПЕЦИАЛИСТОВ`
+                            : `${filteredSpecialists.length} ИЗ ${specialists.length}`
+                        }
+                    </span>
+                </div>
             </div>
-        </Layout>
+
+            {/* Grid */}
+            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 clamp(16px, 4vw, 24px)', paddingBottom: 80 }}>
+                {isLoading ? (
+                    <div style={{ textAlign: 'center', padding: '80px 0', color: GH.ink30 }}>
+                        <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+                        <p style={{ fontSize: 13 }}>Загрузка специалистов...</p>
+                    </div>
+                ) : error ? (
+                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.danger, fontSize: 14 }}>
+                        {error}
+                    </div>
+                ) : filteredSpecialists.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink30 }}>
+                        <p style={{ fontSize: 15, fontWeight: 600 }}>Ничего не найдено</p>
+                        <p style={{ fontSize: 13, color: GH.ink30 }}>Попробуйте изменить параметры поиска</p>
+                    </div>
+                ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 20 }}>
+                        {filteredSpecialists.map(specialist => (
+                            <SpecialistCard key={specialist.id} specialist={specialist} />
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Footer */}
+            <footer style={{ maxWidth: 1200, margin: '0 auto', borderTop: `2px solid ${GH.ink}`, padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ ...ghspMono, color: GH.ink30 }}>UNBOX · 2026</span>
+                <span style={{ ...ghspMono, color: GH.ink10 }}>GRID HOUSE</span>
+            </footer>
+        </div>
     );
 }

@@ -10,14 +10,20 @@
   --font-sans: Akrobat, "BPG Arial", Inter, system-ui, sans-serif;
   --font-geo: "BPG Nino Mtavruli Bold", sans-serif;
 
-  /* Glass Design Tokens — unified across all components */
-  --color-glass-bg: rgba(255, 255, 255, 0.78);
-  --color-glass-bg-light: rgba(255, 255, 255, 0.55);
-  --color-glass-border: rgba(255, 255, 255, 0.50);
+  /* Glass Design Tokens — optimized for photo background */
+  --color-glass-bg: rgba(255, 255, 255, 0.65);
+  --color-glass-bg-light: rgba(255, 255, 255, 0.45);
+  --color-glass-border: rgba(255, 255, 255, 0.40);
   --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.06);
   --shadow-premium: 0 10px 40px -10px rgba(0, 0, 0, 0.10);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(71, 109, 107, 0.06);
   --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(71, 109, 107, 0.10);
+}
+
+/* ── Prevent horizontal scroll on mobile ── */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 @layer utilities {

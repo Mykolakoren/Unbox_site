@@ -52,10 +52,20 @@ const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ de
 const CrmProfile = lazy(() => import('./pages/crm/CrmProfile').then(m => ({ default: m.CrmProfile })));
 
 import { glassPanel, glassSummary } from './utils/styles';
+import { useDesignFlag, GH, GH_SANS } from './hooks/useDesignFlag';
 
 // Booking Flow Wrapper
 function BookingWizard() {
   const { step, editBookingId, reset } = useBookingStore();
+  const isGH = useDesignFlag();
+
+  /* GH card style */
+  const ghCard: React.CSSProperties = {
+    background: '#fff',
+    border: `1px solid ${GH.ink8}`,
+    borderRadius: 12,
+    overflow: 'hidden',
+  };
 
   return (
     <MinimalLayout glassMode fullWidth={step === 2} noPadding>
@@ -63,9 +73,16 @@ function BookingWizard() {
       {/* Edit mode banner */}
       {editBookingId && (
         <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
-          <div className="bg-amber-50/90 backdrop-blur-sm border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between">
-            <span className="font-medium">✏️ Вы редактируете существующее бронирование</span>
-            <button onClick={() => reset()} className="text-sm font-bold underline hover:no-underline">
+          <div style={isGH ? {
+            background: '#FEF3C7', border: `1px solid ${GH.ink10}`, color: '#92400E',
+            padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            fontFamily: GH_SANS, fontSize: 14,
+          } : undefined}
+               className={isGH ? '' : "bg-amber-50/90 backdrop-blur-sm border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between"}>
+            <span style={isGH ? { fontWeight: 500 } : undefined} className={isGH ? '' : "font-medium"}>Вы редактируете существующее бронирование</span>
+            <button onClick={() => reset()}
+              style={isGH ? { fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' } : undefined}
+              className={isGH ? '' : "text-sm font-bold underline hover:no-underline"}>
               Отменить редактирование
             </button>
           </div>
@@ -73,32 +90,33 @@ function BookingWizard() {
       )}
 
       {step === 2 ? (
-        /* ── Step 2: Full-width chessboard in one big glass panel ── */
+        /* ── Step 2: Full-width chessboard ── */
         <div className="max-w-[1920px] mx-auto px-6 md:px-12">
-          <div className="rounded-[28px] overflow-hidden" style={glassPanel}>
+          <div style={isGH ? ghCard : glassPanel} className={isGH ? '' : "rounded-[28px] overflow-hidden"}>
             <ChessboardStep />
           </div>
         </div>
       ) : (
-        /* ── Steps 3 & 4: two-column glass layout ── */
+        /* ── Steps 3 & 4: two-column layout ── */
         <div className="max-w-6xl mx-auto px-4 md:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8">
               {step === 1 && <Navigate to="/" replace />}
               {step === 3 && (
-                <div className="rounded-[28px] overflow-hidden p-8" style={glassPanel}>
+                <div style={isGH ? { ...ghCard, padding: 32 } : glassPanel} className={isGH ? '' : "rounded-[28px] overflow-hidden p-8"}>
                   <OptionsStep />
                 </div>
               )}
               {step === 4 && (
-                <div className="rounded-[28px] overflow-hidden p-8" style={glassPanel}>
+                <div style={isGH ? { ...ghCard, padding: 32 } : glassPanel} className={isGH ? '' : "rounded-[28px] overflow-hidden p-8"}>
                   <ConfirmationStep />
                 </div>
               )}
             </div>
             {step < 5 && (
               <div className="lg:col-span-4 hidden lg:block">
-                <div className="rounded-[28px] overflow-hidden sticky top-[148px]" style={glassSummary}>
+                <div style={isGH ? { ...ghCard, position: 'sticky' as const, top: 80 } : glassSummary}
+                     className={isGH ? '' : "rounded-[28px] overflow-hidden sticky top-[148px]"}>
                   <Summary />
                 </div>
               </div>
@@ -158,7 +176,7 @@ function App() {
         <Route path="/specialists/:id" element={<SpecialistProfilePage />} />
 
         {/* Subscriptions */}
-        <Route path="/subscriptions" element={<MinimalLayout glassMode><SubscriptionsPage /></MinimalLayout>} />
+        <Route path="/subscriptions" element={<SubscriptionsPage />} />
 
         {/* Self-assessment tests */}
         <Route path="/tests/:testId" element={<TestPage />} />

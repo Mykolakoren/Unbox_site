@@ -121,8 +121,8 @@ export function SpecialistProfilePage() {
                         gap: '16px',
                         flexWrap: 'wrap',
                     }}>
-                        <Link to="/specialists" style={{ color: GH.ink, textDecoration: 'none' }}>
-                            ← ИНДЕКС СПЕЦИАЛИСТОВ
+                        <Link to="/#specialists" style={{ color: GH.ink, textDecoration: 'none' }}>
+                            ← К СПИСКУ СПЕЦИАЛИСТОВ
                         </Link>
                         <span style={{ color: GH.ink30 }}>
                             UNBOX · GRID HOUSE · ЧЕРНОВИК

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -146,18 +147,24 @@ function GridHouseWaitlist({
     removeFromWaitlist,
 }: GHWaitlistProps) {
     const total = String(waitlist.length).padStart(3, '0');
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 768);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
-                <div style={{ ...ghwMono, marginBottom: 14 }}>Раздел · Лист ожидания</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 20 }}>
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
+                <div style={{ ...ghwMono, marginBottom: narrow ? 8 : 14 }}>Раздел · Лист ожидания</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: narrow ? 12 : 20 }}>
                     <h1
                         style={{
                             fontFamily: GH_SANS,
                             fontWeight: 800,
-                            fontSize: 'clamp(28px, 3.5vw, 42px)',
+                            fontSize: narrow ? 24 : 'clamp(28px, 3.5vw, 42px)',
                             lineHeight: 0.95,
                             letterSpacing: '-0.02em',
                             margin: 0,
@@ -165,7 +172,7 @@ function GridHouseWaitlist({
                     >
                         Очередь ожидания.
                     </h1>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
                         {total}
                     </div>
                 </div>
@@ -181,7 +188,7 @@ function GridHouseWaitlist({
                         style={{
                             fontFamily: GH_SANS,
                             fontWeight: 800,
-                            fontSize: 'clamp(28px, 3.5vw, 42px)',
+                            fontSize: narrow ? 24 : 'clamp(28px, 3.5vw, 42px)',
                             lineHeight: 0.95,
                             letterSpacing: '-0.02em',
                             margin: 0,
@@ -190,8 +197,85 @@ function GridHouseWaitlist({
                         Никто не ждёт.
                     </h2>
                 </div>
-            ) : (
+            ) : narrow ? (
+                /* ── Mobile card list ── */
                 <div style={{ borderTop: `2px solid ${GH.ink}` }}>
+                    {waitlist.map((entry, idx) => {
+                        const resourceName = RESOURCES.find((r) => r.id === entry.resourceId)?.name || entry.resourceId;
+                        return (
+                            <div
+                                key={entry.id}
+                                style={{
+                                    padding: '14px 0',
+                                    borderBottom: ghwHairline,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: 6,
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                                            {String(idx + 1).padStart(3, '0')}
+                                        </span>
+                                        <span style={{
+                                            fontSize: 14, fontWeight: 700, color: GH.ink, letterSpacing: '-0.005em',
+                                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                                        }}>
+                                            {getUserName(entry.userId)}
+                                        </span>
+                                    </div>
+                                    <span style={{
+                                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em',
+                                        textTransform: 'uppercase' as const, padding: '3px 7px',
+                                        border: `1px solid ${entry.status === 'active' ? GH.ink : GH.ink30}`,
+                                        color: entry.status === 'active' ? GH.ink : GH.ink60,
+                                        whiteSpace: 'nowrap' as const,
+                                    }}>
+                                        {entry.status === 'active' ? 'Ожидает' : entry.status}
+                                    </span>
+                                </div>
+                                <div style={{ ...ghwMono, color: GH.ink60, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                        {format(new Date(entry.date), 'dd MMM', { locale: ru })}
+                                    </span>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontVariantNumeric: 'tabular-nums' }}>
+                                        <Clock size={10} /> {entry.startTime}–{entry.endTime}
+                                    </span>
+                                    <span>{resourceName}</span>
+                                </div>
+                                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                                    <button
+                                        onClick={() => handleNotify(entry.id)}
+                                        style={{
+                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
+                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                                            padding: '6px 10px', background: 'transparent', color: GH.ink,
+                                            border: `1px solid ${GH.ink10}`, cursor: 'pointer',
+                                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                                        }}
+                                    >
+                                        <Bell size={10} /> Уведомить
+                                    </button>
+                                    <button
+                                        onClick={() => removeFromWaitlist(entry.id)}
+                                        style={{
+                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
+                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                                            padding: '6px 10px', background: 'transparent', color: GH.danger,
+                                            border: `1px solid ${GH.danger}40`, cursor: 'pointer',
+                                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                                        }}
+                                    >
+                                        <Trash2 size={10} /> Удалить
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <div style={{ borderTop: `2px solid ${GH.ink}`, overflowX: 'auto' }}>
                     {/* Table head */}
                     <div
                         style={{
@@ -200,6 +284,7 @@ function GridHouseWaitlist({
                             gap: 16,
                             padding: '12px 0',
                             borderBottom: ghwHairline,
+                            minWidth: 720,
                             ...ghwMono,
                         }}
                     >
@@ -257,6 +342,7 @@ function GHWRow({
                 padding: '18px 0',
                 borderBottom: ghwHairline,
                 alignItems: 'center',
+                minWidth: 720,
             }}
         >
             <div

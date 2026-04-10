@@ -44,7 +44,7 @@ const FACTS = [
     { value: '2', label: 'локации\nв Батуми' },
     { value: '6+', label: 'форматов\nпространств' },
     { value: '0₾', label: 'абонплата\nпочасово' },
-    { value: '24/7', label: 'доступ\nдля резидентов' },
+    { value: '24/7', label: 'доступ\nдля специалистов' },
 ];
 
 interface Props {
@@ -114,7 +114,7 @@ export function SpecialistOnboardingHero({ onApply }: Props) {
                 className="rounded-[24px] px-6 py-5"
                 style={glassStep}
             >
-                <p className="text-unbox-dark/45 text-[10px] font-bold uppercase tracking-widest mb-4">Как стать резидентом</p>
+                <p className="text-unbox-dark/45 text-[10px] font-bold uppercase tracking-widest mb-4">Как стать специалистом</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {STEPS.map((step, i) => {
                         const Icon = step.icon;

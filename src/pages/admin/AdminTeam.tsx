@@ -426,21 +426,27 @@ function GridHouseTeam({
     load,
 }: GridHouseTeamProps) {
     const total = String(members.length).padStart(3, '0');
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 768);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
-                <div style={{ ...ghtMono, marginBottom: 14 }}>Раздел · Команда</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
-                    <h1 style={ghtH1}>Команда на витрине.</h1>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
+                <div style={{ ...ghtMono, marginBottom: narrow ? 8 : 14 }}>Раздел · Команда</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
+                    <h1 style={{ ...ghtH1, fontSize: narrow ? 24 : ghtH1.fontSize }}>Команда на витрине.</h1>
+                    <div style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
                         {total}
                     </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-                    <div style={{ ...ghtMono, color: GH.ink30 }}>
-                        Карточки показываются на главной странице сайта
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ ...ghtMono, color: GH.ink30, fontSize: narrow ? 9 : 10 }}>
+                        {narrow ? 'Показаны на сайте' : 'Карточки показываются на главной странице сайта'}
                     </div>
                     <button
                         onClick={() => setEditMember(null)}
@@ -448,19 +454,20 @@ function GridHouseTeam({
                             background: GH.ink,
                             color: GH.paper,
                             fontFamily: GH_MONO,
-                            fontSize: 11,
+                            fontSize: narrow ? 9 : 11,
                             fontWeight: 600,
                             letterSpacing: '0.18em',
                             textTransform: 'uppercase' as const,
-                            padding: '14px 22px',
+                            padding: narrow ? '10px 14px' : '14px 22px',
                             border: 'none',
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 10,
+                            gap: 8,
+                            whiteSpace: 'nowrap' as const,
                         }}
                     >
-                        <Plus size={14} /> Добавить
+                        <Plus size={narrow ? 12 : 14} /> Добавить
                     </button>
                 </div>
             </div>
@@ -479,10 +486,10 @@ function GridHouseTeam({
                 <div
                     style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                        gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
                         gap: 0,
                         borderTop: `2px solid ${GH.ink}`,
-                        borderLeft: ghtHairline,
+                        borderLeft: narrow ? undefined : ghtHairline,
                     }}
                 >
                     {members.map((m, idx) => (

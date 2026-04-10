@@ -18,6 +18,7 @@ export interface Resource {
     name: string;
     type: 'cabinet' | 'capsule' | 'cabinet-uni';
     hourlyRate: number;
+    groupRate?: number;
     capacity: number;
     locationId?: string; // Optional for backward compatibility
     // New fields

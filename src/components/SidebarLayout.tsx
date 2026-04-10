@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { LogOut, Menu, X, ArrowLeft } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../store/userStore';
+import { useDesignFlag } from '../hooks/useDesignFlag';
 
 export interface NavItem {
     path: string;
@@ -24,6 +25,7 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const isGridHouse = useDesignFlag();
 
     const isActive = (path: string, exact?: boolean) => {
         if (exact) return location.pathname === path;
@@ -39,8 +41,15 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
 
     return (
         <div className="min-h-screen flex text-unbox-dark relative">
-            {/* Background */}
-            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
+            {/* Background — photo for Classic, solid for Grid House */}
+            {isGridHouse ? (
+                <div className="fixed inset-0 z-0" style={{ background: '#FAFAF7' }} />
+            ) : (
+                <div className="fixed inset-0 z-0">
+                    <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                    <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+                </div>
+            )}
 
             {/* Sidebar (Desktop) */}
             <aside className="w-64 hidden md:flex flex-col fixed h-full z-10 rounded-r-3xl my-2 ml-2"

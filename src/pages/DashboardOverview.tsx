@@ -749,11 +749,18 @@ interface GridHouseDashboardOverviewProps {
     navigate: ReturnType<typeof useNavigate>;
 }
 
+function useGHNarrow(bp = 768) {
+    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return n;
+}
+
 function GridHouseDashboardOverview({
     currentUser, isNegative, creditLimit, availableCredit, usagePercent: _usagePercent,
     activeBonuses, totalBonusHours, recentBookings, recentTransactions,
     statusConfig, transactionTypeConfig, formatBookingDate, navigate,
 }: GridHouseDashboardOverviewProps) {
+    const narrow = useGHNarrow();
     const ghStatusColor = (status: string) => {
         const map: Record<string, string> = {
             confirmed: GH.accent, completed: GH.ink60, cancelled: GH.danger,
@@ -776,9 +783,9 @@ function GridHouseDashboardOverview({
             </div>
 
             {/* KPI strip */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 0, borderTop: ghdoHairline, marginBottom: 32 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 0, borderTop: ghdoHairline, marginBottom: 32 }}>
                 {/* Balance */}
-                <div style={{ padding: '20px 20px 20px 0', borderRight: ghdoHairline }}>
+                <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 0', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
                     <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БАЛАНС</div>
                     <div style={{
                         fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700,
@@ -794,7 +801,7 @@ function GridHouseDashboardOverview({
                 </div>
 
                 {/* Bonuses */}
-                <div style={{ padding: '20px 20px 20px 20px', borderRight: ghdoHairline }}>
+                <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 20px', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
                     <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БОНУСЫ</div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1, color: activeBonuses.length > 0 ? GH.accent : GH.ink30 }}>
                         {totalBonusHours}
@@ -805,7 +812,7 @@ function GridHouseDashboardOverview({
                 </div>
 
                 {/* Discount */}
-                <div style={{ padding: '20px 0 20px 20px' }}>
+                <div style={{ padding: narrow ? '16px 0' : '20px 0 20px 20px' }}>
                     <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>СКИДКА</div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1 }}>
                         {currentUser.discountPercent || 0}%
@@ -839,7 +846,7 @@ function GridHouseDashboardOverview({
             </div>
 
             {/* Two-column: bookings + payments */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: narrow ? 24 : 32 }}>
                 {/* Recent bookings */}
                 <div>
                     <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>ПОСЛЕДНИЕ БРОНИРОВАНИЯ</div>
@@ -851,19 +858,18 @@ function GridHouseDashboardOverview({
                         <div style={{ border: ghdoHairline }}>
                             {recentBookings.map((b, i) => {
                                 const sc = statusConfig[b.status] || statusConfig.confirmed;
+                                const resName = RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId;
                                 return (
-                                    <div key={i} style={{ padding: '12px 16px', borderBottom: i < recentBookings.length - 1 ? ghdoHairline : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div>
-                                            <div style={{ fontSize: 13, fontWeight: 600 }}>
-                                                {RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
-                                            </div>
-                                            <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30, marginTop: 2 }}>
-                                                {formatBookingDate(b.date)} · {b.startTime}–{b.endTime}
-                                            </div>
+                                    <div key={i} style={{ padding: '14px 16px', borderBottom: i < recentBookings.length - 1 ? ghdoHairline : 'none' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                            <div style={{ fontSize: 14, fontWeight: 600 }}>{resName}</div>
+                                            <span style={{ ...ghdoMono, fontSize: 9, color: ghStatusColor(b.status), padding: '2px 8px', border: `1px solid ${ghStatusColor(b.status)}30`, flexShrink: 0 }}>
+                                                {sc.label.toUpperCase()}
+                                            </span>
                                         </div>
-                                        <span style={{ ...ghdoMono, fontSize: 9, color: ghStatusColor(b.status), padding: '2px 8px', border: `1px solid ${ghStatusColor(b.status)}30` }}>
-                                            {sc.label.toUpperCase()}
-                                        </span>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+                                            {formatBookingDate(b.date)} · {b.startTime}–{b.endTime}
+                                        </div>
                                     </div>
                                 );
                             })}

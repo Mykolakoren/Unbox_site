@@ -2,6 +2,7 @@ import { ArrowLeft, LogIn, LayoutDashboard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 interface MinimalLayoutProps {
     children: React.ReactNode;
@@ -31,19 +32,148 @@ export function MinimalLayout({
     const navigate = useNavigate();
     const resetBooking = useBookingStore(s => s.reset);
     const { currentUser } = useUserStore();
+    const isGH = useDesignFlag();
 
     const handleBack = () => {
         if (onBack) onBack();
         else navigate(-1);
     };
 
+    // ── GRID HOUSE MODE ────────────────────────────────────────────────────
+    if (glassMode && isGH) {
+        return (
+            <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
+                {/* GH Header */}
+                <header style={{
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 50,
+                    background: GH.paper,
+                    borderBottom: `1px solid ${GH.ink8}`,
+                }}>
+                    <div style={{
+                        maxWidth: fullWidth ? 1920 : 960,
+                        margin: '0 auto',
+                        padding: '14px 24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                    }}>
+                        {/* Left: back + logo */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            {showBackButton && (
+                                <button
+                                    onClick={handleBack}
+                                    style={{
+                                        width: 36, height: 36,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        border: `1px solid ${GH.ink10}`,
+                                        borderRadius: 8,
+                                        background: 'transparent',
+                                        color: GH.ink60,
+                                        cursor: 'pointer',
+                                    }}
+                                    aria-label="Go back"
+                                >
+                                    <ArrowLeft size={16} />
+                                </button>
+                            )}
+                            <Link
+                                to="/"
+                                onClick={resetBooking}
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 15,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.06em',
+                                    color: GH.ink,
+                                    textDecoration: 'none',
+                                    textTransform: 'uppercase',
+                                }}
+                            >
+                                Unbox
+                            </Link>
+                        </div>
+
+                        {/* Right: Auth */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {!currentUser ? (
+                                <Link
+                                    to="/login"
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 6,
+                                        padding: '8px 18px',
+                                        background: GH.accent,
+                                        color: '#fff',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        fontFamily: GH_SANS,
+                                        textDecoration: 'none',
+                                        letterSpacing: '0.01em',
+                                    }}
+                                >
+                                    <LogIn size={14} />
+                                    Войти
+                                </Link>
+                            ) : (
+                                <button
+                                    onClick={() => navigate('/dashboard')}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 10,
+                                        padding: '6px 14px',
+                                        background: GH.ink5,
+                                        border: `1px solid ${GH.ink8}`,
+                                        borderRadius: 8,
+                                        cursor: 'pointer',
+                                        fontFamily: GH_SANS,
+                                        fontSize: 13,
+                                        fontWeight: 500,
+                                        color: GH.ink,
+                                    }}
+                                >
+                                    <div style={{
+                                        width: 28, height: 28,
+                                        borderRadius: '50%',
+                                        background: GH.accent,
+                                        color: '#fff',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 12, fontWeight: 700,
+                                    }}>
+                                        {currentUser.name?.charAt(0).toUpperCase() ?? '·'}
+                                    </div>
+                                    <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {currentUser.name}
+                                    </span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </header>
+
+                {/* Main content */}
+                <main style={{
+                    minHeight: 'calc(100vh - 65px)',
+                    paddingTop: 24,
+                    paddingBottom: 40,
+                    ...(noPadding ? {} : { paddingLeft: fullWidth ? 24 : 16, paddingRight: fullWidth ? 24 : 16 }),
+                }}>
+                    {children}
+                </main>
+            </div>
+        );
+    }
+
     // ── GLASS MODE (photo bg + floating glass pill header) ──────────────────
     if (glassMode) {
         return (
             <div className="min-h-screen font-sans text-unbox-dark selection:bg-unbox-green selection:text-white">
 
-                {/* Background */}
-                <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
+                {/* Background — photo layer for glass mode */}
+                <div className="fixed inset-0 z-0">
+                    <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                    <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+                </div>
 
                 {/* Floating glass header pill */}
                 <header className="fixed top-0 left-0 right-0 z-50 px-4 md:px-8 pt-4">

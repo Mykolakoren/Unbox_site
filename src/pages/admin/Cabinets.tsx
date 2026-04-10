@@ -246,15 +246,21 @@ function GridHouseCabinets({
     setIsModalOpen,
 }: GridHouseCabinetsProps) {
     const total = String(filteredResources.length).padStart(3, '0');
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 768);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 28, marginBottom: 28 }}>
-                <div style={{ ...ghcMono, marginBottom: 14 }}>Раздел · Кабинеты</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
-                    <h1 style={ghcH1}>Каталог пространств.</h1>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
+                <div style={{ ...ghcMono, marginBottom: narrow ? 8 : 14 }}>Раздел · Кабинеты</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
+                    <h1 style={{ ...ghcH1, fontSize: narrow ? 24 : ghcH1.fontSize }}>Каталог пространств.</h1>
+                    <div style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 0.9, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
                         {total}
                     </div>
                 </div>
@@ -264,8 +270,17 @@ function GridHouseCabinets({
             </div>
 
             {/* ── Location filter tabs ── */}
-            <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghcHairline, display: 'flex', gap: 0, marginBottom: 32, flexWrap: 'wrap' }}>
-                {[{ id: 'all', name: 'Все филиалы' }, ...LOCATIONS].map((loc) => {
+            <div style={{
+                borderTop: `2px solid ${GH.ink}`,
+                borderBottom: ghcHairline,
+                display: 'flex',
+                gap: 0,
+                marginBottom: narrow ? 20 : 32,
+                overflowX: narrow ? 'auto' : 'visible',
+                flexWrap: narrow ? 'nowrap' : 'wrap',
+                WebkitOverflowScrolling: 'touch',
+            }}>
+                {[{ id: 'all', name: narrow ? 'Все' : 'Все филиалы' }, ...LOCATIONS].map((loc) => {
                     const active = filterLocation === loc.id;
                     return (
                         <button
@@ -273,16 +288,18 @@ function GridHouseCabinets({
                             onClick={() => setFilterLocation(loc.id)}
                             style={{
                                 fontFamily: GH_MONO,
-                                fontSize: 11,
+                                fontSize: narrow ? 10 : 11,
                                 fontWeight: 600,
                                 letterSpacing: '0.14em',
                                 textTransform: 'uppercase' as const,
-                                padding: '18px 24px',
+                                padding: narrow ? '12px 14px' : '18px 24px',
                                 background: active ? GH.ink : 'transparent',
                                 color: active ? GH.paper : GH.ink,
                                 border: 'none',
                                 borderRight: `1px solid ${GH.ink10}`,
                                 cursor: 'pointer',
+                                whiteSpace: 'nowrap' as const,
+                                flexShrink: 0,
                             }}
                         >
                             {loc.name}
@@ -301,10 +318,10 @@ function GridHouseCabinets({
                 <div
                     style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                        gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
                         gap: 0,
                         borderTop: `2px solid ${GH.ink}`,
-                        borderLeft: `1px solid ${GH.ink10}`,
+                        borderLeft: narrow ? undefined : `1px solid ${GH.ink10}`,
                     }}
                 >
                     {filteredResources.map((resource, idx) => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
+import { useUserStore } from '../store/userStore';
 import { MinimalLayout } from '../components/MinimalLayout';
 import { CABINET_SERVICES } from '../utils/data';
 import { MapPin, Wifi, Coffee, Users, Shield, Ruler, ChevronRight, X, ChevronLeft, ArrowRight } from 'lucide-react';
@@ -269,10 +270,15 @@ export function LocationDetailsPage() {
                                                     {resource.type === 'capsule' ? 'Капсула' : 'Кабинет'}
                                                 </span>
                                             </div>
-                                            <div className="absolute bottom-3 right-3">
+                                            <div className="absolute bottom-3 right-3 flex flex-col items-end gap-1">
                                                 <span className="bg-unbox-dark/80 backdrop-blur-sm text-white px-3 py-1.5 rounded-full text-sm font-bold">
                                                     {resource.hourlyRate} ₾/час
                                                 </span>
+                                                {resource.groupRate && (
+                                                    <span className="bg-unbox-green/80 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-xs font-semibold">
+                                                        группа: {resource.groupRate} ₾/час
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
 
@@ -395,13 +401,42 @@ interface GridHouseLocationDetailsProps {
 }
 
 function GridHouseLocationDetails({
-    location, locationResources, allPhotos, navigate: _navigate, handleBookResource,
+    location, locationResources, allPhotos, navigate: nav, handleBookResource,
     galleryOpen, setGalleryOpen, galleryIndex, setGalleryIndex,
 }: GridHouseLocationDetailsProps) {
+    const { currentUser, logout } = useUserStore();
+    const isAdmin = Boolean(currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
+    const ghNavMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' };
+
     return (
-        <MinimalLayout>
-            <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 1200, margin: '0 auto', padding: '32px 24px 80px' }}>
-                {/* Header */}
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', background: GH.paper }}>
+            {/* GH Header */}
+            <header style={{ borderBottom: ghldHairline, background: GH.paper, position: 'sticky', top: 0, zIndex: 40 }}>
+                <div style={{ maxWidth: 1200, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
+                        <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                        <button onClick={() => nav(-1)} style={{ ...ghNavMono, color: GH.ink60, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0' }}>← НАЗАД</button>
+                    </div>
+                    <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                        <Link to="/specialists" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>Специалисты</Link>
+                        <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                        <Link to="/#cabinets" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink, fontWeight: 700, textDecoration: 'none' }}>Кабинеты</Link>
+                        {isAdmin && (<><span style={{ ...ghNavMono, color: GH.ink30 }}>·</span><Link to="/admin" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>Админ</Link></>)}
+                        <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                        {currentUser ? (
+                            <><Link to="/dashboard" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>{currentUser.name ?? 'Кабинет'}</Link>
+                            <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                            <button onClick={() => { logout(); nav('/'); }} style={{ ...ghNavMono, padding: '4px 12px', color: GH.danger, background: 'transparent', border: 'none', cursor: 'pointer' }}>Выйти</button></>
+                        ) : (
+                            <Link to="/login" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>Войти</Link>
+                        )}
+                    </nav>
+                </div>
+            </header>
+
+            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px clamp(16px, 4vw, 24px) 80px', overflowX: 'hidden' }}>
+                {/* Location header */}
                 <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
                     <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 8 }}>ЛОКАЦИЯ</div>
                     <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
@@ -499,8 +534,28 @@ function GridHouseLocationDetails({
                                             )}
                                         </div>
                                     </div>
-                                    <div style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 16, whiteSpace: 'nowrap' }}>
-                                        {resource.hourlyRate} ₾/час
+                                    <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                        {resource.groupRate ? (
+                                            <>
+                                                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', justifyContent: 'flex-end' }}>
+                                                    <div style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 16 }}>
+                                                        {resource.hourlyRate} ₾<span style={{ fontSize: 11, fontWeight: 500, color: GH.ink60 }}>/час</span>
+                                                    </div>
+                                                </div>
+                                                <div style={{
+                                                    fontFamily: GH_MONO, fontSize: 11, color: GH.accent,
+                                                    marginTop: 3, fontWeight: 600,
+                                                    background: `${GH.accent}10`, padding: '2px 8px', borderRadius: 4,
+                                                    display: 'inline-block',
+                                                }}>
+                                                    группа: {resource.groupRate} ₾/час
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 16 }}>
+                                                {resource.hourlyRate} ₾<span style={{ fontSize: 11, fontWeight: 500, color: GH.ink60 }}>/час</span>
+                                            </div>
+                                        )}
                                     </div>
                                     <button
                                         onClick={() => handleBookResource(resource.id)}
@@ -546,6 +601,6 @@ function GridHouseLocationDetails({
                     </div>
                 </div>
             )}
-        </MinimalLayout>
+        </div>
     );
 }

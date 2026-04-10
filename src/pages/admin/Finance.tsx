@@ -71,6 +71,7 @@ export function AdminFinance() {
     const [showEndShift, setShowEndShift] = useState(false);
     const [showCorrection, setShowCorrection] = useState(false);
     const [corrAccount, setCorrAccount] = useState('cash');
+    const [corrBranch, setCorrBranch] = useState('');
     const [corrAmount, setCorrAmount] = useState('');
     const [corrReason, setCorrReason] = useState('');
     const [corrSaving, setCorrSaving] = useState(false);
@@ -138,6 +139,7 @@ export function AdminFinance() {
                 showEndShift={showEndShift} setShowEndShift={setShowEndShift}
                 showCorrection={showCorrection} setShowCorrection={setShowCorrection}
                 corrAccount={corrAccount} setCorrAccount={setCorrAccount}
+                corrBranch={corrBranch} setCorrBranch={setCorrBranch}
                 corrAmount={corrAmount} setCorrAmount={setCorrAmount}
                 corrReason={corrReason} setCorrReason={setCorrReason}
                 corrSaving={corrSaving} setCorrSaving={setCorrSaving}
@@ -354,6 +356,14 @@ export function AdminFinance() {
                         </div>
 
                         <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Филиал</label>
+                            <select value={corrBranch} onChange={e => setCorrBranch(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm">
+                                <option value="">Общая касса (все филиалы)</option>
+                                {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                            </select>
+                        </div>
+
+                        <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">Фактический остаток (GEL)</label>
                             <input
                                 type="number"
@@ -385,16 +395,18 @@ export function AdminFinance() {
                                         const { api } = await import('../../api/client');
                                         await api.post('/cashbox/balance-correction', {
                                             payment_method: corrAccount,
-                                            actual_balance: parseFloat(corrAmount),
+                                            new_balance: parseFloat(corrAmount),
                                             reason: corrReason.trim(),
+                                            branch: corrBranch || undefined,
                                         });
                                         const { toast } = await import('sonner');
                                         toast.success('Остаток скорректирован');
                                         setShowCorrection(false);
                                         setCorrAmount('');
                                         setCorrReason('');
-                                        fetchBalance();
-                                        fetchTransactions();
+                                        setCorrBranch('');
+                                        fetchBalance(selectedBranch || undefined);
+                                        refetchTransactions();
                                     } catch (err: any) {
                                         const { toast } = await import('sonner');
                                         toast.error(err?.response?.data?.detail || 'Ошибка корректировки');
@@ -425,6 +437,7 @@ type GHAFProps = {
     showEndShift: boolean; setShowEndShift: (v: boolean) => void;
     showCorrection: boolean; setShowCorrection: (v: boolean) => void;
     corrAccount: string; setCorrAccount: (v: string) => void;
+    corrBranch: string; setCorrBranch: (v: string) => void;
     corrAmount: string; setCorrAmount: (v: string) => void;
     corrReason: string; setCorrReason: (v: string) => void;
     corrSaving: boolean; setCorrSaving: (v: boolean) => void;
@@ -446,12 +459,12 @@ type GHAFProps = {
 
 function GHFSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
     return (
-        <section style={{ marginBottom: 48 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 20, borderTop: `2px solid ${GH.ink}`, paddingTop: 16, marginBottom: 20 }}>
-                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.14em', color: GH.ink60, minWidth: 40 }}>{number}</div>
-                <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(22px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', color: GH.ink, margin: 0 }}>{title}</h2>
+        <section style={{ marginBottom: 40 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, borderTop: `2px solid ${GH.ink}`, paddingTop: 16, marginBottom: 20 }}>
+                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.14em', color: GH.ink60, minWidth: 32 }}>{number}</div>
+                <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(20px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', color: GH.ink, margin: 0 }}>{title}</h2>
             </div>
-            <div style={{ paddingLeft: 60 }}>{children}</div>
+            <div>{children}</div>
         </section>
     );
 }
@@ -519,53 +532,61 @@ function GridHouseAdminFinance(p: GHAFProps) {
         <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
             <div style={{ maxWidth: 1400, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
                 {/* HEAD */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 24, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 40 }}>
-                    <div>
+                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 24, marginBottom: 32 }}>
+                    <div style={{ marginBottom: 16 }}>
                         <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 12 }}>
                             Раздел · Финансы
                         </div>
-                        <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
+                        <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(28px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
                             Касса и поток средств.
                         </h1>
                     </div>
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {p.canCorrectBalance && (
-                            <button onClick={() => p.setShowCorrection(true)} style={dangerBtn}>
-                                <Settings2 size={12} style={{ verticalAlign: 'middle', marginRight: 8 }} />
+                            <button onClick={() => p.setShowCorrection(true)} style={{ ...dangerBtn, padding: '10px 14px', fontSize: 10 }}>
+                                <Settings2 size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                                 Корректировка
                             </button>
                         )}
-                        <button onClick={() => p.setShowEndShift(true)} style={outlineBtn}>
-                            <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 8 }} />
+                        <button onClick={() => p.setShowEndShift(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
+                            <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Закрыть смену
                         </button>
-                        <button onClick={() => p.setShowAddTx(true)} style={inkBtn}>
-                            <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 8 }} />
+                        <button onClick={() => p.setShowAddTx(true)} style={{ ...inkBtn, padding: '10px 14px', fontSize: 10 }}>
+                            <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Новая операция
                         </button>
                     </div>
                 </div>
 
-                {/* 01 — Период и локация */}
-                <GHFSection number="01" title="Период и локация.">
+                {/* 01 — Баланс */}
+                <GHFSection number="01" title="Баланс.">
+                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 24 }}>
+                        <BalanceCard filteredTransactions={p.filtered} periodLabel={p.period.label} />
+                    </div>
+                </GHFSection>
+
+                {/* 02 — Период и локация */}
+                <GHFSection number="02" title="Период и локация.">
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 20 }}>
                         {/* Period mode tabs */}
-                        <div style={{ display: 'flex', border: `1px solid ${GH.ink10}` }}>
+                        <div style={{ display: 'flex', border: `1px solid ${GH.ink10}`, flexWrap: 'wrap' }}>
                             {periodTabs.map(t => (
                                 <button
                                     key={t.id}
                                     onClick={() => { p.setPeriodMode(t.id); p.setPeriodOffset(0); }}
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
-                                        letterSpacing: '0.14em',
+                                        fontSize: 10,
+                                        letterSpacing: '0.12em',
                                         textTransform: 'uppercase',
-                                        padding: '10px 16px',
+                                        padding: '10px 12px',
                                         background: p.periodMode === t.id ? GH.ink : 'transparent',
                                         color: p.periodMode === t.id ? GH.paper : GH.ink,
                                         border: 'none',
                                         borderRight: `1px solid ${GH.ink10}`,
                                         cursor: 'pointer',
+                                        whiteSpace: 'nowrap',
                                     }}
                                 >
                                     {t.label}
@@ -614,7 +635,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         )}
 
                         {/* Branch dropdown */}
-                        <div style={{ marginLeft: 'auto' }}>
+                        <div>
                             <select
                                 value={p.selectedBranch}
                                 onChange={e => p.setSelectedBranch(e.target.value)}
@@ -638,17 +659,10 @@ function GridHouseAdminFinance(p: GHAFProps) {
                     </div>
                 </GHFSection>
 
-                {/* 02 — Баланс */}
-                <GHFSection number="02" title="Баланс.">
-                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 24 }}>
-                        <BalanceCard filteredTransactions={p.filtered} periodLabel={p.period.label} />
-                    </div>
-                </GHFSection>
-
                 {/* 03 — Журнал */}
                 <GHFSection number="03" title="Журнал операций.">
                     {/* Tab selector */}
-                    <div style={{ display: 'flex', border: `2px solid ${GH.ink}`, width: 'fit-content', marginBottom: 24 }}>
+                    <div style={{ display: 'flex', border: `2px solid ${GH.ink}`, width: '100%', maxWidth: 'fit-content', marginBottom: 24, overflowX: 'auto' }}>
                         {tabs.map((t, idx) => {
                             if (t.id === 'categories' && !p.canManageCategories) return null;
                             const active = p.tab === t.id;
@@ -658,15 +672,17 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                     onClick={() => p.setTab(t.id)}
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
-                                        letterSpacing: '0.16em',
+                                        fontSize: 10,
+                                        letterSpacing: '0.14em',
                                         textTransform: 'uppercase',
-                                        padding: '12px 24px',
+                                        padding: '12px 16px',
                                         background: active ? GH.ink : 'transparent',
                                         color: active ? GH.paper : GH.ink,
                                         border: 'none',
                                         borderLeft: idx > 0 ? `1px solid ${active ? GH.paper : GH.ink}` : 'none',
                                         cursor: 'pointer',
+                                        whiteSpace: 'nowrap',
+                                        flex: '1 0 auto',
                                     }}
                                 >
                                     {t.label}
@@ -677,7 +693,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
 
                     {/* Type filter (transactions tab only) */}
                     {p.tab === 'transactions' && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 20 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 20 }}>
                             <div style={{ display: 'flex', border: `1px solid ${GH.ink10}` }}>
                                 {typeTabs.map(t => {
                                     const active = p.txType === t.id;
@@ -688,14 +704,15 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                             style={{
                                                 fontFamily: GH_MONO,
                                                 fontSize: 10,
-                                                letterSpacing: '0.14em',
+                                                letterSpacing: '0.12em',
                                                 textTransform: 'uppercase',
-                                                padding: '8px 16px',
+                                                padding: '8px 12px',
                                                 background: active ? GH.ink : 'transparent',
                                                 color: active ? GH.paper : GH.ink,
                                                 border: 'none',
                                                 borderRight: `1px solid ${active ? GH.paper : GH.ink10}`,
                                                 cursor: 'pointer',
+                                                whiteSpace: 'nowrap',
                                             }}
                                         >
                                             {t.label}
@@ -704,7 +721,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 })}
                             </div>
                             {p.filtered.length > 0 && (
-                                <span style={{ marginLeft: 'auto', fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', color: GH.ink60, textTransform: 'uppercase' }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', color: GH.ink60, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                                     {p.filtered.length} операций · {p.period.label}
                                 </span>
                             )}
@@ -712,7 +729,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                     )}
 
                     {/* Tab content */}
-                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 24, background: GH.paper }}>
+                    <div style={{ border: `1px solid ${GH.ink10}`, padding: 'clamp(8px, 2vw, 24px)', background: GH.paper, overflowX: 'auto' }}>
                         {p.tab === 'transactions' && <CashboxTransactionTable filteredTransactions={p.filtered} onRefresh={p.refetchTransactions} />}
                         {p.tab === 'categories' && p.canManageCategories && <CategoryManager />}
                         {p.tab === 'shifts' && <ShiftReportsTable />}
@@ -782,6 +799,20 @@ function GridHouseAdminFinance(p: GHAFProps) {
 
                         <div style={{ marginBottom: 20 }}>
                             <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
+                                Филиал
+                            </label>
+                            <select
+                                value={p.corrBranch}
+                                onChange={e => p.setCorrBranch(e.target.value)}
+                                style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}
+                            >
+                                <option value="">Общая касса (все филиалы)</option>
+                                {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                            </select>
+                        </div>
+
+                        <div style={{ marginBottom: 20 }}>
+                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
                                 Фактический остаток · GEL
                             </label>
                             <input
@@ -821,16 +852,18 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                         const { api } = await import('../../api/client');
                                         await api.post('/cashbox/balance-correction', {
                                             payment_method: p.corrAccount,
-                                            actual_balance: parseFloat(p.corrAmount),
+                                            new_balance: parseFloat(p.corrAmount),
                                             reason: p.corrReason.trim(),
+                                            branch: p.corrBranch || undefined,
                                         });
                                         const { toast } = await import('sonner');
                                         toast.success('Остаток скорректирован');
                                         p.setShowCorrection(false);
                                         p.setCorrAmount('');
                                         p.setCorrReason('');
-                                        p.fetchBalance();
-                                        p.fetchTransactions();
+                                        p.setCorrBranch('');
+                                        p.fetchBalance(p.selectedBranch || undefined);
+                                        p.refetchTransactions();
                                     } catch (err: any) {
                                         const { toast } = await import('sonner');
                                         toast.error(err?.response?.data?.detail || 'Ошибка корректировки');

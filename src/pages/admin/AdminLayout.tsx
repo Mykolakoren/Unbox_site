@@ -77,8 +77,11 @@ export function AdminLayout() {
 
     return (
         <div className="min-h-screen flex flex-col text-unbox-dark relative">
-            {/* Background */}
-            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
+            {/* Background — photo layer for glass mode */}
+            <div className="fixed inset-0 z-0">
+                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+            </div>
 
             {/* ── Top Navigation Bar ── */}
             <header
@@ -240,7 +243,7 @@ export function AdminLayout() {
             )}
 
             {/* Main Content */}
-            <main className="flex-1 pt-14 relative z-10">
+            <main className="flex-1 pt-14 relative z-0">
                 <div className="max-w-[1400px] mx-auto p-4 pt-6 md:p-8">
                     <Outlet />
                 </div>
@@ -305,15 +308,20 @@ function GridHouseAdminShell({
                 WebkitFontSmoothing: 'antialiased',
                 display: 'flex',
                 position: 'relative',
+                overflowX: 'hidden',
+                width: '100%',
+                maxWidth: '100vw',
             }}
         >
             {/* ── SIDEBAR ── */}
             <aside
                 style={{
-                    width: 260,
-                    minWidth: 260,
-                    background: GH.ink5,
-                    borderRight: hairline,
+                    width: narrow ? 280 : 260,
+                    minWidth: narrow ? 280 : 260,
+                    // Use distinct solid surface on mobile so it never appears transparent
+                    background: narrow ? '#F3EFE2' : '#F0ECDD',
+                    backgroundColor: narrow ? '#F3EFE2' : '#F0ECDD',
+                    borderRight: narrow ? `2px solid ${GH.ink}` : hairline,
                     position: narrow ? 'fixed' : 'sticky',
                     top: 0,
                     left: 0,
@@ -321,9 +329,10 @@ function GridHouseAdminShell({
                     overflowY: 'auto',
                     transform: narrow && !mobileOpen ? 'translateX(-100%)' : 'translateX(0)',
                     transition: 'transform 0.2s ease',
-                    zIndex: 50,
+                    zIndex: 60,
                     display: 'flex',
                     flexDirection: 'column',
+                    boxShadow: narrow && mobileOpen ? '8px 0 40px rgba(15,15,16,0.35)' : 'none',
                 }}
             >
                 {/* Brand */}
@@ -419,14 +428,16 @@ function GridHouseAdminShell({
                     style={{
                         position: 'fixed',
                         inset: 0,
-                        background: 'rgba(15,15,16,0.35)',
-                        zIndex: 45,
+                        background: 'rgba(15,15,16,0.55)',
+                        backdropFilter: 'blur(2px)',
+                        WebkitBackdropFilter: 'blur(2px)',
+                        zIndex: 55,
                     }}
                 />
             )}
 
             {/* ── MAIN ── */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowX: 'hidden', width: narrow ? '100%' : undefined }}>
                 {/* Top bar */}
                 <header
                     style={{
@@ -435,11 +446,11 @@ function GridHouseAdminShell({
                         position: 'sticky',
                         top: 0,
                         zIndex: 30,
-                        padding: '16px 28px',
+                        padding: narrow ? '12px 16px' : '16px 28px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        gap: 16,
+                        gap: 8,
                     }}
                 >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -450,12 +461,13 @@ function GridHouseAdminShell({
                                 style={{
                                     fontFamily: GH_MONO,
                                     fontSize: 11,
+                                    fontWeight: 600,
                                     letterSpacing: '0.14em',
                                     textTransform: 'uppercase',
-                                    color: GH.ink,
-                                    background: 'transparent',
-                                    border: `1px solid ${GH.ink10}`,
-                                    padding: '6px 10px',
+                                    color: GH.paper,
+                                    background: GH.ink,
+                                    border: `1px solid ${GH.ink}`,
+                                    padding: '8px 12px',
                                     cursor: 'pointer',
                                 }}
                             >
@@ -472,7 +484,7 @@ function GridHouseAdminShell({
                 </header>
 
                 {/* Content */}
-                <main style={{ flex: 1, padding: 'clamp(24px, 3vw, 40px)', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+                <main style={{ flex: 1, padding: 'clamp(16px, 3vw, 40px)', maxWidth: 1400, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
                     <Outlet />
                 </main>
             </div>

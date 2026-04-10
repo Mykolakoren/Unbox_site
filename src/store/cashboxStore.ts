@@ -22,6 +22,7 @@ interface CashboxStore {
     fetchTransactions: (params?: Parameters<typeof cashboxApi.getTransactions>[0]) => Promise<void>;
     createTransaction: (data: Parameters<typeof cashboxApi.createTransaction>[0]) => Promise<void>;
     deleteTransaction: (id: string) => Promise<void>;
+    updateTransaction: (id: string, data: Partial<Parameters<typeof cashboxApi.createTransaction>[0]>) => Promise<void>;
     fetchCategories: () => Promise<void>;
     createCategory: (data: Parameters<typeof cashboxApi.createCategory>[0]) => Promise<void>;
     updateCategory: (id: string, data: Parameters<typeof cashboxApi.updateCategory>[1]) => Promise<void>;
@@ -79,6 +80,17 @@ export const useCashboxStore = create<CashboxStore>((set, get) => ({
             toast.success('Транзакция удалена');
         } catch (error) {
             toast.error('Не удалось удалить транзакцию');
+            throw error;
+        }
+    },
+
+    updateTransaction: async (id, data) => {
+        try {
+            await cashboxApi.updateTransaction(id, data);
+            await get().fetchBalance();
+            toast.success('Транзакция обновлена');
+        } catch (error) {
+            toast.error('Не удалось обновить транзакцию');
             throw error;
         }
     },

@@ -78,7 +78,10 @@ export function TestPage() {
     return (
         <div className="min-h-screen font-sans" style={{ background: 'rgb(246,248,247)' }}>
             {/* Background */}
-            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
+            <div className="fixed inset-0 z-0">
+                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+            </div>
 
             {/* Header */}
             <header className="relative z-10 flex items-center gap-4 px-6 py-5">
@@ -359,7 +362,7 @@ function GridHouseTestPage({
     return (
         <div style={{ minHeight: '100vh', fontFamily: GH_SANS, background: GH.paper, color: GH.ink }}>
             {/* Header */}
-            <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px 24px', borderBottom: `2px solid ${GH.ink}` }}>
+            <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px clamp(16px, 4vw, 24px)', borderBottom: `2px solid ${GH.ink}` }}>
                 <button
                     onClick={() => navigate(-1)}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', fontFamily: GH_SANS }}
@@ -373,7 +376,7 @@ function GridHouseTestPage({
             </header>
 
             {/* Main content */}
-            <main style={{ maxWidth: 640, margin: '0 auto', padding: '32px 20px 80px' }}>
+            <main style={{ maxWidth: 640, margin: '0 auto', padding: '32px clamp(16px, 4vw, 20px) 80px' }}>
                 {/* Test info */}
                 <div style={{ ...ghtpMono, color: GH.ink30, marginBottom: 8 }}>ТЕСТ</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 4 }}>
@@ -592,7 +595,7 @@ function GridHouseTestPage({
             </main>
 
             {/* Footer */}
-            <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ ...ghtpMono, color: GH.ink30, fontSize: 10 }}>UNBOX · 2026</span>
                 <span style={{ ...ghtpMono, color: GH.ink10, fontSize: 10 }}>GRID HOUSE</span>
             </footer>

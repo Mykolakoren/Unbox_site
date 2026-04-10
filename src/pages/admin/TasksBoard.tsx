@@ -713,74 +713,147 @@ const GH_COLUMNS: { id: TaskStatus; num: string; title: string }[] = [
 
 function GridHouseAdminTasksBoard(p: GHTBProps) {
     const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 768);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+    const [mobileTab, setMobileTab] = useState<TaskStatus>('TODO');
 
     return (
         <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ maxWidth: 1600, width: '100%', margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)', flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ maxWidth: 1600, width: '100%', margin: '0 auto', padding: narrow ? '16px' : 'clamp(24px, 4vw, 48px)', flex: 1, display: 'flex', flexDirection: 'column' }}>
                 {/* HEAD */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 20, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 32 }}>
-                    <div>
-                        <div style={{ ...eyebrow, marginBottom: 12 }}>Раздел · Задачи</div>
-                        <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: narrow ? 12 : 20, borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 32, marginBottom: narrow ? 16 : 32 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ ...eyebrow, marginBottom: narrow ? 6 : 12 }}>Раздел · Задачи</div>
+                        <h1 style={{ fontFamily: GH_SANS, fontSize: narrow ? 28 : 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
                             Рабочая доска.
                         </h1>
-                        <div style={{ ...eyebrow, marginTop: 12 }}>
+                        <div style={{ ...eyebrow, marginTop: narrow ? 8 : 12 }}>
                             {p.tasks.length} задач · {p.tasks.filter(t => t.status === 'DONE').length} завершено
                         </div>
                     </div>
                     <button
                         onClick={() => p.setEditingTask(p.emptyNewTask)}
                         style={{
-                            fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
-                            background: GH.ink, color: GH.paper, border: `1px solid ${GH.ink}`, padding: '14px 22px', cursor: 'pointer',
+                            fontFamily: GH_MONO,
+                            fontSize: narrow ? 9 : 11,
+                            letterSpacing: '0.16em',
+                            textTransform: 'uppercase',
+                            background: GH.ink,
+                            color: GH.paper,
+                            border: `1px solid ${GH.ink}`,
+                            padding: narrow ? '10px 14px' : '14px 22px',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
                         }}
                     >
-                        <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 8 }} />
-                        Новая задача
+                        <Plus size={narrow ? 11 : 12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                        {narrow ? 'Создать' : 'Новая задача'}
                     </button>
                 </div>
 
                 {/* FILTERS */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 24, marginBottom: 32, paddingBottom: 16, borderBottom: `1px solid ${GH.ink10}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 220, maxWidth: 400 }}>
-                        <Search size={14} color={GH.ink60} />
+                <div style={{
+                    display: 'flex',
+                    flexDirection: narrow ? 'column' : 'row',
+                    flexWrap: 'wrap',
+                    alignItems: narrow ? 'stretch' : 'center',
+                    gap: narrow ? 10 : 24,
+                    marginBottom: narrow ? 16 : 32,
+                    paddingBottom: narrow ? 12 : 16,
+                    borderBottom: `1px solid ${GH.ink10}`,
+                }}>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        flex: narrow ? 'none' : 1,
+                        width: narrow ? '100%' : undefined,
+                        minWidth: narrow ? 0 : 220,
+                        maxWidth: narrow ? '100%' : 400,
+                        border: narrow ? `1px solid ${GH.ink10}` : 'none',
+                        padding: narrow ? '8px 12px' : 0,
+                    }}>
+                        <Search size={14} color={GH.ink60} style={{ flexShrink: 0 }} />
                         <input
                             value={p.searchQuery}
                             onChange={e => p.setSearchQuery(e.target.value)}
                             placeholder="Поиск задач…"
-                            style={{ flex: 1, fontFamily: GH_SANS, fontSize: 14, background: 'transparent', border: 'none', outline: 'none', padding: '6px 0', color: GH.ink }}
+                            style={{ flex: 1, minWidth: 0, fontFamily: GH_SANS, fontSize: 14, background: 'transparent', border: 'none', outline: 'none', padding: '4px 0', color: GH.ink }}
                         />
                     </div>
-                    <select
-                        value={p.filterPriority}
-                        onChange={e => p.setFilterPriority(e.target.value)}
-                        style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', outline: 'none', cursor: 'pointer' }}
-                    >
-                        <option value="">Все приоритеты</option>
-                        <option value="HIGH">Срочно</option>
-                        <option value="MEDIUM">Средний</option>
-                        <option value="LOW">Низкий</option>
-                    </select>
-                    <select
-                        value={p.filterAssignee}
-                        onChange={e => p.setFilterAssignee(e.target.value)}
-                        style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', outline: 'none', cursor: 'pointer' }}
-                    >
-                        <option value="">Все ответственные</option>
-                        {p.admins.map((a: any) => (
-                            <option key={a.email} value={String(a.id || a.email)}>{a.name}</option>
-                        ))}
-                    </select>
-                    {p.hasFilters && (
-                        <button
-                            onClick={() => { p.setSearchQuery(''); p.setFilterPriority(''); p.setFilterAssignee(''); }}
-                            style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', background: 'transparent', color: GH.danger, border: `1px solid ${GH.danger}`, padding: '8px 14px', cursor: 'pointer' }}
+                    <div style={{ display: 'flex', gap: narrow ? 8 : 24, flexWrap: 'wrap' }}>
+                        <select
+                            value={p.filterPriority}
+                            onChange={e => p.setFilterPriority(e.target.value)}
+                            style={{ flex: narrow ? 1 : undefined, minWidth: 0, fontFamily: GH_MONO, fontSize: narrow ? 10 : 11, letterSpacing: '0.12em', textTransform: 'uppercase', background: GH.paper, color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 10px', outline: 'none', cursor: 'pointer' }}
                         >
-                            <X size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                            Сбросить
-                        </button>
-                    )}
+                            <option value="">Все приоритеты</option>
+                            <option value="HIGH">Срочно</option>
+                            <option value="MEDIUM">Средний</option>
+                            <option value="LOW">Низкий</option>
+                        </select>
+                        <select
+                            value={p.filterAssignee}
+                            onChange={e => p.setFilterAssignee(e.target.value)}
+                            style={{ flex: narrow ? 1 : undefined, minWidth: 0, fontFamily: GH_MONO, fontSize: narrow ? 10 : 11, letterSpacing: '0.12em', textTransform: 'uppercase', background: GH.paper, color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 10px', outline: 'none', cursor: 'pointer' }}
+                        >
+                            <option value="">Все ответственные</option>
+                            {p.admins.map((a: any) => (
+                                <option key={a.email} value={String(a.id || a.email)}>{a.name}</option>
+                            ))}
+                        </select>
+                        {p.hasFilters && (
+                            <button
+                                onClick={() => { p.setSearchQuery(''); p.setFilterPriority(''); p.setFilterAssignee(''); }}
+                                style={{ fontFamily: GH_MONO, fontSize: narrow ? 10 : 11, letterSpacing: '0.12em', textTransform: 'uppercase', background: 'transparent', color: GH.danger, border: `1px solid ${GH.danger}`, padding: '8px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >
+                                <X size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                                Сброс
+                            </button>
+                        )}
+                    </div>
                 </div>
+
+                {/* Mobile column tabs */}
+                {narrow && !p.loading && (
+                    <div style={{ display: 'flex', gap: 0, marginBottom: 12, border: `2px solid ${GH.ink}` }}>
+                        {GH_COLUMNS.map((col) => {
+                            const colTasks = p.getColumnTasks(col.id);
+                            const active = mobileTab === col.id;
+                            return (
+                                <button
+                                    key={col.id}
+                                    onClick={() => setMobileTab(col.id)}
+                                    style={{
+                                        flex: 1,
+                                        padding: '10px 8px',
+                                        border: 'none',
+                                        borderLeft: col.id !== 'TODO' ? `2px solid ${GH.ink}` : 'none',
+                                        background: active ? GH.ink : 'transparent',
+                                        color: active ? GH.paper : GH.ink,
+                                        fontFamily: GH_MONO,
+                                        fontSize: 9,
+                                        fontWeight: 600,
+                                        letterSpacing: '0.12em',
+                                        textTransform: 'uppercase',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        gap: 2,
+                                    }}
+                                >
+                                    <span>{col.title}</span>
+                                    <span style={{ fontSize: 14, fontWeight: 700 }}>{colTasks.length}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
 
                 {/* BOARD */}
                 {p.loading ? (
@@ -789,12 +862,18 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                     </div>
                 ) : (
                     <DndContext sensors={p.sensors} collisionDetection={p.collisionDetection} onDragStart={p.handleDragStart} onDragEnd={p.handleDragEnd}>
-                        <div style={{ flex: 1, overflowX: 'auto', paddingBottom: 16 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(320px, 1fr))', gap: 0, border: `2px solid ${GH.ink}`, minWidth: 'max-content', height: '100%' }}>
-                                {GH_COLUMNS.map((col, colIdx) => {
+                        <div style={{ flex: 1, overflowX: narrow ? 'visible' : 'auto', paddingBottom: 16 }}>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: narrow ? '1fr' : 'repeat(3, 1fr)',
+                                gap: 0,
+                                border: `2px solid ${GH.ink}`,
+                                height: '100%',
+                            }}>
+                                {GH_COLUMNS.filter(col => !narrow || col.id === mobileTab).map((col, colIdx) => {
                                     const colTasks = p.getColumnTasks(col.id);
                                     return (
-                                        <GHDroppableColumn key={col.id} colId={col.id} borderLeft={colIdx > 0}>
+                                        <GHDroppableColumn key={col.id} colId={col.id} borderLeft={!narrow && colIdx > 0}>
                                             {/* Column head */}
                                             <div style={{ padding: '16px 16px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <div>

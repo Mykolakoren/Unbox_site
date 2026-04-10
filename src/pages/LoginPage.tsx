@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { User, Lock, Phone, LogIn, Eye, EyeOff } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { TelegramLoginButton } from '../components/TelegramLoginButton';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+
+function useGHNarrow(bp = 768) {
+    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return n;
+}
 
 // ─── Clean styles (post-Liquid Glass) ────────────────────────────────────────
 const glassHeader: React.CSSProperties = {
@@ -28,7 +34,9 @@ const glassInput: React.CSSProperties = {
 export function LoginPage() {
     const navigate = useNavigate();
     const { login, register, googleLogin } = useUserStore();
-    const [isRegistering, setIsRegistering] = useState(false);
+    const [isRegistering, setIsRegistering] = useState(
+        () => new URLSearchParams(window.location.search).get('register') === '1'
+    );
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showPassword, setShowPassword] = useState(false);
@@ -101,7 +109,10 @@ export function LoginPage() {
         <div className="min-h-screen font-sans text-unbox-dark selection:bg-unbox-green selection:text-white overflow-hidden">
 
             {/* ── Background ── */}
-            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
+            <div className="fixed inset-0 z-0">
+                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+            </div>
 
             {/* ── Glass header (same as ExplorePage) ── */}
             <header className="fixed top-0 left-0 right-0 z-50 px-4 md:px-8 pt-4">
@@ -351,6 +362,7 @@ function GridHouseLoginPage({
     onGoogleSuccess,
     onGoogleError,
 }: GridHouseLoginPageProps) {
+    const narrow = useGHNarrow(768);
     return (
         <div
             style={{
@@ -366,7 +378,7 @@ function GridHouseLoginPage({
             <header
                 style={{
                     borderBottom: GH_HAIRLINE,
-                    padding: '20px 32px',
+                    padding: narrow ? '16px 20px' : '20px 32px',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -402,14 +414,16 @@ function GridHouseLoginPage({
             <div
                 style={{
                     flex: 1,
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                    display: narrow ? 'flex' : 'grid',
+                    flexDirection: narrow ? 'column' : undefined,
+                    gridTemplateColumns: narrow ? undefined : 'minmax(0, 1fr) minmax(0, 1fr)',
                     maxWidth: 1280,
                     width: '100%',
                     margin: '0 auto',
                 }}
             >
-                {/* LEFT — masthead column */}
+                {/* LEFT — masthead column (hidden on mobile) */}
+                {!narrow && (
                 <aside
                     style={{
                         borderRight: GH_HAIRLINE,
@@ -434,7 +448,7 @@ function GridHouseLoginPage({
                                 marginBottom: 24,
                             }}
                         >
-                            {isRegistering ? 'Новый резидент.' : 'Добро пожаловать.'}
+                            {isRegistering ? 'Новый специалист.' : 'Добро пожаловать.'}
                         </div>
                         <div
                             style={{
@@ -451,13 +465,37 @@ function GridHouseLoginPage({
                     </div>
                     <div style={GH_MONO_LABEL}>Unbox · Батуми · MMXXVI</div>
                 </aside>
+                )}
 
                 {/* RIGHT — form column */}
-                <main style={{ padding: '64px 48px', display: 'flex', alignItems: 'center' }}>
+                <main style={{ padding: narrow ? '32px 20px' : '64px 48px', display: 'flex', alignItems: narrow ? 'flex-start' : 'center', flex: 1 }}>
                     <div style={{ width: '100%', maxWidth: 420, margin: '0 auto' }}>
+                        {/* Mobile-only headline */}
+                        {narrow && (
+                            <div style={{ marginBottom: 28 }}>
+                                <div
+                                    style={{
+                                        fontSize: 36,
+                                        fontWeight: 800,
+                                        lineHeight: 0.95,
+                                        letterSpacing: '-0.03em',
+                                        marginBottom: 12,
+                                    }}
+                                >
+                                    {isRegistering ? 'Новый специалист.' : 'Вход.'}
+                                </div>
+                                <div style={{ fontSize: 15, lineHeight: 1.5, color: GH.ink60 }}>
+                                    {isRegistering
+                                        ? 'Регистрация открывает личный кабинет.'
+                                        : 'Войдите, чтобы увидеть бронирования, сессии и расписание.'}
+                                </div>
+                            </div>
+                        )}
+                        {!narrow && (
                         <div style={{ ...GH_MONO_LABEL, marginBottom: 24 }}>
                             {isRegistering ? '→ Регистрация' : '→ Вход'}
                         </div>
+                        )}
 
                         {error && (
                             <div
@@ -659,25 +697,16 @@ function GridHouseLoginPage({
             <footer
                 style={{
                     borderTop: GH_HAIRLINE,
-                    padding: '16px 32px',
+                    padding: narrow ? '16px 20px' : '16px 32px',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     ...GH_MONO_LABEL,
+                    flexWrap: 'wrap',
+                    gap: 8,
                 }}
             >
-                <span>Grid House · Направление А · Эксперимент</span>
-                <a
-                    href={`${window.location.pathname}?design=off`}
-                    style={{
-                        color: GH.ink,
-                        textDecoration: 'none',
-                        borderBottom: `1px solid ${GH.ink}`,
-                        paddingBottom: 2,
-                    }}
-                >
-                    ← Вернуться к обычному дизайну
-                </a>
+                <span>Unbox · Батуми · MMXXVI</span>
             </footer>
         </div>
     );

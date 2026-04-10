@@ -1,6 +1,6 @@
 """Cashbox — transactions: balance, list, create, delete."""
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select, func, col, desc
 from app.db.session import get_session
@@ -176,6 +176,64 @@ def delete_transaction(
     return {"ok": True}
 
 
+@router.patch("/transactions/{transaction_id}", response_model=CashboxTransactionRead)
+def update_transaction(
+    transaction_id: str,
+    payload: dict,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_cashbox),
+):
+    """Edit an existing transaction. Permission rules mirror delete:
+    owner/senior_admin — any transaction; admin — today and yesterday only."""
+    tx = session.get(CashboxTransaction, transaction_id)
+    if not tx:
+        raise HTTPException(404, "Транзакция не найдена")
+
+    tx_date = tx.date.date() if isinstance(tx.date, datetime) else tx.date
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    is_recent = tx_date >= yesterday
+
+    if current_user.role not in ("owner", "senior_admin") and not is_recent:
+        raise HTTPException(403, "Редактирование прошлых транзакций требует подтверждения старшего администратора")
+
+    # Allowed fields
+    allowed = {"type", "amount", "currency", "payment_method", "category_id",
+               "description", "branch", "date", "client_id", "client_name"}
+
+    for key, value in payload.items():
+        if key in allowed:
+            if key == "date" and value:
+                value = datetime.fromisoformat(str(value))
+            if key == "type" and value not in ("income", "expense"):
+                raise HTTPException(400, "type должен быть 'income' или 'expense'")
+            if key == "amount" and (value is None or float(value) <= 0):
+                raise HTTPException(400, "amount должен быть больше 0")
+            setattr(tx, key, value)
+
+    # Resolve client name from client_id if not provided
+    if "client_id" in payload and payload["client_id"] and "client_name" not in payload:
+        from app.models.therapist_client import TherapistClient
+        client = session.get(TherapistClient, payload["client_id"])
+        if client:
+            tx.client_name = client.name
+
+    # Resolve category name for response
+    cat_name = None
+    if tx.category_id:
+        cat = session.get(ExpenseCategory, tx.category_id)
+        if cat:
+            cat_name = cat.name
+
+    session.add(tx)
+    session.commit()
+    session.refresh(tx)
+
+    result = CashboxTransactionRead.model_validate(tx)
+    result.category_name = cat_name
+    return result
+
+
 @router.post("/balance-correction")
 def create_balance_correction(
     payload: dict,
@@ -190,36 +248,40 @@ def create_balance_correction(
     payment_method = payload.get("payment_method", "cash")
     new_balance = payload.get("new_balance")
     reason = payload.get("reason", "Корректировка остатков")
+    branch = payload.get("branch")  # optional branch filter
 
     if new_balance is None:
         raise HTTPException(400, "new_balance обязателен")
 
-    # Calculate current balance for this payment method
-    income = session.exec(
-        select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
-            CashboxTransaction.type == "income",
-            CashboxTransaction.payment_method == payment_method,
-        )
-    ).one()
-    expense = session.exec(
-        select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
-            CashboxTransaction.type == "expense",
-            CashboxTransaction.payment_method == payment_method,
-        )
-    ).one()
+    # Calculate current balance for this payment method (optionally filtered by branch)
+    inc_q = select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
+        CashboxTransaction.type == "income",
+        CashboxTransaction.payment_method == payment_method,
+    )
+    exp_q = select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
+        CashboxTransaction.type == "expense",
+        CashboxTransaction.payment_method == payment_method,
+    )
+    if branch:
+        inc_q = inc_q.where(CashboxTransaction.branch == branch)
+        exp_q = exp_q.where(CashboxTransaction.branch == branch)
+
+    income = session.exec(inc_q).one()
+    expense = session.exec(exp_q).one()
     current_balance = float(income) - float(expense)
     diff = float(new_balance) - current_balance
 
     if abs(diff) < 0.01:
         return {"ok": True, "message": "Баланс уже соответствует", "diff": 0}
 
-    # Create correction transaction
+    # Create correction transaction (with branch if specified)
     tx = CashboxTransaction(
         type="income" if diff > 0 else "expense",
         amount=abs(diff),
         currency="GEL",
         payment_method=payment_method,
-        description=f"[КОРРЕКЦИЯ] {reason} (было: {current_balance:.2f}, стало: {new_balance:.2f})",
+        branch=branch or None,
+        description=f"[КОРРЕКЦИЯ{' · ' + branch if branch else ''}] {reason} (было: {current_balance:.2f}, стало: {new_balance:.2f})",
         date=datetime.now(),
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",

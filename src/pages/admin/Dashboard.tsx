@@ -221,6 +221,12 @@ function GridHouseAdminDashboard({
     monthAnalytics,
 }: GHDashProps) {
     const hairline = `1px solid ${GH.ink10}`;
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 768);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
         fontSize: 10,
@@ -257,11 +263,11 @@ function GridHouseAdminDashboard({
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* Header */}
-            <div style={{ marginBottom: 32 }}>
-                <div style={{ ...monoLabel, marginBottom: 10 }}>Админ · Обзор</div>
+            <div style={{ marginBottom: narrow ? 20 : 32 }}>
+                <div style={{ ...monoLabel, marginBottom: narrow ? 6 : 10 }}>Админ · Обзор</div>
                 <h1
                     style={{
-                        fontSize: 'clamp(44px, 5vw, 68px)',
+                        fontSize: narrow ? 32 : 'clamp(32px, 5vw, 68px)',
                         fontWeight: 800,
                         letterSpacing: '-0.02em',
                         lineHeight: 0.95,
@@ -278,7 +284,7 @@ function GridHouseAdminDashboard({
                 style={{
                     border: hairline,
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))',
                     marginBottom: 0,
                 }}
             >
@@ -286,13 +292,16 @@ function GridHouseAdminDashboard({
                     <div
                         key={c.label}
                         style={{
-                            padding: '28px 24px',
-                            borderRight: i < kpi.length - 1 ? hairline : undefined,
+                            padding: narrow ? '14px 12px' : 'clamp(16px, 2vw, 28px) clamp(14px, 2vw, 24px)',
+                            borderRight: narrow
+                                ? (i % 2 === 0 ? hairline : undefined)
+                                : (i < kpi.length - 1 ? hairline : undefined),
+                            borderBottom: hairline,
                         }}
                     >
-                        <div style={{ ...monoLabel, marginBottom: 14 }}>{c.label}</div>
-                        <div style={bigNumber}>{c.num}</div>
-                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 10, textTransform: 'capitalize' }}>{c.sub}</div>
+                        <div style={{ ...monoLabel, marginBottom: narrow ? 8 : 14, fontSize: narrow ? 9 : 10 }}>{c.label}</div>
+                        <div style={{ ...bigNumber, fontSize: narrow ? 20 : 'clamp(24px, 4vw, 44px)' }}>{c.num}</div>
+                        <div style={{ fontSize: narrow ? 10 : 12, color: GH.ink60, marginTop: narrow ? 6 : 10, textTransform: 'capitalize' }}>{c.sub}</div>
                     </div>
                 ))}
             </div>
@@ -303,63 +312,66 @@ function GridHouseAdminDashboard({
                     border: hairline,
                     borderTop: 'none',
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    marginBottom: 40,
+                    gridTemplateColumns: narrow ? '1fr 1fr 1fr' : 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))',
+                    marginBottom: narrow ? 24 : 40,
                 }}
             >
                 {secondary.map((c, i) => (
                     <div
                         key={c.label}
                         style={{
-                            padding: '22px 24px',
+                            padding: narrow ? '12px 10px' : 'clamp(14px, 2vw, 22px) clamp(14px, 2vw, 24px)',
                             borderRight: i < secondary.length - 1 ? hairline : undefined,
+                            borderBottom: hairline,
                         }}
                     >
-                        <div style={{ ...monoLabel, marginBottom: 12 }}>{c.label}</div>
-                        <div style={{ ...bigNumber, fontSize: 28 }}>{c.num}</div>
-                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 8 }}>{c.sub}</div>
+                        <div style={{ ...monoLabel, marginBottom: narrow ? 6 : 12, fontSize: narrow ? 8 : 10 }}>{c.label}</div>
+                        <div style={{ ...bigNumber, fontSize: narrow ? 14 : 'clamp(20px, 3vw, 28px)' }}>{c.num}</div>
+                        <div style={{ fontSize: narrow ? 9 : 12, color: GH.ink60, marginTop: narrow ? 4 : 8 }}>{c.sub}</div>
                     </div>
                 ))}
             </div>
 
             {/* Analytics charts — wrapped in hairline frame (legacy internals) */}
-            <div style={{ border: hairline, padding: 28, marginBottom: 40 }}>
-                <div style={{ ...monoLabel, marginBottom: 20 }}>Аналитика · Бронирования</div>
+            <div style={{ border: hairline, padding: narrow ? 14 : 28, marginBottom: narrow ? 24 : 40, overflowX: 'auto' }}>
+                <div style={{ ...monoLabel, marginBottom: narrow ? 12 : 20 }}>Аналитика · Бронирования</div>
                 <AnalyticsCharts bookings={recentBookings.length > 0 ? useUserStore.getState().bookings : []} />
             </div>
 
             {/* Recent bookings */}
             <div style={{ marginBottom: 40 }}>
-                <div style={{ ...monoLabel, marginBottom: 14 }}>Последние бронирования</div>
+                <div style={{ ...monoLabel, marginBottom: narrow ? 8 : 14 }}>Последние бронирования</div>
                 <h2
                     style={{
-                        fontSize: 28,
+                        fontSize: narrow ? 20 : 28,
                         fontWeight: 800,
                         letterSpacing: '-0.01em',
                         margin: 0,
-                        marginBottom: 20,
+                        marginBottom: narrow ? 14 : 20,
                     }}
                 >
                     Входящий поток
                 </h2>
                 <div style={{ border: hairline }}>
                     {/* Header */}
-                    <div
-                        style={{
-                            display: 'grid',
-                            gridTemplateColumns: '64px 120px 1fr 140px 120px',
-                            padding: '12px 20px',
-                            borderBottom: hairline,
-                            background: GH.ink5,
-                            ...monoLabel,
-                        }}
-                    >
-                        <div>№</div>
-                        <div>Дата · Время</div>
-                        <div>Клиент</div>
-                        <div>Статус</div>
-                        <div style={{ textAlign: 'right' }}>Сумма</div>
-                    </div>
+                    {!narrow && (
+                        <div
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '64px 120px 1fr 140px 120px',
+                                padding: '12px 20px',
+                                borderBottom: hairline,
+                                background: GH.ink5,
+                                ...monoLabel,
+                            }}
+                        >
+                            <div>№</div>
+                            <div>Дата · Время</div>
+                            <div>Клиент</div>
+                            <div>Статус</div>
+                            <div style={{ textAlign: 'right' }}>Сумма</div>
+                        </div>
+                    )}
                     {recentBookings.length === 0 && (
                         <div style={{ padding: 32, textAlign: 'center', color: GH.ink60, ...monoLabel }}>
                             Нет бронирований
@@ -368,7 +380,47 @@ function GridHouseAdminDashboard({
                     {recentBookings.map((b, i) => {
                         const clientName = users.find(u => u.email === b.userId)?.name || b.userId;
                         const statusColor = b.status === 'confirmed' ? GH.accent : b.status === 'cancelled' ? GH.ink30 : b.status === 're-rented' ? GH.ink : GH.ink60;
-                        const statusText = b.status === 'confirmed' ? 'Подтверждено' : b.status === 'cancelled' ? 'Отменено' : b.status === 're-rented' ? 'Пересдано' : b.status;
+                        const statusText = b.status === 'confirmed' ? 'Подтв.' : b.status === 'cancelled' ? 'Отмен.' : b.status === 're-rented' ? 'Пересд.' : b.status;
+                        if (narrow) {
+                            return (
+                                <div
+                                    key={b.id}
+                                    style={{
+                                        padding: '12px 14px',
+                                        borderBottom: i < recentBookings.length - 1 ? hairline : undefined,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 4,
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                            <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                                                {String(i + 1).padStart(2, '0')}
+                                            </span>
+                                            <span style={{
+                                                fontSize: 13, fontWeight: 600, color: GH.ink,
+                                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                                            }}>
+                                                {clientName}
+                                            </span>
+                                        </div>
+                                        <span style={{
+                                            fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, color: GH.ink,
+                                            fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' as const,
+                                        }}>
+                                            {b.paymentMethod === 'subscription' ? 'Абн.' : `${b.finalPrice}₾`}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
+                                            {format(new Date(b.date), 'dd.MM')} · {b.startTime}
+                                        </span>
+                                        <span style={{ ...monoLabel, color: statusColor, fontSize: 9 }}>{statusText}</span>
+                                    </div>
+                                </div>
+                            );
+                        }
                         return (
                             <div
                                 key={b.id}

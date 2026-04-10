@@ -11,6 +11,7 @@ import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock 
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 import { isPeakTime } from '../../utils/pricing';
+import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 // Hook to detect mobile viewport
 function useIsMobile(breakpoint = 768) {
@@ -36,6 +37,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const isAdminBooking = !!bookingForUser && !!currentUser?.isAdmin;
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
     const isMobile = useIsMobile();
+    const isGH = useDesignFlag();
 
     // Refresh bookings on mount — admin sees ALL bookings, users see only their own
     useEffect(() => {
@@ -526,80 +528,116 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         const mobileBlockDuration = mobileBlock ? (mobileBlock.end - mobileBlock.start + 1) * 30 : 0;
 
         return (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4">
+            <div style={isGH ? { paddingBottom: 128, padding: '16px 12px 128px', fontFamily: GH_SANS } : undefined}
+                 className={isGH ? '' : "animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4"}>
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h2 className="text-xl font-bold">Выберите время</h2>
-                        <p className="text-unbox-grey text-sm">
+                        <h2 style={isGH ? { fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
+                            className={isGH ? '' : "text-xl font-bold"}>Выберите время</h2>
+                        <p style={isGH ? { fontSize: 13, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
+                           className={isGH ? '' : "text-unbox-grey text-sm"}>
                             {format(date, 'd MMMM yyyy', { locale: ru })}
                         </p>
                     </div>
-                    <button onClick={() => setStep(1)} className="p-2 rounded-xl border border-unbox-light text-unbox-grey">
+                    <button onClick={() => setStep(1)}
+                        style={isGH ? { padding: 8, border: `1px solid ${GH.ink10}`, borderRadius: 8, background: 'transparent', color: GH.ink60, cursor: 'pointer' } : undefined}
+                        className={isGH ? '' : "p-2 rounded-xl border border-unbox-light text-unbox-grey"}>
                         <ArrowLeft size={18} />
                     </button>
                 </div>
 
                 {/* Week Picker — compact mobile */}
-                <div className="flex items-center gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"
-                    style={{ background: 'rgba(212,226,225,0.35)' }}>
-                    <button onClick={handlePrevWeek} className="p-1.5 rounded-lg hover:bg-white text-unbox-grey">
+                <div style={isGH ? { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, padding: 4, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
+                     className={isGH ? '' : "flex items-center gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"}>
+                    <button onClick={handlePrevWeek}
+                        style={isGH ? { padding: 6, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                        className={isGH ? '' : "p-1.5 rounded-lg hover:bg-white text-unbox-grey"}>
                         <ChevronLeft size={16} />
                     </button>
-                    <div className="flex-1 grid grid-cols-7 gap-1">
+                    <div className={isGH ? '' : "flex-1 grid grid-cols-7 gap-1"} style={isGH ? { flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 } : undefined}>
                         {weekDays.map(day => {
                             const isSelectedDate = isSameDay(day, date);
                             return (
                                 <button
                                     key={day.toISOString()}
                                     onClick={() => setDate(day)}
-                                    className={clsx(
+                                    style={isGH ? {
+                                        display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
+                                        padding: '8px 0', borderRadius: 8, border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
+                                        background: isSelectedDate ? GH.accent : '#fff',
+                                        color: isSelectedDate ? '#fff' : GH.ink60,
+                                        cursor: 'pointer', transition: 'all 0.15s',
+                                    } : undefined}
+                                    className={isGH ? '' : clsx(
                                         "flex flex-col items-center py-2 rounded-xl transition-all text-xs",
                                         isSelectedDate
                                             ? "bg-unbox-green text-white shadow-md"
                                             : "bg-white text-unbox-grey border border-unbox-light/50"
                                     )}
                                 >
-                                    <span className="text-[9px] font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
-                                    <span className="text-sm font-bold">{format(day, 'd')}</span>
+                                    <span style={isGH ? { fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, fontFamily: GH_MONO } : undefined}
+                                          className={isGH ? '' : "text-[9px] font-bold uppercase"}>{format(day, 'EEEEEE', { locale: ru })}</span>
+                                    <span style={isGH ? { fontSize: 14, fontWeight: 700 } : undefined}
+                                          className={isGH ? '' : "text-sm font-bold"}>{format(day, 'd')}</span>
                                 </button>
                             );
                         })}
                     </div>
-                    <button onClick={handleNextWeek} className="p-1.5 rounded-lg hover:bg-white text-unbox-grey">
+                    <button onClick={handleNextWeek}
+                        style={isGH ? { padding: 6, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                        className={isGH ? '' : "p-1.5 rounded-lg hover:bg-white text-unbox-grey"}>
                         <ChevronRight size={16} />
                     </button>
                 </div>
 
                 {/* Resource selector — horizontal scroll */}
-                <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
+                <div style={isGH ? { display: 'flex', gap: 8, overflowX: 'auto' as const, paddingBottom: 8, marginBottom: 12 } : undefined}
+                     className={isGH ? '' : "flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide"}>
                     {resources.map((r, idx) => (
                         <button
                             key={r.id}
                             onClick={() => setMobileResourceIdx(idx)}
-                            className={clsx(
+                            style={isGH ? {
+                                flexShrink: 0, padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                                border: `1px solid ${mobileResourceIdx === idx ? GH.accent : GH.ink10}`,
+                                background: mobileResourceIdx === idx ? GH.accent : '#fff',
+                                color: mobileResourceIdx === idx ? '#fff' : GH.ink,
+                                cursor: 'pointer', fontFamily: GH_SANS, transition: 'all 0.15s',
+                            } : undefined}
+                            className={isGH ? '' : clsx(
                                 "shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
                                 mobileResourceIdx === idx
                                     ? "bg-unbox-green text-white border-unbox-green shadow-sm"
                                     : "bg-white text-unbox-grey border-unbox-light hover:border-unbox-green/40"
                             )}
                         >
-                            <div className="font-bold text-xs whitespace-nowrap">{r.name}</div>
-                            <div className="text-[10px] opacity-70 whitespace-nowrap">{r.capacity} чел. · {getPrice(r.id)}/ч</div>
+                            <div style={isGH ? { fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' as const } : undefined}
+                                 className={isGH ? '' : "font-bold text-xs whitespace-nowrap"}>{r.name}</div>
+                            <div style={isGH ? { fontSize: 10, opacity: 0.6, whiteSpace: 'nowrap' as const, fontFamily: GH_MONO } : undefined}
+                                 className={isGH ? '' : "text-[10px] opacity-70 whitespace-nowrap"}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
                         </button>
                     ))}
                 </div>
 
                 {/* Selected block summary */}
                 {mobileBlock && mobileResource && (
-                    <div className="flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3 mb-3">
+                    <div style={isGH ? {
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        background: `${GH.accent}12`, border: `1px solid ${GH.accent}30`,
+                        borderRadius: 8, padding: '12px 16px', marginBottom: 12,
+                    } : undefined}
+                         className={isGH ? '' : "flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3 mb-3"}>
                         <div>
-                            <div className="text-sm font-bold text-unbox-dark">{mobileBlockStart} — {mobileBlockEnd}</div>
-                            <div className="text-xs text-unbox-grey">{mobileBlockDuration} мин · {mobileResource.name}</div>
+                            <div style={isGH ? { fontSize: 14, fontWeight: 700, color: GH.ink } : undefined}
+                                 className={isGH ? '' : "text-sm font-bold text-unbox-dark"}>{mobileBlockStart} — {mobileBlockEnd}</div>
+                            <div style={isGH ? { fontSize: 12, color: GH.ink60, fontFamily: GH_MONO } : undefined}
+                                 className={isGH ? '' : "text-xs text-unbox-grey"}>{mobileBlockDuration} мин · {mobileResource.name}</div>
                         </div>
                         <button
                             onClick={() => useBookingStore.getState().setSlotRange(mobileResource.id, [])}
-                            className="p-1.5 rounded-lg bg-red-100 text-red-500 hover:bg-red-200 transition-colors"
+                            style={isGH ? { padding: 6, borderRadius: 6, background: '#B84A2F18', color: GH.danger, border: 'none', cursor: 'pointer' } : undefined}
+                            className={isGH ? '' : "p-1.5 rounded-lg bg-red-100 text-red-500 hover:bg-red-200 transition-colors"}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                         </button>
@@ -607,9 +645,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 )}
 
                 {/* 2-column time grid: XX:00 | XX:30 */}
-                <div className="rounded-2xl bg-white/60 backdrop-blur-sm border border-unbox-light/30 p-2 space-y-1.5">
+                <div style={isGH ? { borderRadius: 12, border: `1px solid ${GH.ink8}`, background: '#fff', padding: 8 } : undefined}
+                     className={isGH ? '' : "rounded-2xl bg-white/60 backdrop-blur-sm border border-unbox-light/30 p-2 space-y-1.5"}>
                     {mobileResource && mobileHourPairs.map(([left, right]) => (
-                        <div key={left} className="flex gap-1.5">
+                        <div key={left} style={isGH ? { display: 'flex', gap: 6, marginBottom: 6 } : undefined} className={isGH ? '' : "flex gap-1.5"}>
                             {[left, right].map((time, colIdx) => {
                                 if (!time) return <div key={`empty-${colIdx}`} className="flex-1" />;
                                 const isHourCol = colIdx === 0;
@@ -629,7 +668,16 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                             }
                                         }}
                                         disabled={blocked && !bookerName}
-                                        className={clsx(
+                                        style={isGH ? {
+                                            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                            padding: '12px 12px', borderRadius: 8, minHeight: 48, border: 'none',
+                                            fontFamily: GH_MONO, fontSize: 13, cursor: blocked && !bookerName ? 'not-allowed' : 'pointer',
+                                            background: blocked ? GH.cellDead : selected ? GH.accent : isPeakTime(time) ? '#FEF3C7' : '#fff',
+                                            color: blocked ? GH.ink30 : selected ? '#fff' : GH.ink,
+                                            outline: !blocked && !selected ? `1px solid ${GH.ink8}` : 'none',
+                                            transition: 'all 0.15s',
+                                        } : undefined}
+                                        className={isGH ? '' : clsx(
                                             "flex-1 flex items-center justify-between px-3 py-3 rounded-xl transition-all min-h-[48px]",
                                             blocked
                                                 ? "bg-gray-50 text-gray-300 cursor-not-allowed"
@@ -641,27 +689,32 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                         )}
                                     >
                                         <div className="flex items-center gap-2 min-w-0">
-                                            <span className={clsx(
+                                            <span style={isGH ? { fontSize: 13, fontWeight: 600, fontFamily: GH_MONO, fontVariantNumeric: 'tabular-nums' as const } : undefined}
+                                                  className={isGH ? '' : clsx(
                                                 "text-sm font-bold tabular-nums",
                                                 selected ? "text-white" : blocked ? "text-gray-300" : "text-unbox-dark"
                                             )}>
                                                 {time}
                                             </span>
                                             {blocked && bookerName && (
-                                                <span className="text-[10px] text-gray-400 truncate">{bookerName}</span>
+                                                <span style={isGH ? { fontSize: 10, color: GH.ink30 } : undefined}
+                                                      className={isGH ? '' : "text-[10px] text-gray-400 truncate"}>{bookerName}</span>
                                             )}
                                             {blocked && !bookerName && (
-                                                <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                                                <span style={isGH ? { fontSize: 10, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 2 } : undefined}
+                                                      className={isGH ? '' : "text-[10px] text-gray-400 flex items-center gap-0.5"}>
                                                     <Clock size={9} /> Занято
                                                 </span>
                                             )}
                                         </div>
                                         {selected ? (
-                                            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                                            <div style={isGH ? { width: 20, height: 20, borderRadius: '50%', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}
+                                                 className={isGH ? '' : "w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0"}>
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                                             </div>
                                         ) : !blocked ? (
-                                            <div className="w-5 h-5 rounded-full border-2 border-unbox-light shrink-0" />
+                                            <div style={isGH ? { width: 20, height: 20, borderRadius: '50%', border: `2px solid ${GH.ink10}` } : undefined}
+                                                 className={isGH ? '' : "w-5 h-5 rounded-full border-2 border-unbox-light shrink-0"} />
                                         ) : null}
                                     </button>
                                 );
@@ -673,25 +726,46 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 {/* Fixed bottom bar */}
                 <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3">
                     <div
-                        className="rounded-2xl p-3.5 flex items-center justify-between"
-                        style={{
+                        style={isGH ? {
+                            borderRadius: 12, padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            background: GH.paper, borderTop: `1px solid ${GH.ink8}`,
+                            boxShadow: '0 -2px 12px rgba(0,0,0,0.04)',
+                        } : {
                             background: 'rgba(255,255,255,0.85)',
                             backdropFilter: 'blur(24px)',
                             WebkitBackdropFilter: 'blur(24px)',
                             border: '1px solid rgba(255,255,255,0.50)',
                             boxShadow: '0 -4px 20px rgba(0,0,0,0.08)',
                         }}
+                        className={isGH ? '' : "rounded-2xl p-3.5 flex items-center justify-between"}
                     >
-                        <div className="text-sm text-unbox-dark">
+                        <div style={isGH ? { fontSize: 14, color: GH.ink, fontFamily: GH_SANS } : undefined} className={isGH ? '' : "text-sm text-unbox-dark"}>
                             {selectedSlots.length > 0 ? (
-                                <span><span className="font-bold text-unbox-green">{selectedSlots.length * 30}</span> мин выбрано</span>
+                                <span><span style={isGH ? { fontWeight: 700, color: GH.accent } : undefined} className={isGH ? '' : "font-bold text-unbox-green"}>{selectedSlots.length * 30}</span> мин выбрано</span>
                             ) : (
-                                <span className="text-unbox-grey">Выберите слоты</span>
+                                <span style={isGH ? { color: GH.ink30 } : undefined} className={isGH ? '' : "text-unbox-grey"}>Выберите слоты</span>
                             )}
                         </div>
-                        <Button disabled={selectedSlots.length === 0} onClick={handleNext} size="sm" className="shadow-md px-6">
-                            Далее <ArrowRight size={14} className="ml-1" />
-                        </Button>
+                        {isGH ? (
+                            <button
+                                disabled={selectedSlots.length === 0}
+                                onClick={handleNext}
+                                style={{
+                                    padding: '10px 24px', borderRadius: 8, border: 'none',
+                                    background: selectedSlots.length === 0 ? GH.ink10 : GH.accent,
+                                    color: selectedSlots.length === 0 ? GH.ink30 : '#fff',
+                                    fontFamily: GH_SANS, fontSize: 14, fontWeight: 600,
+                                    cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                }}
+                            >
+                                Далее <ArrowRight size={14} />
+                            </button>
+                        ) : (
+                            <Button disabled={selectedSlots.length === 0} onClick={handleNext} size="sm" className="shadow-md px-6">
+                                Далее <ArrowRight size={14} className="ml-1" />
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -709,74 +783,121 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
     // ── DESKTOP VIEW (original) ──
 
+    /* GH button helper */
+    const ghBtn = (active: boolean): React.CSSProperties => ({
+        padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+        fontFamily: GH_SANS, cursor: 'pointer', border: `1px solid ${active ? GH.accent : GH.ink10}`,
+        background: active ? GH.accent : 'transparent', color: active ? '#fff' : GH.ink,
+        display: 'inline-flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
+    });
+
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 24, paddingBottom: 112, padding: '24px 24px 112px', fontFamily: GH_SANS } : undefined}
+             className={isGH ? '' : "space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6"}>
+            <div className={isGH ? '' : "flex flex-col md:flex-row justify-between items-start md:items-center gap-4"}
+                 style={isGH ? { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: 16 } : undefined}>
                 <div>
-                    <h2 className="text-2xl font-bold">Выберите время</h2>
-                    <p className="text-unbox-grey">
+                    <h2 style={isGH ? { fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
+                        className={isGH ? '' : "text-2xl font-bold"}>Выберите время</h2>
+                    <p style={isGH ? { fontSize: 14, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
+                       className={isGH ? '' : "text-unbox-grey"}>
                         {format(date, 'd MMMM yyyy', { locale: ru })} • {bookingFormat === 'individual' ? 'Индивидуально' : 'Группа'}
                     </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div style={isGH ? { display: 'flex', flexWrap: 'wrap' as const, gap: 8 } : undefined}
+                     className={isGH ? '' : "flex flex-wrap gap-2"}>
                     {!embedded && (
                         <>
-                            <Button
-                                variant={showAllLocations ? 'primary' : 'outline'}
-                                size="sm"
-                                onClick={() => setShowAllLocations(!showAllLocations)}
-                            >
-                                {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => setStep(1)}>
-                                <ArrowLeft size={16} className="mr-2" /> Назад
-                            </Button>
+                            {isGH ? (
+                                <>
+                                    <button style={ghBtn(showAllLocations)} onClick={() => setShowAllLocations(!showAllLocations)}>
+                                        {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
+                                    </button>
+                                    <button style={ghBtn(false)} onClick={() => setStep(1)}>
+                                        <ArrowLeft size={14} /> Назад
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <Button
+                                        variant={showAllLocations ? 'primary' : 'outline'}
+                                        size="sm"
+                                        onClick={() => setShowAllLocations(!showAllLocations)}
+                                    >
+                                        {showAllLocations ? 'Показать текущую локацию' : 'Показать все центры'}
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => setStep(1)}>
+                                        <ArrowLeft size={16} className="mr-2" /> Назад
+                                    </Button>
+                                </>
+                            )}
                         </>
                     )}
                     {highlightedResourceId && locationId && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                setHighlightedResourceId(null);
-                                window.history.back();
-                            }}
-                        >
-                            <ArrowLeft size={16} className="mr-2" /> К выбору кабинетов
-                        </Button>
+                        isGH ? (
+                            <button style={ghBtn(false)} onClick={() => { setHighlightedResourceId(null); window.history.back(); }}>
+                                <ArrowLeft size={14} /> К выбору кабинетов
+                            </button>
+                        ) : (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setHighlightedResourceId(null);
+                                    window.history.back();
+                                }}
+                            >
+                                <ArrowLeft size={16} className="mr-2" /> К выбору кабинетов
+                            </Button>
+                        )
                     )}
                 </div>
             </div>
 
             {/* Week Picker */}
-            <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-unbox-light/60"
-                style={{ background: 'rgba(212,226,225,0.35)' }}>
-                <button onClick={handlePrevWeek} className="p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light">
+            <div style={isGH ? { display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
+                 className={isGH ? '' : "flex items-center gap-2 p-1.5 rounded-2xl border border-unbox-light/60"}>
+                <button onClick={handlePrevWeek}
+                    style={isGH ? { padding: 8, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                    className={isGH ? '' : "p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light"}>
                     <ChevronLeft size={18} />
                 </button>
-                <div className="flex-1 grid grid-cols-7 gap-1.5">
+                <div style={isGH ? { flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 } : undefined}
+                     className={isGH ? '' : "flex-1 grid grid-cols-7 gap-1.5"}>
                     {weekDays.map(day => {
                         const isSelectedDate = isSameDay(day, date);
                         return (
                             <button
                                 key={day.toISOString()}
                                 onClick={() => setDate(day)}
-                                className={clsx(
+                                style={isGH ? {
+                                    display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
+                                    padding: '10px 0', borderRadius: 8,
+                                    border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
+                                    background: isSelectedDate ? GH.accent : '#fff',
+                                    color: isSelectedDate ? '#fff' : GH.ink60,
+                                    cursor: 'pointer', transition: 'all 0.15s',
+                                } : undefined}
+                                className={isGH ? '' : clsx(
                                     "flex flex-col items-center justify-center py-2.5 rounded-xl transition-all duration-200 text-sm",
                                     isSelectedDate
                                         ? "bg-unbox-green text-white shadow-lg shadow-unbox-green/30 scale-[1.04] border border-unbox-green/20"
                                         : "bg-white text-unbox-grey border border-unbox-light hover:border-unbox-green/40 hover:text-unbox-dark hover:shadow-sm"
                                 )}
                             >
-                                <span className={clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelectedDate ? "opacity-80" : "opacity-50")}>
+                                <span style={isGH ? { fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em', marginBottom: 4, fontFamily: GH_MONO, opacity: isSelectedDate ? 0.8 : 0.5 } : undefined}
+                                      className={isGH ? '' : clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelectedDate ? "opacity-80" : "opacity-50")}>
                                     {format(day, 'EEE', { locale: ru })}
                                 </span>
-                                <span className="text-base font-bold leading-none">{format(day, 'd')}</span>
+                                <span style={isGH ? { fontSize: 16, fontWeight: 700, lineHeight: 1 } : undefined}
+                                      className={isGH ? '' : "text-base font-bold leading-none"}>{format(day, 'd')}</span>
                             </button>
                         );
                     })}
                 </div>
-                <button onClick={handleNextWeek} className="p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light">
+                <button onClick={handleNextWeek}
+                    style={isGH ? { padding: 8, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                    className={isGH ? '' : "p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light"}>
                     <ChevronRight size={18} />
                 </button>
             </div>
@@ -784,38 +905,61 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
 
             {/* The Grid - Refactored to Horizontal Layout */}
-            <div className="border border-white/40 rounded-2xl overflow-x-auto scrollbar-visible glass-card isolate">
-                <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
-                    <thead className="text-unbox-dark font-medium border-b border-unbox-light/60"
-                        style={{ background: 'rgba(212,226,225,0.45)' }}>
+            <div style={isGH ? { border: `1px solid ${GH.ink8}`, borderRadius: 12, overflowX: 'auto' as const, isolation: 'isolate' as const } : undefined}
+                 className={isGH ? '' : "border border-white/40 rounded-2xl overflow-x-auto scrollbar-visible glass-card isolate"}>
+                <table style={isGH ? { width: '100%', fontSize: 13, textAlign: 'left' as const, whiteSpace: 'nowrap' as const, borderCollapse: 'collapse' as const, fontFamily: GH_SANS } : undefined}
+                       className={isGH ? '' : "w-full text-sm text-left whitespace-nowrap border-collapse"}>
+                    <thead style={isGH ? { borderBottom: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.45)' }}
+                           className={isGH ? '' : "text-unbox-dark font-medium border-b border-unbox-light/60"}>
                         <tr>
-                            <th className="sticky left-0 backdrop-blur-sm p-3 border-r border-unbox-light/50 z-20 w-32 font-bold text-unbox-dark text-xs"
-                                style={{ background: 'rgba(212,226,225,0.60)' }}>
+                            <th style={isGH ? {
+                                position: 'sticky' as const, left: 0, padding: 12, borderRight: `1px solid ${GH.ink8}`,
+                                zIndex: 20, width: 128, fontWeight: 700, fontSize: 11, color: GH.ink,
+                                background: GH.paper, fontFamily: GH_MONO, textTransform: 'uppercase' as const, letterSpacing: '0.06em',
+                            } : { background: 'rgba(212,226,225,0.60)' }}
+                                className={isGH ? '' : "sticky left-0 backdrop-blur-sm p-3 border-r border-unbox-light/50 z-20 w-32 font-bold text-unbox-dark text-xs"}>
                                 Кабинет
                             </th>
                             {timeSlots.map(time => (
-                                <th key={time} className={clsx(
+                                <th key={time}
+                                    style={isGH ? {
+                                        padding: 6, textAlign: 'center' as const, minWidth: 48,
+                                        borderRight: `1px solid ${GH.ink5}`, fontSize: 10, fontWeight: 700,
+                                        textTransform: 'uppercase' as const, fontFamily: GH_MONO,
+                                        color: isPeakTime(time) ? '#B45309' : GH.ink30,
+                                        background: isPeakTime(time) ? '#FEF9C320' : 'transparent',
+                                    } : undefined}
+                                    className={isGH ? '' : clsx(
                                     "p-1.5 text-center min-w-[48px] border-r border-unbox-light/40 text-[10px] uppercase font-bold",
                                     isPeakTime(time) ? "text-amber-600 bg-amber-50/40" : "text-unbox-dark/60"
                                 )}>
                                     {time}
                                 </th>
                             ))}
-                            {/* no sticky right column */}
                         </tr>
                     </thead>
                     <tbody>
                         {resources.map(r => {
                             const isHighlighted = highlightedResourceId === r.id;
                             return (
-                            <tr key={r.id} className={clsx("hover:bg-unbox-light/10 group", isHighlighted && "bg-unbox-green/[0.06]")}>
-                                <td className={clsx(
+                            <tr key={r.id}
+                                style={isGH ? { background: isHighlighted ? `${GH.accent}08` : 'transparent' } : undefined}
+                                className={isGH ? '' : clsx("hover:bg-unbox-light/10 group", isHighlighted && "bg-unbox-green/[0.06]")}>
+                                <td style={isGH ? {
+                                    position: 'sticky' as const, left: 0, padding: 12,
+                                    borderRight: `1px solid ${isHighlighted ? GH.accent + '40' : GH.ink8}`,
+                                    zIndex: 10, width: 128,
+                                    background: isHighlighted ? `${GH.accent}14` : GH.paper,
+                                    boxShadow: '2px 0 5px rgba(0,0,0,0.02)',
+                                } : { background: isHighlighted ? 'rgba(71,109,107,0.12)' : 'rgba(212,226,225,0.50)' }}
+                                    className={isGH ? '' : clsx(
                                     "sticky left-0 backdrop-blur-sm p-3 border-r z-10 shadow-[2px_0_5px_rgba(71,109,107,0.04)] w-32",
                                     isHighlighted ? "border-r-unbox-green/40" : "border-r-unbox-light/40"
-                                )}
-                                    style={{ background: isHighlighted ? 'rgba(71,109,107,0.12)' : 'rgba(212,226,225,0.50)' }}>
-                                    <div className={clsx("font-bold text-xs leading-tight", isHighlighted ? "text-unbox-green" : "text-unbox-dark")}>{r.name}</div>
-                                    <div className="text-[9px] text-unbox-grey leading-tight">{r.capacity} чел. • {getPrice(r.id)}/час</div>
+                                )}>
+                                    <div style={isGH ? { fontWeight: 700, fontSize: 12, lineHeight: 1.3, color: isHighlighted ? GH.accent : GH.ink } : undefined}
+                                         className={isGH ? '' : clsx("font-bold text-xs leading-tight", isHighlighted ? "text-unbox-green" : "text-unbox-dark")}>{r.name}</div>
+                                    <div style={isGH ? { fontSize: 9, color: GH.ink30, lineHeight: 1.3, fontFamily: GH_MONO } : undefined}
+                                         className={isGH ? '' : "text-[9px] text-unbox-grey leading-tight"}>{r.capacity} чел. • {getPrice(r.id)}/час</div>
                                 </td>
                                 {timeSlots.map(time => {
                                     const isBlocked = isSlotBlocked(r.id, time);
@@ -840,18 +984,17 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     );
 
                                     return (
-                                        <td key={`${r.id}-${time}`} className="p-0 border-r border-unbox-light/30 h-14 relative group/slot">
+                                        <td key={`${r.id}-${time}`}
+                                            style={isGH ? { padding: 0, borderRight: `1px solid ${GH.ink5}`, height: 56, position: 'relative' as const } : undefined}
+                                            className={isGH ? '' : "p-0 border-r border-unbox-light/30 h-14 relative group/slot"}>
                                             <div
                                                 data-resid={r.id}
                                                 data-time={time}
                                                 onPointerDown={(e) => {
-                                                    // Only prevent default on touch to stop scrolling, but let mouse click pass (or just prevent default on drag)
                                                     if (e.pointerType === 'mouse' && (e.target as HTMLElement).tagName.toLowerCase() === 'button') {
                                                         return;
                                                     }
                                                     e.preventDefault();
-
-                                                    // Set touch pointer capture so we get global move events reliably (or handle globally)
                                                     if (selected) {
                                                         handlePointerDown(r.id, time, 'move');
                                                     } else {
@@ -859,7 +1002,21 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                     }
                                                 }}
                                                 onPointerEnter={() => handlePointerEnter(r.id, time)}
-                                                className={clsx(
+                                                style={isGH ? {
+                                                    width: '100%', height: '100%', display: 'flex', flexDirection: 'column' as const,
+                                                    alignItems: 'center', justifyContent: 'center', fontSize: 9, position: 'relative' as const,
+                                                    userSelect: 'none' as const, touchAction: 'none' as const, transition: 'background 0.1s',
+                                                    background: isBlocked ? GH.cellDead
+                                                        : selected ? GH.accent
+                                                        : isHovered ? `${GH.accent}14`
+                                                        : isPeakTime(time) ? '#FEF9C340' : 'transparent',
+                                                    color: isBlocked ? GH.ink30 : selected ? '#fff' : isHovered ? GH.ink : isPeakTime(time) ? '#B45309' : GH.ink30,
+                                                    cursor: isBlocked ? 'pointer' : selected ? 'grab' : 'pointer',
+                                                    borderRadius: isBlockStart && isBlockEnd ? 6
+                                                        : isBlockStart ? '6px 0 0 6px'
+                                                        : isBlockEnd ? '0 6px 6px 0' : 0,
+                                                } : undefined}
+                                                className={isGH ? '' : clsx(
                                                     "w-full h-full transition-colors flex flex-col items-center justify-center text-[9px] relative select-none touch-none",
                                                     isBlocked
                                                         ? "bg-striped text-unbox-grey/50 cursor-pointer border-none hover:bg-amber-50/60"
@@ -941,23 +1098,48 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4">
             <div className="max-w-[1920px] mx-auto">
             <div
-                className="rounded-2xl p-4 flex justify-center"
-                style={{
+                style={isGH ? {
+                    borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'center',
+                    background: GH.paper, borderTop: `1px solid ${GH.ink8}`,
+                    boxShadow: '0 -2px 12px rgba(0,0,0,0.04)',
+                } : {
                     background: 'rgba(255,255,255,0.82)',
                     backdropFilter: 'blur(24px) saturate(150%)',
                     WebkitBackdropFilter: 'blur(24px) saturate(150%)',
                     border: '1px solid rgba(255,255,255,0.50)',
                     boxShadow: '0 -4px 24px rgba(0,0,0,0.08)',
                 }}
+                className={isGH ? '' : "rounded-2xl p-4 flex justify-center"}
             >
-                <div className="w-full flex justify-between items-center">
-                    <div className="text-sm font-medium text-unbox-dark">
-                        Выбрано: <span className="font-bold text-unbox-green">{selectedSlots.length}</span> слотов
-                        {selectedBlocks.length > 1 && <span className="ml-2 text-unbox-grey">({selectedBlocks.length} кабинета)</span>}
+                <div style={isGH ? { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } : undefined}
+                     className={isGH ? '' : "w-full flex justify-between items-center"}>
+                    <div style={isGH ? { fontSize: 14, fontWeight: 500, color: GH.ink, fontFamily: GH_SANS } : undefined}
+                         className={isGH ? '' : "text-sm font-medium text-unbox-dark"}>
+                        Выбрано: <span style={isGH ? { fontWeight: 700, color: GH.accent } : undefined}
+                                       className={isGH ? '' : "font-bold text-unbox-green"}>{selectedSlots.length}</span> слотов
+                        {selectedBlocks.length > 1 && <span style={isGH ? { marginLeft: 8, color: GH.ink30 } : undefined}
+                                                             className={isGH ? '' : "ml-2 text-unbox-grey"}>({selectedBlocks.length} кабинета)</span>}
                     </div>
-                    <Button disabled={selectedSlots.length === 0} onClick={handleNext} className="shadow-lg shadow-unbox-green/20 px-8">
-                        Далее <ArrowRight size={16} className="ml-2" />
-                    </Button>
+                    {isGH ? (
+                        <button
+                            disabled={selectedSlots.length === 0}
+                            onClick={handleNext}
+                            style={{
+                                padding: '12px 32px', borderRadius: 8, border: 'none',
+                                background: selectedSlots.length === 0 ? GH.ink10 : GH.accent,
+                                color: selectedSlots.length === 0 ? GH.ink30 : '#fff',
+                                fontFamily: GH_SANS, fontSize: 15, fontWeight: 600,
+                                cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
+                                display: 'flex', alignItems: 'center', gap: 8,
+                            }}
+                        >
+                            Далее <ArrowRight size={16} />
+                        </button>
+                    ) : (
+                        <Button disabled={selectedSlots.length === 0} onClick={handleNext} className="shadow-lg shadow-unbox-green/20 px-8">
+                            Далее <ArrowRight size={16} className="ml-2" />
+                        </Button>
+                    )}
                 </div>
             </div></div></div>
 

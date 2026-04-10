@@ -132,7 +132,10 @@ export function ExplorePage() {
             {/* ══════════════════════════════════════════════
                 BACKGROUND
             ══════════════════════════════════════════════ */}
-            <div className="fixed inset-0 z-0" style={{ background: '#F0EDE6' }} />
+            <div className="fixed inset-0 z-0">
+                <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
+            </div>
 
             {/* ══════════════════════════════════════════════
                 GLASS HEADER — floating pill

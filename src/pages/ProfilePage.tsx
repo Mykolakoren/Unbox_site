@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useUserStore } from '../store/userStore';
 import { Button } from '../components/ui/Button';
 import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff, Pencil, X, Loader2 } from 'lucide-react';
@@ -116,6 +116,9 @@ export function ProfilePage() {
             {/* Change Password */}
             <ChangePasswordSection />
 
+            {/* Design Switcher */}
+            <LegacyDesignSwitcher />
+
             {/* Admin Access Section — only for users with admin role or admin.access permission */}
             {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
                 <div className="bg-white p-6 rounded-2xl border border-unbox-light">
@@ -136,6 +139,48 @@ export function ProfilePage() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ── Legacy Design Switcher ──────────────────────────────────────────────────
+
+function LegacyDesignSwitcher() {
+    const isGH = useDesignFlag();
+    const switchTo = useCallback((mode: 'grid' | 'off') => {
+        if (mode === 'off') {
+            localStorage.setItem('unbox_design_flag', 'off');
+        } else {
+            localStorage.removeItem('unbox_design_flag');
+        }
+        window.location.reload();
+    }, []);
+
+    return (
+        <div className="bg-white p-6 rounded-2xl border border-unbox-light">
+            <h3 className="font-bold text-lg mb-4">Оформление</h3>
+            <div className="grid grid-cols-2 gap-3 max-w-md">
+                <button
+                    onClick={() => !isGH && switchTo('grid')}
+                    className={`p-4 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                        isGH ? 'border-unbox-green bg-unbox-green/5' : 'border-unbox-light hover:border-unbox-green/30'
+                    }`}
+                >
+                    <div className="font-bold text-sm mb-1">Grid House</div>
+                    <div className="text-xs text-unbox-grey">Минимализм</div>
+                    {isGH && <div className="text-xs text-unbox-green font-semibold mt-2">✓ Активен</div>}
+                </button>
+                <button
+                    onClick={() => isGH && switchTo('off')}
+                    className={`p-4 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                        !isGH ? 'border-unbox-green bg-unbox-green/5' : 'border-unbox-light hover:border-unbox-green/30'
+                    }`}
+                >
+                    <div className="font-bold text-sm mb-1">Classic</div>
+                    <div className="text-xs text-unbox-grey">Стекло, тени</div>
+                    {!isGH && <div className="text-xs text-unbox-green font-semibold mt-2">✓ Активен</div>}
+                </button>
+            </div>
         </div>
     );
 }
@@ -369,6 +414,69 @@ const ghpInput: React.CSSProperties = {
     color: GH.ink, outline: 'none',
 };
 
+// ── Design Switcher ─────────────────────────────────────────────────────────
+
+function DesignSwitcher() {
+    const isGH = useDesignFlag();
+    const [hover, setHover] = useState<string | null>(null);
+
+    const switchTo = useCallback((mode: 'grid' | 'off') => {
+        if (mode === 'off') {
+            localStorage.setItem('unbox_design_flag', 'off');
+        } else {
+            localStorage.removeItem('unbox_design_flag');
+        }
+        window.location.reload();
+    }, []);
+
+    const optStyle = (active: boolean, id: string): React.CSSProperties => ({
+        flex: 1,
+        padding: '20px 16px',
+        border: active ? `2px solid ${GH.ink}` : `1px solid ${GH.ink10}`,
+        background: active ? GH.ink5 : hover === id ? GH.ink5 : 'transparent',
+        cursor: active ? 'default' : 'pointer',
+        textAlign: 'center',
+        transition: 'all 0.15s ease',
+    });
+
+    return (
+        <div style={{ borderTop: ghpHairline, paddingTop: 24, marginBottom: 32 }}>
+            <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 16 }}>ОФОРМЛЕНИЕ</div>
+            <div style={{ display: 'flex', gap: 12, maxWidth: 480 }}>
+                {/* Grid House option */}
+                <div
+                    style={optStyle(isGH, 'gh')}
+                    onClick={() => !isGH && switchTo('grid')}
+                    onMouseEnter={() => setHover('gh')}
+                    onMouseLeave={() => setHover(null)}
+                >
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30, marginBottom: 8 }}>
+                        АКТИВНО
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Grid House</div>
+                    <div style={{ fontSize: 12, color: GH.ink60 }}>Минимализм, типографика</div>
+                    {isGH && <div style={{ marginTop: 10, fontSize: 11, color: GH.accent, fontWeight: 600 }}>✓ Текущий</div>}
+                </div>
+
+                {/* Classic option */}
+                <div
+                    style={optStyle(!isGH, 'classic')}
+                    onClick={() => isGH && switchTo('off')}
+                    onMouseEnter={() => setHover('classic')}
+                    onMouseLeave={() => setHover(null)}
+                >
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30, marginBottom: 8 }}>
+                        АЛЬТЕРНАТИВА
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Classic</div>
+                    <div style={{ fontSize: 12, color: GH.ink60 }}>Стекло, тени, скругления</div>
+                    {!isGH && <div style={{ marginTop: 10, fontSize: 11, color: GH.accent, fontWeight: 600 }}>✓ Текущий</div>}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 interface GridHouseProfilePageProps {
     currentUser: any;
     updateUser: (data: any) => void;
@@ -486,6 +594,9 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                     </Link>
                 </div>
             )}
+
+            {/* Design switcher */}
+            <DesignSwitcher />
 
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>

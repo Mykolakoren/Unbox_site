@@ -59,6 +59,7 @@ export function CrmClientDetail() {
     const [editForm, setEditForm] = useState({
         name: '', phone: '', email: '', telegram: '', aliasCode: '', basePrice: '', currency: 'GEL', defaultAccount: 'cash', tags: '',
     });
+    const [applyPriceTo, setApplyPriceTo] = useState<'none' | 'all_unpaid' | 'future_only'>('none');
 
     const loadData = useCallback(async () => {
         if (!clientId) return;
@@ -87,13 +88,12 @@ export function CrmClientDetail() {
 
     const stats = useMemo(() => {
         const completed = sessions.filter(s => s.status === 'COMPLETED').length;
-        // Debt = only COMPLETED unpaid sessions (future PLANNED sessions are not debt yet)
-        const unpaid = sessions.filter(
-            s => !s.isPaid && s.status === 'COMPLETED'
-        );
+        const unpaid = sessions.filter(s => !s.isPaid && s.status === 'COMPLETED');
         const debt = unpaid.reduce((sum, s) => sum + (s.price ?? client?.basePrice ?? 0), 0);
         const totalPaid = balance?.totalPaid ?? 0;
-        return { completed, unpaidCount: unpaid.length, debt, totalPaid };
+        const paidByCurrency: Record<string, number> = balance?.paidByCurrency ?? {};
+        const debtByCurrency: Record<string, number> = balance?.debtByCurrency ?? {};
+        return { completed, unpaidCount: unpaid.length, debt, totalPaid, paidByCurrency, debtByCurrency };
     }, [sessions, client, balance]);
 
     const notesBySession = useMemo(() => {
@@ -225,10 +225,12 @@ export function CrmClientDetail() {
                 currency: editForm.currency,
                 defaultAccount: editForm.defaultAccount,
                 tags: tags.length ? tags : [],
-            });
+            }, applyPriceTo !== 'none' ? applyPriceTo : undefined);
             setClient(updated);
             setEditingProfile(false);
+            setApplyPriceTo('none');
             toast.success('Профиль обновлён');
+            if (applyPriceTo !== 'none') loadData();
         } catch (e: any) {
             toast.error(e.message || 'Ошибка сохранения');
         }
@@ -312,6 +314,8 @@ export function CrmClientDetail() {
             setSyncMonthsForward={setSyncMonthsForward}
             syncing={syncing}
             setSyncing={setSyncing}
+            applyPriceTo={applyPriceTo}
+            setApplyPriceTo={setApplyPriceTo}
             clientId={clientId!}
             loadData={loadData}
             navigate={navigate}
@@ -357,7 +361,9 @@ export function CrmClientDetail() {
                                     <span className="flex items-center gap-1.5"><Mail className="w-4 h-4 text-gray-400" />{client.email}</span>
                                 )}
                                 <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-700 font-medium">
-                                    Оплачено всего: {client.currency} {stats.totalPaid}
+                                    Оплачено всего: {Object.keys(stats.paidByCurrency).length > 1
+                                        ? Object.entries(stats.paidByCurrency).map(([c, a]) => `${a} ${c}`).join(' + ')
+                                        : `${stats.totalPaid} ${Object.keys(stats.paidByCurrency)[0] || client.currency}`}
                                 </span>
                             </div>
                             {client.tags?.length > 0 && (
@@ -505,9 +511,26 @@ export function CrmClientDetail() {
                             />
                         </div>
                     </div>
+                    {(editForm.basePrice !== String(client?.basePrice || '') || editForm.currency !== (client?.currency || 'GEL') || editForm.defaultAccount !== (client?.defaultAccount || 'cash')) && (
+                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                            <div className="text-sm font-medium text-amber-800 mb-2">Применить к существующим сессиям:</div>
+                            <div className="flex flex-col gap-1.5">
+                                {[
+                                    { value: 'none' as const, label: 'Только для новых сессий' },
+                                    { value: 'future_only' as const, label: 'Ко всем запланированным (незавершённым)' },
+                                    { value: 'all_unpaid' as const, label: 'Ко всем неоплаченным' },
+                                ].map(opt => (
+                                    <label key={opt.value} className="flex items-center gap-2 text-sm text-amber-900 cursor-pointer">
+                                        <input type="radio" name="applyPriceTo" checked={applyPriceTo === opt.value} onChange={() => setApplyPriceTo(opt.value)} className="accent-amber-600" />
+                                        {opt.label}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
                         <button
-                            onClick={() => setEditingProfile(false)}
+                            onClick={() => { setEditingProfile(false); setApplyPriceTo('none'); }}
                             className="px-4 py-2 text-sm text-unbox-grey hover:bg-gray-100 rounded-xl transition-colors"
                         >
                             Отмена
@@ -623,7 +646,7 @@ export function CrmClientDetail() {
                                             )}
                                         </div>
                                         <span className="text-sm font-medium text-gray-600">
-                                            {s.price ?? client.basePrice} {client.currency}
+                                            {s.price ?? client.basePrice} {s.currency ?? client.currency}
                                         </span>
                                     </div>
                                 ))}
@@ -800,7 +823,7 @@ export function CrmClientDetail() {
                                                     </td>
                                                     <td className="px-5 py-3 text-gray-800 font-medium">
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <span>{sessionPrice} {client.currency}</span>
+                                                            <span>{sessionPrice} {session.currency ?? client.currency}</span>
                                                             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                                                                     {!isCancelled && (
                                                                         session.isPaid ? (
@@ -828,7 +851,7 @@ export function CrmClientDetail() {
                                                                             } else {
                                                                                 setEditingSession(session.id);
                                                                                 setEditSessionPrice(String(session.price ?? client.basePrice));
-                                                                                setEditSessionAccount(client.defaultAccount || 'cash');
+                                                                                setEditSessionAccount(session.account ?? (client.defaultAccount || 'cash'));
                                                                             }
                                                                         }}
                                                                         className={`p-1 rounded-lg transition-colors ${isEditing ? 'bg-unbox-light text-unbox-green' : 'text-gray-400 hover:text-unbox-green hover:bg-unbox-light/50'}`}
@@ -934,17 +957,33 @@ export function CrmClientDetail() {
 
                             <div className="p-4 rounded-xl border bg-green-50 border-green-100">
                                 <div className="text-sm mb-1 text-green-600">LTV</div>
-                                <div className="text-xl font-semibold text-green-700">
-                                    {stats.totalPaid} {client.currency}
-                                </div>
+                                {Object.keys(stats.paidByCurrency).length > 1 ? (
+                                    <div className="space-y-1">
+                                        {Object.entries(stats.paidByCurrency).map(([cur, amt]) => (
+                                            <div key={cur} className="text-lg font-semibold text-green-700">{amt} {cur}</div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-xl font-semibold text-green-700">
+                                        {stats.totalPaid} {Object.keys(stats.paidByCurrency)[0] || client.currency}
+                                    </div>
+                                )}
                             </div>
 
                             {stats.debt > 0 && (
                                 <div className="p-4 rounded-xl border bg-red-50 border-red-100">
                                     <div className="text-sm mb-1 text-red-600">Текущий долг клиента</div>
-                                    <div className="text-xl font-semibold text-red-700">
-                                        {stats.debt} {client.currency}
-                                    </div>
+                                    {Object.keys(stats.debtByCurrency).length > 1 ? (
+                                        <div className="space-y-1">
+                                            {Object.entries(stats.debtByCurrency).map(([cur, amt]) => (
+                                                <div key={cur} className="text-lg font-semibold text-red-700">{amt} {cur}</div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-xl font-semibold text-red-700">
+                                            {stats.debt} {Object.keys(stats.debtByCurrency)[0] || client.currency}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1047,7 +1086,7 @@ interface GHClientDetailProps {
     sessions: CrmSession[];
     notes: CrmNote[];
     payments: CrmPayment[];
-    stats: { completed: number; unpaidCount: number; debt: number; totalPaid: number };
+    stats: { completed: number; unpaidCount: number; debt: number; totalPaid: number; paidByCurrency: Record<string, number>; debtByCurrency: Record<string, number> };
     futureSessions: CrmSession[];
     pastSessions: CrmSession[];
     notesBySession: Map<string, CrmNote>;
@@ -1088,6 +1127,8 @@ interface GHClientDetailProps {
     setSyncMonthsForward: (v: number) => void;
     syncing: boolean;
     setSyncing: (v: boolean) => void;
+    applyPriceTo: 'none' | 'all_unpaid' | 'future_only';
+    setApplyPriceTo: (v: 'none' | 'all_unpaid' | 'future_only') => void;
     clientId: string;
     loadData: () => Promise<void>;
     navigate: ReturnType<typeof useNavigate>;
@@ -1116,6 +1157,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
         sessionNoteTags: _sessionNoteTags, setSessionNoteTags, savingSessionNote, handleAddSessionNote,
         showSyncPicker, setShowSyncPicker, syncMonthsBack, setSyncMonthsBack,
         syncMonthsForward, setSyncMonthsForward, syncing, setSyncing,
+        applyPriceTo, setApplyPriceTo,
         clientId, loadData, navigate, paymentAccounts,
     } = props;
 
@@ -1244,13 +1286,27 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                 padding: '32px 32px 24px', flexWrap: 'wrap', gap: 24,
             }}>
                 <div>
-                    <div style={{
-                        fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)',
-                        fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
-                    }}>
-                        {stats.totalPaid}
-                        <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink30 }}>{client.currency}</span>
-                    </div>
+                    {Object.keys(stats.paidByCurrency).length > 1 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {Object.entries(stats.paidByCurrency).map(([cur, amt]) => (
+                                <div key={cur} style={{
+                                    fontFamily: GH_MONO, fontSize: 'clamp(28px, 3.5vw, 44px)',
+                                    fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                                }}>
+                                    {amt}
+                                    <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink30 }}>{cur}</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div style={{
+                            fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)',
+                            fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                        }}>
+                            {stats.totalPaid}
+                            <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink30 }}>{Object.keys(stats.paidByCurrency)[0] || client.currency}</span>
+                        </div>
+                    )}
                     <div style={{ ...ghMono, marginTop: 4 }}>LTV</div>
                 </div>
                 <div style={{ display: 'flex', gap: 24 }}>
@@ -1258,7 +1314,9 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                         { label: 'Сессий', value: stats.completed },
                         { label: 'Ставка', value: `${client.basePrice}` },
                         { label: 'Не оплачено', value: stats.unpaidCount, color: stats.unpaidCount > 0 ? GH.danger : undefined },
-                        ...(stats.debt > 0 ? [{ label: 'Долг', value: `${stats.debt}`, color: GH.danger }] : []),
+                        ...(stats.debt > 0 ? [{ label: 'Долг', value: Object.keys(stats.debtByCurrency).length > 1
+                            ? Object.entries(stats.debtByCurrency).map(([c, a]) => `${a} ${c}`).join(' / ')
+                            : `${stats.debt} ${Object.keys(stats.debtByCurrency)[0] || client.currency}`, color: GH.danger }] : []),
                     ].map(kpi => (
                         <div key={kpi.label} style={{ textAlign: 'right' }}>
                             <div style={{
@@ -1328,9 +1386,24 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             <input style={ghInput} value={editForm.tags} onChange={e => setEditForm(f => ({ ...f, tags: e.target.value }))} placeholder="через запятую: тревога, пары, онлайн" />
                         </div>
                     </div>
+                    {(editForm.basePrice !== String(client?.basePrice || '') || editForm.currency !== (client?.currency || 'GEL') || editForm.defaultAccount !== (client?.defaultAccount || 'cash')) && (
+                        <div style={{ marginTop: 16, padding: 12, background: 'rgba(184,154,47,0.08)', border: '1px solid rgba(184,154,47,0.25)' }}>
+                            <div style={{ ...ghMono, fontSize: 10, color: '#8B7320', marginBottom: 8 }}>Применить к существующим сессиям:</div>
+                            {[
+                                { value: 'none' as const, label: 'Только для новых сессий' },
+                                { value: 'future_only' as const, label: 'Ко всем запланированным (незавершённым)' },
+                                { value: 'all_unpaid' as const, label: 'Ко всем неоплаченным' },
+                            ].map(opt => (
+                                <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 8, ...ghMono, fontSize: 11, color: '#6B5A18', cursor: 'pointer', marginBottom: 4 }}>
+                                    <input type="radio" name="ghApplyPriceTo" checked={applyPriceTo === opt.value} onChange={() => setApplyPriceTo(opt.value)} />
+                                    {opt.label}
+                                </label>
+                            ))}
+                        </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20, paddingTop: 16, borderTop: ghHairline }}>
                         <button
-                            onClick={() => setEditingProfile(false)}
+                            onClick={() => { setEditingProfile(false); setApplyPriceTo('none'); }}
                             style={{ ...ghMono, padding: '8px 16px', background: 'transparent', border: ghHairline, cursor: 'pointer', color: GH.ink60 }}
                         >
                             Отмена
@@ -1448,7 +1521,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                         )}
                                     </div>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500, color: GH.ink60 }}>
-                                        {s.price ?? client.basePrice} {client.currency}
+                                        {s.price ?? client.basePrice} {s.currency ?? client.currency}
                                     </span>
                                 </div>
                             ))}
@@ -1646,7 +1719,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                 <div style={{ textAlign: 'right' }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                                                         <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500 }}>
-                                                            {sessionPrice} {client.currency}
+                                                            {sessionPrice} {session.currency ?? client.currency}
                                                         </span>
                                                         {!isCancelled && (
                                                             session.isPaid ? (
@@ -1682,7 +1755,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                 } else {
                                                                     setEditingSession(session.id);
                                                                     setEditSessionPrice(String(session.price ?? client.basePrice));
-                                                                    setEditSessionAccount(client.defaultAccount || 'cash');
+                                                                    setEditSessionAccount(session.account ?? (client.defaultAccount || 'cash'));
                                                                 }
                                                             }}
                                                             style={{
@@ -1787,17 +1860,37 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
                         <div style={{ padding: '14px 16px', background: 'rgba(71,109,107,0.06)', border: `1px solid rgba(71,109,107,0.15)` }}>
                             <div style={{ ...ghMono, fontSize: 9, marginBottom: 4, color: GH.accent }}>LTV</div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: GH.accent }}>
-                                {stats.totalPaid} {client.currency}
-                            </div>
+                            {Object.keys(stats.paidByCurrency).length > 1 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    {Object.entries(stats.paidByCurrency).map(([cur, amt]) => (
+                                        <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, color: GH.accent }}>
+                                            {amt} {cur}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: GH.accent }}>
+                                    {stats.totalPaid} {Object.keys(stats.paidByCurrency)[0] || client.currency}
+                                </div>
+                            )}
                         </div>
 
                         {stats.debt > 0 && (
                             <div style={{ padding: '14px 16px', background: 'rgba(184,74,47,0.06)', border: `1px solid rgba(184,74,47,0.15)` }}>
                                 <div style={{ ...ghMono, fontSize: 9, marginBottom: 4, color: GH.danger }}>Текущий долг</div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: GH.danger }}>
-                                    {stats.debt} {client.currency}
-                                </div>
+                                {Object.keys(stats.debtByCurrency).length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                        {Object.entries(stats.debtByCurrency).map(([cur, amt]) => (
+                                            <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, color: GH.danger }}>
+                                                {amt} {cur}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: GH.danger }}>
+                                        {stats.debt} {Object.keys(stats.debtByCurrency)[0] || client.currency}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
