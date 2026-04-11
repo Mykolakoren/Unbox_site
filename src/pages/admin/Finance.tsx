@@ -172,7 +172,7 @@ export function AdminFinance() {
                 <div className="flex gap-2">
                     {canCorrectBalance && (
                         <button
-                            onClick={() => setShowCorrection(true)}
+                            onClick={() => { setCorrBranch(selectedBranch); setShowCorrection(true); }}
                             className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-amber-300 text-xs sm:text-sm font-medium text-amber-700 hover:bg-amber-50 transition-colors"
                         >
                             <Settings2 size={14} />
@@ -334,7 +334,7 @@ export function AdminFinance() {
 
             {/* Modals */}
             <AddCashboxTransactionModal isOpen={showAddTx} onClose={() => { setShowAddTx(false); refetchTransactions(); }} />
-            <EndShiftModal isOpen={showEndShift} onClose={() => setShowEndShift(false)} />
+            <EndShiftModal isOpen={showEndShift} onClose={() => setShowEndShift(false)} branch={selectedBranch || undefined} />
 
             {/* Balance Correction Modal — owner/senior_admin only */}
             {showCorrection && canCorrectBalance && createPortal(
@@ -543,7 +543,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {p.canCorrectBalance && (
-                            <button onClick={() => p.setShowCorrection(true)} style={{ ...dangerBtn, padding: '10px 14px', fontSize: 10 }}>
+                            <button onClick={() => { p.setCorrBranch(p.selectedBranch); p.setShowCorrection(true); }} style={{ ...dangerBtn, padding: '10px 14px', fontSize: 10 }}>
                                 <Settings2 size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                                 Корректировка
                             </button>
@@ -752,7 +752,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
 
             {/* Modals */}
             <AddCashboxTransactionModal isOpen={p.showAddTx} onClose={() => { p.setShowAddTx(false); p.refetchTransactions(); }} />
-            <EndShiftModal isOpen={p.showEndShift} onClose={() => p.setShowEndShift(false)} />
+            <EndShiftModal isOpen={p.showEndShift} onClose={() => p.setShowEndShift(false)} branch={p.selectedBranch || undefined} />
 
             {/* Grid House balance correction modal */}
             {p.showCorrection && p.canCorrectBalance && createPortal(

@@ -7,9 +7,10 @@ import { useCashboxStore } from '../../../store/cashboxStore';
 interface Props {
     isOpen: boolean;
     onClose: () => void;
+    branch?: string;
 }
 
-export function EndShiftModal({ isOpen, onClose }: Props) {
+export function EndShiftModal({ isOpen, onClose, branch }: Props) {
     const { balances, endShift } = useCashboxStore();
     const cashBalance = balances.cash;
     const [actualBalance, setActualBalance] = useState('');
@@ -40,6 +41,7 @@ export function EndShiftModal({ isOpen, onClose }: Props) {
             const report = await endShift({
                 actual_balance: actualValue,
                 notes: notes || undefined,
+                branch: branch || undefined,
             });
             const disc = report.discrepancy;
             if (Math.abs(disc) < 0.01) {
@@ -70,7 +72,11 @@ export function EndShiftModal({ isOpen, onClose }: Props) {
                 </button>
 
                 <h3 className="text-lg font-bold text-unbox-dark mb-1">Закрытие смены</h3>
-                <p className="text-sm text-unbox-grey mb-5">Пересчитайте наличные в кассе</p>
+                <p className="text-sm text-unbox-grey mb-5">
+                    {branch
+                        ? <>Филиал: <span className="font-semibold text-unbox-dark">{branch}</span> · пересчитайте наличные в кассе</>
+                        : 'Общая касса · пересчитайте наличные во всех кассах'}
+                </p>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Expected cash balance */}

@@ -28,6 +28,7 @@ class ShiftReport(ShiftReportBase, table=True):
 class ShiftReportCreate(SQLModel):
     actual_balance: float
     notes: Optional[str] = None
+    branch: Optional[str] = None  # if set, expected balance is computed for this branch only
 
 
 class ShiftReportRead(ShiftReportBase):

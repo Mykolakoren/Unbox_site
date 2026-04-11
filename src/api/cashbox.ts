@@ -148,7 +148,7 @@ export const cashboxApi = {
         return data;
     },
 
-    endShift: async (payload: { actual_balance: number; notes?: string }): Promise<ShiftReport> => {
+    endShift: async (payload: { actual_balance: number; notes?: string; branch?: string }): Promise<ShiftReport> => {
         const { data } = await api.post('/cashbox/shifts', payload);
         return data;
     },
