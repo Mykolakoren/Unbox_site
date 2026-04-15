@@ -27,9 +27,10 @@ const TIME_SLOTS: string[] = (() => {
     return slots;
 })();
 
-const timeToMin = (t: string) => {
+const timeToMin = (t: string | undefined | null) => {
+    if (!t || typeof t !== 'string' || !t.includes(':')) return 0;
     const [h, m] = t.split(':').map(Number);
-    return h * 60 + m;
+    return (h || 0) * 60 + (m || 0);
 };
 
 const parseBookingDate = (d: string | Date): Date => {
@@ -88,19 +89,26 @@ export function AdminChessboardView() {
 
     // ── User name helper ──────────────────────────────────────────────────────
     const getUserName = (userId: string | undefined | null) => {
-        if (!userId) return 'Гость';
+        if (!userId || typeof userId !== 'string') return 'Гость';
         const u = users.find(u => u.email === userId || u.id === userId);
-        return u?.name || userId.split('@')[0] || userId.slice(0, 10);
+        if (u?.name) return u.name;
+        if (userId.includes('@')) return userId.split('@')[0];
+        return userId.slice(0, 10);
     };
 
     // ── Bookings on selected date ─────────────────────────────────────────────
     const bookingsOnDate = useMemo(() => {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
         return bookings.filter(b => {
-            if (!b.date) return false;
-            const bd = parseBookingDate(b.date);
-            return format(bd, 'yyyy-MM-dd') === dateStr &&
-                (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed');
+            if (!b || !b.date) return false;
+            try {
+                const bd = parseBookingDate(b.date);
+                if (isNaN(bd.getTime())) return false;
+                return format(bd, 'yyyy-MM-dd') === dateStr &&
+                    (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed');
+            } catch {
+                return false;
+            }
         });
     }, [bookings, selectedDate]);
 
@@ -108,7 +116,13 @@ export function AdminChessboardView() {
     const slotMap = useMemo(() => {
         const map = new Map<string, { booking: BookingHistoryItem; isStart: boolean }>();
         bookingsOnDate.forEach(booking => {
-            if (!booking.startTime || !booking.duration || !booking.resourceId) return;
+            if (
+                !booking.startTime ||
+                typeof booking.startTime !== 'string' ||
+                !booking.startTime.includes(':') ||
+                !booking.duration ||
+                !booking.resourceId
+            ) return;
             const startMin = timeToMin(booking.startTime);
             const dur = booking.duration;
             TIME_SLOTS.forEach(slot => {
@@ -180,7 +194,9 @@ export function AdminChessboardView() {
     const selectedNewBlocks = useMemo(() => {
         const byRes: Record<string, number[]> = {};
         for (const slot of newSlots) {
+            if (!slot || typeof slot !== 'string' || !slot.includes('|')) continue;
             const [resId, timeStr] = slot.split('|');
+            if (!resId || !timeStr) continue;
             const idx = TIME_SLOTS.indexOf(timeStr);
             if (idx === -1) continue;
             if (!byRes[resId]) byRes[resId] = [];
@@ -304,7 +320,8 @@ export function AdminChessboardView() {
             if (!dragResId) return prev;
             const resSlots = prev.filter(s => s.startsWith(`${dragResId}|`));
             if (resSlots.length !== 1) return prev;
-            const timeStr = resSlots[0].split('|')[1];
+            const timeStr = resSlots[0]?.split('|')[1];
+            if (!timeStr) return prev;
             const idx = TIME_SLOTS.indexOf(timeStr);
             if (idx >= 0 && idx + 1 < TIME_SLOTS.length && !isSlotOccupied(dragResId, TIME_SLOTS[idx + 1])) {
                 return [...prev, `${dragResId}|${TIME_SLOTS[idx + 1]}`];
@@ -444,10 +461,12 @@ export function AdminChessboardView() {
     // ── MOBILE VIEW ──
     if (isMobile) {
         const mobileBlock = mobileRes ? getNewBlockForResource(mobileRes.id) : null;
-        const mobileBlockStartTime = mobileBlock ? TIME_SLOTS[mobileBlock.start] : null;
+        const mobileBlockStartTime = mobileBlock ? (TIME_SLOTS[mobileBlock.start] ?? null) : null;
         const mobileBlockEndTime = mobileBlock ? (() => {
-            const [h, m] = TIME_SLOTS[mobileBlock.end].split(':').map(Number);
-            return format(addMinutes(setMinutes(setHours(startOfToday(), h), m), 30), 'HH:mm');
+            const endSlot = TIME_SLOTS[mobileBlock.end];
+            if (!endSlot || !endSlot.includes(':')) return null;
+            const [h, m] = endSlot.split(':').map(Number);
+            return format(addMinutes(setMinutes(setHours(startOfToday(), h || 0), m || 0), 30), 'HH:mm');
         })() : null;
         const mobileBlockDuration = mobileBlock ? (mobileBlock.end - mobileBlock.start + 1) * 30 : 0;
 
@@ -1042,9 +1061,12 @@ export function AdminChessboardView() {
 
                     {/* Actions */}
                     {selectedBooking.status === 'confirmed' && (() => {
-                        const [bh, bm] = (selectedBooking.startTime || '00:00').split(':').map(Number);
+                        const rawTime = (typeof selectedBooking.startTime === 'string' && selectedBooking.startTime.includes(':'))
+                            ? selectedBooking.startTime
+                            : '00:00';
+                        const [bh, bm] = rawTime.split(':').map(Number);
                         const bookEnd = new Date(selectedBooking.date);
-                        bookEnd.setHours(bh, bm + (selectedBooking.duration || 60), 0, 0);
+                        bookEnd.setHours(bh || 0, (bm || 0) + (selectedBooking.duration || 60), 0, 0);
                         const isPastB = bookEnd < new Date();
 
                         return isPastB ? (
@@ -1123,8 +1145,9 @@ function AdminQuickBookingModal({
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
     const endTime = (() => {
+        if (!slot?.time || typeof slot.time !== 'string' || !slot.time.includes(':')) return '';
         const [h, m] = slot.time.split(':').map(Number);
-        const end = addMinutes(setMinutes(setHours(slot.date, h), m), duration);
+        const end = addMinutes(setMinutes(setHours(slot.date, h || 0), m || 0), duration);
         return format(end, 'HH:mm');
     })();
 
