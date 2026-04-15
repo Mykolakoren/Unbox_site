@@ -87,7 +87,8 @@ export function AdminChessboardView() {
     );
 
     // ── User name helper ──────────────────────────────────────────────────────
-    const getUserName = (userId: string) => {
+    const getUserName = (userId: string | undefined | null) => {
+        if (!userId) return 'Гость';
         const u = users.find(u => u.email === userId || u.id === userId);
         return u?.name || userId.split('@')[0] || userId.slice(0, 10);
     };

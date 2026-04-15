@@ -13,6 +13,11 @@ const mapToFrontend = (b: any): BookingHistoryItem => ({
     // Previous manual map expected 'dateCreated' or 'created_at'.
     // Ensure we don't overwrite if unnecessary.
     createdAt: b.createdAt || b.dateCreated || new Date().toISOString(),
+    // Public bookings (/bookings/public) hide user_id for privacy — default to ''
+    // so downstream code calling .split/.includes on userId doesn't crash.
+    userId: b.userId ?? '',
+    // Public bookings also hide final_price — default to 0 so rendering doesn't NaN.
+    finalPrice: b.finalPrice ?? 0,
 });
 
 // Map Frontend -> Backend

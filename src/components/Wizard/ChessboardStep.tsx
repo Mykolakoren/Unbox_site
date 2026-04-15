@@ -26,7 +26,7 @@ function useIsMobile(breakpoint = 768) {
 
 export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const {
-        locationId, date, setDate, format: bookingFormat, groupSize,
+        locationId, date, setDate, format: bookingFormat, groupSize, setFormat,
         selectedSlots,
         setStep,
         highlightedResourceId, setHighlightedResourceId
@@ -35,17 +35,21 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const { bookings, fetchBookings, fetchAllBookings, currentUser } = useUserStore();
     const bookingForUser = useBookingStore(s => s.bookingForUser);
     const isAdminBooking = !!bookingForUser && !!currentUser?.isAdmin;
+    // Admin / senior_admin / owner may book right up to the slot start (no 30-min buffer)
+    const isPrivileged = currentUser?.isAdmin
+        || currentUser?.role === 'admin'
+        || currentUser?.role === 'senior_admin'
+        || currentUser?.role === 'owner';
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
+    const [isLoadingBookings, setIsLoadingBookings] = useState(true);
     const isMobile = useIsMobile();
     const isGH = useDesignFlag();
 
     // Refresh bookings on mount — admin sees ALL bookings, users see only their own
     useEffect(() => {
-        if (isAdminBooking) {
-            fetchAllBookings();
-        } else {
-            fetchBookings();
-        }
+        setIsLoadingBookings(true);
+        const fetchFn = isAdminBooking ? fetchAllBookings : fetchBookings;
+        fetchFn().finally(() => setIsLoadingBookings(false));
     }, [fetchBookings, fetchAllBookings, isAdminBooking]);
 
     // Week View State
@@ -82,28 +86,48 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     // Auto-show all locations when no location is selected (e.g. admin booking from client card)
     const [showAllLocations, setShowAllLocations] = useState(!locationId);
 
-    // 1. Get Resources
-    const resources = useMemo(() => {
-        let res = (showAllLocations || !locationId) ? RESOURCES : RESOURCES.filter(r => r.locationId === locationId);
-
-        // Filter by format
+    // Reusable: apply format + group size filters to a resource list
+    const applyFormatSizeFilter = (list: typeof RESOURCES) => {
+        let res = list;
         if (bookingFormat) {
             res = res.filter(r => r.formats?.includes(bookingFormat));
         }
-
-        // Filter by group capacity
-        if (bookingFormat === 'group' && groupSize) {
+        if ((bookingFormat === 'group' || bookingFormat === 'intervision') && groupSize) {
             let minCapacity = 0;
             if (groupSize === '4-8') minCapacity = 8;
             else if (groupSize === '8-14') minCapacity = 14;
             else if (groupSize === '14-20') minCapacity = 20;
             else if (groupSize === '20-30') minCapacity = 30;
             else if (groupSize === '30+') minCapacity = 31;
-
             res = res.filter(r => r.capacity >= minCapacity);
         }
-
         return res;
+    };
+
+    // Auto-expand to all locations when current location has no matching cabinets
+    // (e.g. group/intervision is only available in Unbox Uni — rooms 7/8/9)
+    const [autoExpanded, setAutoExpanded] = useState(false);
+    useEffect(() => {
+        if (!locationId || showAllLocations) { setAutoExpanded(false); return; }
+        const inLocation = RESOURCES.filter(r => r.locationId === locationId);
+        const matchInLocation = applyFormatSizeFilter(inLocation);
+        if (matchInLocation.length === 0) {
+            const globalMatch = applyFormatSizeFilter(RESOURCES);
+            if (globalMatch.length > 0) {
+                setShowAllLocations(true);
+                setAutoExpanded(true);
+            }
+        } else {
+            setAutoExpanded(false);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [locationId, bookingFormat, groupSize]);
+
+    // 1. Get Resources
+    const resources = useMemo(() => {
+        const inLocation = (showAllLocations || !locationId) ? RESOURCES : RESOURCES.filter(r => r.locationId === locationId);
+        return applyFormatSizeFilter(inLocation);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [locationId, showAllLocations, bookingFormat, groupSize]);
 
     // 2. Fetch External Events (Mock)
@@ -142,8 +166,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         const [h, m] = timeStr.split(':').map(Number);
         slotDate.setHours(h, m, 0, 0);
 
-        // CHECK: Booking buffer — can't book slots starting in the past or within 30 min
-        if (isBefore(slotDate, addMinutes(new Date(), 30))) {
+        // CHECK: Booking buffer — regular users can't book slots starting within 30 min;
+        // admin/senior_admin/owner can book up to slot start (and even up to 12h in the past via AdminChessboardView).
+        const bufferMinutes = isPrivileged ? 0 : 30;
+        if (isBefore(slotDate, addMinutes(new Date(), bufferMinutes))) {
             return true;
         }
 
@@ -450,7 +476,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         const resource = resources.find(r => r.id === resId);
         if (!resource) return '';
         const isCapsule = resource.type === 'capsule';
-        const rate = isCapsule ? 10 : (bookingFormat === 'group' ? 35 : 20);
+        const rate = isCapsule ? 10 : (
+            bookingFormat === 'group' ? 35 :
+            bookingFormat === 'intervision' ? 30 : 20
+        );
         return `${rate} ₾`;
     };
 
@@ -528,8 +557,17 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         const mobileBlockDuration = mobileBlock ? (mobileBlock.end - mobileBlock.start + 1) * 30 : 0;
 
         return (
-            <div style={isGH ? { paddingBottom: 128, padding: '16px 12px 128px', fontFamily: GH_SANS } : undefined}
-                 className={isGH ? '' : "animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4"}>
+            <div style={isGH ? { paddingBottom: 128, padding: '16px 12px 128px', fontFamily: GH_SANS, position: 'relative' as const } : undefined}
+                 className={isGH ? '' : "animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4 relative"}>
+                {/* Loading overlay while bookings are being fetched */}
+                {isLoadingBookings && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: 'rgba(250,250,247,0.85)', backdropFilter: 'blur(4px)' }}>
+                        <div className="flex flex-col items-center gap-3">
+                            <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                            <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загрузка расписания...</span>
+                        </div>
+                    </div>
+                )}
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                     <div>
@@ -545,6 +583,53 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         className={isGH ? '' : "p-2 rounded-xl border border-unbox-light text-unbox-grey"}>
                         <ArrowLeft size={18} />
                     </button>
+                </div>
+
+                {/* Format switcher — mobile segmented control */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 1fr',
+                    gap: 0,
+                    marginBottom: 12,
+                    border: `1px solid ${GH.ink10}`,
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    background: '#fff',
+                }}>
+                    {([
+                        { key: 'individual', label: 'Индивид.', price: '20' },
+                        { key: 'group', label: 'Группа', price: '35' },
+                        { key: 'intervision', label: 'Интервизия', price: '30' },
+                    ] as const).map((opt, i) => {
+                        const active = bookingFormat === opt.key;
+                        return (
+                            <button
+                                key={opt.key}
+                                onClick={() => setFormat(opt.key)}
+                                style={{
+                                    padding: '10px 8px',
+                                    fontFamily: GH_SANS,
+                                    fontSize: 12,
+                                    fontWeight: active ? 700 : 500,
+                                    background: active ? GH.ink : 'transparent',
+                                    color: active ? '#fff' : GH.ink,
+                                    border: 'none',
+                                    borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none',
+                                    cursor: 'pointer',
+                                    transition: 'background 150ms, color 150ms',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    gap: 2,
+                                }}
+                            >
+                                <span>{opt.label}</span>
+                                <span style={{ fontSize: 10, opacity: active ? 0.75 : 0.55, fontFamily: GH_MONO }}>
+                                    {opt.price} ₾/ч
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {/* Week Picker — compact mobile */}
@@ -590,6 +675,29 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         <ChevronRight size={16} />
                     </button>
                 </div>
+
+                {/* Info banner — auto-expanded to all locations */}
+                {autoExpanded && (bookingFormat === 'group' || bookingFormat === 'intervision') && (
+                    <div style={{
+                        padding: '10px 12px', marginBottom: 12,
+                        background: '#FEF3C7', border: '1px solid #FDE68A',
+                        borderRadius: 8, fontSize: 12, color: '#92400E', lineHeight: 1.4,
+                    }}>
+                        Для формата «{bookingFormat === 'group' ? 'Группа' : 'Интервизия'}» подходящие кабинеты есть только в <b>Unbox Uni</b> — показан расширенный список.
+                    </div>
+                )}
+
+                {/* Empty state — no resources match */}
+                {resources.length === 0 && (
+                    <div style={{
+                        padding: '24px 16px', marginBottom: 16, textAlign: 'center' as const,
+                        background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 8,
+                        color: '#991B1B', fontSize: 13, lineHeight: 1.5,
+                    }}>
+                        <b>Нет подходящих кабинетов</b><br />
+                        Попробуйте изменить формат{groupSize ? ' или размер группы' : ''}.
+                    </div>
+                )}
 
                 {/* Resource selector — horizontal scroll */}
                 <div style={isGH ? { display: 'flex', gap: 8, overflowX: 'auto' as const, paddingBottom: 8, marginBottom: 12 } : undefined}
@@ -792,8 +900,17 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     });
 
     return (
-        <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 24, paddingBottom: 112, padding: '24px 24px 112px', fontFamily: GH_SANS } : undefined}
-             className={isGH ? '' : "space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6"}>
+        <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 24, paddingBottom: 112, padding: '24px 24px 112px', fontFamily: GH_SANS, position: 'relative' as const } : undefined}
+             className={isGH ? '' : "space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6 relative"}>
+            {/* Loading overlay while bookings are being fetched */}
+            {isLoadingBookings && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: 'rgba(250,250,247,0.85)', backdropFilter: 'blur(4px)' }}>
+                    <div className="flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                        <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загрузка расписания...</span>
+                    </div>
+                </div>
+            )}
             <div className={isGH ? '' : "flex flex-col md:flex-row justify-between items-start md:items-center gap-4"}
                  style={isGH ? { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: 16 } : undefined}>
                 <div>
@@ -801,8 +918,58 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         className={isGH ? '' : "text-2xl font-bold"}>Выберите время</h2>
                     <p style={isGH ? { fontSize: 14, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
                        className={isGH ? '' : "text-unbox-grey"}>
-                        {format(date, 'd MMMM yyyy', { locale: ru })} • {bookingFormat === 'individual' ? 'Индивидуально' : 'Группа'}
+                        {format(date, 'd MMMM yyyy', { locale: ru })} • {
+                            bookingFormat === 'individual' ? 'Индивидуально · 20 ₾/ч' :
+                            bookingFormat === 'intervision' ? 'Интервизия · 30 ₾/ч' : 'Группа · 35 ₾/ч'
+                        }
                     </p>
+                    {/* Format switcher (segmented control) */}
+                    <div style={{
+                        display: 'inline-flex',
+                        marginTop: 12,
+                        border: `1px solid ${GH.ink10}`,
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                        background: '#fff',
+                    }}>
+                        {([
+                            { key: 'individual', label: 'Индивидуально', price: '20' },
+                            { key: 'group', label: 'Группа', price: '35' },
+                            { key: 'intervision', label: 'Интервизия', price: '30' },
+                        ] as const).map((opt, i) => {
+                            const active = bookingFormat === opt.key;
+                            return (
+                                <button
+                                    key={opt.key}
+                                    onClick={() => setFormat(opt.key)}
+                                    style={{
+                                        padding: '8px 14px',
+                                        fontFamily: GH_SANS,
+                                        fontSize: 13,
+                                        fontWeight: active ? 600 : 500,
+                                        background: active ? GH.ink : '#fff',
+                                        color: active ? '#fff' : GH.ink,
+                                        border: 'none',
+                                        borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none',
+                                        cursor: 'pointer',
+                                        transition: 'background 150ms, color 150ms',
+                                        whiteSpace: 'nowrap',
+                                    }}
+                                    title={`${opt.price} ₾/час`}
+                                >
+                                    {opt.label}
+                                    <span style={{
+                                        marginLeft: 6,
+                                        fontSize: 11,
+                                        opacity: active ? 0.75 : 0.5,
+                                        fontFamily: GH_MONO,
+                                    }}>
+                                        {opt.price}₾
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
                 <div style={isGH ? { display: 'flex', flexWrap: 'wrap' as const, gap: 8 } : undefined}
                      className={isGH ? '' : "flex flex-wrap gap-2"}>
@@ -904,7 +1071,31 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
 
 
+            {/* Info banner — auto-expanded to all locations */}
+            {autoExpanded && (bookingFormat === 'group' || bookingFormat === 'intervision') && (
+                <div style={{
+                    padding: '12px 16px',
+                    background: '#FEF3C7', border: '1px solid #FDE68A',
+                    borderRadius: 10, fontSize: 13, color: '#92400E', lineHeight: 1.5,
+                }}>
+                    Для формата «{bookingFormat === 'group' ? 'Группа' : 'Интервизия'}» подходящие кабинеты есть только в <b>Unbox Uni</b> (Кабинеты 7, 8, 9) — показан расширенный список.
+                </div>
+            )}
+
+            {/* Empty state — no resources match */}
+            {resources.length === 0 && (
+                <div style={{
+                    padding: '32px 20px', textAlign: 'center' as const,
+                    background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 12,
+                    color: '#991B1B', fontSize: 14, lineHeight: 1.6,
+                }}>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>Нет подходящих кабинетов</div>
+                    <div>Для выбранного формата{groupSize ? ' и размера группы' : ''} нет доступных кабинетов. Попробуйте изменить параметры.</div>
+                </div>
+            )}
+
             {/* The Grid - Refactored to Horizontal Layout */}
+            {resources.length > 0 && (
             <div style={isGH ? { border: `1px solid ${GH.ink8}`, borderRadius: 12, overflowX: 'auto' as const, isolation: 'isolate' as const } : undefined}
                  className={isGH ? '' : "border border-white/40 rounded-2xl overflow-x-auto scrollbar-visible glass-card isolate"}>
                 <table style={isGH ? { width: '100%', fontSize: 13, textAlign: 'left' as const, whiteSpace: 'nowrap' as const, borderCollapse: 'collapse' as const, fontFamily: GH_SANS } : undefined}
@@ -1086,6 +1277,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     </tbody>
                 </table>
             </div>
+            )}
 
             {/* Overlap warning bar */}
             {hasTimeOverlap && (
