@@ -17,10 +17,89 @@ from app.models.specialist_appointment import (
     SpecialistAppointment, SpecialistAppointmentRead, SpecialistAppointmentCreate,
 )
 from app.models.therapy_session import TherapySession
+from app.models.location import Location
 from app.api.deps import get_current_user, require_admin
 from app.models.user import User
+from app.services.telegram import telegram_service
+
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _appointment_location_name(session: Session, location_id: Optional[str]) -> Optional[str]:
+    if not location_id:
+        return None
+    loc = session.get(Location, location_id)
+    return loc.name if loc else None
+
+
+def _notify_specialist_appointment_created(session: Session, appt: SpecialistAppointment, specialist: Specialist) -> None:
+    """Fire-and-forget: notify the specialist (via their linked User.telegram_id) about a new appointment."""
+    try:
+        if not specialist.user_id:
+            return
+        specialist_user = session.get(User, specialist.user_id)
+        if not specialist_user or not specialist_user.telegram_id:
+            return
+        loc_name = _appointment_location_name(session, appt.location_id)
+        specialist_name = f"{specialist.first_name} {specialist.last_name}".strip()
+        telegram_service.send_specialist_appointment_new(
+            chat_id=specialist_user.telegram_id,
+            specialist_name=specialist_name,
+            client_name=appt.client_name,
+            client_phone=appt.client_phone,
+            client_email=appt.client_email,
+            date=datetime.combine(appt.date, datetime.min.time()),
+            start_time=appt.start_time,
+            duration_minutes=appt.duration,
+            location_name=loc_name,
+            notes=appt.notes,
+            appointment_id=str(appt.id),
+        )
+    except Exception as e:
+        logger.warning("[tg:appt-created] notify failed: %r", e)
+
+
+def _notify_appointment_cancelled(session: Session, appt: SpecialistAppointment, specialist: Specialist) -> None:
+    """Fire-and-forget: notify both sides of a cancelled appointment."""
+    try:
+        loc_name = _appointment_location_name(session, appt.location_id)
+        specialist_name = f"{specialist.first_name} {specialist.last_name}".strip()
+        appt_dt = datetime.combine(appt.date, datetime.min.time())
+
+        # Specialist notification
+        if specialist.user_id:
+            specialist_user = session.get(User, specialist.user_id)
+            if specialist_user and specialist_user.telegram_id:
+                telegram_service.send_specialist_appointment_cancelled(
+                    chat_id=specialist_user.telegram_id,
+                    audience="specialist",
+                    specialist_name=specialist_name,
+                    client_name=appt.client_name,
+                    date=appt_dt,
+                    start_time=appt.start_time,
+                    duration_minutes=appt.duration,
+                    location_name=loc_name,
+                )
+
+        # Client notification (if they had an account)
+        if appt.client_user_id:
+            client = session.get(User, appt.client_user_id)
+            if client and client.telegram_id:
+                telegram_service.send_specialist_appointment_cancelled(
+                    chat_id=client.telegram_id,
+                    audience="client",
+                    specialist_name=specialist_name,
+                    client_name=appt.client_name,
+                    date=appt_dt,
+                    start_time=appt.start_time,
+                    duration_minutes=appt.duration,
+                    location_name=loc_name,
+                )
+    except Exception as e:
+        logger.warning("[tg:appt-cancelled] notify failed: %r", e)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -286,6 +365,10 @@ def create_appointment(
     session.add(appointment)
     session.commit()
     session.refresh(appointment)
+
+    # Notify specialist via Telegram if linked
+    _notify_specialist_appointment_created(session, appointment, specialist)
+
     return appointment
 
 
@@ -303,4 +386,10 @@ def cancel_appointment(
     appt.status = "cancelled"
     session.add(appt)
     session.commit()
+
+    # Notify both sides via Telegram if linked
+    specialist = session.get(Specialist, specialist_id)
+    if specialist:
+        _notify_appointment_cancelled(session, appt, specialist)
+
     return {"ok": True}

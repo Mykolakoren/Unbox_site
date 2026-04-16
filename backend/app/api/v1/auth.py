@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+import time
 from typing import Annotated, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -199,8 +200,9 @@ def telegram_login(
     if hash_calc != login_data.hash:
         raise HTTPException(status_code=400, detail="Invalid Telegram authentication hash")
         
-    # Check Auth Date (Optional: expiration check)
-    # if time.time() - login_data.auth_date > 86400: ...
+    # Check Auth Date — reject stale auth data (> 24 hours old)
+    if time.time() - login_data.auth_date > 86400:
+        raise HTTPException(status_code=400, detail="Telegram auth data expired. Please try again.")
 
     telegram_id = str(login_data.id)
     
@@ -300,9 +302,9 @@ def telegram_login_callback(
         user_id, expires_delta=access_token_expires
     )
     
-    # Instead of redirecting (which happens inside the popup),
-    # return a small HTML page that saves the token to localStorage 
+    # Return a small HTML page that saves the token to localStorage
     # and closes the popup. The parent window polls for the token.
+    # SECURITY: Token is only stored via JS localStorage, never in URL params.
     from fastapi.responses import HTMLResponse
     html_content = f"""
     <!DOCTYPE html>
@@ -315,8 +317,9 @@ def telegram_login_callback(
                 window.localStorage.setItem('token', '{access_token}');
                 window.close();
             }} catch(e) {{
-                // If window.close() is blocked, redirect instead
-                window.location.href = '/dashboard?token={access_token}&source=telegram';
+                // If window.close() is blocked, redirect to dashboard
+                // Token is already in localStorage, just navigate
+                window.location.href = '/dashboard?source=telegram';
             }}
         </script>
     </body>

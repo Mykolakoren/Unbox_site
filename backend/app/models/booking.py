@@ -70,3 +70,17 @@ class BookingRead(BookingBase):
     created_at: datetime
     gcal_sync_failed: bool = False
     recurring_group_id: Optional[str] = None
+
+
+class BookingPublicRead(SQLModel):
+    """Public-facing booking read — NO user PII (email, uuid)."""
+    id: UUID
+    resource_id: str
+    location_id: str
+    date: datetime
+    start_time: str
+    duration: int
+    status: str
+    format: str
+    is_re_rent_listed: bool = False
+    created_at: datetime

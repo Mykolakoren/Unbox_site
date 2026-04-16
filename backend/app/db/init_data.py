@@ -157,6 +157,11 @@ def migrate_add_columns():
         ("manual_status",         "VARCHAR"),
         ("responsible_admin_id",  "VARCHAR"),
         ("attracted_by_admin_id", "VARCHAR"),
+        # JSON column — Postgres JSONB, SQLite TEXT; default empty array
+        ("additional_contacts",   "JSONB DEFAULT '[]'::jsonb" if dialect == 'postgresql' else "TEXT DEFAULT '[]'"),
+        # Telegram deep-link binding: one-time token + expiry
+        ("telegram_link_token",            "VARCHAR"),
+        ("telegram_link_token_expires_at", "TIMESTAMP"),
     ]
 
     for col_name, col_type in user_columns:

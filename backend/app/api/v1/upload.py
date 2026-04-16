@@ -1,8 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 import shutil
 import os
 import uuid
 from typing import Dict
+from app.api.deps import get_current_user
+from app.models.user import User
 
 router = APIRouter()
 
@@ -11,7 +13,10 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads"
 # /app/api/v1/../../.. -> /backend/uploads
 
 @router.post("/", response_model=Dict[str, str])
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are allowed")
 
@@ -34,7 +39,10 @@ MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
 @router.post("/task-file", response_model=Dict[str, str])
-async def upload_task_file(file: UploadFile = File(...)):
+async def upload_task_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
     """Upload any file type for task attachments (max 20MB)."""
     # Read and check size
     contents = await file.read()

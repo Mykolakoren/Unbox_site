@@ -22,11 +22,15 @@ def check_availability(
     start_time: str,
     duration: int,
     exclude_booking_id: str = None,
+    lock_rows: bool = False,
 ) -> tuple[bool, str | None]:
     """
     Check if a slot is available.
     Returns (True, None) if available, (False, reason) if overlapping.
     All confirmed bookings block the slot, including re-rent listed ones.
+
+    lock_rows=True: use SELECT FOR UPDATE to prevent race conditions
+    during booking creation (two concurrent requests for the same slot).
     """
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
@@ -40,6 +44,9 @@ def check_availability(
 
     if exclude_booking_id:
         statement = statement.where(Booking.id != exclude_booking_id)
+
+    if lock_rows:
+        statement = statement.with_for_update()
 
     day_bookings = session.exec(statement).all()
 
