@@ -175,7 +175,7 @@ export function AdminKnowledgeBase() {
                             </h3>
                             <ul className="space-y-2.5">
                                 <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-300 mt-1.5 flex-shrink-0" /><strong>Бесплатная отмена:</strong> Возможна строго более чем за 24 часа до начала.</li>
-                                <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-orange-300 mt-1.5 flex-shrink-0" /><strong>Горящие окна (Hot Booking):</strong> Бронь менее чем за 12 часов дает скидку 10%. Такие брони <strong>non-refundable</strong> (не подлежат возврату/переносу).</li>
+                                <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-orange-300 mt-1.5 flex-shrink-0" /><strong>Горящие окна (Hot Booking):</strong> Бронь менее чем за 12 часов требует одобрения администратора.</li>
                             </ul>
                         </div>
                     </div>
@@ -236,7 +236,7 @@ export function AdminKnowledgeBase() {
                                 <p className="font-bold text-unbox-dark mb-2">Приоритет расчетов (Один чек)</p>
                                 <ul className="space-y-2 text-sm text-unbox-dark list-decimal pl-4 marker:text-unbox-green marker:font-bold">
                                     <li><strong>Базовая цена</strong> (Тариф × Длительность)</li>
-                                    <li><strong>Применение правила скидки</strong> (Скидки не суммируются! Применяется только одна с наивысшим приоритетом: Ручная скидка админа → Абонемент → Еженедельная скидка → Горящее окно)</li>
+                                    <li><strong>Применение правила скидки</strong> (Скидки не суммируются! Применяется только одна с наивысшим приоритетом: Ручная скидка админа → Абонемент → Еженедельная скидка → Скидка за длительность)</li>
                                     <li><strong>Списание с баланса</strong> (Бонусный кошелек)</li>
                                 </ul>
                             </div>
@@ -584,7 +584,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             <div style={boxHair}>
                 <div style={subhead}>Отмена и горящие окна</div>
                 <div style={li}><span style={bullet}>01</span><strong style={{ fontWeight: 700 }}>Бесплатная отмена.</strong> Строго более чем за 24 часа до начала.</div>
-                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Hot Booking.</strong> Бронь менее чем за 12 часов — скидка 10%, non-refundable.</div>
+                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Hot Booking.</strong> Бронь менее чем за 12 часов — требует одобрения администратора.</div>
             </div>
         </div>
     );
@@ -632,7 +632,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                     <div style={boxHair}>
                         <div style={subhead}>Приоритет расчётов · один чек</div>
                         <div style={li}><span style={bullet}>01</span>Базовая цена (тариф × длительность)</div>
-                        <div style={li}><span style={bullet}>02</span>Одна скидка: ручная → абонемент → недельная → hot booking</div>
+                        <div style={li}><span style={bullet}>02</span>Одна скидка: ручная → абонемент → недельная → за длительность</div>
                         <div style={li}><span style={bullet}>03</span>Списание с баланса (бонусы)</div>
                     </div>
                     <div style={boxHair}>

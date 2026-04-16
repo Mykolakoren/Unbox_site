@@ -7,10 +7,12 @@ export const PRICING_CONFIG = {
         ROOM: {
             IND: 20,
             GRP: 35,
+            INTV: 30, // Intervision: group price variant for peer supervision
         },
         CAP: {
             IND: 10,
             GRP: 10, // Assuming group cap is same/na, defaulting to 10
+            INTV: 10,
         }
     },
     peak_hours: {
@@ -22,10 +24,10 @@ export const PRICING_CONFIG = {
         ],
     },
     discounts: {
-        priority: ['SUBSCRIPTION', 'MANUAL_OVERRIDE', 'WEEKLY_PROGRESSIVE', 'HOT_BOOKING', 'NONE'],
+        priority: ['SUBSCRIPTION', 'MANUAL_OVERRIDE', 'WEEKLY_PROGRESSIVE', 'CONSECUTIVE_HOURS', 'NONE'],
         hot_booking: {
             hours_before: 12,
-            percent: 10
+            percent: 0  // No discount — only admin approval for bookings <12h
         },
         duration: [
             { min: 2, max: 2.99, percent: 10 },

@@ -55,9 +55,23 @@ class PricingService:
         """Return list of unknown extra IDs (if any)."""
         return [eid for eid in extras_ids if eid not in cls.EXTRAS_PRICES]
 
+    # Base rates lookup — mirrors frontend PRICING_CONFIG.base_rates
+    # Space type (ROOM/CAP) × Format (IND/GRP/INTV) → GEL per hour
+    BASE_RATES = {
+        "ROOM": {"IND": 20.0, "GRP": 35.0, "INTV": 30.0},
+        "CAP": {"IND": 10.0, "GRP": 10.0, "INTV": 10.0},
+    }
+
+    # Format string → lookup code
+    FORMAT_CODES = {
+        "individual": "IND",
+        "group": "GRP",
+        "intervision": "INTV",
+    }
+
     # Pricing Configuration (Mirroring Frontend)
     PRICING_CONFIG = {
-        "hot_booking": {"hours_before": 12, "percent": 10},
+        "hot_booking": {"hours_before": 12, "percent": 0},  # No discount — only admin approval
         "duration": [
             {"min": 2, "max": 2.99, "percent": 10},
             {"min": 3, "max": 3.99, "percent": 15},
@@ -107,12 +121,12 @@ class PricingService:
 
         booked_hours = duration_minutes / 60.0
 
-        # 2. Determine Base Rate
-        base_rate = resource.hourly_rate
-        # Create a simple multiplier for group format if not explicitly stored
-        if format_type == "group" and resource.type == "cabinet":
-             # Logic from config: IND=20, GRP=35. (Multiplier ~1.75 or explicit lookup)
-             pass
+        # 2. Determine Base Rate via config lookup (space_type × format)
+        space_type = "CAP" if resource.type == "capsule" else "ROOM"
+        format_code = self.FORMAT_CODES.get(format_type, "IND")
+        rate_table = self.BASE_RATES.get(space_type, {})
+        # Fallback: resource.hourly_rate if format_code missing (defensive)
+        base_rate = rate_table.get(format_code, resource.hourly_rate)
 
         # 2b. Calculate base price with peak hours surcharge
         surcharge_pct = self.PRICING_CONFIG["peak_hours"]["surcharge_percent"]
@@ -165,11 +179,7 @@ class PricingService:
         if user.pricing_system == "personal" and user.personal_discount_percent > 0:
             personal_percent = user.personal_discount_percent
 
-        # Standard discounts
-        hot_percent = 0
-        if self._is_hot_booking(start_time):
-            hot_percent = self.PRICING_CONFIG["hot_booking"]["percent"]
-
+        # Hot booking: no discount, only admin approval (handled in routes.py)
         duration_percent = 0
         for tier in self.PRICING_CONFIG["duration"]:
             if tier["min"] <= booked_hours < tier["max"]:
@@ -185,7 +195,7 @@ class PricingService:
                 break
 
         # Apply the BEST (max) discount — no stacking
-        best_percent = max(personal_percent, hot_percent, duration_percent, weekly_percent)
+        best_percent = max(personal_percent, duration_percent, weekly_percent)
 
         if best_percent > 0:
             discount_val = breakdown.base_price * (best_percent / 100.0)
@@ -200,10 +210,6 @@ class PricingService:
                 breakdown.applied_rule = "WEEKLY_PROGRESSIVE"
             elif best_percent == duration_percent:
                 breakdown.applied_rule = "CONSECUTIVE_HOURS"
-            else:
-                breakdown.applied_rule = "HOT_BOOKING"
-                breakdown.is_non_refundable = True
-                breakdown.is_non_reschedulable = True
 
         return breakdown
 

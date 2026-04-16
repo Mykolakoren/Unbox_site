@@ -3,15 +3,17 @@ import logging
 from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
 from app.api import deps
-from app.models.booking import Booking, BookingCreate, BookingRead
+from app.models.booking import Booking, BookingCreate, BookingRead, BookingPublicRead
 from app.models.user import User
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
 from app.services.booking import check_availability, find_re_rent_conflicts
+from app.services.email import email_service
+from app.services.telegram import telegram_service
 from app.core.permissions import ADMIN_ROLES
 
 logger = logging.getLogger(__name__)
@@ -142,13 +144,14 @@ def read_bookings(
     return [enrich_booking_status(b) for b in bookings]
 
 
-@router.get("/public", response_model=List[BookingRead])
+@router.get("/public", response_model=List[BookingPublicRead])
 def read_public_bookings(
     session: Session = Depends(deps.get_session),
     start_date: str = None,
     end_date: str = None,
 ) -> Any:
-    """Retrieve ALL confirmed bookings for availability display (Public)."""
+    """Retrieve confirmed bookings for availability display (Public).
+    Returns BookingPublicRead — no user PII (email/uuid) exposed."""
     query = select(Booking).where(Booking.status == "confirmed")
 
     if start_date:
@@ -232,6 +235,7 @@ def create_booking(
     session: Session = Depends(deps.get_session),
     booking_in: BookingCreate,
     current_user: User = Depends(deps.get_current_user),
+    background_tasks: BackgroundTasks,
 ) -> Any:
     """Create new booking."""
     try:
@@ -255,6 +259,7 @@ def create_booking(
             date=booking_in.date,
             start_time=booking_in.start_time,
             duration=booking_in.duration,
+            lock_rows=True,  # SELECT FOR UPDATE: prevents race condition on double booking
         )
 
         if not is_available:
@@ -410,9 +415,14 @@ def create_booking(
 
         # ── Hot Booking Approval Gate ──
         # If booking is within 12 hours AND user is NOT admin/owner → require admin approval
+        # No discount for hot bookings — only admin approval required
         HOT_BOOKING_THRESHOLD_HOURS = 12
         is_admin_or_above = current_user.role in ("admin", "senior_admin", "owner")
-        is_hot = quote.applied_rule == "HOT_BOOKING"
+        from datetime import datetime as _dt
+        _now = _dt.now()
+        _start = start_dt.replace(tzinfo=None) if start_dt.tzinfo else start_dt
+        _diff_hours = (_start - _now).total_seconds() / 3600.0
+        is_hot = 0 < _diff_hours <= HOT_BOOKING_THRESHOLD_HOURS
 
         if is_hot and not is_admin_or_above:
             # Don't deduct balance — set status to pending_approval
@@ -492,6 +502,49 @@ def create_booking(
 
         if not gcal_sync_ok:
             logger.info(f"Booking {booking.id} created without GCal sync")
+
+        # ── Booking confirmation notifications (fire-and-forget) ──
+        # Only for confirmed bookings — skip pending_approval (hot bookings)
+        if booking.status == "confirmed":
+            try:
+                from app.models.resource import Resource as ResModel
+                from app.models.location import Location as LocModel
+
+                res_obj = session.get(ResModel, booking.resource_id)
+                loc_obj = session.get(LocModel, booking.location_id)
+                common_ctx = dict(
+                    user_name=booking_owner.name,
+                    resource_name=(res_obj.name if res_obj else booking.resource_id),
+                    location_name=(loc_obj.name if loc_obj else booking.location_id),
+                    location_address=(loc_obj.address if loc_obj else None),
+                    date=booking.date,
+                    start_time=booking.start_time,
+                    duration_minutes=booking.duration,
+                    format_type=booking.format,
+                    final_price=booking.final_price,
+                    payment_method=booking.payment_method,
+                    booking_id=str(booking.id),
+                )
+
+                # Telegram (primary channel for our audience)
+                if booking_owner.telegram_id:
+                    background_tasks.add_task(
+                        telegram_service.send_booking_confirmation,
+                        chat_id=str(booking_owner.telegram_id),
+                        **common_ctx,
+                    )
+
+                # Email (fallback / secondary — disabled by default on prod)
+                if booking_owner.email and not booking_owner.email.endswith("@telegram.unbox"):
+                    background_tasks.add_task(
+                        email_service.send_booking_confirmation,
+                        to_email=booking_owner.email,
+                        to_name=booking_owner.name,
+                        **{k: v for k, v in common_ctx.items() if k != "user_name"},
+                    )
+            except Exception as e:
+                # Never block the booking flow on notification errors
+                logger.warning(f"[Booking notification] Non-blocking failure: {e}")
 
         return booking
 

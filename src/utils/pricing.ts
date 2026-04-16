@@ -81,7 +81,9 @@ const getBaseRate = (resourceId: string, format: Format): number => {
     const spaceType = isCapsule ? 'CAP' : 'ROOM';
 
     // Determine Format Code
-    const formatCode = format === 'group' ? 'GRP' : 'IND';
+    const formatCode: 'IND' | 'GRP' | 'INTV' =
+        format === 'group' ? 'GRP' :
+        format === 'intervision' ? 'INTV' : 'IND';
 
     // Lookup Rate
     return PRICING_CONFIG.base_rates[spaceType][formatCode];
@@ -162,16 +164,10 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
         const matchDuration = durationTiers.find(t => hours >= t.min && hours < t.max);
         if (matchDuration) durationPercent = matchDuration.percent;
 
-        // Hot Booking
-        let hotPercent = 0;
-        const now = new Date();
-        const diffHours = differenceInMinutes(params.startTime, now) / 60;
-        if (diffHours >= 0 && diffHours <= PRICING_CONFIG.discounts.hot_booking.hours_before) {
-            hotPercent = PRICING_CONFIG.discounts.hot_booking.percent;
-        }
+        // Hot Booking: no discount, only admin approval (handled server-side)
 
         // Apply BEST discount (max of all — no stacking)
-        const maxPercent = Math.max(personalPercent, weeklyPercent, durationPercent, hotPercent);
+        const maxPercent = Math.max(personalPercent, weeklyPercent, durationPercent);
 
         if (maxPercent > 0) {
             discountAmount = totalBasePrice * (maxPercent / 100);
@@ -180,7 +176,6 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
             if (maxPercent === personalPercent && personalPercent > 0) discountType = 'personal';
             else if (maxPercent === durationPercent) discountType = 'duration';
             else if (maxPercent === weeklyPercent) discountType = 'loyalty';
-            else discountType = 'hot';
         }
     }
 
