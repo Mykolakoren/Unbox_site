@@ -3,7 +3,7 @@ import { specialistsApi, type ScheduleSlot, type Appointment } from '../../api/s
 import { LOCATIONS } from '../../utils/data';
 import { useUserStore } from '../../store/userStore';
 import { api } from '../../api/client';
-import { Clock, Save, Loader2, Trash2, Calendar, MapPin, Video, User } from 'lucide-react';
+import { Clock, Save, Loader2, Trash2, Calendar, MapPin, Video, User, Plus, CalendarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -22,7 +22,27 @@ interface DaySchedule {
     location_id: string; // "__online__" or location id
 }
 
+// Date-specific override: either mark the day off (is_available=false)
+// or override the weekly schedule for that date (custom hours/location).
+interface OverrideEntry {
+    specific_date: string; // "YYYY-MM-DD"
+    is_available: boolean;
+    start_time: string;
+    end_time: string;
+    location_id: string;   // "__online__" or location id
+}
+
 const DEFAULT_DAY: DaySchedule = { enabled: false, start_time: '10:00', end_time: '18:00', location_id: 'unbox_uni' };
+
+const todayISO = () => format(new Date(), 'yyyy-MM-dd');
+
+const emptyOverride = (): OverrideEntry => ({
+    specific_date: todayISO(),
+    is_available: false,
+    start_time: '10:00',
+    end_time: '18:00',
+    location_id: 'unbox_uni',
+});
 
 export function CrmSchedule() {
     const currentUser = useUserStore(s => s.currentUser);
@@ -31,6 +51,7 @@ export function CrmSchedule() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [days, setDays] = useState<DaySchedule[]>(Array(7).fill(null).map(() => ({ ...DEFAULT_DAY })));
+    const [overrides, setOverrides] = useState<OverrideEntry[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
 
     // Find specialist ID for current user
@@ -58,10 +79,19 @@ export function CrmSchedule() {
             specialistsApi.getSchedule(specialistId),
             specialistsApi.getAppointments(specialistId).catch(() => []),
         ]).then(([schedule, appts]) => {
-            // Map schedule to days
+            // Map schedule to days + overrides
             const newDays = Array(7).fill(null).map(() => ({ ...DEFAULT_DAY }));
+            const newOverrides: OverrideEntry[] = [];
             schedule.forEach(slot => {
-                if (slot.day_of_week != null && slot.day_of_week >= 0 && slot.day_of_week <= 6) {
+                if (slot.specific_date) {
+                    newOverrides.push({
+                        specific_date: slot.specific_date,
+                        is_available: slot.is_available,
+                        start_time: slot.start_time,
+                        end_time: slot.end_time,
+                        location_id: slot.location_id || '__online__',
+                    });
+                } else if (slot.day_of_week != null && slot.day_of_week >= 0 && slot.day_of_week <= 6) {
                     newDays[slot.day_of_week] = {
                         enabled: slot.is_available,
                         start_time: slot.start_time,
@@ -70,7 +100,9 @@ export function CrmSchedule() {
                     };
                 }
             });
+            newOverrides.sort((a, b) => a.specific_date.localeCompare(b.specific_date));
             setDays(newDays);
+            setOverrides(newOverrides);
             setAppointments(appts);
         }).catch(() => {
             toast.error('Не удалось загрузить расписание');
@@ -81,7 +113,7 @@ export function CrmSchedule() {
         if (!specialistId) return;
         setSaving(true);
         try {
-            const slots: Omit<ScheduleSlot, 'id'>[] = days.map((d, i) => ({
+            const weeklySlots: Omit<ScheduleSlot, 'id'>[] = days.map((d, i) => ({
                 day_of_week: i,
                 specific_date: null,
                 start_time: d.start_time,
@@ -89,13 +121,40 @@ export function CrmSchedule() {
                 location_id: d.location_id === '__online__' ? null : d.location_id,
                 is_available: d.enabled,
             }));
-            await specialistsApi.updateSchedule(specialistId, slots);
+            // Deduplicate overrides by date (last one wins) and drop invalid ranges
+            const byDate = new Map<string, OverrideEntry>();
+            overrides.forEach(o => {
+                if (!o.specific_date) return;
+                // Day-off overrides don't need time validation
+                if (o.is_available && o.start_time >= o.end_time) return;
+                byDate.set(o.specific_date, o);
+            });
+            const overrideSlots: Omit<ScheduleSlot, 'id'>[] = Array.from(byDate.values()).map(o => ({
+                day_of_week: null,
+                specific_date: o.specific_date,
+                start_time: o.is_available ? o.start_time : '00:00',
+                end_time: o.is_available ? o.end_time : '00:00',
+                location_id: o.location_id === '__online__' ? null : o.location_id,
+                is_available: o.is_available,
+            }));
+            await specialistsApi.updateSchedule(specialistId, [...weeklySlots, ...overrideSlots]);
             toast.success('Расписание сохранено');
         } catch {
             toast.error('Ошибка при сохранении');
         } finally {
             setSaving(false);
         }
+    };
+
+    // Overrides helpers
+    const addOverride = () => {
+        setOverrides(prev => [...prev, emptyOverride()]);
+    };
+    const updateOverride = (i: number, patch: Partial<OverrideEntry>) => {
+        setOverrides(prev => prev.map((o, idx) => idx === i ? { ...o, ...patch } : o));
+    };
+    const removeOverride = (i: number) => {
+        setOverrides(prev => prev.filter((_, idx) => idx !== i));
     };
 
     const updateDay = (i: number, patch: Partial<DaySchedule>) => {
@@ -119,6 +178,10 @@ export function CrmSchedule() {
                 specialistId={specialistId}
                 days={days}
                 updateDay={updateDay}
+                overrides={overrides}
+                addOverride={addOverride}
+                updateOverride={updateOverride}
+                removeOverride={removeOverride}
                 saving={saving}
                 handleSave={handleSave}
                 upcomingAppointments={upcomingAppointments}
@@ -234,6 +297,96 @@ export function CrmSchedule() {
                 </div>
             </div>
 
+            {/* Date-specific overrides: vacation days or extra working days */}
+            <div className="bg-white rounded-xl border border-unbox-light shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-unbox-light bg-unbox-light/30 flex items-center justify-between gap-2">
+                    <h2 className="font-bold text-sm text-unbox-dark flex items-center gap-2">
+                        <CalendarOff size={16} /> Исключения
+                    </h2>
+                    <button
+                        onClick={addOverride}
+                        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-unbox-green text-white hover:bg-unbox-dark transition-colors"
+                    >
+                        <Plus size={14} /> Добавить
+                    </button>
+                </div>
+                {overrides.length === 0 ? (
+                    <div className="text-center py-8 px-4 text-unbox-dark/40 text-xs">
+                        Отпуск, доп. дни или нестандартные часы. Переопределяет недельный шаблон.
+                    </div>
+                ) : (
+                    <div className="divide-y divide-unbox-light">
+                        {overrides.map((ov, i) => (
+                            <div key={i} className={`flex flex-wrap items-center gap-3 px-5 py-3 ${ov.is_available ? 'bg-white' : 'bg-gray-50/50'}`}>
+                                <input
+                                    type="date"
+                                    value={ov.specific_date}
+                                    onChange={e => updateOverride(i, { specific_date: e.target.value })}
+                                    className="px-2 py-1 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/50"
+                                />
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => updateOverride(i, { is_available: false })}
+                                        className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                                            !ov.is_available
+                                                ? 'bg-red-50 text-red-600 border-red-200'
+                                                : 'bg-white text-unbox-grey border-unbox-light hover:border-red-200'
+                                        }`}
+                                    >
+                                        Выходной
+                                    </button>
+                                    <button
+                                        onClick={() => updateOverride(i, { is_available: true })}
+                                        className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                                            ov.is_available
+                                                ? 'bg-unbox-green text-white border-unbox-green'
+                                                : 'bg-white text-unbox-grey border-unbox-light hover:border-unbox-green/50'
+                                        }`}
+                                    >
+                                        Работаю
+                                    </button>
+                                </div>
+                                {ov.is_available && (
+                                    <>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="time"
+                                                value={ov.start_time}
+                                                onChange={e => updateOverride(i, { start_time: e.target.value })}
+                                                className="px-2 py-1 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/50"
+                                            />
+                                            <span className="text-unbox-dark/40">—</span>
+                                            <input
+                                                type="time"
+                                                value={ov.end_time}
+                                                onChange={e => updateOverride(i, { end_time: e.target.value })}
+                                                className="px-2 py-1 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/50"
+                                            />
+                                        </div>
+                                        <select
+                                            value={ov.location_id}
+                                            onChange={e => updateOverride(i, { location_id: e.target.value })}
+                                            className="px-3 py-1.5 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/50"
+                                        >
+                                            {LOCATION_OPTIONS.map(opt => (
+                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                            ))}
+                                        </select>
+                                    </>
+                                )}
+                                <button
+                                    onClick={() => removeOverride(i)}
+                                    className="ml-auto p-1.5 rounded-lg hover:bg-red-50 text-unbox-dark/30 hover:text-red-500 transition-colors"
+                                    title="Удалить"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
             {/* Upcoming appointments */}
             <div className="bg-white rounded-xl border border-unbox-light shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-unbox-light bg-unbox-light/30">
@@ -313,6 +466,10 @@ interface GridHouseCrmScheduleProps {
     specialistId: string | null;
     days: DaySchedule[];
     updateDay: (i: number, patch: Partial<DaySchedule>) => void;
+    overrides: OverrideEntry[];
+    addOverride: () => void;
+    updateOverride: (i: number, patch: Partial<OverrideEntry>) => void;
+    removeOverride: (i: number) => void;
     saving: boolean;
     handleSave: () => void;
     upcomingAppointments: Appointment[];
@@ -324,6 +481,10 @@ function GridHouseCrmSchedule({
     specialistId,
     days,
     updateDay,
+    overrides,
+    addOverride,
+    updateOverride,
+    removeOverride,
     saving,
     handleSave,
     upcomingAppointments,
@@ -484,6 +645,68 @@ function GridHouseCrmSchedule({
                 {days.map((day, i) => (
                     <GridHouseDayRow key={i} index={i} day={day} onUpdate={(patch) => updateDay(i, patch)} />
                 ))}
+            </section>
+
+            {/* ── Date-specific overrides ── */}
+            <section style={{ marginBottom: 56 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+                    <h2 style={{ ...GH_MONO_LABEL, color: GH.ink }}>Исключения</h2>
+                    <button
+                        onClick={addOverride}
+                        style={{
+                            background: 'none',
+                            border: GH_HAIRLINE_STRONG,
+                            color: GH.ink,
+                            padding: '6px 14px',
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.18em',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                        }}
+                    >
+                        <Plus size={12} /> Добавить
+                    </button>
+                </div>
+
+                {overrides.length === 0 ? (
+                    <div style={{ border: GH_HAIRLINE, padding: '32px 24px', textAlign: 'center', ...GH_MONO_LABEL }}>
+                        Отпуск, доп. дни или нестандартные часы · Переопределяют недельный шаблон
+                    </div>
+                ) : (
+                    <div style={{ border: GH_HAIRLINE }}>
+                        {/* Header */}
+                        <div
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '120px 180px 1fr 1fr 40px',
+                                gap: 0,
+                                ...GH_MONO_LABEL,
+                                borderBottom: GH_HAIRLINE,
+                                padding: '10px 16px',
+                            }}
+                        >
+                            <div>Дата</div>
+                            <div>Статус</div>
+                            <div>Время</div>
+                            <div>Локация</div>
+                            <div></div>
+                        </div>
+                        {overrides.map((ov, i) => (
+                            <GridHouseOverrideRow
+                                key={i}
+                                override={ov}
+                                onUpdate={(patch) => updateOverride(i, patch)}
+                                onRemove={() => removeOverride(i)}
+                                isLast={i === overrides.length - 1}
+                            />
+                        ))}
+                    </div>
+                )}
             </section>
 
             {/* ── Upcoming appointments ── */}
@@ -779,6 +1002,186 @@ function GridHouseDayRow({
                 ) : (
                     <div style={GH_MONO_LABEL}>—</div>
                 )}
+            </div>
+        </div>
+    );
+}
+
+// ── Single override row (Grid House) ──
+function GridHouseOverrideRow({
+    override,
+    onUpdate,
+    onRemove,
+    isLast,
+}: {
+    override: OverrideEntry;
+    onUpdate: (patch: Partial<OverrideEntry>) => void;
+    onRemove: () => void;
+    isLast: boolean;
+}) {
+    const { is_available } = override;
+    return (
+        <div
+            style={{
+                display: 'grid',
+                gridTemplateColumns: '120px 180px 1fr 1fr 40px',
+                gap: 0,
+                padding: '12px 16px',
+                alignItems: 'center',
+                borderBottom: isLast ? 'none' : GH_HAIRLINE,
+                background: is_available ? 'transparent' : GH.ink5,
+                transition: 'background 0.15s ease',
+            }}
+        >
+            {/* Date */}
+            <input
+                type="date"
+                value={override.specific_date}
+                onChange={(e) => onUpdate({ specific_date: e.target.value })}
+                style={{
+                    fontFamily: GH_MONO,
+                    fontSize: 12,
+                    border: 'none',
+                    borderBottom: GH_HAIRLINE,
+                    background: 'transparent',
+                    padding: '4px 2px',
+                    color: GH.ink,
+                    outline: 'none',
+                    width: '100%',
+                    cursor: 'pointer',
+                }}
+            />
+
+            {/* Status toggle */}
+            <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                    onClick={() => onUpdate({ is_available: false })}
+                    style={{
+                        flex: 1,
+                        padding: '6px 10px',
+                        border: !is_available ? GH_HAIRLINE_STRONG : GH_HAIRLINE,
+                        background: !is_available ? GH.ink : 'transparent',
+                        color: !is_available ? GH.paper : GH.ink60,
+                        fontFamily: GH_MONO,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.1em',
+                        cursor: 'pointer',
+                    }}
+                >
+                    Выходной
+                </button>
+                <button
+                    onClick={() => onUpdate({ is_available: true })}
+                    style={{
+                        flex: 1,
+                        padding: '6px 10px',
+                        border: is_available ? GH_HAIRLINE_STRONG : GH_HAIRLINE,
+                        background: is_available ? GH.ink : 'transparent',
+                        color: is_available ? GH.paper : GH.ink60,
+                        fontFamily: GH_MONO,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.1em',
+                        cursor: 'pointer',
+                    }}
+                >
+                    Работаю
+                </button>
+            </div>
+
+            {/* Time range */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {is_available ? (
+                    <>
+                        <input
+                            type="time"
+                            value={override.start_time}
+                            onChange={(e) => onUpdate({ start_time: e.target.value })}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 12,
+                                border: 'none',
+                                borderBottom: GH_HAIRLINE,
+                                background: 'transparent',
+                                padding: '4px 2px',
+                                color: GH.ink,
+                                outline: 'none',
+                                width: 70,
+                            }}
+                        />
+                        <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
+                        <input
+                            type="time"
+                            value={override.end_time}
+                            onChange={(e) => onUpdate({ end_time: e.target.value })}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 12,
+                                border: 'none',
+                                borderBottom: GH_HAIRLINE,
+                                background: 'transparent',
+                                padding: '4px 2px',
+                                color: GH.ink,
+                                outline: 'none',
+                                width: 70,
+                            }}
+                        />
+                    </>
+                ) : (
+                    <span style={{ ...GH_MONO_LABEL }}>—</span>
+                )}
+            </div>
+
+            {/* Location */}
+            <div>
+                {is_available ? (
+                    <select
+                        value={override.location_id}
+                        onChange={(e) => onUpdate({ location_id: e.target.value })}
+                        style={{
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                            border: 'none',
+                            borderBottom: GH_HAIRLINE,
+                            background: 'transparent',
+                            padding: '4px 2px',
+                            color: GH.ink,
+                            outline: 'none',
+                            width: '100%',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        {LOCATION_OPTIONS.map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <span style={{ ...GH_MONO_LABEL }}>—</span>
+                )}
+            </div>
+
+            {/* Remove */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                    onClick={onRemove}
+                    title="Удалить"
+                    style={{
+                        background: 'none',
+                        border: 'none',
+                        color: GH.ink30,
+                        cursor: 'pointer',
+                        padding: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                    }}
+                >
+                    <Trash2 size={14} />
+                </button>
             </div>
         </div>
     );
