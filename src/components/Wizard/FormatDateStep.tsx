@@ -1,6 +1,6 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { Card } from '../ui/Card';
-import { User, Users } from 'lucide-react';
+import { User, Users, GraduationCap } from 'lucide-react';
 import { addDays, format, isSameDay } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import clsx from 'clsx';
@@ -17,40 +17,57 @@ export function FormatDateStep() {
             {/* Format Selection */}
             <section>
                 <h2 className="text-2xl font-bold mb-2">Выберите формат</h2>
-                <p className="text-unbox-grey mb-6">Индивидуально или группой?</p>
+                <p className="text-unbox-grey mb-6">Индивидуально, групповой или интервизия?</p>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <Card
-                        className="p-6 flex items-center gap-4"
+                        className="p-5 flex items-center gap-3"
                         selected={bookingFormat === 'individual'}
                         onClick={() => setFormat('individual')}
                     >
                         <div className={clsx(
-                            "p-3 rounded-xl",
+                            "p-3 rounded-xl shrink-0",
                             bookingFormat === 'individual' ? "bg-unbox-green text-white" : "bg-unbox-light/50 text-unbox-grey"
                         )}>
-                            <User size={24} />
+                            <User size={22} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-lg">Индивидуальный</h3>
+                            <h3 className="font-bold text-base">Индивидуальный</h3>
                             <p className="text-unbox-grey text-sm">20 ₾ / час</p>
                         </div>
                     </Card>
 
                     <Card
-                        className="p-6 flex items-center gap-4"
+                        className="p-5 flex items-center gap-3"
                         selected={bookingFormat === 'group'}
                         onClick={() => setFormat('group')}
                     >
                         <div className={clsx(
-                            "p-3 rounded-xl",
+                            "p-3 rounded-xl shrink-0",
                             bookingFormat === 'group' ? "bg-unbox-green text-white" : "bg-unbox-light/50 text-unbox-grey"
                         )}>
-                            <Users size={24} />
+                            <Users size={22} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-lg">Групповой</h3>
+                            <h3 className="font-bold text-base">Групповой</h3>
                             <p className="text-unbox-grey text-sm">35 ₾ / час</p>
+                        </div>
+                    </Card>
+
+                    <Card
+                        className="p-5 flex items-center gap-3"
+                        selected={bookingFormat === 'intervision'}
+                        onClick={() => setFormat('intervision')}
+                    >
+                        <div className={clsx(
+                            "p-3 rounded-xl shrink-0",
+                            bookingFormat === 'intervision' ? "bg-unbox-green text-white" : "bg-unbox-light/50 text-unbox-grey"
+                        )}>
+                            <GraduationCap size={22} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-base">Интервизия</h3>
+                            <p className="text-unbox-grey text-sm">30 ₾ / час</p>
                         </div>
                     </Card>
                 </div>

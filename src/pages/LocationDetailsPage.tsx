@@ -7,6 +7,19 @@ import { CABINET_SERVICES } from '../utils/data';
 import { MapPin, Wifi, Coffee, Users, Shield, Ruler, ChevronRight, X, ChevronLeft, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { PRICING_CONFIG } from '../utils/pricingConfig';
+
+// Derive per-format display rate from space type + global config.
+// Falls back to resource.hourlyRate if something is missing.
+const deriveRate = (resource: { type: string; hourlyRate: number; groupRate?: number | null }, format: 'group' | 'intervision'): number => {
+    const spaceType = resource.type === 'capsule' ? 'CAP' : 'ROOM';
+    const code = format === 'group' ? 'GRP' : 'INTV';
+    // Prefer explicit resource.groupRate for 'group' when set (legacy override), else config
+    if (format === 'group' && typeof resource.groupRate === 'number' && resource.groupRate > 0) {
+        return resource.groupRate;
+    }
+    return PRICING_CONFIG.base_rates[spaceType][code] ?? resource.hourlyRate;
+};
 
 export function LocationDetailsPage() {
     const gridHouse = useDesignFlag();
@@ -271,12 +284,19 @@ export function LocationDetailsPage() {
                                                 </span>
                                             </div>
                                             <div className="absolute bottom-3 right-3 flex flex-col items-end gap-1">
-                                                <span className="bg-unbox-dark/80 backdrop-blur-sm text-white px-3 py-1.5 rounded-full text-sm font-bold">
-                                                    {resource.hourlyRate} ₾/час
-                                                </span>
-                                                {resource.groupRate && (
+                                                {resource.formats?.includes('individual') !== false && (
+                                                    <span className="bg-unbox-dark/80 backdrop-blur-sm text-white px-3 py-1.5 rounded-full text-sm font-bold">
+                                                        {resource.hourlyRate} ₾/час
+                                                    </span>
+                                                )}
+                                                {resource.formats?.includes('group') && (
                                                     <span className="bg-unbox-green/80 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-xs font-semibold">
-                                                        группа: {resource.groupRate} ₾/час
+                                                        группа: {deriveRate(resource, 'group')} ₾/час
+                                                    </span>
+                                                )}
+                                                {resource.formats?.includes('intervision') && (
+                                                    <span className="bg-purple-500/80 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-xs font-semibold">
+                                                        интервизия: {deriveRate(resource, 'intervision')} ₾/час
                                                     </span>
                                                 )}
                                             </div>
@@ -408,6 +428,13 @@ function GridHouseLocationDetails({
     const isAdmin = Boolean(currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
     const ghNavMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' };
 
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 640);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', background: GH.paper }}>
             {/* GH Header */}
@@ -517,10 +544,21 @@ function GridHouseLocationDetails({
                         <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 16 }}>КАБИНЕТЫ И ПРОСТРАНСТВА</div>
                         <div style={{ border: ghldHairline }}>
                             {locationResources.map((resource, i) => (
-                                <div key={resource.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 16, alignItems: 'center', padding: '16px 20px', borderBottom: i < locationResources.length - 1 ? ghldHairline : 'none' }}>
+                                <div
+                                    key={resource.id}
+                                    style={{
+                                        display: narrow ? 'flex' : 'grid',
+                                        flexDirection: narrow ? 'column' : undefined,
+                                        gridTemplateColumns: narrow ? undefined : '1fr auto auto',
+                                        gap: narrow ? 10 : 16,
+                                        alignItems: narrow ? 'stretch' : 'center',
+                                        padding: narrow ? '14px 16px' : '16px 20px',
+                                        borderBottom: i < locationResources.length - 1 ? ghldHairline : 'none',
+                                    }}
+                                >
                                     <div>
                                         <div style={{ fontWeight: 600, fontSize: 15 }}>{resource.name}</div>
-                                        <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                                        <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
                                             <span style={{ ...ghldMono, color: GH.ink30, fontSize: 9 }}>
                                                 {resource.type === 'capsule' ? 'КАПСУЛА' : 'КАБИНЕТ'}
                                             </span>
@@ -534,34 +572,46 @@ function GridHouseLocationDetails({
                                             )}
                                         </div>
                                     </div>
-                                    <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                        {resource.groupRate ? (
-                                            <>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', justifyContent: 'flex-end' }}>
-                                                    <div style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 16 }}>
-                                                        {resource.hourlyRate} ₾<span style={{ fontSize: 11, fontWeight: 500, color: GH.ink60 }}>/час</span>
-                                                    </div>
-                                                </div>
-                                                <div style={{
-                                                    fontFamily: GH_MONO, fontSize: 11, color: GH.accent,
-                                                    marginTop: 3, fontWeight: 600,
-                                                    background: `${GH.accent}10`, padding: '2px 8px', borderRadius: 4,
-                                                    display: 'inline-block',
-                                                }}>
-                                                    группа: {resource.groupRate} ₾/час
-                                                </div>
-                                            </>
-                                        ) : (
+                                    <div style={{
+                                        textAlign: narrow ? 'left' : 'right',
+                                        whiteSpace: 'nowrap',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: narrow ? 'flex-start' : 'flex-end',
+                                        gap: 4,
+                                    }}>
+                                        {resource.formats?.includes('individual') !== false && (
                                             <div style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 16 }}>
                                                 {resource.hourlyRate} ₾<span style={{ fontSize: 11, fontWeight: 500, color: GH.ink60 }}>/час</span>
                                             </div>
                                         )}
+                                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: narrow ? 'flex-start' : 'flex-end' }}>
+                                            {resource.formats?.includes('group') && (
+                                                <span style={{
+                                                    fontFamily: GH_MONO, fontSize: 11, color: GH.accent, fontWeight: 600,
+                                                    background: `${GH.accent}10`, padding: '2px 8px', borderRadius: 4,
+                                                }}>
+                                                    группа: {deriveRate(resource, 'group')} ₾/час
+                                                </span>
+                                            )}
+                                            {resource.formats?.includes('intervision') && (
+                                                <span style={{
+                                                    fontFamily: GH_MONO, fontSize: 11, color: '#6D28D9', fontWeight: 600,
+                                                    background: 'rgba(109,40,217,0.08)', padding: '2px 8px', borderRadius: 4,
+                                                }}>
+                                                    интервизия: {deriveRate(resource, 'intervision')} ₾/час
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     <button
                                         onClick={() => handleBookResource(resource.id)}
                                         style={{
-                                            padding: '8px 20px', background: GH.ink, color: GH.paper,
+                                            padding: narrow ? '12px 20px' : '8px 20px',
+                                            background: GH.ink, color: GH.paper,
                                             fontWeight: 700, fontSize: 12, fontFamily: GH_SANS, border: 'none', cursor: 'pointer',
+                                            width: narrow ? '100%' : undefined,
+                                            marginTop: narrow ? 4 : 0,
                                         }}
                                     >
                                         Забронировать →

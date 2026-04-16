@@ -1,4 +1,4 @@
-export type Format = 'individual' | 'group';
+export type Format = 'individual' | 'group' | 'intervision';
 export type GroupSize = '4-8' | '8-14' | '14-20' | '20-30' | '30+';
 
 export interface Location {

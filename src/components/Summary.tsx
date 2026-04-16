@@ -174,7 +174,10 @@ export function Summary() {
                         <div className="text-gray-400"><Users size={16} /></div>
                         <div>
                             <div className="text-gray-500">Формат</div>
-                            <div>{state.format === 'individual' ? 'Индивидуальный' : 'Групповой'}</div>
+                            <div>{
+                                state.format === 'individual' ? 'Индивидуальный' :
+                                state.format === 'intervision' ? 'Интервизия' : 'Групповой'
+                            }</div>
                         </div>
                     </div>
 

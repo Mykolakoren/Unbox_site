@@ -74,7 +74,7 @@ INITIAL_RESOURCES = [
         "location_id": "unbox_uni",
         "area": 25,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
+        "formats": ["individual", "group", "intervision"],
         "description": "Большой групповой кабинет для тренингов, лекций, супервизий и мероприятий.",
         "services": ["flipchart", "projector", "whiteboard", "climate_control", "wifi", "natural_light"]
     },
@@ -87,7 +87,7 @@ INITIAL_RESOURCES = [
         "location_id": "unbox_uni",
         "area": 20,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
+        "formats": ["individual", "group", "intervision"],
         "description": "Просторный групповой кабинет для групповой терапии, воркшопов и обучения.",
         "services": ["flipchart", "whiteboard", "climate_control", "wifi"]
     },
@@ -100,7 +100,7 @@ INITIAL_RESOURCES = [
         "location_id": "unbox_uni",
         "area": 16,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
+        "formats": ["individual", "group", "intervision"],
         "description": "Уютный кабинет для индивидуальной и групповой работы.",
         "services": ["private_entrance", "couch", "climate_control", "wifi"]
     },
