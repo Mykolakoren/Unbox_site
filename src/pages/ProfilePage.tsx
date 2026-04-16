@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useUserStore } from '../store/userStore';
 import { Button } from '../components/ui/Button';
-import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff, Pencil, X, Loader2 } from 'lucide-react';
+import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff, Pencil, X, Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import { toast } from 'sonner';
@@ -107,6 +107,11 @@ export function ProfilePage() {
                         </div>
                     </div>
 
+                    <TelegramIdField
+                        value={currentUser.telegramId || ''}
+                        onChange={(v) => updateUser({ telegramId: v })}
+                    />
+
                     <div className="pt-4">
                         <Button>Сохранить изменения</Button>
                     </div>
@@ -138,6 +143,123 @@ export function ProfilePage() {
                         </Link>
                     </div>
                 </div>
+            )}
+        </div>
+    );
+}
+
+// ── Telegram Connect Hook ───────────────────────────────────────────────────
+// Generates a one-time link, opens it, and polls /users/me until the backend
+// reports telegram_id is set (meaning the bot received /start <token>).
+
+function useTelegramConnect() {
+    const { fetchCurrentUser } = useUserStore();
+    const [isConnecting, setIsConnecting] = useState(false);
+    const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    const deadline = useRef<number>(0);
+
+    const stopPolling = useCallback(() => {
+        if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
+        setIsConnecting(false);
+    }, []);
+
+    useEffect(() => () => stopPolling(), [stopPolling]);
+
+    const connect = useCallback(async () => {
+        try {
+            setIsConnecting(true);
+            const { data } = await api.post<{ url: string; expires_at: string }>('/telegram/link-token');
+            // Open bot deep-link (Telegram app if installed, else web)
+            window.open(data.url, '_blank', 'noopener,noreferrer');
+            toast.info('Откройте Telegram и нажмите «Start». Ждём подтверждения…', { duration: 5000 });
+
+            // Poll every 2s for up to 3 minutes
+            deadline.current = Date.now() + 3 * 60 * 1000;
+            pollTimer.current = setInterval(async () => {
+                if (Date.now() > deadline.current) {
+                    stopPolling();
+                    toast.error('Не дождались подключения. Попробуйте ещё раз.');
+                    return;
+                }
+                await fetchCurrentUser();
+                const cu = useUserStore.getState().currentUser;
+                if (cu?.telegramId && /^\d+$/.test(cu.telegramId)) {
+                    stopPolling();
+                    toast.success('✅ Telegram подключён!');
+                }
+            }, 2000);
+        } catch (e) {
+            stopPolling();
+            toast.error('Не удалось создать ссылку. Попробуйте позже.');
+            console.error(e);
+        }
+    }, [fetchCurrentUser, stopPolling]);
+
+    return { connect, isConnecting, cancel: stopPolling };
+}
+
+
+// ── Telegram ID Field ───────────────────────────────────────────────────────
+
+function TelegramIdField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const { connect, isConnecting, cancel } = useTelegramConnect();
+    // A numeric telegramId means the user has been auto-bound via /start — bot
+    // can now send messages. A @username means manual, no notifications yet.
+    const isBound = !!value && /^\d+$/.test(value);
+    return (
+        <div>
+            <label className="block text-sm font-medium mb-2">Telegram</label>
+
+            {isBound ? (
+                <div className="flex items-center gap-2 p-3 rounded-xl border border-unbox-light bg-green-50">
+                    <CheckCircle2 className="text-green-600" size={18} />
+                    <span className="text-sm text-unbox-dark">Подключено — уведомления активны</span>
+                    <button
+                        type="button"
+                        onClick={() => onChange('')}
+                        className="ml-auto text-xs text-unbox-grey hover:text-unbox-dark underline"
+                    >
+                        Отключить
+                    </button>
+                </div>
+            ) : (
+                <>
+                    <button
+                        type="button"
+                        onClick={isConnecting ? cancel : connect}
+                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition ${
+                            isConnecting
+                                ? 'bg-unbox-light text-unbox-grey'
+                                : 'bg-[#26A5E4] text-white hover:bg-[#1e90cf]'
+                        }`}
+                    >
+                        {isConnecting ? (
+                            <><Loader2 className="animate-spin" size={18} /> Ждём подтверждения… (отмена)</>
+                        ) : (
+                            <><Send size={18} /> Подключить Telegram</>
+                        )}
+                    </button>
+
+                    <div className="mt-3">
+                        <label className="block text-xs text-unbox-grey mb-1">Или укажите @username вручную:</label>
+                        <div className="relative">
+                            <Send className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={16} />
+                            <input
+                                type="text"
+                                className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                placeholder="@username"
+                                value={value}
+                                onChange={(e) => onChange(e.target.value)}
+                            />
+                        </div>
+                        <p className="text-[11px] text-unbox-grey mt-1.5">
+                            При ручном вводе уведомления придут, только если вы уже писали боту{' '}
+                            <a href="https://t.me/Unbox_Booking_G_Bot" target="_blank" rel="noopener noreferrer" className="text-unbox-green underline">
+                                @Unbox_Booking_G_Bot
+                            </a>.
+                        </p>
+                    </div>
+                </>
             )}
         </div>
     );
@@ -477,6 +599,79 @@ function DesignSwitcher() {
     );
 }
 
+// ── Grid House — Telegram Connect ────────────────────────────────────────────
+
+function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const { connect, isConnecting, cancel } = useTelegramConnect();
+    const isBound = !!value && /^\d+$/.test(value);
+
+    if (isBound) {
+        return (
+            <div style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '12px 14px', border: `1px solid ${GH.ink10}`, background: '#F0FDF4',
+            }}>
+                <CheckCircle2 size={18} color="#16A34A" />
+                <span style={{ fontSize: 13, color: GH.ink }}>Подключено — уведомления активны</span>
+                <button
+                    type="button"
+                    onClick={() => onChange('')}
+                    style={{
+                        marginLeft: 'auto', fontSize: 11, fontFamily: GH_MONO,
+                        color: GH.ink60, background: 'transparent', border: 'none',
+                        textDecoration: 'underline', cursor: 'pointer',
+                    }}
+                >
+                    Отключить
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <>
+            <button
+                type="button"
+                onClick={isConnecting ? cancel : connect}
+                style={{
+                    width: '100%', padding: '12px 16px',
+                    background: isConnecting ? GH.ink10 : '#26A5E4',
+                    color: isConnecting ? GH.ink60 : '#fff',
+                    fontWeight: 700, fontSize: 13, fontFamily: GH_SANS,
+                    border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+            >
+                {isConnecting ? (
+                    <><Loader2 size={16} className="animate-spin" /> Ждём подтверждения… (отмена)</>
+                ) : (
+                    <><Send size={16} /> Подключить Telegram</>
+                )}
+            </button>
+            <div style={{ marginTop: 12 }}>
+                <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 4, fontSize: 9 }}>
+                    ИЛИ @USERNAME ВРУЧНУЮ
+                </label>
+                <input
+                    type="text"
+                    style={{ ...ghpInput, fontSize: 13 }}
+                    placeholder="@username"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                />
+                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 6, lineHeight: 1.5 }}>
+                    При ручном вводе уведомления придут, только если вы уже писали боту{' '}
+                    <a href="https://t.me/Unbox_Booking_G_Bot" target="_blank" rel="noopener noreferrer"
+                       style={{ color: GH.ink, textDecoration: 'underline' }}>
+                        @Unbox_Booking_G_Bot
+                    </a>.
+                </div>
+            </div>
+        </>
+    );
+}
+
+
 interface GridHouseProfilePageProps {
     currentUser: any;
     updateUser: (data: any) => void;
@@ -558,6 +753,14 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                         style={ghpInput}
                         value={currentUser.phone}
                         onChange={(e) => updateUser({ phone: e.target.value })}
+                    />
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                    <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>TELEGRAM</label>
+                    <GridHouseTelegramConnect
+                        value={currentUser.telegramId || ''}
+                        onChange={(v) => updateUser({ telegramId: v })}
                     />
                 </div>
 
