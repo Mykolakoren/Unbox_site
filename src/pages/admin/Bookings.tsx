@@ -10,6 +10,7 @@ import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
+import { ConfirmationModal, PromptModal } from '../../components/ui/ConfirmationModal';
 
 type ViewMode = 'list' | 'grid';
 
@@ -21,6 +22,10 @@ export function AdminBookings() {
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
     const [viewMode, setViewMode] = useState<ViewMode>('list');
+
+    // Modal state for replacing native confirm/prompt
+    const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; destructive?: boolean }>({ open: false, title: '', message: '', onConfirm: () => {} });
+    const [priceModal, setPriceModal] = useState<{ open: boolean; bookingId: string; currentPrice: number }>({ open: false, bookingId: '', currentPrice: 0 });
 
     useEffect(() => {
         fetchUsers();
@@ -46,23 +51,32 @@ export function AdminBookings() {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     const handleEditPrice = (bookingId: string, currentPrice: number) => {
-        const newPriceString = prompt('Введите новую цену (GEL):', currentPrice.toString());
-        if (newPriceString !== null) {
-            const newPrice = parseFloat(newPriceString);
-            if (!isNaN(newPrice)) setManualPrice(bookingId, newPrice);
-        }
+        setPriceModal({ open: true, bookingId, currentPrice });
     };
 
     const handleCancel = (bookingId: string) => {
-        if (confirm('Вы уверены, что хотите отменить это бронирование?')) {
-            cancelBooking(bookingId);
-        }
+        setConfirmModal({
+            open: true,
+            title: 'Отмена бронирования',
+            message: 'Вы уверены, что хотите отменить это бронирование? Средства будут возвращены клиенту.',
+            destructive: true,
+            onConfirm: () => {
+                cancelBooking(bookingId);
+                toast.success('Бронирование отменено');
+            },
+        });
     };
 
     const handleReRent = (bookingId: string) => {
-        if (confirm('Выставить этот слот на переаренду?')) {
-            listForReRent(bookingId);
-        }
+        setConfirmModal({
+            open: true,
+            title: 'Переаренда',
+            message: 'Выставить этот слот на переаренду? Если другой пользователь забронирует, текущая бронь будет отменена с 50% возвратом.',
+            onConfirm: () => {
+                listForReRent(bookingId);
+                toast.success('Слот выставлен на переаренду');
+            },
+        });
     };
 
     const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -82,39 +96,90 @@ export function AdminBookings() {
     };
 
     const handleReject = async (bookingId: string) => {
-        if (!confirm('Отклонить горячую бронь?')) return;
-        setRejectingId(bookingId);
-        try {
-            await bookingsApi.rejectBooking(bookingId);
-            toast.success('Бронь отклонена');
-            useUserStore.getState().fetchAllBookings();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Ошибка при отклонении');
-        }
-        setRejectingId(null);
+        setConfirmModal({
+            open: true,
+            title: 'Отклонить бронь',
+            message: 'Отклонить горячую бронь? Средства будут возвращены клиенту.',
+            destructive: true,
+            onConfirm: async () => {
+                setRejectingId(bookingId);
+                try {
+                    await bookingsApi.rejectBooking(bookingId);
+                    toast.success('Бронь отклонена');
+                    useUserStore.getState().fetchAllBookings();
+                } catch (e: any) {
+                    toast.error(e?.response?.data?.detail || 'Ошибка при отклонении');
+                }
+                setRejectingId(null);
+            },
+        });
     };
 
+    // Shared modals rendered in both variants
+    const modals = (
+        <>
+            <ConfirmationModal
+                isOpen={confirmModal.open}
+                onClose={() => setConfirmModal(p => ({ ...p, open: false }))}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                isDestructive={confirmModal.destructive}
+                confirmLabel={confirmModal.destructive ? 'Да, отменить' : 'Подтвердить'}
+            />
+            <PromptModal
+                isOpen={priceModal.open}
+                onClose={() => setPriceModal(p => ({ ...p, open: false }))}
+                onSubmit={(val) => {
+                    const newPrice = parseFloat(val);
+                    if (!isNaN(newPrice) && newPrice >= 0) {
+                        setManualPrice(priceModal.bookingId, newPrice);
+                        toast.success(`Цена обновлена: ${newPrice} ₾`);
+                    } else {
+                        toast.error('Некорректная цена');
+                    }
+                }}
+                title="Изменить цену"
+                inputLabel="Новая цена (GEL)"
+                inputType="number"
+                defaultValue={priceModal.currentPrice.toString()}
+                placeholder="0.00"
+                submitLabel="Сохранить"
+                validate={(v) => {
+                    const n = parseFloat(v);
+                    if (isNaN(n)) return 'Введите число';
+                    if (n < 0) return 'Цена не может быть отрицательной';
+                    return null;
+                }}
+            />
+        </>
+    );
+
     if (gridHouse) return (
-        <GridHouseAdminBookings
-            bookings={bookings}
-            filteredBookings={filteredBookings}
-            viewMode={viewMode} setViewMode={setViewMode}
-            filterStatus={filterStatus} setFilterStatus={setFilterStatus}
-            search={search} setSearch={setSearch}
-            navigate={navigate}
-            getUserName={getUserName}
-            handleEditPrice={handleEditPrice}
-            handleCancel={handleCancel}
-            handleReRent={handleReRent}
-            handleApprove={handleApprove}
-            handleReject={handleReject}
-            approvingId={approvingId}
-            rejectingId={rejectingId}
-        />
+        <>
+            {modals}
+            <GridHouseAdminBookings
+                bookings={bookings}
+                filteredBookings={filteredBookings}
+                viewMode={viewMode} setViewMode={setViewMode}
+                filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+                search={search} setSearch={setSearch}
+                navigate={navigate}
+                getUserName={getUserName}
+                handleEditPrice={handleEditPrice}
+                handleCancel={handleCancel}
+                handleReRent={handleReRent}
+                handleApprove={handleApprove}
+                handleReject={handleReject}
+                approvingId={approvingId}
+                rejectingId={rejectingId}
+            />
+        </>
     );
 
     return (
         <div className="space-y-6">
+            {modals}
             {/* ── Header ── */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
@@ -128,6 +193,13 @@ export function AdminBookings() {
                 </div>
 
                 <div className="flex gap-2 w-full sm:w-auto items-center">
+                    {/* Add booking button */}
+                    <button
+                        onClick={() => navigate('/checkout')}
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-unbox-green text-white rounded-lg hover:bg-unbox-green/90 transition-colors"
+                    >
+                        + Бронь
+                    </button>
                     {/* View toggle */}
                     <div className="flex rounded-lg border border-unbox-light overflow-hidden bg-white">
                         <button
@@ -433,6 +505,23 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                     >
                         Поток броней.
                     </h1>
+                    {/* Add booking */}
+                    <button onClick={() => navigate('/checkout')}
+                        style={{
+                            padding: narrow ? '5px 10px' : '6px 16px',
+                            border: ghabHairline,
+                            cursor: 'pointer',
+                            fontFamily: GH_MONO,
+                            fontSize: narrow ? 9 : 10,
+                            letterSpacing: '0.14em',
+                            textTransform: 'uppercase',
+                            background: GH.ink,
+                            color: GH.paper,
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            marginRight: narrow ? 4 : 8,
+                        }}>
+                        + БРОНЬ
+                    </button>
                     {/* View toggle */}
                     <div style={{ display: 'flex' }}>
                         {(['list', 'grid'] as const).map((m, i) => (

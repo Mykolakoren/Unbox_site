@@ -52,6 +52,8 @@ export function AdminUserDetails() {
 
     // Subscription topup form state
     const [isTopupOpen, setIsTopupOpen] = useState(false);
+    const [isEditingExpiry, setIsEditingExpiry] = useState(false);
+    const [editExpiryDate, setEditExpiryDate] = useState('');
     const [topupForm, setTopupForm] = useState({ hours: '', amount: '', payment_method: 'cash', note: '' });
     const [topupSaving, setTopupSaving] = useState(false);
 
@@ -988,7 +990,44 @@ export function AdminUserDetails() {
                                                         {user.subscription.isFrozen ? 'Заморожен' : 'Активен'}
                                                     </div>
                                                     <div className="text-xs text-purple-600">
-                                                        до {format(new Date(user.subscription.expiryDate), 'd.MM.yyyy')}
+                                                        {isEditingExpiry ? (
+                                                            <div className="flex items-center gap-1.5 mt-1">
+                                                                <input
+                                                                    type="date"
+                                                                    value={editExpiryDate}
+                                                                    onChange={e => setEditExpiryDate(e.target.value)}
+                                                                    className="rounded border border-purple-300 px-1.5 py-0.5 text-xs focus:outline-none focus:border-purple-500"
+                                                                />
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (!editExpiryDate) return;
+                                                                        const updated = { ...user.subscription!, expiryDate: new Date(editExpiryDate).toISOString() };
+                                                                        updateUserById(user.email, { subscription: updated as any });
+                                                                        toast.success('Дата абонемента обновлена');
+                                                                        setIsEditingExpiry(false);
+                                                                    }}
+                                                                    className="text-green-700 hover:text-green-900 font-bold text-xs"
+                                                                >
+                                                                    ✓
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setIsEditingExpiry(false)}
+                                                                    className="text-gray-400 hover:text-gray-600 text-xs"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditExpiryDate(format(new Date(user.subscription!.expiryDate), 'yyyy-MM-dd'));
+                                                                    setIsEditingExpiry(true);
+                                                                }}
+                                                                className="hover:text-purple-900 underline decoration-dotted"
+                                                            >
+                                                                до {format(new Date(user.subscription.expiryDate), 'd.MM.yyyy')}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                     <button
                                                         onClick={toggleFreeze}

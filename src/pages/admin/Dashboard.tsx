@@ -91,6 +91,7 @@ export function AdminDashboard() {
                 reRentedCount={reRentedCount}
                 balance={balance}
                 recentBookings={recentBookings}
+                allBookings={bookings}
                 users={users}
                 monthAnalytics={monthAnalytics}
             />
@@ -131,7 +132,14 @@ export function AdminDashboard() {
                     <h2 className="font-bold text-lg mb-4">Последние бронирования</h2>
                     <div className="space-y-4">
                         {recentBookings.map(booking => (
-                            <div key={booking.id} className="flex items-center justify-between pb-4 border-b border-unbox-light last:border-0 last:pb-0">
+                            <div
+                                key={booking.id}
+                                className="flex items-center justify-between pb-4 border-b border-unbox-light last:border-0 last:pb-0 cursor-pointer hover:bg-unbox-light/30 -mx-2 px-2 rounded-lg transition-colors"
+                                onClick={() => {
+                                    const userName = users.find(u => u.email === booking.userId)?.name || booking.userId;
+                                    window.location.href = `/admin/bookings?search=${encodeURIComponent(userName)}`;
+                                }}
+                            >
                                 <div>
                                     <div className="font-medium text-unbox-dark">
                                         {format(new Date(booking.date), 'dd.MM')} · {booking.startTime}
@@ -205,6 +213,7 @@ interface GHDashProps {
     reRentedCount: number;
     balance: number;
     recentBookings: BookingHistoryItem[];
+    allBookings: BookingHistoryItem[];
     users: AppUser[];
     monthAnalytics: CashboxAnalytics | null;
 }
@@ -217,6 +226,7 @@ function GridHouseAdminDashboard({
     reRentedCount,
     balance,
     recentBookings,
+    allBookings,
     users,
     monthAnalytics,
 }: GHDashProps) {
@@ -335,7 +345,7 @@ function GridHouseAdminDashboard({
             {/* Analytics charts — wrapped in hairline frame (legacy internals) */}
             <div style={{ border: hairline, padding: narrow ? 14 : 28, marginBottom: narrow ? 24 : 40, overflowX: 'auto' }}>
                 <div style={{ ...monoLabel, marginBottom: narrow ? 12 : 20 }}>Аналитика · Бронирования</div>
-                <AnalyticsCharts bookings={recentBookings.length > 0 ? useUserStore.getState().bookings : []} />
+                <AnalyticsCharts bookings={allBookings} />
             </div>
 
             {/* Recent bookings */}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
@@ -62,6 +62,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [transferTo, setTransferTo] = useState('card_tbc');
     const [clientId, setClientId] = useState('');
+    const [clientSearch, setClientSearch] = useState('');
+    const [showClientDropdown, setShowClientDropdown] = useState(false);
+    const clientInputRef = useRef<HTMLInputElement>(null);
     const [bookingUsers, setBookingUsers] = useState<{id: string; name: string; email: string}[]>([]);
 
     // Fetch booking Users (not CRM clients — those are specialist-only)
@@ -330,25 +333,74 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         );
                     })()}
 
-                    {/* Client (income only) */}
-                    {type === 'income' && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
-                            <select
-                                value={clientId}
-                                onChange={e => setClientId(e.target.value)}
-                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
-                            >
-                                <option value="">— Без привязки к клиенту —</option>
-                                {bookingUsers.map(c => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.name} ({c.email})
-                                        </option>
-                                    ))
-                                }
-                            </select>
-                        </div>
-                    )}
+                    {/* Client (income only) — searchable autocomplete */}
+                    {type === 'income' && (() => {
+                        const sorted = [...bookingUsers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+                        const filtered = clientSearch.trim()
+                            ? sorted.filter(c => {
+                                const q = clientSearch.toLowerCase();
+                                return c.name?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q);
+                            })
+                            : sorted;
+                        const selectedUser = bookingUsers.find(c => c.id === clientId);
+
+                        return (
+                            <div className="relative">
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
+                                <input
+                                    ref={clientInputRef}
+                                    type="text"
+                                    placeholder="Начните вводить имя или email..."
+                                    value={clientSearch || (selectedUser ? `${selectedUser.name} (${selectedUser.email})` : '')}
+                                    onChange={e => {
+                                        setClientSearch(e.target.value);
+                                        setClientId('');
+                                        setShowClientDropdown(true);
+                                    }}
+                                    onFocus={() => setShowClientDropdown(true)}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                                />
+                                {clientId && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setClientId(''); setClientSearch(''); }}
+                                        className="absolute right-3 top-[38px] text-gray-400 hover:text-gray-600"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                                {showClientDropdown && !clientId && (
+                                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                        <button
+                                            type="button"
+                                            onClick={() => { setClientId(''); setClientSearch(''); setShowClientDropdown(false); }}
+                                            className="w-full text-left px-4 py-2 text-sm text-gray-400 hover:bg-gray-50"
+                                        >
+                                            — Без привязки к клиенту —
+                                        </button>
+                                        {filtered.map(c => (
+                                            <button
+                                                type="button"
+                                                key={c.id}
+                                                onClick={() => {
+                                                    setClientId(c.id);
+                                                    setClientSearch('');
+                                                    setShowClientDropdown(false);
+                                                }}
+                                                className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/50 transition-colors"
+                                            >
+                                                <span className="font-medium">{c.name}</span>
+                                                <span className="text-gray-400 ml-1.5">({c.email})</span>
+                                            </button>
+                                        ))}
+                                        {filtered.length === 0 && (
+                                            <div className="px-4 py-2 text-sm text-gray-400">Не найдено</div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
 
                     {/* Branch */}
                     <div>

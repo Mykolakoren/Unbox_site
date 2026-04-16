@@ -15,7 +15,8 @@ import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
 import { ru } from 'date-fns/locale';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { RESOURCES, EXTRAS, LOCATIONS } from '../utils/data';
-import { isPeakTime } from '../utils/pricing';
+import { isPeakTime, calculatePrice } from '../utils/pricing';
+import type { Format } from '../types';
 import { generateGoogleCalendarUrl } from '../utils/calendar';
 import { bookingsApi } from '../api/bookings';
 import { toast } from 'sonner';
@@ -505,6 +506,9 @@ function BookingsChessboard({
     // ─── Drag handlers (rescheduling) ──────────────────────────────────────────
     const handleDragStart = (booking: BookingHistoryItem, resId: string, time: string, e: React.PointerEvent) => {
         if (!canModify(booking)) return;
+        // Admins cannot drag other users' bookings to prevent accidental reschedules
+        const cu = useUserStore.getState().currentUser;
+        if (cu?.isAdmin && booking.userId !== cu?.email) return;
         e.preventDefault();
         const offsetMins = timeToMins(time) - timeToMins(booking.startTime!);
         dragStartRef.current = { resId, time, offsetMins };
@@ -1173,7 +1177,6 @@ function BookingsChessboard({
                                     if (isPubStart) {
                                         const pubSpan = Math.max(1, Math.round(pubB.duration / 30));
                                         skipUntilIdx = idx + pubSpan - 1;
-                                        const pubUserName = usersMap?.get(pubB.userId) || '';
                                         cells.push(
                                             <td
                                                 key={`${r.id}-${time}`}
@@ -1194,12 +1197,9 @@ function BookingsChessboard({
                                                     <span className="text-[10px] font-bold leading-none">
                                                         {pubB.startTime} · {pubB.duration / 60}ч
                                                     </span>
-                                                    {pubUserName && (
-                                                        <span className="text-[9px] opacity-80 leading-none flex items-center gap-0.5 truncate max-w-full">
-                                                            <UserIcon size={8} className="shrink-0" />
-                                                            <span className="truncate">{pubUserName}</span>
-                                                        </span>
-                                                    )}
+                                                    <span className="text-[9px] opacity-80 leading-none">
+                                                        Занято
+                                                    </span>
                                                     {isReRentAvailable && <span className="text-[8px] font-medium leading-none">♻️ переаренда</span>}
                                                 </div>
                                             </td>
@@ -1312,15 +1312,15 @@ function BookingsChessboard({
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-unbox-dark/80 bg-white/70 backdrop-blur-md rounded-xl px-4 py-2.5 shadow-sm">
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded bg-unbox-green" />
-                    <span>Ваша бронь (перетаскивайте)</span>
+                    <span>Ваша бронь (можно перетащить на другое время)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded bg-unbox-dark/80" />
-                    <span>≤24ч — только переаренда</span>
+                    <span>До брони менее 24ч — можно выставить на переаренду</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded border-2 border-dashed border-amber-400 bg-amber-50" />
-                    <span>На переаренде</span>
+                    <span>Кабинет открыт для переаренды другим специалистам</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded bg-gray-200/80" />
@@ -2019,7 +2019,10 @@ function BookingCard({
                         {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}
                     </h3>
                     <div className="text-xs sm:text-sm text-unbox-grey mb-1">
-                        {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'} · {booking.format === 'individual' ? 'Индивидуальный' : 'Групповой'}
+                        {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'} · {
+                            booking.format === 'individual' ? 'Индивидуальный' :
+                            booking.format === 'intervision' ? 'Интервизия' : 'Групповой'
+                        }
                     </div>
                     <div className="text-sm text-unbox-dark flex items-center gap-1.5 font-medium">
                         <Clock size={14} />
@@ -2200,16 +2203,52 @@ function CrmQuickBookingModal({
     onBooked: () => void;
 }) {
     const { updateSession } = useCrmStore();
+    const { currentUser } = useUserStore();
     const resource = RESOURCES.find(r => r.id === slot.resId);
+
+    // Available formats (fallback to 'individual' for CRM — therapy is 1-on-1 by default)
+    const availableFormats = (resource?.formats && resource.formats.length > 0)
+        ? resource.formats
+        : (['individual'] as Format[]);
+
     const [duration, setDuration] = useState(crmMode.duration ?? 60);
+    const [chosenFormat, setChosenFormat] = useState<Format>(
+        availableFormats.includes('individual') ? 'individual' : availableFormats[0]
+    );
+    const [chosenExtras, setChosenExtras] = useState<string[]>([]);
+    const [useSubscription, setUseSubscription] = useState(false);
     const [saving, setSaving] = useState(false);
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
-    const endTime = (() => {
+    const hasSubscription = !!currentUser?.subscription?.planId && (currentUser?.subscription?.remainingHours ?? 0) > 0;
+
+    const startDate = useMemo(() => {
         const [h, m] = slot.time.split(':').map(Number);
-        const end = addMinutes(setMinutes(setHours(slot.date, h), m), duration);
-        return format(end, 'HH:mm');
-    })();
+        return setMinutes(setHours(slot.date, h), m);
+    }, [slot.date, slot.time]);
+    const endDate = useMemo(() => addMinutes(startDate, duration), [startDate, duration]);
+    const endTime = format(endDate, 'HH:mm');
+
+    // Price preview — uses the same calculator as the main booking wizard
+    const pricing = useMemo(() => {
+        try {
+            return calculatePrice({
+                format: chosenFormat,
+                startTime: startDate,
+                endTime: endDate,
+                extras: EXTRAS.filter(e => chosenExtras.includes(e.id)),
+                resourceId: slot.resId,
+                paymentMethod: useSubscription ? 'subscription' : 'balance',
+                personalDiscountPercent: currentUser?.personalDiscountPercent,
+                pricingSystem: (currentUser as any)?.pricingSystem,
+            });
+        } catch {
+            return null;
+        }
+    }, [chosenFormat, startDate, endDate, chosenExtras, slot.resId, useSubscription, currentUser]);
+
+    const hoursForSub = duration / 60;
+    const enoughHoursOnSub = hasSubscription && (currentUser?.subscription?.remainingHours ?? 0) >= hoursForSub;
 
     const handleBook = async () => {
         setSaving(true);
@@ -2219,8 +2258,10 @@ function CrmQuickBookingModal({
                 date: dateStr, // Send as string 'YYYY-MM-DD' to avoid timezone shift
                 startTime: slot.time,
                 duration,
-                format: resource?.formats?.[0],
+                format: chosenFormat,
+                extras: chosenExtras,
                 locationId: resource?.locationId,
+                paymentMethod: useSubscription && enoughHoursOnSub ? 'subscription' : 'balance',
             } as any);
             await bookingsApi.linkCrmClient(booking.id, crmMode.clientId);
             // Link booking to CRM session and sync time
@@ -2248,10 +2289,13 @@ function CrmQuickBookingModal({
         }
     };
 
+    const fmtLabel = (f: Format) =>
+        f === 'individual' ? 'Индивид.' : f === 'group' ? 'Группа' : 'Интервизия';
+
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-200"
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-200 max-h-[92vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
                 <div className="flex items-start justify-between">
@@ -2297,6 +2341,118 @@ function CrmQuickBookingModal({
                         ))}
                     </div>
                 </div>
+
+                {availableFormats.length > 1 && (
+                    <div>
+                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Формат</label>
+                        <div className="flex gap-2">
+                            {availableFormats.map(f => (
+                                <button
+                                    key={f}
+                                    onClick={() => setChosenFormat(f)}
+                                    className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                                        chosenFormat === f
+                                            ? 'bg-unbox-green text-white border-unbox-green'
+                                            : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                    }`}
+                                >
+                                    {fmtLabel(f)}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {EXTRAS.length > 0 && (
+                    <div>
+                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Доп. опции</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {EXTRAS.map(e => {
+                                const active = chosenExtras.includes(e.id);
+                                return (
+                                    <button
+                                        key={e.id}
+                                        onClick={() => setChosenExtras(prev =>
+                                            active ? prev.filter(id => id !== e.id) : [...prev, e.id]
+                                        )}
+                                        className={`px-2.5 py-2 rounded-xl text-xs font-medium border text-left transition-colors ${
+                                            active
+                                                ? 'bg-unbox-green text-white border-unbox-green'
+                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-1">
+                                            <span className="truncate">{e.name}</span>
+                                            {e.price > 0 && (
+                                                <span className={`text-[10px] shrink-0 ${active ? 'text-white/80' : 'text-unbox-grey'}`}>
+                                                    +{e.price}₾
+                                                </span>
+                                            )}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {hasSubscription && (
+                    <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${
+                        useSubscription && enoughHoursOnSub
+                            ? 'bg-unbox-light border-unbox-green'
+                            : 'bg-white border-unbox-light hover:border-unbox-green/50'
+                    } ${!enoughHoursOnSub ? 'opacity-60' : ''}`}>
+                        <input
+                            type="checkbox"
+                            checked={useSubscription && enoughHoursOnSub}
+                            onChange={(e) => setUseSubscription(e.target.checked)}
+                            disabled={!enoughHoursOnSub}
+                            className="mt-0.5 accent-unbox-green"
+                        />
+                        <div className="flex-1 text-sm">
+                            <div className="font-medium text-unbox-dark">Списать из абонемента</div>
+                            <div className="text-xs text-unbox-grey mt-0.5">
+                                {enoughHoursOnSub
+                                    ? `Осталось ${currentUser?.subscription?.remainingHours ?? 0} ч · спишется ${hoursForSub} ч`
+                                    : `Недостаточно часов (нужно ${hoursForSub} ч, осталось ${currentUser?.subscription?.remainingHours ?? 0} ч)`
+                                }
+                            </div>
+                        </div>
+                    </label>
+                )}
+
+                {pricing && (
+                    <div className="bg-unbox-light/70 rounded-xl p-3 space-y-1 text-sm">
+                        <div className="flex justify-between text-unbox-grey">
+                            <span>Кабинет ({duration} мин, {fmtLabel(chosenFormat)})</span>
+                            <span>{pricing.basePrice.toFixed(0)} ₾</span>
+                        </div>
+                        {pricing.extrasPrice > 0 && (
+                            <div className="flex justify-between text-unbox-grey">
+                                <span>Доп. опции</span>
+                                <span>+{pricing.extrasPrice.toFixed(0)} ₾</span>
+                            </div>
+                        )}
+                        {pricing.discountAmount > 0 && (
+                            <div className="flex justify-between text-unbox-green">
+                                <span>Скидка</span>
+                                <span>−{pricing.discountAmount.toFixed(0)} ₾</span>
+                            </div>
+                        )}
+                        {pricing.peakSlotCount > 0 && !useSubscription && (
+                            <div className="text-[11px] text-amber-600">⏱ Вечерний тариф применён</div>
+                        )}
+                        <div className="flex justify-between font-bold text-unbox-dark pt-1.5 border-t border-unbox-light">
+                            <span>Итого</span>
+                            <span>
+                                {useSubscription && enoughHoursOnSub
+                                    ? <>{hoursForSub} ч из абонемента{pricing.subscriptionPeakDebt > 0 ? ` + ${pricing.subscriptionPeakDebt.toFixed(0)} ₾ за вечер` : ''}</>
+                                    : `${pricing.finalPrice.toFixed(0)} ₾`
+                                }
+                            </span>
+                        </div>
+                    </div>
+                )}
 
                 <button
                     onClick={handleBook}

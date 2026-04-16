@@ -671,6 +671,7 @@ export function AdminSpecialists() {
     const [toggling, setToggling] = useState<string | null>(null);
     const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
     const [activeId, setActiveId] = useState<string | null>(null);
+    const [specFilter, setSpecFilter] = useState<string>('all');
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -749,10 +750,22 @@ export function AdminSpecialists() {
 
     const verifiedCount = useMemo(() => specialists.filter(s => s.isVerified).length, [specialists]);
 
+    // Unique specialization tags for filtering
+    const allSpecTags = useMemo(() => {
+        const tags = new Set<string>();
+        specialists.forEach(s => (s.specializations ?? []).forEach(t => tags.add(t)));
+        return Array.from(tags).sort((a, b) => a.localeCompare(b, 'ru'));
+    }, [specialists]);
+
+    const filteredSpecialists = useMemo(() => {
+        if (specFilter === 'all') return specialists;
+        return specialists.filter(s => (s.specializations ?? []).includes(specFilter));
+    }, [specialists, specFilter]);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
     if (gridHouse) return (
         <GridHouseAdminSpecialists
-            specialists={specialists} loading={loading}
+            specialists={filteredSpecialists} loading={loading}
             activeTab={activeTab} setActiveTab={setActiveTab}
             viewMode={viewMode} setViewMode={setViewMode}
             canAcceptRequests={canAcceptRequests} verifiedCount={verifiedCount}
@@ -765,6 +778,7 @@ export function AdminSpecialists() {
             handleDragEnd={handleDragEnd}
             activeSpecialist={activeSpecialist ?? null}
             load={load}
+            specFilter={specFilter} setSpecFilter={setSpecFilter} allSpecTags={allSpecTags}
         />
     );
 
@@ -825,6 +839,26 @@ export function AdminSpecialists() {
                 <CrmAccessRequests />
             ) : (
                 <>
+                    {/* Specialization filter tags */}
+                    {allSpecTags.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5 mb-4">
+                            <button
+                                onClick={() => setSpecFilter('all')}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${specFilter === 'all' ? 'bg-unbox-green text-white' : 'bg-unbox-light/50 text-unbox-grey hover:bg-unbox-light'}`}
+                            >
+                                Все направления
+                            </button>
+                            {allSpecTags.map(tag => (
+                                <button
+                                    key={tag}
+                                    onClick={() => setSpecFilter(tag)}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${specFilter === tag ? 'bg-unbox-green text-white' : 'bg-unbox-light/50 text-unbox-grey hover:bg-unbox-light'}`}
+                                >
+                                    {tag}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {loading ? (
                         <div className="text-center py-16 text-unbox-dark/40">
                             <Loader2 className="h-8 w-8 animate-spin mx-auto text-unbox-green mb-2" />
@@ -839,9 +873,9 @@ export function AdminSpecialists() {
                                         <GripVertical size={12} />
                                         Перетащите карточки для изменения порядка отображения на сайте
                                     </div>
-                                    <SortableContext items={specialists.map(s => s.id)} strategy={rectSortingStrategy}>
+                                    <SortableContext items={filteredSpecialists.map(s => s.id)} strategy={rectSortingStrategy}>
                                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                                            {specialists.map(s => (
+                                            {filteredSpecialists.map(s => (
                                                 <SortablePreviewCard key={s.id} specialist={s}
                                                     onEdit={() => setEditing(s)}
                                                     onToggleVisibility={() => handleToggleVisibility(s)}
@@ -868,9 +902,9 @@ export function AdminSpecialists() {
                                                 <th className="p-4 text-right pr-6">Действия</th>
                                             </tr>
                                         </thead>
-                                        <SortableContext items={specialists.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                                        <SortableContext items={filteredSpecialists.map(s => s.id)} strategy={verticalListSortingStrategy}>
                                             <tbody className="divide-y divide-unbox-light">
-                                                {specialists.map((s, idx) => (
+                                                {filteredSpecialists.map((s, idx) => (
                                                     <SortableTableRow key={s.id} specialist={s} index={idx}
                                                         onEdit={() => setEditing(s)}
                                                         onToggleVisibility={() => handleToggleVisibility(s)}
@@ -936,6 +970,9 @@ interface GHAdminSpecialistsProps {
     handleDragEnd: (event: DragEndEvent) => void;
     activeSpecialist: SpecialistExtended | null;
     load: () => void;
+    specFilter?: string;
+    setSpecFilter?: (f: string) => void;
+    allSpecTags?: string[];
 }
 
 function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
@@ -944,6 +981,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
         canAcceptRequests, verifiedCount, editing, setEditing,
         toggling, deleting, handleToggleVisibility, handleDelete,
         sensors, handleDragStart, handleDragEnd, activeSpecialist, load,
+        specFilter = 'all', setSpecFilter, allSpecTags = [],
     } = props;
 
     const hiddenCount = specialists.length - verifiedCount;
@@ -1022,6 +1060,22 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                 <CrmAccessRequests />
             ) : (
                 <>
+                    {/* Specialization filter tags (GH) */}
+                    {allSpecTags.length > 1 && setSpecFilter && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 24 }}>
+                            {['all', ...allSpecTags].map(tag => (
+                                <button key={tag} onClick={() => setSpecFilter(tag)}
+                                    style={{
+                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                        padding: '4px 12px', border: ghaHairline, cursor: 'pointer',
+                                        background: specFilter === tag ? GH.ink : 'transparent',
+                                        color: specFilter === tag ? GH.paper : GH.ink60,
+                                    }}>
+                                    {tag === 'all' ? 'Все' : tag}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {loading ? (
                         <div style={{ textAlign: 'center', padding: '64px 0', color: GH.ink30 }}>
                             <Loader2 size={24} className="animate-spin" style={{ margin: '0 auto 8px', display: 'block' }} />
