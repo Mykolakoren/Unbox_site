@@ -44,6 +44,11 @@ export function ConfirmationStep() {
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
     const [recurringOccurrences, setRecurringOccurrences] = useState(12);
 
+    // Guest form state (when no user is authenticated)
+    const [guestName, setGuestName] = useState('');
+    const [guestPhone, setGuestPhone] = useState('');
+    const [guestEmail, setGuestEmail] = useState('');
+
     // Fetch CRM clients and bonuses
     useEffect(() => {
         if (currentUser) {
@@ -209,7 +214,8 @@ export function ConfirmationStep() {
     // Auto-select subscription if eligible?
     // We already do this via default paymentMethod in store or user action.
     // Logic: if current method is 'subscription' but not eligible, switch to 'balance'.
-    useMemo(() => {
+    // Auto-switch payment method if current one becomes ineligible
+    useEffect(() => {
         if (!isSubscriptionEligible && state.paymentMethod === 'subscription') {
             state.setPaymentMethod('balance');
         }
@@ -222,6 +228,14 @@ export function ConfirmationStep() {
     const handleConfirm = async () => {
         setIsSubmitting(true);
         try {
+            // Validate guest form if no authenticated user
+            if (!effectiveUser) {
+                if (!guestName.trim() || !guestEmail.trim()) {
+                    toast.error('Заполните имя и email для бронирования');
+                    return;
+                }
+            }
+
             if (cartDetails.length === 0) {
                 toast.error("Ошибка: Корзина пуста. Пожалуйста, выберите время.");
                 return;
@@ -460,6 +474,18 @@ export function ConfirmationStep() {
                     toast.info('🕐 Запрос на горячую бронь отправлен администратору. Вы получите уведомление.');
                 } else {
                     toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
+                    if (!isRescheduling) {
+                        // Invite the user to subscribe to Telegram booking notifications.
+                        // Backend will only manage to send if the user has /start'ed the bot.
+                        toast('💬 Получать уведомления о бронях в Telegram', {
+                            description: 'Напишите /start нашему боту → @Unbox_Booking_G_Bot',
+                            action: {
+                                label: 'Открыть',
+                                onClick: () => window.open('https://t.me/Unbox_Booking_G_Bot', '_blank'),
+                            },
+                            duration: 8000,
+                        });
+                    }
                 }
 
                 if (hasGcalFailure) {
@@ -674,17 +700,20 @@ export function ConfirmationStep() {
                 ) : (
                     <>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-unbox-dark">Имя</label>
-                            <input type="text" className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="Иван Иванов" />
+                            <label htmlFor="guest-name" className="text-sm font-medium text-unbox-dark">Имя *</label>
+                            <input id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="Иван Иванов" />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-unbox-dark">Телефон</label>
-                            <input type="tel" className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="+995 555 00 00 00" />
+                            <label htmlFor="guest-phone" className="text-sm font-medium text-unbox-dark">Телефон</label>
+                            <input id="guest-phone" type="tel" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="+995 555 00 00 00" />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-unbox-dark">Email</label>
-                            <input type="email" className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="ivan@example.com" />
+                            <label htmlFor="guest-email" className="text-sm font-medium text-unbox-dark">Email *</label>
+                            <input id="guest-email" type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="ivan@example.com" />
                         </div>
+                        {(!guestName.trim() || !guestEmail.trim()) && (
+                            <p className="text-xs text-amber-600">* Заполните имя и email для бронирования</p>
+                        )}
                     </>
                 )}
             </div>
