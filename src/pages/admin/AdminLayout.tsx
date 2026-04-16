@@ -20,7 +20,7 @@ const NAV_ITEMS = [
     { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
     { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
     { path: '/admin/waitlist',    icon: Clock,           label: 'Лист ожидания' },
-    { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База данных' },
+    { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База знаний' },
 ];
 
 const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
@@ -479,7 +479,7 @@ function GridHouseAdminShell({
                         </div>
                     </div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
-                        Unbox · Grid House · Черновик
+                        Unbox · Панель управления
                     </div>
                 </header>
 

@@ -463,7 +463,7 @@ function GridHouseLoginPage({
                                 : 'Войдите, чтобы увидеть бронирования, сессии и расписание.'}
                         </div>
                     </div>
-                    <div style={GH_MONO_LABEL}>Unbox · Батуми · MMXXVI</div>
+                    <div style={GH_MONO_LABEL}>Unbox · Батуми</div>
                 </aside>
                 )}
 
@@ -706,7 +706,7 @@ function GridHouseLoginPage({
                     gap: 8,
                 }}
             >
-                <span>Unbox · Батуми · MMXXVI</span>
+                <span>Unbox · Батуми</span>
             </footer>
         </div>
     );

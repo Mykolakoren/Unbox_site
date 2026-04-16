@@ -463,7 +463,7 @@ function GridHouseCrmShell({ isAdmin, currentUser }: { isAdmin: boolean; current
                         textTransform: 'uppercase',
                         color: GH.ink30,
                     }}>
-                        UNBOX · GRID HOUSE · ЧЕРНОВИК
+                        UNBOX · CRM
                     </div>
                 </div>
 

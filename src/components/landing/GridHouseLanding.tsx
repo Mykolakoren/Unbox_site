@@ -96,9 +96,8 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
             >
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
                     <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' }}>Unbox</div>
-                    <div style={MONO_LABEL}>Батуми · 2026 · MMXXVI</div>
+                    <div style={MONO_LABEL}>Батуми · Пространство для практики</div>
                 </div>
-                <div style={MONO_LABEL}>Издание 01 · Гейт входа</div>
             </div>
 
             {/* Two columns */}
@@ -111,7 +110,7 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
             >
                 <GateColumn
                     num="01"
-                    title="Клиент"
+                    title="Я клиент"
                     tag="Ищу специалиста"
                     body="Психологи, терапевты, коучи и педагоги. Подобрать специалиста, посмотреть расписание, записаться на сессию очно в Батуми или онлайн."
                     cta="Войти как клиент"
@@ -121,8 +120,8 @@ function WelcomeGate({ onSelect }: { onSelect: (m: 'client' | 'specialist') => v
                 />
                 <GateColumn
                     num="02"
-                    title="Специалист"
-                    tag="Работаю в Unbox"
+                    title="Я специалист"
+                    tag="Принимаю клиентов"
                     body="Аренда кабинетов, приём клиентов, CRM для ведения практики. Для специалистов, которые принимают в пространствах Unbox."
                     cta="Войти как специалист"
                     onClick={() => onSelect('specialist')}
@@ -304,6 +303,12 @@ function Masthead({
                     <NavLink to="/#cabinets" label="Кабинеты" />
                     <NavDivider />
                     <NavLink to="/subscriptions" label="Тарифы" hideOnNarrow={narrow} />
+                    {currentUser && (
+                        <>
+                            <NavDivider hideOnNarrow={narrow} />
+                            <NavLink to="/dashboard/bookings" label="Бронирования" hideOnNarrow={narrow} />
+                        </>
+                    )}
                     {isAdmin && (
                         <>
                             <NavDivider hideOnNarrow={narrow} />
@@ -452,7 +457,7 @@ function Hero({ totalSpecialists, locations }: { totalSpecialists: number; locat
             }}
         >
             <div style={{ ...MONO_LABEL, marginBottom: 32 }}>
-                Издание 01 · Терапия · Психиатрия · Коучинг · Педагогика
+                Терапия · Психиатрия · Коучинг · Педагогика
             </div>
             <h1
                 style={{
@@ -1115,10 +1120,17 @@ function ContactFooter() {
             }}
         >
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 32, marginBottom: 40 }}>
-                <ContactBlock label="Адрес" value={<>ул. Шерифа Химшиашвили, 13<br/>Батуми, Грузия</>} />
-                <ContactBlock label="Телефон" value="+995 555 123 456" />
-                <ContactBlock label="Почта" value="hello@unbox.com.ge" />
+                <ContactBlock label="Unbox One" value={<>ул. Палиашвили, 4<br/>Батуми, Грузия</>} />
+                <ContactBlock label="Unbox Uni" value={<>ул. Тбел Абусеридзе, 38<br/>Батуми, Грузия</>} />
+                <ContactBlock label="Телефон" value={<>+995 599 324 668<br/><span style={{ fontSize: 13, color: GH.ink60 }}>Telegram · WhatsApp</span></>} />
+                <ContactBlock label="Почта" value="unbox.psy@gmail.com" />
                 <ContactBlock label="Часы" value={<>Пн—Вс<br/>09:00 — 22:00</>} />
+            </div>
+            {/* Social links */}
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 32, ...MONO_LABEL }}>
+                <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Telegram ↗</a>
+                <a href="https://www.instagram.com/unbox.center/" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Instagram ↗</a>
+                <a href="https://www.facebook.com/UnboxYourself1" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Facebook ↗</a>
             </div>
             <div
                 style={{
@@ -1132,7 +1144,7 @@ function ContactFooter() {
                 }}
             >
                 <span>© 2026 Unbox · Пространство для практики</span>
-                <span>Батуми · Грузия · MMXXVI</span>
+                <span>Батуми · Грузия</span>
             </div>
         </footer>
     );
@@ -1162,7 +1174,7 @@ function SpecialistRoute({ onReset }: { onReset: () => void }) {
             <main>
                 <section style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(56px, 8vw, 112px) clamp(16px, 4vw, 32px)' }}>
                     <div style={{ ...MONO_LABEL, marginBottom: 32 }}>
-                        Издание 01 · Портал специалиста
+                        Портал специалиста
                     </div>
                     <h1
                         style={{

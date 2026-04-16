@@ -160,6 +160,13 @@ ssh root@138.68.111.248 "rm -rf /var/www/unbox/dist && mv /var/www/unbox/dist-ba
 - Кофе Меама: 3₾/капсула
 - Курсы обмена: USD=2.7, EUR=2.95, RUB=0.03
 
+## Контакты и соцсети Unbox
+- Почта: unbox.psy@gmail.com
+- Телефон: +995 599 324 668 (Telegram, WhatsApp)
+- Telegram: @UnboxCenter (https://t.me/UnboxCenter)
+- Instagram: https://www.instagram.com/unbox.center/
+- Facebook: https://www.facebook.com/UnboxYourself1
+
 ## Тестовые аккаунты (prod)
 - Owner: koren.nikolas@gmail.com (Google OAuth)
 - Бета: admin@unbox.com / admin123

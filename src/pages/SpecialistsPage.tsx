@@ -13,7 +13,6 @@ const FORMAT_FILTERS = [
     { key: 'all', label: 'Все' },
     { key: 'ONLINE', label: 'Онлайн' },
     { key: 'OFFLINE_ROOM', label: 'Кабинет' },
-    { key: 'OFFLINE_CAPSULE', label: 'Капсула' },
 ];
 
 const glassPanel: React.CSSProperties = {

@@ -165,7 +165,7 @@ export function AdminKnowledgeBase() {
                             <ul className="space-y-2.5">
                                 <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-300 mt-1.5 flex-shrink-0" /><strong>Минималка:</strong> 1 час (60 мин). Шаг тарификации: 30 мин.</li>
                                 <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-300 mt-1.5 flex-shrink-0" /><strong>Правило "55+5":</strong> 55 мин работы + 5 мин буфер для проветривания перед следующим специалистом.</li>
-                                <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-300 mt-1.5 flex-shrink-0" /><strong>Overstay (задержка):</strong> Если задержка {'>'}10 мин, админ добавляет 30 мин к счету. Продление возможно ТОЛЬКО если после нет другой брони.</li>
+                                <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-300 mt-1.5 flex-shrink-0" /><strong>Overstay (задержка):</strong> Если задержка {'>'}5 мин, админ добавляет 30 мин к счету. Продление возможно ТОЛЬКО если после нет другой брони.</li>
                             </ul>
                         </div>
                         <div>
@@ -267,14 +267,26 @@ export function AdminKnowledgeBase() {
                         <p className="text-[13px] text-unbox-grey mb-2">Абонемент дает гарантированную скидку и фиксированный пакет часов. При покупке абонемента часы списываются в момент подтверждения брони.</p>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[13px]">
+                            {/* Пробный */}
+                            <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-purple-200"></div>
+                                <h4 className="font-bold text-unbox-dark mb-1">Пробный</h4>
+                                <div className="text-purple-700 font-bold mb-3">70 GEL <span className="text-unbox-grey text-xs font-normal">/ 14 дней</span></div>
+                                <ul className="space-y-1 text-unbox-grey">
+                                    <li><strong>Кабинет:</strong> 4 часа</li>
+                                    <li><strong>Капсула:</strong> 1 час</li>
+                                    <li><strong>Формат:</strong> Индивидуальный</li>
+                                </ul>
+                            </div>
+
                             {/* Тёплый старт */}
                             <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-purple-300"></div>
                                 <h4 className="font-bold text-unbox-dark mb-1">Тёплый старт</h4>
                                 <div className="text-purple-700 font-bold mb-3">180 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
                                 <ul className="space-y-1 text-unbox-grey">
-                                    <li><strong>Часов:</strong> 10 часов</li>
-                                    <li><strong>Скидка:</strong> 10%</li>
+                                    <li><strong>Кабинет:</strong> 10 часов</li>
+                                    <li><strong>Капсула:</strong> 4 часа</li>
                                     <li><strong>Формат:</strong> Индивидуальный</li>
                                 </ul>
                             </div>
@@ -283,35 +295,25 @@ export function AdminKnowledgeBase() {
                             <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-purple-400"></div>
                                 <h4 className="font-bold text-unbox-dark mb-1">Регулярный практик</h4>
-                                <div className="text-purple-700 font-bold mb-3">340 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
+                                <div className="text-purple-700 font-bold mb-3">350 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
                                 <ul className="space-y-1 text-unbox-grey">
-                                    <li><strong>Часов:</strong> 20 часов</li>
-                                    <li><strong>Скидка:</strong> 15%</li>
+                                    <li><strong>Кабинет:</strong> 20 часов</li>
+                                    <li><strong>Капсула:</strong> 6 часов</li>
                                     <li><strong>Формат:</strong> Индивидуальный</li>
-                                    <li className="text-purple-600 mt-2 text-[12px]">✨ 1 бесплатный перенос</li>
                                 </ul>
                             </div>
 
                             {/* Профи+ */}
-                            <div className="bg-white p-4 rounded-xl border border-purple-200 shadow-sm relative overflow-hidden md:col-span-2 shadow-purple-900/5">
+                            <div className="bg-white p-4 rounded-xl border border-purple-200 shadow-sm relative overflow-hidden shadow-purple-900/5">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-purple-600"></div>
-                                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                                    <div>
-                                        <h4 className="font-bold text-unbox-dark mb-1">Профи+</h4>
-                                        <div className="text-purple-700 font-bold mb-3">640 GEL <span className="text-unbox-grey text-xs font-normal">/ 45 дней</span></div>
-                                        <ul className="space-y-1 text-unbox-grey">
-                                            <li><strong>Часов:</strong> 40 часов <span className="text-purple-600 font-bold">(+2 бонусных)</span></li>
-                                            <li><strong>Скидка:</strong> 20%</li>
-                                            <li><strong>Формат:</strong> Инд. и Групповой</li>
-                                        </ul>
-                                    </div>
-                                    <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-[12px] space-y-1.5 min-w-[200px]">
-                                        <p className="font-bold text-purple-900 mb-1">Привилегии:</p>
-                                        <p className="flex items-center gap-1.5"><span className="text-purple-500">✨</span> Приоритетное бронирование</p>
-                                        <p className="flex items-center gap-1.5"><span className="text-purple-500">✨</span> Внеурочный доступ (капсула)</p>
-                                        <p className="flex items-center gap-1.5"><span className="text-purple-500">✨</span> Рекомендуемый специалист</p>
-                                    </div>
-                                </div>
+                                <h4 className="font-bold text-unbox-dark mb-1">Профи+</h4>
+                                <div className="text-purple-700 font-bold mb-3">650 GEL <span className="text-unbox-grey text-xs font-normal">/ 45 дней</span></div>
+                                <ul className="space-y-1 text-unbox-grey">
+                                    <li><strong>Кабинет:</strong> 40 часов</li>
+                                    <li><strong>Капсула:</strong> 10 часов</li>
+                                    <li><strong>Формат:</strong> Инд. и Групповой</li>
+                                    <li className="text-purple-600 mt-2 text-[12px]">✨ Приоритетное бронирование</li>
+                                </ul>
                             </div>
 
                             {/* Групповой мастер */}
@@ -320,11 +322,10 @@ export function AdminKnowledgeBase() {
                                 <div className="flex justify-between items-start">
                                     <div>
                                         <h4 className="font-bold text-unbox-dark mb-1">Групповой мастер</h4>
-                                        <div className="text-pink-600 font-bold mb-3">420 GEL <span className="text-unbox-grey text-xs font-normal">/ 30 дней</span></div>
+                                        <div className="text-pink-600 font-bold mb-3">450 GEL <span className="text-unbox-grey text-xs font-normal">/ 45 дней</span></div>
                                         <ul className="space-y-1 text-unbox-grey">
-                                            <li><strong>Гостей:</strong> Групповой (только Кабинет)</li>
-                                            <li><strong>Часов:</strong> 16 часов</li>
-                                            <li><strong>Скидка:</strong> 25%</li>
+                                            <li><strong>Групповой:</strong> 20 часов</li>
+                                            <li><strong>Индивидуальный:</strong> 4 часа</li>
                                         </ul>
                                     </div>
                                     <div className="bg-pink-50 text-pink-700 px-3 py-1.5 rounded-lg text-[11px] font-bold border border-pink-100">

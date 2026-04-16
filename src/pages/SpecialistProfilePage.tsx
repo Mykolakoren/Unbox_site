@@ -125,7 +125,7 @@ export function SpecialistProfilePage() {
                             ← К СПИСКУ СПЕЦИАЛИСТОВ
                         </Link>
                         <span style={{ color: GH.ink30 }}>
-                            UNBOX · GRID HOUSE · ЧЕРНОВИК
+                            UNBOX · СПЕЦИАЛИСТ
                         </span>
                     </div>
 
@@ -468,7 +468,7 @@ export function SpecialistProfilePage() {
                         flexWrap: 'wrap',
                         gap: '16px',
                     }}>
-                        <span>GRID HOUSE · НАПРАВЛЕНИЕ A · ЭКСПЕРИМЕНТ</span>
+                        <span>UNBOX · ПРОФИЛЬ СПЕЦИАЛИСТА</span>
                         <Link
                             to={`/specialists/${id}`}
                             style={{
@@ -620,7 +620,7 @@ export function SpecialistProfilePage() {
                             flexWrap: 'wrap',
                         }}
                     >
-                        <span>GRID HOUSE ЧЕРНОВИК · НАПРАВЛЕНИЕ A · ЭКСПЕРИМЕНТ</span>
+                        <span>UNBOX · СПЕЦИАЛИСТ</span>
                         <Link
                             to={`/specialists/${id}`}
                             style={{
