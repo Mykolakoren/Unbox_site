@@ -17,7 +17,7 @@ import {
 import { subDays, isAfter } from 'date-fns';
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import type { User } from '../../store/types';
+import type { User, Transaction } from '../../store/types';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 type PipelineStage = 'new' | 'active' | 'sleeping' | 'vip' | 'partner' | 'bad_client';
@@ -105,8 +105,12 @@ export function AdminCrm() {
         };
         clientStages.forEach((stage) => { stageCounts[stage]++; });
 
+        // Доход = входящие деньги (не refund/expense). Только реальные платежи (не внутренние переводы с баланса).
+        const incomeTypes: Transaction['type'][] = ['deposit', 'subscription_purchase', 'booking_payment', 'manual_correction'];
         const recentTransactions = transactions.filter(
-            (t) => isAfter(new Date(t.date), thirtyDaysAgo) && ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod)
+            (t) => isAfter(new Date(t.date), thirtyDaysAgo)
+                && ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod)
+                && incomeTypes.includes(t.type)
         );
         const monthlyRevenue = recentTransactions.reduce((sum, t) => sum + t.amount, 0);
 
@@ -275,7 +279,7 @@ export function AdminCrm() {
             </div>
 
             {/* Pipeline Kanban */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6 gap-3">
                 {pipeline.map(({ stage, clients: stageClients }) => {
                     const config = STAGE_CONFIG[stage];
                     const isOver = dragOverStage === stage;

@@ -415,7 +415,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
         color: GH.ink60,
     };
 
-    const sortBtn = (mode: SortMode, label: string): React.CSSProperties => ({
+    const sortBtn = (mode: SortMode, _label: string): React.CSSProperties => ({
         fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
         padding: '6px 10px', border: `1px solid ${sortMode === mode ? GH.ink : GH.ink10}`,
         background: sortMode === mode ? GH.ink : 'transparent',
@@ -560,7 +560,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
             ) : narrow ? (
                 /* ── Mobile compact cards ── */
                 <div style={{ borderTop: `2px solid ${GH.ink}` }}>
-                    {sorted.map((user, idx) => (
+                    {sorted.map((user) => (
                         <Link
                             key={user.email}
                             to={`/admin/users/${encodeURIComponent(user.email)}`}

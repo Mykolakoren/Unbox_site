@@ -1362,7 +1362,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
     const allRows = [...p.upcomingGroups, ...p.pastGroups];
 
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh', overflowX: 'hidden' }}>
             {/* ── Head ── */}
             <div style={{ padding: '48px clamp(16px, 4vw, 32px) 0' }}>
                 <div style={ghsMono}>CRM · Сессии</div>
@@ -1400,15 +1400,24 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         завершено · {format(p.currentMonth, 'LLLL', { locale: ru })}
                     </div>
                 </div>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%', minWidth: 0 }}>
                     {[
-                        { label: 'Запланировано', value: p.stats.planned },
-                        { label: 'Не оплачено', value: p.stats.unpaidCount, color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel },
-                        { label: 'Получено', value: p.stats.revenueLabel, color: GH.accent, sub: p.stats.revenueGel },
+                        { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false },
+                        { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false },
+                        { label: 'Получено', value: p.stats.revenueLabel, color: GH.accent, sub: p.stats.revenueGel, multiline: true },
                     ].map(kpi => (
-                        <div key={kpi.label} style={{ textAlign: 'right' as const }}>
-                            <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink, whiteSpace: 'nowrap' }}>
-                                {kpi.value}
+                        <div key={kpi.label} style={{ textAlign: 'right' as const, minWidth: 0, maxWidth: '100%' }}>
+                            <div style={{
+                                fontSize: kpi.multiline && ghNarrow ? 14 : 18,
+                                fontWeight: 700,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: kpi.color || GH.ink,
+                                // On narrow screens let the multi-currency label wrap each currency to its own line
+                                whiteSpace: kpi.multiline && ghNarrow ? ('pre-line' as const) : ('normal' as const),
+                                wordBreak: 'break-word' as const,
+                                lineHeight: 1.25,
+                            }}>
+                                {kpi.multiline && ghNarrow ? kpi.value.split(' · ').join('\n') : kpi.value}
                             </div>
                             <div style={{ ...ghsMono, fontSize: 9 }}>{kpi.label}</div>
                             {kpi.sub && <div style={{ ...ghsMono, fontSize: 9, color: kpi.color || GH.ink30 }}>{kpi.sub}</div>}

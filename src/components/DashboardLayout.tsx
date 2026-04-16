@@ -84,7 +84,6 @@ function GridHouseDashboardShell({
     currentUser: any;
 }) {
     const location = useLocation();
-    const navigate = useNavigate();
     const logout = useUserStore(s => s.logout);
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 960);
     const [mobileOpen, setMobileOpen] = useState(false);
@@ -122,7 +121,9 @@ function GridHouseDashboardShell({
                 style={{
                     width: 240,
                     minWidth: 240,
-                    background: GH.ink5,
+                    // Opaque base (GH.paper) + subtle ink5 tint via layered gradient —
+                    // prevents content bleed-through when sidebar slides over main on mobile.
+                    background: `linear-gradient(${GH.ink5}, ${GH.ink5}), ${GH.paper}`,
                     borderRight: hairline,
                     position: narrow ? 'fixed' : 'sticky',
                     top: 0,
@@ -134,6 +135,7 @@ function GridHouseDashboardShell({
                     zIndex: 50,
                     display: 'flex',
                     flexDirection: 'column',
+                    boxShadow: narrow && mobileOpen ? '2px 0 24px rgba(0,0,0,0.12)' : 'none',
                 }}
             >
                 {/* Brand */}

@@ -7,10 +7,14 @@ import clsx from 'clsx';
 import { RESOURCES } from '../../utils/data';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { WaitlistEntry } from '../../store/types';
+import { toast } from 'sonner';
+import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 
 export function AdminWaitlist() {
     const gridHouse = useDesignFlag();
     const { waitlist, removeFromWaitlist, users } = useUserStore();
+
+    const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; entryId: string }>({ open: false, entryId: '' });
 
     // Helper to get user name
     const getUserName = (userId: string) => {
@@ -18,22 +22,47 @@ export function AdminWaitlist() {
         return u ? u.name : userId;
     };
 
-    const handleNotify = (entryId: string) => {
-        // Mock notification
-        alert(`Уведомление отправлено пользователю! (ID запроса: ${entryId})`);
+    const handleNotify = (_entryId: string) => {
+        // TODO: implement real notification via backend
+        toast.info('Функция уведомления пока в разработке');
     };
 
-    if (gridHouse) return (
-        <GridHouseWaitlist
-            waitlist={waitlist}
-            getUserName={getUserName}
-            handleNotify={handleNotify}
-            removeFromWaitlist={removeFromWaitlist}
+    const handleDeleteRequest = (entryId: string) => {
+        setDeleteConfirm({ open: true, entryId });
+    };
+
+    const handleDeleteConfirm = () => {
+        removeFromWaitlist(deleteConfirm.entryId);
+        toast.success('Запись удалена из листа ожидания');
+    };
+
+    const deleteModal = (
+        <ConfirmationModal
+            isOpen={deleteConfirm.open}
+            onClose={() => setDeleteConfirm({ open: false, entryId: '' })}
+            onConfirm={handleDeleteConfirm}
+            title="Удалить из листа ожидания"
+            message="Вы уверены? Эту запись нельзя будет восстановить."
+            isDestructive
+            confirmLabel="Удалить"
         />
+    );
+
+    if (gridHouse) return (
+        <>
+            {deleteModal}
+            <GridHouseWaitlist
+                waitlist={waitlist}
+                getUserName={getUserName}
+                handleNotify={handleNotify}
+                removeFromWaitlist={handleDeleteRequest}
+            />
+        </>
     );
 
     return (
         <div className="space-y-6">
+            {deleteModal}
             <div>
                 <h1 className="text-2xl font-bold">Лист ожидания</h1>
                 <p className="text-unbox-grey">Пользователи, ожидающие освобождения слотов</p>
@@ -94,7 +123,7 @@ export function AdminWaitlist() {
                                                 <Bell size={18} />
                                             </button>
                                             <button
-                                                onClick={() => removeFromWaitlist(entry.id)}
+                                                onClick={() => handleDeleteRequest(entry.id)}
                                                 className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                                 title="Удалить"
                                             >
@@ -137,7 +166,7 @@ interface GHWaitlistProps {
     waitlist: WaitlistEntry[];
     getUserName: (userId: string) => string;
     handleNotify: (entryId: string) => void;
-    removeFromWaitlist: (id: string) => Promise<void>;
+    removeFromWaitlist: (id: string) => void | Promise<void>;
 }
 
 function GridHouseWaitlist({
@@ -329,7 +358,7 @@ function GHWRow({
     index: number;
     getUserName: (userId: string) => string;
     handleNotify: (entryId: string) => void;
-    removeFromWaitlist: (id: string) => Promise<void>;
+    removeFromWaitlist: (id: string) => void | Promise<void>;
 }) {
     const resourceName = RESOURCES.find((r) => r.id === entry.resourceId)?.name || entry.resourceId;
 

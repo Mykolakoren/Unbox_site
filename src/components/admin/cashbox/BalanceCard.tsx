@@ -9,7 +9,7 @@ interface Props {
     periodLabel: string;
 }
 
-export function BalanceCard({ filteredTransactions, periodLabel }: Props) {
+export function BalanceCard({ filteredTransactions }: Props) {
     const { balances } = useCashboxStore();
 
     const stats = useMemo(() => {
