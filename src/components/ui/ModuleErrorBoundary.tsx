@@ -25,6 +25,30 @@ export class ModuleErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error(`[${this.props.moduleName || 'Module'}] Error:`, error, errorInfo);
     this.setState({ componentStack: errorInfo.componentStack ?? null });
+
+    // ── Stale-tab auto-recovery ──
+    // When we ship a new bundle, rsync --delete removes the old chunks. Any
+    // tab opened before the deploy still has the previous index.js with
+    // references to those now-gone chunk filenames. The first lazy import
+    // (e.g. clicking on /crm) then fails with "Failed to fetch dynamically
+    // imported module". We can detect that shape of error and force-reload,
+    // which pulls the fresh index.js with the current chunk names.
+    const msg = (error?.message || '').toLowerCase();
+    const isChunkLoad =
+      msg.includes('failed to fetch dynamically imported module') ||
+      msg.includes('loading chunk') ||
+      msg.includes('importing a module script failed') ||
+      (error as any)?.name === 'ChunkLoadError';
+
+    if (isChunkLoad) {
+      // Guard against an infinite loop: only reload once per URL.
+      const flag = `unbox_chunk_retry_${window.location.pathname}`;
+      if (!sessionStorage.getItem(flag)) {
+        sessionStorage.setItem(flag, '1');
+        // Small timeout so the state update above has a chance to flush.
+        setTimeout(() => window.location.reload(), 250);
+      }
+    }
   }
 
   handleCopy = () => {
