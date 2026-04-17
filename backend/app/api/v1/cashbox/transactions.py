@@ -130,6 +130,24 @@ def create_transaction(
         if client:
             client_name = client.name
 
+    # ── Optionally credit user balance (Excel #43) ──
+    # Only for income transactions with a client selected. We try to resolve
+    # the client_id as either a User UUID or an email and top up User.balance.
+    credited_user_id: Optional[str] = None
+    target_user: Optional[User] = None
+    if payload.credit_user_balance and payload.type == "income" and payload.client_id:
+        target_user = _resolve_user_from_client_id(session, payload.client_id)
+        if not target_user:
+            raise HTTPException(
+                400,
+                "Клиент не найден среди пользователей — нельзя зачислить на баланс. "
+                "Выберите клиента из списка зарегистрированных пользователей.",
+            )
+        credited_user_id = str(target_user.id)
+        # Prefer the user's canonical name for the cash-box record
+        if not client_name and target_user.name:
+            client_name = target_user.name
+
     tx = CashboxTransaction(
         type=payload.type,
         amount=payload.amount,
@@ -143,14 +161,36 @@ def create_transaction(
         admin_name=current_user.name or "",
         client_id=payload.client_id,
         client_name=client_name,
+        credited_user_id=credited_user_id,
     )
     session.add(tx)
+
+    if target_user is not None:
+        target_user.balance = float(target_user.balance or 0) + float(payload.amount)
+        session.add(target_user)
+
     session.commit()
     session.refresh(tx)
 
     result = CashboxTransactionRead.model_validate(tx)
     result.category_name = cat_name
     return result
+
+
+def _resolve_user_from_client_id(session: Session, client_id: str) -> Optional[User]:
+    """Treat client_id as either a User.id (UUID) or a User.email and fetch."""
+    if not client_id:
+        return None
+    # Try UUID path first
+    try:
+        from uuid import UUID as _UUID
+        u = session.get(User, _UUID(client_id))
+        if u:
+            return u
+    except (ValueError, AttributeError):
+        pass
+    # Fallback: email
+    return session.exec(select(User).where(User.email == client_id)).first()
 
 
 @router.delete("/transactions/{transaction_id}")
@@ -170,6 +210,17 @@ def delete_transaction(
 
     if current_user.role not in ("owner", "senior_admin") and not is_today:
         raise HTTPException(403, "Удаление прошлых транзакций требует подтверждения старшего администратора")
+
+    # If this transaction credited a user balance, reverse the credit.
+    if tx.credited_user_id:
+        try:
+            from uuid import UUID as _UUID
+            target = session.get(User, _UUID(tx.credited_user_id))
+        except (ValueError, AttributeError):
+            target = None
+        if target:
+            target.balance = float(target.balance or 0) - float(tx.amount)
+            session.add(target)
 
     session.delete(tx)
     session.commit()
@@ -201,6 +252,11 @@ def update_transaction(
     allowed = {"type", "amount", "currency", "payment_method", "category_id",
                "description", "branch", "date", "client_id", "client_name"}
 
+    # Snapshot pre-change state to rebalance a credited user afterwards.
+    old_amount = float(tx.amount or 0)
+    old_type = tx.type
+    old_credited_user_id = tx.credited_user_id
+
     for key, value in payload.items():
         if key in allowed:
             if key == "date" and value:
@@ -217,6 +273,29 @@ def update_transaction(
         client = session.get(TherapistClient, payload["client_id"])
         if client:
             tx.client_name = client.name
+
+    # If this transaction previously credited a user, and the amount/type has
+    # changed, compensate the user balance accordingly. We don't support moving
+    # a credit between users via edit — changing client_id on a credited tx
+    # keeps the original credit pinned to the original user; admins should
+    # delete + recreate to reassign.
+    if old_credited_user_id:
+        try:
+            from uuid import UUID as _UUID
+            target = session.get(User, _UUID(old_credited_user_id))
+        except (ValueError, AttributeError):
+            target = None
+        if target:
+            # If the type flipped off income, reverse the old credit entirely.
+            # Otherwise apply the delta (new_amount − old_amount).
+            if tx.type != "income":
+                delta = -old_amount
+                tx.credited_user_id = None  # credit no longer applies
+            else:
+                delta = float(tx.amount or 0) - old_amount
+            if delta != 0:
+                target.balance = float(target.balance or 0) + delta
+                session.add(target)
 
     # Resolve category name for response
     cat_name = None

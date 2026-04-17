@@ -32,6 +32,10 @@ export interface CashboxTransactionCreate {
     date?: string;
     client_id?: string;
     client_name?: string;
+    /** If true, tops up User.balance by `amount` and records credited_user_id
+     *  (reversible on delete/edit). Backend ignores the flag unless
+     *  type=income and client_id is set. */
+    credit_user_balance?: boolean;
 }
 
 export interface ExpenseCategory {

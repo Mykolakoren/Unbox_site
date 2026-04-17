@@ -178,6 +178,18 @@ def migrate_add_columns():
             except Exception:
                 conn.rollback()  # reset transaction state before next iteration
 
+    # cashbox_transactions: credited_user_id — marks transactions that topped up
+    # a client's balance, so we can reverse the credit on delete/edit.
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text("ALTER TABLE cashbox_transactions ADD COLUMN IF NOT EXISTS credited_user_id VARCHAR"))
+            else:
+                conn.execute(text("ALTER TABLE cashbox_transactions ADD COLUMN credited_user_id VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     # resource table: services column (JSONB in Postgres, TEXT in SQLite)
     with engine.connect() as conn:
         try:

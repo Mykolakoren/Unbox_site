@@ -66,6 +66,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [showClientDropdown, setShowClientDropdown] = useState(false);
     const clientInputRef = useRef<HTMLInputElement>(null);
     const [bookingUsers, setBookingUsers] = useState<{id: string; name: string; email: string}[]>([]);
+    // Topping up client balance (Excel #43) — default on for income with a selected client
+    const [creditUserBalance, setCreditUserBalance] = useState(true);
 
     // Fetch booking Users (not CRM clients — those are specialist-only)
     useEffect(() => {
@@ -129,6 +131,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     date: dateValue,
                     client_id: (type === 'income' && clientId) ? clientId : undefined,
                     client_name: (type === 'income' && clientId) ? bookingUsers.find(c => c.id === clientId)?.name : undefined,
+                    credit_user_balance: (type === 'income' && !!clientId && creditUserBalance),
                 } as any);
                 toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
             }
@@ -368,6 +371,22 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                     >
                                         <X size={14} />
                                     </button>
+                                )}
+                                {/* Credit-to-balance toggle (Excel #43) */}
+                                {clientId && (
+                                    <label className="mt-2 flex items-start gap-2 cursor-pointer select-none text-xs">
+                                        <input
+                                            type="checkbox"
+                                            checked={creditUserBalance}
+                                            onChange={e => setCreditUserBalance(e.target.checked)}
+                                            className="mt-0.5 accent-unbox-green cursor-pointer"
+                                        />
+                                        <span className={creditUserBalance ? 'text-emerald-700' : 'text-gray-500'}>
+                                            {creditUserBalance
+                                                ? 'Зачислить сумму на баланс клиента (рекомендуется для пополнений)'
+                                                : 'Не зачислять на баланс — это прочий приход (напр., штраф, компенсация)'}
+                                        </span>
+                                    </label>
                                 )}
                                 {showClientDropdown && !clientId && (
                                     <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
