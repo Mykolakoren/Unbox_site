@@ -1,7 +1,8 @@
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { SidebarLayout } from './SidebarLayout';
-import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut } from 'lucide-react';
+import { QuickActionsFab, type QuickAction } from './ui/QuickActionsFab';
+import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut, Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmAccessToggle } from './CrmAccessToggle';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
@@ -47,12 +48,19 @@ export function DashboardLayout() {
         ...(isAdmin ? [{ icon: ShieldCheck, label: 'Админ-панель', path: '/admin' }] : []),
     ];
 
+    const quickActions: QuickAction[] = [
+        { label: 'Забронировать кабинет', sub: 'Быстрая бронь', path: '/booking', icon: Plus },
+        { label: 'Мои бронирования', sub: 'Ближайшие и история', path: '/dashboard/bookings', icon: Calendar },
+        { label: 'Найти специалиста', sub: 'Каталог и запись', path: '/specialists', icon: Search },
+    ];
+
     // ── Grid House shell ─────────────────────────────────────────────
     if (isGridHouse) {
         return (
             <GridHouseDashboardShell
                 navItems={navItems}
                 currentUser={currentUser}
+                quickActions={quickActions}
             />
         );
     }
@@ -61,6 +69,7 @@ export function DashboardLayout() {
     return (
         <SidebarLayout navItems={navItems} customTopContent={<CrmAccessToggle />}>
             <Outlet />
+            <QuickActionsFab actions={quickActions} />
         </SidebarLayout>
     );
 }
@@ -79,9 +88,11 @@ const ghMono: React.CSSProperties = {
 function GridHouseDashboardShell({
     navItems,
     currentUser,
+    quickActions,
 }: {
     navItems: Array<{ path: string; label: string; icon: React.ElementType; exact?: boolean }>;
     currentUser: any;
+    quickActions: QuickAction[];
 }) {
     const location = useLocation();
     const logout = useUserStore(s => s.logout);
@@ -267,6 +278,7 @@ function GridHouseDashboardShell({
                     <Outlet />
                 </main>
             </div>
+            <QuickActionsFab actions={quickActions} />
         </div>
     );
 }

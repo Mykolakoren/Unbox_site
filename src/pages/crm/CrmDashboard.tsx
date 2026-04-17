@@ -1182,19 +1182,34 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     gap: '0',
                     border: `1px solid ${GH.ink10}`,
                 }}>
-                    {[
+                    {([
                         { label: 'Добавить клиента', sub: 'Создать новую карточку', path: '/crm/clients' },
                         { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions' },
                         { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard' },
-                    ].map((action, idx) => (
+                        {
+                            label: 'Открыть Google Calendar',
+                            sub: calendarIdSaved ? 'Ваш личный календарь' : 'Google Calendar',
+                            // If the specialist has set their own calendarId, open it directly;
+                            // otherwise open the generic Google Calendar landing page.
+                            href: calendarIdSaved
+                                ? `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(calendarIdSaved)}`
+                                : 'https://calendar.google.com/calendar/u/0/r',
+                        },
+                    ] as Array<{ label: string; sub: string; path?: string; href?: string }>).map((action, idx, arr) => (
                         <button
-                            key={action.path}
-                            onClick={() => navigate(action.path)}
+                            key={action.path ?? action.href ?? idx}
+                            onClick={() => {
+                                if (action.href) {
+                                    window.open(action.href, '_blank', 'noopener,noreferrer');
+                                } else if (action.path) {
+                                    navigate(action.path);
+                                }
+                            }}
                             style={{
                                 padding: '28px 24px',
                                 background: GH.paper,
                                 border: 'none',
-                                borderRight: idx < 2 ? `1px solid ${GH.ink10}` : 'none',
+                                borderRight: idx < arr.length - 1 ? `1px solid ${GH.ink10}` : 'none',
                                 textAlign: 'left',
                                 cursor: 'pointer',
                                 transition: 'background 0.12s',

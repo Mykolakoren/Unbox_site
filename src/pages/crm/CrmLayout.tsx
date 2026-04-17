@@ -1,6 +1,7 @@
 import { Outlet, useNavigate, Navigate, useLocation, Link } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { SidebarLayout } from '../../components/SidebarLayout';
+import { QuickActionsFab, type QuickAction } from '../../components/ui/QuickActionsFab';
 import {
     Settings,
     ArrowLeft,
@@ -14,6 +15,9 @@ import {
     Clock,
     UserCircle,
     Shield,
+    UserPlus,
+    Plus,
+    ExternalLink,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
@@ -76,6 +80,29 @@ export function CrmLayout() {
     const hasToken = Boolean(localStorage.getItem('token'));
     const [accessStatus, setAccessStatus] = useState<CrmAccessStatus | null>(null);
     const [accessLoading, setAccessLoading] = useState(true);
+    const [calendarId, setCalendarId] = useState<string | null>(null);
+
+    // Load GCal id for the Quick Actions FAB
+    useEffect(() => {
+        if (!currentUser) return;
+        crmApi.getSettings()
+            .then(s => setCalendarId(s.calendarId ?? null))
+            .catch(() => setCalendarId(null));
+    }, [currentUser]);
+
+    const quickActions: QuickAction[] = [
+        { label: 'Добавить клиента', sub: 'Создать карточку', path: '/crm/clients', icon: UserPlus },
+        { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions', icon: Calendar },
+        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/booking', icon: Plus },
+        {
+            label: 'Открыть Google Calendar',
+            sub: calendarId ? 'Ваш личный календарь' : 'Google Calendar',
+            href: calendarId
+                ? `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(calendarId)}`
+                : 'https://calendar.google.com/calendar/u/0/r',
+            icon: ExternalLink,
+        },
+    ];
 
     useEffect(() => {
         if (!hasToken) navigate('/login');
@@ -153,13 +180,14 @@ export function CrmLayout() {
     // Flag via useDesignFlag (?design=grid). Full rollback: remove this block
     // and the GridHouseCrmShell component below, plus the imports.
     if (useDesignFlag()) {
-        return <GridHouseCrmShell isAdmin={isAdmin} currentUser={currentUser} />;
+        return <GridHouseCrmShell isAdmin={isAdmin} currentUser={currentUser} quickActions={quickActions} />;
     }
 
     return (
         <SidebarLayout navItems={sidebarNavItems} customBottomContent={customBottomContent}>
             <CrmTopTabs />
             <Outlet />
+            <QuickActionsFab actions={quickActions} />
         </SidebarLayout>
     );
 }
@@ -182,7 +210,7 @@ const GH_NAV = [
     { label: 'Настройки',     path: '/crm/settings' },
 ];
 
-function GridHouseCrmShell({ isAdmin, currentUser }: { isAdmin: boolean; currentUser: User }) {
+function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: boolean; currentUser: User; quickActions: QuickAction[] }) {
     const location = useLocation();
     const navigate = useNavigate();
     const logout = useUserStore(s => s.logout);
@@ -474,6 +502,7 @@ function GridHouseCrmShell({ isAdmin, currentUser }: { isAdmin: boolean; current
                     <Outlet />
                 </div>
             </main>
+            <QuickActionsFab actions={quickActions} />
         </div>
     );
 }
