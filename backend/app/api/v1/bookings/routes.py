@@ -173,6 +173,58 @@ def read_public_bookings(
     return [enrich_booking_status(b) for b in bookings]
 
 
+# ─── External events from Google Calendar (Excel #15, #32, #38) ──────────────
+# Pull-side of the two-way GCal sync. The push side already runs: every
+# confirmed booking creates an event in the cabinet's Google Calendar.
+# This endpoint returns manual events a cleaner/phone-booking admin added
+# straight in GCal so the chessboard can render them as "busy".
+
+@router.get("/external-events")
+def read_external_events(
+    resource_id: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    session: Session = Depends(deps.get_session),
+) -> Any:
+    """Return Google Calendar events for a specific resource in a time window.
+    Public — no auth required so the checkout chessboard can see them."""
+    from datetime import timezone as _tz
+
+    # Default window: now → now + 14 days
+    try:
+        t_min = datetime.fromisoformat(date_from) if date_from else datetime.now()
+    except ValueError:
+        t_min = datetime.now()
+    try:
+        t_max = datetime.fromisoformat(date_to) if date_to else (t_min + timedelta(days=14))
+    except ValueError:
+        t_max = t_min + timedelta(days=14)
+
+    # RFC3339 for the Google API — pin to UTC if naive
+    def _rfc3339(d: datetime) -> str:
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_tz.utc)
+        return d.isoformat()
+
+    # Skip events that we created ourselves — those are Bookings, already
+    # sourced by /bookings/public. Keeping them would double-render slots.
+    our_event_ids = {
+        b.gcal_event_id for b in session.exec(
+            select(Booking)
+            .where(Booking.resource_id == resource_id)
+            .where(Booking.status == "confirmed")
+            .where(Booking.gcal_event_id.is_not(None))  # type: ignore
+        ).all() if b.gcal_event_id
+    }
+
+    events = gcal_service.list_events(
+        resource_id=resource_id,
+        time_min=_rfc3339(t_min),
+        time_max=_rfc3339(t_max),
+    )
+    return [e for e in events if e.get('id') not in our_event_ids]
+
+
 # ─── Availability check ──────────────────────────────────────────────────────
 
 class SlotCheckItem(PydanticBaseModel):

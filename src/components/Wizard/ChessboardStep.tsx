@@ -130,15 +130,22 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [locationId, showAllLocations, bookingFormat, groupSize]);
 
-    // 2. Fetch External Events (Mock)
+    // 2. Fetch External Events from Google Calendar (real pull, 5-min cached)
     useEffect(() => {
-        // Collect events for all visible resources
-        let allEvents: ExternalEvent[] = [];
-        resources.forEach(r => {
-            const events = googleCalendarService.getEvents(r.id);
-            allEvents = [...allEvents, ...events];
+        let cancelled = false;
+        const dayStart = new Date(date);
+        dayStart.setHours(0, 0, 0, 0);
+        const fromISO = new Date(dayStart); fromISO.setDate(fromISO.getDate() - 1);
+        const toISO = new Date(dayStart); toISO.setDate(toISO.getDate() + 2);
+        Promise.all(
+            resources.map(r =>
+                googleCalendarService.fetchEvents(r.id, fromISO.toISOString(), toISO.toISOString())
+            )
+        ).then(results => {
+            if (cancelled) return;
+            setExternalEvents(results.flat());
         });
-        setExternalEvents(allEvents);
+        return () => { cancelled = true; };
     }, [resources, date]);
 
     // 3. Generate Time Slots (09:00 - 21:00)

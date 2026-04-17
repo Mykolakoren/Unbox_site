@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useUserStore } from '../store/userStore';
 import { Button } from '../components/ui/Button';
+import { PhoneInput } from '../components/ui/PhoneInput';
 import { Shield, User, Phone, Mail, Plus, Lock, Eye, EyeOff, Pencil, X, Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SubscriptionCard } from '../components/SubscriptionCard';
@@ -98,11 +99,10 @@ export function ProfilePage() {
                         <label className="block text-sm font-medium mb-2">Телефон</label>
                         <div className="relative">
                             <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
-                            <input
-                                type="tel"
+                            <PhoneInput
                                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                                value={currentUser.phone}
-                                onChange={(e) => updateUser({ phone: e.target.value })}
+                                value={currentUser.phone || ''}
+                                onChange={(v) => updateUser({ phone: v })}
                             />
                         </div>
                     </div>
@@ -748,11 +748,10 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
 
                 <div style={{ marginBottom: 20 }}>
                     <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>ТЕЛЕФОН</label>
-                    <input
-                        type="tel"
+                    <PhoneInput
                         style={ghpInput}
-                        value={currentUser.phone}
-                        onChange={(e) => updateUser({ phone: e.target.value })}
+                        value={currentUser.phone || ''}
+                        onChange={(v) => updateUser({ phone: v })}
                     />
                 </div>
 

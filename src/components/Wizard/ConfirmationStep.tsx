@@ -3,6 +3,7 @@ import { calculatePrice } from '../../utils/pricing';
 import { useUserStore } from '../../store/userStore';
 import { bookingsApi } from '../../api/bookings';
 import { Button } from '../ui/Button';
+import { PhoneInput } from '../ui/PhoneInput';
 import {
     CheckCircle,
     Download,
@@ -15,7 +16,6 @@ import {
     Repeat,
 } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
-import { googleCalendarService } from '../../services/googleCalendarMock';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { EXTRAS, RESOURCES } from '../../utils/data';
 import { useNavigate } from 'react-router-dom';
@@ -435,16 +435,9 @@ export function ConfirmationStep() {
                     crmClientId: selectedCrmClientId || undefined, // CRM client link
                 };
                 newBookings.push(bookingData);
-
-                if (effectiveUser) {
-                    // Sync to Google Calendar (Mock)
-                    await googleCalendarService.addEvent({
-                        resourceId: item.resourceId,
-                        start: item.startDateTime.toISOString(),
-                        end: item.endDateTime.toISOString(),
-                        title: `Бронь: ${effectiveUser.name} (${state.format})`
-                    });
-                }
+                // GCal sync is handled server-side: on booking confirm the
+                // backend calls gcal_service.create_event(). The old
+                // googleCalendarService.addEvent (mock) is gone.
             }
 
             if (newBookings.length > 0) {
@@ -713,7 +706,7 @@ export function ConfirmationStep() {
                         </div>
                         <div className="space-y-2">
                             <label htmlFor="guest-phone" className="text-sm font-medium text-unbox-dark">Телефон</label>
-                            <input id="guest-phone" type="tel" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="+995 555 00 00 00" />
+                            <PhoneInput id="guest-phone" value={guestPhone} onChange={setGuestPhone} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                         </div>
                         <div className="space-y-2">
                             <label htmlFor="guest-email" className="text-sm font-medium text-unbox-dark">Email *</label>

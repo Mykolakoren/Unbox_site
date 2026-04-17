@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { specialistsApi, type AvailableSlot, type AppointmentCreate } from '../../api/specialists';
 import { LOCATIONS } from '../../utils/data';
+import { PhoneInput } from '../ui/PhoneInput';
 import { ChevronLeft, ChevronRight, MapPin, Video, Loader2, Check, X } from 'lucide-react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -211,12 +212,10 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                             </div>
                             <div>
                                 <label className="block text-xs font-medium text-unbox-dark/60 mb-1">Телефон</label>
-                                <input
-                                    type="tel"
+                                <PhoneInput
                                     value={bookingForm.phone}
-                                    onChange={e => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                                    onChange={(v) => setBookingForm(f => ({ ...f, phone: v }))}
                                     className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/50"
-                                    placeholder="+995..."
                                 />
                             </div>
                             <div>

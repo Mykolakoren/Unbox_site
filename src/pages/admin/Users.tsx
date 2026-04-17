@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useUserStore, type User } from '../../store/userStore';
 import { Search, Edit, Shield, User as UserIcon, Plus, X, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { PhoneInput } from '../../components/ui/PhoneInput';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { TimelineList } from '../../components/Timeline/TimelineList';
@@ -275,12 +276,10 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Телефон</label>
-                            <input
-                                type="tel"
+                            <PhoneInput
                                 className="w-full px-4 py-2.5 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                 value={phone}
-                                onChange={e => setPhone(e.target.value)}
-                                placeholder="+995..."
+                                onChange={setPhone}
                             />
                         </div>
                         <div>

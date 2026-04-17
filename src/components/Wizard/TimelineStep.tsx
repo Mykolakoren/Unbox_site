@@ -39,10 +39,21 @@ export function TimelineStep() {
     const [waitlistSlot, setWaitlistSlot] = useState<string | null>(null);
 
     useEffect(() => {
-        if (resourceId) {
-            setExternalEvents(googleCalendarService.getEvents(resourceId));
-        }
-    }, [resourceId]);
+        if (!resourceId) return;
+        let cancelled = false;
+        // Pull real GCal events for the booked day ±1 (handles TZ edge cases).
+        const dayISO = new Date(date);
+        const fromISO = new Date(dayISO); fromISO.setDate(fromISO.getDate() - 1);
+        const toISO = new Date(dayISO); toISO.setDate(toISO.getDate() + 2);
+        googleCalendarService.fetchEvents(
+            resourceId,
+            fromISO.toISOString(),
+            toISO.toISOString(),
+        ).then(events => {
+            if (!cancelled) setExternalEvents(events);
+        });
+        return () => { cancelled = true; };
+    }, [resourceId, date]);
 
     // Generate slots 09:00 to 21:00 (last slot starts at 20:30)
     const slots = useMemo(() => {

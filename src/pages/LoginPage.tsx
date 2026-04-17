@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
+import { PhoneInput } from '../components/ui/PhoneInput';
 import { User, Lock, Phone, LogIn, Eye, EyeOff } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { TelegramLoginButton } from '../components/TelegramLoginButton';
@@ -234,13 +235,11 @@ export function LoginPage() {
                                 </label>
                                 <div className="relative">
                                     <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 text-unbox-grey" size={16} />
-                                    <input
-                                        type="tel"
+                                    <PhoneInput
                                         style={glassInput}
                                         className="w-full pl-10 pr-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/30 transition-all"
-                                        placeholder="+995 555 00 00 00"
                                         value={formData.phone}
-                                        onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                                        onChange={v => setFormData({ ...formData, phone: v })}
                                     />
                                 </div>
                             </div>
@@ -746,25 +745,46 @@ function GHField({
                 }}
             >
                 <div style={{ color: GH.ink30, marginRight: 12, display: 'flex' }}>{icon}</div>
-                <input
-                    type={type}
-                    value={value}
-                    required={required}
-                    placeholder={placeholder}
-                    onChange={(e) => onChange(e.target.value)}
-                    onFocus={() => setFocused(true)}
-                    onBlur={() => setFocused(false)}
-                    style={{
-                        flex: 1,
-                        border: 'none',
-                        outline: 'none',
-                        background: 'transparent',
-                        fontFamily: GH_SANS,
-                        fontSize: 16,
-                        color: GH.ink,
-                        padding: 0,
-                    }}
-                />
+                {type === 'tel' ? (
+                    <PhoneInput
+                        value={value}
+                        onChange={onChange}
+                        required={required}
+                        placeholder={placeholder}
+                        onFocus={() => setFocused(true)}
+                        onBlur={() => setFocused(false)}
+                        style={{
+                            flex: 1,
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            fontFamily: GH_SANS,
+                            fontSize: 16,
+                            color: GH.ink,
+                            padding: 0,
+                        }}
+                    />
+                ) : (
+                    <input
+                        type={type}
+                        value={value}
+                        required={required}
+                        placeholder={placeholder}
+                        onChange={(e) => onChange(e.target.value)}
+                        onFocus={() => setFocused(true)}
+                        onBlur={() => setFocused(false)}
+                        style={{
+                            flex: 1,
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            fontFamily: GH_SANS,
+                            fontSize: 16,
+                            color: GH.ink,
+                            padding: 0,
+                        }}
+                    />
+                )}
                 {trailing && <div style={{ marginLeft: 12 }}>{trailing}</div>}
             </div>
         </div>

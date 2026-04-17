@@ -184,6 +184,63 @@ class GoogleCalendarService:
         except Exception as e:
             logger.error(f"Google Calendar: Failed to delete event {event_id}: {e}")
 
+    def list_events(
+        self,
+        resource_id: str,
+        time_min: str,
+        time_max: str,
+    ) -> list[dict]:
+        """List events from the resource's Google Calendar in a time window.
+
+        Returns a list of dicts ready to be consumed by the frontend as
+        ExternalEvent: id, resource_id, start (ISO), end (ISO), title.
+        Filters out events that were CREATED by us (they have a matching
+        gcal_event_id on a Booking row — those are sourced from the booking,
+        not external). Returns empty list on any error.
+        """
+        if not self.service:
+            return []
+        calendar_id = self.get_calendar_id(resource_id)
+        if not calendar_id:
+            return []
+
+        try:
+            # Request events in the window. timeMin/timeMax are RFC3339.
+            events_result = self.service.events().list(
+                calendarId=calendar_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,          # expand recurring
+                orderBy='startTime',
+                maxResults=250,
+            ).execute()
+            items = events_result.get('items', [])
+
+            out = []
+            for ev in items:
+                # Skip cancelled / declined
+                if ev.get('status') == 'cancelled':
+                    continue
+                # Only dateTime (skip all-day "date"-only events)
+                start_obj = ev.get('start') or {}
+                end_obj = ev.get('end') or {}
+                start = start_obj.get('dateTime')
+                end = end_obj.get('dateTime')
+                if not start or not end:
+                    continue
+                out.append({
+                    'id': ev.get('id'),
+                    'resource_id': resource_id,
+                    'start': start,
+                    'end': end,
+                    'title': ev.get('summary', 'Событие в календаре'),
+                    'source': 'google_calendar',
+                })
+            return out
+        except Exception as e:
+            logger.error(f"Google Calendar: Failed to list events for {resource_id}: {e}")
+            return []
+
     def is_connected(self) -> bool:
         """
         Check if the service is authenticated and ready.

@@ -105,20 +105,41 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     mode: 'create',
     bookingForUser: null,
 
-    startEditing: (booking: BookingState & { id: string }, mode = 'edit') => set({
-        step: 1,
-        locationId: booking.locationId,
-        resourceId: booking.resourceId,
-        format: booking.format,
-        groupSize: booking.groupSize || null,
-        date: new Date(booking.date),
-        startTime: booking.startTime,
-        duration: booking.duration,
-        selectedSlots: [],
-        extras: booking.extras,
-        editBookingId: booking.id,
-        mode: mode as any
-    }),
+    startEditing: (booking: BookingState & { id: string }, mode = 'edit') => {
+        // Excel #27 fix: pre-populate selectedSlots from the existing booking
+        // so that ConfirmationStep's cart isn't empty if the user doesn't
+        // re-click slots. Covers the common reschedule path where the admin
+        // just wants to move a single booking to a new time.
+        const slots: string[] = [];
+        try {
+            const [h, m] = (booking.startTime || '').split(':').map(Number);
+            if (!Number.isNaN(h) && !Number.isNaN(m) && booking.duration > 0 && booking.resourceId) {
+                const startMinutes = h * 60 + m;
+                for (let offset = 0; offset < booking.duration; offset += 30) {
+                    const sm = startMinutes + offset;
+                    const hh = Math.floor(sm / 60);
+                    const mm = sm % 60;
+                    slots.push(`${booking.resourceId}|${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`);
+                }
+            }
+        } catch {
+            // Defensive: fall through to empty slots.
+        }
+        return set({
+            step: 1,
+            locationId: booking.locationId,
+            resourceId: booking.resourceId,
+            format: booking.format,
+            groupSize: booking.groupSize || null,
+            date: new Date(booking.date),
+            startTime: booking.startTime,
+            duration: booking.duration,
+            selectedSlots: slots,
+            extras: booking.extras,
+            editBookingId: booking.id,
+            mode: mode as any,
+        });
+    },
 
     price: {
         basePrice: 0,
