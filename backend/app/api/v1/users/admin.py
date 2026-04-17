@@ -426,3 +426,101 @@ def topup_subscription(
     session.commit()
     session.refresh(user)
     return user
+
+
+# ── Change email (senior_admin / owner only) ─────────────────────────────────
+# Excel #47. Email is used as a soft foreign key in legacy tables
+# (Booking.user_id, Waitlist.user_id, etc.). This endpoint atomically updates
+# User.email plus every row that pins to the old email — so history and balance
+# stay attached to the user after the change.
+
+from pydantic import BaseModel as _Pyd
+
+
+class _ChangeEmailRequest(_Pyd):
+    new_email: str
+
+
+@router.post("/{user_id}/change-email", response_model=UserRead)
+def change_user_email(
+    *,
+    user_id: str,
+    session: Session = Depends(get_session),
+    payload: _ChangeEmailRequest,
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    # Only senior_admin / owner may rename emails — it's a rare privileged op.
+    if current_user.role not in ("senior_admin", "owner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Только старший администратор или владелец может менять email пользователя",
+        )
+
+    user = _resolve_user(session, user_id)
+    old_email = user.email
+    new_email = (payload.new_email or "").strip().lower()
+
+    if not new_email:
+        raise HTTPException(400, "Новый email не может быть пустым")
+
+    import re
+    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", new_email):
+        raise HTTPException(400, "Email имеет некорректный формат")
+
+    if new_email == (old_email or "").lower():
+        raise HTTPException(400, "Новый email совпадает с текущим")
+
+    existing = session.exec(select(User).where(User.email == new_email)).first()
+    if existing and existing.id != user.id:
+        raise HTTPException(409, f"Email {new_email} уже используется другим пользователем")
+
+    # ── Cascade-update every table that stores this email as a soft FK ──
+    from sqlalchemy import text
+    updates: dict[str, int] = {}
+
+    def _bulk(sql: str, label: str) -> None:
+        res = session.execute(text(sql), {"old": old_email, "new": new_email})
+        updates[label] = int(getattr(res, "rowcount", 0) or 0)
+
+    # Bookings — owner reference via email
+    _bulk('UPDATE booking SET user_id = :new WHERE user_id = :old', "booking.user_id")
+    # Bookings — cancelled_by audit field
+    _bulk('UPDATE booking SET cancelled_by = :new WHERE cancelled_by = :old', "booking.cancelled_by")
+    # Waitlist — owner reference via email
+    _bulk('UPDATE waitlist SET user_id = :new WHERE user_id = :old', "waitlist.user_id")
+    # Cashbox — client_id may be stored as email for unregistered picks
+    _bulk(
+        'UPDATE cashbox_transactions SET client_id = :new WHERE client_id = :old',
+        "cashbox_transactions.client_id",
+    )
+    # User self-refs. Postgres requires quoting the reserved word "user".
+    user_table = '"user"' if session.bind.dialect.name == 'postgresql' else 'user'
+    _bulk(
+        f'UPDATE {user_table} SET responsible_admin_id = :new WHERE responsible_admin_id = :old',
+        "user.responsible_admin_id",
+    )
+    _bulk(
+        f'UPDATE {user_table} SET attracted_by_admin_id = :new WHERE attracted_by_admin_id = :old',
+        "user.attracted_by_admin_id",
+    )
+
+    user.email = new_email
+    user.updated_at = datetime.now()
+    session.add(user)
+
+    comment_history = (user.comment_history or []).copy()
+    comment_history.append({
+        "text": f"Email изменён: {old_email} → {new_email}",
+        "author_id": str(current_user.id),
+        "author_name": current_user.name or current_user.email,
+        "created_at": datetime.now().isoformat(),
+        "type": "email_change",
+        "old_email": old_email,
+        "new_email": new_email,
+        "cascade": updates,
+    })
+    user.comment_history = comment_history
+
+    session.commit()
+    session.refresh(user)
+    return user

@@ -698,6 +698,52 @@ export function AdminUserDetails() {
                                         <div className="text-[10px] text-unbox-grey">Установить новый пароль для пользователя</div>
                                     </div>
                                 </button>
+
+                                {/* Change email (Excel #47) — senior_admin/owner only */}
+                                {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
+                                    <button
+                                        onClick={async () => {
+                                            const next = prompt(
+                                                `Текущий email: ${user.email}\n\nВведите новый email:`,
+                                                user.email || '',
+                                            );
+                                            if (!next) return;
+                                            const trimmed = next.trim().toLowerCase();
+                                            if (trimmed === (user.email || '').toLowerCase()) {
+                                                toast.error('Этот email уже установлен');
+                                                return;
+                                            }
+                                            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+                                                toast.error('Неверный формат email');
+                                                return;
+                                            }
+                                            const ok = window.confirm(
+                                                `Изменить email пользователя?\n\n${user.email} → ${trimmed}\n\n` +
+                                                'Все связанные записи (брони, waitlist, транзакции) будут обновлены автоматически.\n\n' +
+                                                'Продолжить?',
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.changeEmail(user.id, trimmed);
+                                                toast.success(`Email изменён на ${trimmed}. Обновите страницу для актуализации.`);
+                                                // Navigate to the new canonical URL
+                                                navigate(`/admin/users/${encodeURIComponent(trimmed)}`, { replace: true });
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Ошибка смены email');
+                                            }
+                                        }}
+                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-purple-50 border border-dashed border-purple-200 transition-colors text-left"
+                                    >
+                                        <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
+                                            <Shield size={14} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="text-sm font-medium text-unbox-dark">Изменить email</div>
+                                            <div className="text-[10px] text-unbox-grey">Каскадно обновляет брони, waitlist и транзакции</div>
+                                        </div>
+                                    </button>
+                                )}
                             </div>
                         )}
                     </Card>

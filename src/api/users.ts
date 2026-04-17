@@ -33,6 +33,16 @@ export const usersApi = {
         return response.data;
     },
 
+    /** Admin-only email change. Cascades to Booking/Waitlist/Cashbox refs
+     *  that store email as a soft foreign key. Returns the updated user. */
+    changeEmail: async (id: string, newEmail: string) => {
+        const response = await api.post<User>(
+            `/users/${encodeURIComponent(id)}/change-email`,
+            { new_email: newEmail },
+        );
+        return response.data;
+    },
+
     getDiscountProgress: async () => {
         const response = await api.get<{
             accumulatedHours: number;
