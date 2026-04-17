@@ -13,6 +13,7 @@ import { CashboxTransactionTable } from '../../components/admin/cashbox/CashboxT
 import { AddCashboxTransactionModal } from '../../components/admin/cashbox/AddCashboxTransactionModal';
 import { CategoryManager } from '../../components/admin/cashbox/CategoryManager';
 import { EndShiftModal } from '../../components/admin/cashbox/EndShiftModal';
+import { PreCloseShiftChecklist } from '../../components/admin/cashbox/PreCloseShiftChecklist';
 import { ShiftReportsTable } from '../../components/admin/cashbox/ShiftReportsTable';
 import { CashboxAnalytics } from '../../components/admin/cashbox/CashboxAnalytics';
 import type { CashboxTransaction } from '../../api/cashbox';
@@ -69,6 +70,8 @@ export function AdminFinance() {
     const [tab, setTab] = useState<Tab>('transactions');
     const [showAddTx, setShowAddTx] = useState(false);
     const [showEndShift, setShowEndShift] = useState(false);
+    // Step 1 of shift close (Excel #53): pre-close checklist
+    const [showCloseChecklist, setShowCloseChecklist] = useState(false);
     const [showCorrection, setShowCorrection] = useState(false);
     const [corrAccount, setCorrAccount] = useState('cash');
     const [corrBranch, setCorrBranch] = useState('');
@@ -149,6 +152,7 @@ export function AdminFinance() {
                 tab={tab} setTab={setTab}
                 showAddTx={showAddTx} setShowAddTx={setShowAddTx}
                 showEndShift={showEndShift} setShowEndShift={setShowEndShift}
+                showCloseChecklist={showCloseChecklist} setShowCloseChecklist={setShowCloseChecklist}
                 showCorrection={showCorrection} setShowCorrection={setShowCorrection}
                 corrAccount={corrAccount} setCorrAccount={setCorrAccount}
                 corrBranch={corrBranch} setCorrBranch={setCorrBranch}
@@ -208,7 +212,7 @@ export function AdminFinance() {
                         {yesterdayShiftStatus === 'closed' ? '✓ Вчера закрыта' : '⚠ Вчера не закрыта'}
                     </div>
                     <button
-                        onClick={() => setShowEndShift(true)}
+                        onClick={() => setShowCloseChecklist(true)}
                         className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                     >
                         <Clock size={14} />
@@ -362,6 +366,11 @@ export function AdminFinance() {
 
             {/* Modals */}
             <AddCashboxTransactionModal isOpen={showAddTx} onClose={() => { setShowAddTx(false); refetchTransactions(); }} />
+            <PreCloseShiftChecklist
+                isOpen={showCloseChecklist}
+                onClose={() => setShowCloseChecklist(false)}
+                onProceed={() => { setShowCloseChecklist(false); setShowEndShift(true); }}
+            />
             <EndShiftModal isOpen={showEndShift} onClose={() => setShowEndShift(false)} branch={selectedBranch || undefined} />
 
             {/* Balance Correction Modal — owner/senior_admin only */}
@@ -463,6 +472,7 @@ type GHAFProps = {
     tab: Tab; setTab: (t: Tab) => void;
     showAddTx: boolean; setShowAddTx: (v: boolean) => void;
     showEndShift: boolean; setShowEndShift: (v: boolean) => void;
+    showCloseChecklist: boolean; setShowCloseChecklist: (v: boolean) => void;
     showCorrection: boolean; setShowCorrection: (v: boolean) => void;
     corrAccount: string; setCorrAccount: (v: string) => void;
     corrBranch: string; setCorrBranch: (v: string) => void;
@@ -598,7 +608,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         >
                             {p.yesterdayShiftStatus === 'closed' ? '✓ Вчера закрыта' : '⚠ Вчера не закрыта'}
                         </div>
-                        <button onClick={() => p.setShowEndShift(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
+                        <button onClick={() => p.setShowCloseChecklist(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
                             <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Закрыть смену
                         </button>
@@ -802,6 +812,11 @@ function GridHouseAdminFinance(p: GHAFProps) {
 
             {/* Modals */}
             <AddCashboxTransactionModal isOpen={p.showAddTx} onClose={() => { p.setShowAddTx(false); p.refetchTransactions(); }} />
+            <PreCloseShiftChecklist
+                isOpen={p.showCloseChecklist}
+                onClose={() => p.setShowCloseChecklist(false)}
+                onProceed={() => { p.setShowCloseChecklist(false); p.setShowEndShift(true); }}
+            />
             <EndShiftModal isOpen={p.showEndShift} onClose={() => p.setShowEndShift(false)} branch={p.selectedBranch || undefined} />
 
             {/* Grid House balance correction modal */}
