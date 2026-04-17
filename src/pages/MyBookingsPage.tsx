@@ -1697,10 +1697,14 @@ export function MyBookingsPage() {
         confirmLabel?: string;
     }>({ isOpen: false, title: '', message: null, onConfirm: () => {} });
 
-    const userBookings = (currentUser?.isAdmin
-        ? bookings
-        : bookings.filter(b => b.userId === currentUser?.email)
-    ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Always filter by the logged-in user's own email — even for admins. Previously
+    // admins saw ALL bookings in /dashboard/bookings which (a) made bookings they'd
+    // created on behalf of clients appear as "theirs", and (b) caused false conflict
+    // warnings on the personal chessboard when creating parallel bookings for clients.
+    // Admins have a dedicated /admin/bookings page to see all bookings.
+    const userBookings = bookings
+        .filter(b => b.userId === currentUser?.email)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     // Split into upcoming and past
     const upcomingBookings = userBookings.filter(b => b.status === 'confirmed');
