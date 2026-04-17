@@ -935,6 +935,13 @@ def cancel_booking(
     session.commit()
     session.refresh(booking)
 
+    # ── Waitlist: notify anyone waiting on this freed slot ──
+    try:
+        from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+        notify_waitlist_for_freed_slot(session, booking)
+    except Exception:
+        logger.exception("Failed to notify waitlist on cancellation")
+
     # ── Audit logging ──
     timeline_service.log_event(
         session=session,
@@ -1123,6 +1130,22 @@ def reschedule_booking(
     session.commit()
     session.refresh(booking)
 
+    # ── Waitlist: notify anyone waiting on the OLD (now freed) slot ──
+    # Skip if the slot didn't really move (same day + time + resource edge case).
+    slot_moved = (old_resource != new_resource) or (old_date != new_date) or (old_time != data.new_start_time)
+    if slot_moved:
+        try:
+            from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+            # Build a proxy booking representing the old (freed) slot
+            from copy import copy as _copy
+            freed = _copy(booking)
+            freed.resource_id = old_resource
+            freed.date = old_date
+            freed.start_time = old_time
+            notify_waitlist_for_freed_slot(session, freed)
+        except Exception:
+            logger.exception("Failed to notify waitlist on reschedule")
+
     timeline_service.log_event(
         session=session,
         actor_id=current_user.id,
@@ -1229,12 +1252,22 @@ def toggle_re_rent(
             status_code=400, detail="Cannot re-rent a past booking"
         )
 
+    was_listed_before = booking.is_re_rent_listed
     booking.is_re_rent_listed = not booking.is_re_rent_listed
     booking.updated_at = datetime.now()
 
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # If the booking just became re-rentable, the slot is effectively free
+    # for other users — notify anyone on the waitlist for this slot.
+    if not was_listed_before and booking.is_re_rent_listed:
+        try:
+            from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+            notify_waitlist_for_freed_slot(session, booking)
+        except Exception:
+            logger.exception("Failed to notify waitlist on re-rent listing")
 
     return enrich_booking_status(booking)
 

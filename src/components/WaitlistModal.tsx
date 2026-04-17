@@ -1,6 +1,7 @@
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Bell, X } from 'lucide-react';
+import { Bell, X, Send } from 'lucide-react';
+import { toast } from 'sonner';
 import { useUserStore } from '../store/userStore';
 
 interface WaitlistModalProps {
@@ -34,7 +35,12 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
             createdAt: new Date().toISOString()
         });
 
-        alert('Вы добавлены в лист ожидания! Мы сообщим, если слот освободится.');
+        const hasTelegram = !!(currentUser?.telegramId && /^\d+$/.test(currentUser.telegramId));
+        if (hasTelegram) {
+            toast.success('Вы в листе ожидания. Пришлём уведомление в Telegram, когда слот освободится.');
+        } else {
+            toast.success('Вы в листе ожидания. Уведомление появится в вашем аккаунте — подключите Telegram в профиле, чтобы не пропустить.');
+        }
         onClose();
     };
 
@@ -57,6 +63,19 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
                         <span className="font-bold text-unbox-dark mx-1">{startTime}</span>
                         на <span className="font-bold text-unbox-dark">{format(date, 'd MMMM', { locale: ru })}</span> освободится?
                     </p>
+                    {(() => {
+                        const hasTg = !!(currentUser?.telegramId && /^\d+$/.test(currentUser.telegramId));
+                        return (
+                            <div className={`mt-3 flex items-start gap-2 text-xs rounded-lg px-3 py-2 ${hasTg ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                                <Send size={14} className="mt-0.5 shrink-0" />
+                                <span>
+                                    {hasTg
+                                        ? 'Telegram подключён — мгновенное уведомление в чат.'
+                                        : 'Telegram не подключён — уведомление будет только в веб-кабинете. Подключите в профиле.'}
+                                </span>
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 <div className="pt-2">

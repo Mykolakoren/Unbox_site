@@ -156,6 +156,47 @@ class TelegramService:
         )
         return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
+    def send_slot_available(
+        self,
+        *,
+        chat_id: str,
+        user_name: Optional[str],
+        resource_name: str,
+        location_name: Optional[str],
+        date: datetime,
+        start_time: str,
+        end_time: str,
+    ) -> bool:
+        """Notify a user on their waitlist that a slot they requested has freed up.
+
+        `chat_id` is the user's telegram_id. Returns False silently if the user
+        hasn't linked Telegram or has blocked the bot — the caller should still
+        proceed to mark the waitlist entry as fulfilled so we don't spam.
+        """
+        if not chat_id:
+            return False
+
+        greeting = (
+            f"Здравствуйте, <b>{escape(user_name)}</b>!" if user_name
+            else "Здравствуйте!"
+        )
+        date_label = self._fmt_date(date)
+        loc_line = f" · {escape(location_name)}" if location_name else ""
+
+        text = (
+            f"{greeting}\n"
+            f"\n"
+            f"🔔 <b>Слот из вашего листа ожидания освободился!</b>\n"
+            f"\n"
+            f"📅 <b>{escape(date_label)}</b>, {escape(start_time)} — {escape(end_time)}\n"
+            f"📍 {escape(resource_name)}{loc_line}\n"
+            f"\n"
+            f"Успейте забронировать до того, как его займут:\n"
+            f"https://unbox.com.ge/booking"
+        )
+
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
     def send_specialist_appointment_cancelled(
         self,
         *,
