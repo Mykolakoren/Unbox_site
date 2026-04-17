@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import {
-    Wallet, Plus, AlertCircle, TrendingUp, Calendar,
+    Wallet, Plus, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
     GripVertical, Settings2, RotateCw, Check, Gift,
 } from 'lucide-react';
