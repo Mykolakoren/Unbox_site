@@ -30,7 +30,12 @@ function timeAgo(dateStr: string): string {
     return `${Math.floor(days / 7)} нед.`;
 }
 
-export function NotificationBell() {
+interface NotificationBellProps {
+    /** "dark" — white icon on a dark header (classic admin). "light" — dark icon on a paper background (Grid House). */
+    variant?: 'dark' | 'light';
+}
+
+export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {}) {
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -132,10 +137,15 @@ export function NotificationBell() {
                 onClick={handleOpen}
                 className={clsx(
                     "relative p-2 rounded-xl transition-colors",
-                    open ? "bg-white/15" : "hover:bg-white/10"
+                    variant === 'light'
+                        ? (open ? "bg-black/10" : "hover:bg-black/5")
+                        : (open ? "bg-white/15" : "hover:bg-white/10"),
                 )}
             >
-                <Bell size={18} className="text-white/80" />
+                <Bell
+                    size={18}
+                    className={variant === 'light' ? "text-black/70" : "text-white/80"}
+                />
                 {totalUnread > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1 shadow-lg animate-in zoom-in-50 duration-200">
                         {totalUnread > 99 ? '99+' : totalUnread}

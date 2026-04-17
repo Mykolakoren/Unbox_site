@@ -478,8 +478,11 @@ function GridHouseAdminShell({
                             {String((activeIndex < 0 ? 0 : activeIndex) + 1).padStart(2, '0')} · {activeItem?.label ?? 'Раздел'}
                         </div>
                     </div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
-                        Unbox · Панель управления
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <NotificationBell variant="light" />
+                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
+                            Unbox · Панель управления
+                        </div>
                     </div>
                 </header>
 

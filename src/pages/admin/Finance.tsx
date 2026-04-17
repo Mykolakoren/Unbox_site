@@ -87,7 +87,19 @@ export function AdminFinance() {
     const [txType, setTxType] = useState<TxType>('all');
 
     const currentUser = useUserStore(s => s.currentUser);
-    const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions } = useCashboxStore();
+    const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions, shiftReports } = useCashboxStore();
+
+    // Yesterday's shift status (Excel #61) — was yesterday closed?
+    const yesterdayShiftStatus = useMemo(() => {
+        const now = new Date();
+        const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const yEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const closedYesterday = shiftReports.some(r => {
+            const endTs = new Date(r.shiftEnd).getTime();
+            return endTs >= yStart.getTime() && endTs < yEnd.getTime();
+        });
+        return closedYesterday ? 'closed' : 'missed';
+    }, [shiftReports]);
     const canManageCategories = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
     const canCorrectBalance = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
 
@@ -157,6 +169,7 @@ export function AdminFinance() {
                 refetchTransactions={refetchTransactions}
                 fetchBalance={fetchBalance}
                 fetchTransactions={fetchTransactions}
+                yesterdayShiftStatus={yesterdayShiftStatus}
             />
         );
     }
@@ -179,6 +192,21 @@ export function AdminFinance() {
                             <span className="hidden sm:inline">Корректировка</span>
                         </button>
                     )}
+                    {/* Yesterday shift status badge (#61) */}
+                    <div
+                        className={
+                            yesterdayShiftStatus === 'closed'
+                                ? 'hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200'
+                        }
+                        title={
+                            yesterdayShiftStatus === 'closed'
+                                ? 'Вчерашняя смена была закрыта.'
+                                : 'Вчерашняя смена не была закрыта. Проверьте и закройте её сегодня.'
+                        }
+                    >
+                        {yesterdayShiftStatus === 'closed' ? '✓ Вчера закрыта' : '⚠ Вчера не закрыта'}
+                    </div>
                     <button
                         onClick={() => setShowEndShift(true)}
                         className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -455,6 +483,7 @@ type GHAFProps = {
     refetchTransactions: () => void;
     fetchBalance: (branch?: string) => void;
     fetchTransactions: (params?: any) => void;
+    yesterdayShiftStatus: 'closed' | 'missed';
 };
 
 function GHFSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
@@ -548,6 +577,27 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 Корректировка
                             </button>
                         )}
+                        {/* Yesterday shift status (Excel #61) */}
+                        <div
+                            title={
+                                p.yesterdayShiftStatus === 'closed'
+                                    ? 'Вчерашняя смена была закрыта.'
+                                    : 'Вчерашняя смена не была закрыта.'
+                            }
+                            style={{
+                                padding: '10px 12px',
+                                fontSize: 10,
+                                fontFamily: GH_MONO,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase',
+                                border: `1px solid ${GH.ink}`,
+                                background: p.yesterdayShiftStatus === 'closed' ? GH.paper : GH.ink,
+                                color: p.yesterdayShiftStatus === 'closed' ? GH.ink : GH.paper,
+                                alignSelf: 'center',
+                            }}
+                        >
+                            {p.yesterdayShiftStatus === 'closed' ? '✓ Вчера закрыта' : '⚠ Вчера не закрыта'}
+                        </div>
                         <button onClick={() => p.setShowEndShift(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
                             <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Закрыть смену
