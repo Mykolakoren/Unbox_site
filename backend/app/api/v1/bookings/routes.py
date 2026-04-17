@@ -418,9 +418,11 @@ def create_booking(
         # No discount for hot bookings — only admin approval required
         HOT_BOOKING_THRESHOLD_HOURS = 12
         is_admin_or_above = current_user.role in ("admin", "senior_admin", "owner")
-        from datetime import datetime as _dt
-        _now = _dt.now()
-        _start = start_dt.replace(tzinfo=None) if start_dt.tzinfo else start_dt
+        # Use UTC-aware comparison to avoid tz drift across server/client.
+        # If booking date is naive, assume UTC (server is Etc/UTC on prod per CLAUDE.md).
+        from datetime import datetime as _dt, timezone as _tz
+        _now = _dt.now(_tz.utc)
+        _start = start_dt if start_dt.tzinfo else start_dt.replace(tzinfo=_tz.utc)
         _diff_hours = (_start - _now).total_seconds() / 3600.0
         is_hot = 0 < _diff_hours <= HOT_BOOKING_THRESHOLD_HOURS
 

@@ -187,6 +187,10 @@ function App() {
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
 
+        {/* Short-link aliases (used by TG bot, emails, external links) */}
+        <Route path="/profile" element={<Navigate to="/dashboard/profile" replace />} />
+        <Route path="/bookings" element={<Navigate to="/dashboard/bookings" replace />} />
+
         {/* Dashboard */}
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<DashboardOverview />} />

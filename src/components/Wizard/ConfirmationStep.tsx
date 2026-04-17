@@ -230,8 +230,16 @@ export function ConfirmationStep() {
         try {
             // Validate guest form if no authenticated user
             if (!effectiveUser) {
-                if (!guestName.trim() || !guestEmail.trim()) {
+                const trimmedName = guestName.trim();
+                const trimmedEmail = guestEmail.trim();
+                if (!trimmedName || !trimmedEmail) {
                     toast.error('Заполните имя и email для бронирования');
+                    return;
+                }
+                // Minimal RFC-pragmatic email regex: local@host.tld, no spaces
+                const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+                if (!emailOk) {
+                    toast.error('Проверьте email — формат "name@example.com"');
                     return;
                 }
             }
