@@ -438,14 +438,10 @@ export function DashboardOverview() {
                 return (
                     <div className="p-6 rounded-2xl flex flex-col justify-center gap-4" style={glassStyle}>
                         <h3 className="font-bold text-lg">Быстрые действия</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <Button onClick={() => navigate('/dashboard/bookings')} className="w-full justify-start py-6" size="lg">
+                        <div>
+                            <Button onClick={() => navigate('/booking')} className="w-full justify-start py-6" size="lg">
                                 <Plus className="mr-2" />
                                 Новое бронирование
-                            </Button>
-                            <Button onClick={() => navigate('/dashboard/bookings')} variant="outline" className="w-full justify-start py-6" size="lg">
-                                <AlertCircle className="mr-2" />
-                                Мои бронирования
                             </Button>
                         </div>
                     </div>
@@ -833,15 +829,6 @@ function GridHouseDashboardOverview({
                     }}
                 >
                     + Забронировать кабинет
-                </button>
-                <button
-                    onClick={() => navigate('/dashboard/bookings')}
-                    style={{
-                        padding: '10px 20px', background: 'transparent', color: GH.ink,
-                        fontWeight: 600, fontSize: 13, fontFamily: GH_SANS, border: ghdoHairline, cursor: 'pointer',
-                    }}
-                >
-                    Мои бронирования
                 </button>
             </div>
 

@@ -154,7 +154,7 @@ export interface BookingSlice {
     cancelBooking: (id: string, isFreeReschedule?: boolean, reason?: string, adminUser?: User) => void;
     rescheduleBooking: (oldId: string, newBooking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;
     updateBooking: (booking: BookingHistoryItem) => void;
-    listForReRent: (id: string) => void;
+    listForReRent: (id: string) => Promise<void>;
     setManualPrice: (bookingId: string, newPrice: number) => void;
 }
 

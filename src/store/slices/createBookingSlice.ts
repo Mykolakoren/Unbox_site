@@ -172,11 +172,23 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         )
     })),
 
-    listForReRent: (id) => set((state) => ({
-        bookings: state.bookings.map(b =>
-            b.id === id ? { ...b, isReRentListed: true } : b
-        )
-    })),
+    listForReRent: async (id) => {
+        try {
+            // Persist the re-rent toggle on the server. Without this, the local
+            // flip was overwritten the next time fetchAllBookings() ran, making
+            // the re-rent status "disappear" when switching views.
+            const updated = await bookingsApi.toggleReRent(id);
+            set((state) => ({
+                bookings: state.bookings.map(b =>
+                    b.id === id ? updated : b
+                )
+            }));
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            toast.error(detail || 'Не удалось обновить статус переаренды');
+            throw error;
+        }
+    },
 
     setManualPrice: (bookingId, newPrice) => {
         const state = get();
