@@ -35,58 +35,57 @@ def end_shift(
     session: Session = Depends(get_session),
     current_user: User = Depends(require_cashbox),
 ):
+    """End the shift (reconcile cash).
+
+    Fixes Excel #13: previously branch-scoped close summed ALL history for
+    that branch (→ huge discrepancy every time), and global close picked
+    branch-scoped reports as its baseline (→ wrong starting_balance). Now
+    branch closes isolate to their own history via shift_reports.branch,
+    and global closes skip branch-scoped rows entirely.
+    """
     now = datetime.now()
     branch = payload.branch
 
+    # Find the last SAME-SCOPE close as our starting point. Branch close →
+    # previous close of that same branch. Global close → previous global close.
+    last_query = select(ShiftReport).order_by(desc(ShiftReport.shift_end)).limit(1)
     if branch:
-        # Branch-scoped close: expected = current cash balance for this branch
-        # (sum of all cash movements for this branch, mirroring /balance?branch=X).
-        # We don't track per-branch shift history, so there's no meaningful
-        # "starting balance" — just a point-in-time snapshot.
-        cash_in = session.exec(
-            select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
-            .where(CashboxTransaction.type == "income")
-            .where(CashboxTransaction.payment_method == "cash")
-            .where(CashboxTransaction.branch == branch)
-        ).one()
-        cash_out = session.exec(
-            select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
-            .where(CashboxTransaction.type == "expense")
-            .where(CashboxTransaction.payment_method == "cash")
-            .where(CashboxTransaction.branch == branch)
-        ).one()
-        expected = round(float(cash_in) - float(cash_out), 2)
-        shift_start = now  # branch snapshot — no interval
+        last_query = last_query.where(ShiftReport.branch == branch)
     else:
-        # Global close: use last shift as starting point
-        last_shift = session.exec(
-            select(ShiftReport).order_by(desc(ShiftReport.shift_end)).limit(1)
-        ).first()
+        last_query = last_query.where(ShiftReport.branch.is_(None))  # type: ignore
+    last_shift = session.exec(last_query).first()
 
-        shift_start = last_shift.shift_end if last_shift else datetime.min
-        starting_balance = last_shift.actual_balance if last_shift else 0.0
+    shift_start = last_shift.shift_end if last_shift else datetime.min
+    starting_balance = float(last_shift.actual_balance) if last_shift else 0.0
 
-        cash_in = session.exec(
-            select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
-            .where(CashboxTransaction.type == "income")
-            .where(CashboxTransaction.payment_method == "cash")
-            .where(CashboxTransaction.date >= shift_start)
-        ).one()
-        cash_out = session.exec(
-            select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
-            .where(CashboxTransaction.type == "expense")
-            .where(CashboxTransaction.payment_method == "cash")
-            .where(CashboxTransaction.date >= shift_start)
-        ).one()
+    # Sum cash movements for this shift window. For branch closes, also
+    # filter by branch so we only count transactions for that location.
+    cash_in_q = (
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "income")
+        .where(CashboxTransaction.payment_method == "cash")
+        .where(CashboxTransaction.date >= shift_start)
+    )
+    cash_out_q = (
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "expense")
+        .where(CashboxTransaction.payment_method == "cash")
+        .where(CashboxTransaction.date >= shift_start)
+    )
+    if branch:
+        cash_in_q = cash_in_q.where(CashboxTransaction.branch == branch)
+        cash_out_q = cash_out_q.where(CashboxTransaction.branch == branch)
 
-        expected = round(starting_balance + float(cash_in) - float(cash_out), 2)
+    cash_in = float(session.exec(cash_in_q).one())
+    cash_out = float(session.exec(cash_out_q).one())
 
+    expected = round(starting_balance + cash_in - cash_out, 2)
     discrepancy = round(payload.actual_balance - expected, 2)
 
-    # Encode branch in notes so it's visible in shift history (ShiftReport DB
-    # model has no branch column; avoid a schema migration).
+    # Keep legacy [Branch] prefix in notes for UI back-compat with older clients
+    # that expect it; the canonical source now is the `branch` column.
     notes = payload.notes
-    if branch:
+    if branch and not (notes or "").startswith(f"[{branch}]"):
         prefix = f"[{branch}]"
         notes = f"{prefix} {notes}" if notes else prefix
 
@@ -95,6 +94,7 @@ def end_shift(
         actual_balance=payload.actual_balance,
         discrepancy=discrepancy,
         notes=notes,
+        branch=branch,
         shift_start=shift_start,
         shift_end=now,
         admin_id=str(current_user.id),

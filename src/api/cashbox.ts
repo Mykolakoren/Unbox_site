@@ -66,6 +66,8 @@ export interface ShiftReport {
     adminId: string;
     adminName: string;
     createdAt: string;
+    /** null = global close across all branches; otherwise the branch name */
+    branch?: string | null;
 }
 
 export interface CashboxAnalytics {

@@ -178,6 +178,36 @@ def migrate_add_columns():
             except Exception:
                 conn.rollback()  # reset transaction state before next iteration
 
+    # shift_reports: branch — NULL=global close; non-null=branch-scoped close.
+    # Used to filter last_shift baseline per branch (Excel #13 fix).
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text("ALTER TABLE shift_reports ADD COLUMN IF NOT EXISTS branch VARCHAR"))
+            else:
+                conn.execute(text("ALTER TABLE shift_reports ADD COLUMN branch VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # Backfill shift_reports.branch from the legacy "[Branch] ..." prefix in
+    # notes, but only for rows where branch is still NULL.
+    # Regex: '[' + one or more non-']' chars + ']'  at the start of notes.
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text(
+                    "UPDATE shift_reports "
+                    "SET branch = substring(notes FROM '^\\[([^\\]]+)\\]') "
+                    "WHERE branch IS NULL AND notes ~ '^\\[[^\\]]+\\]'"
+                ))
+            else:
+                # SQLite: regex not standard, skip backfill — dev DB is tiny.
+                pass
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     # cashbox_transactions: credited_user_id — marks transactions that topped up
     # a client's balance, so we can reverse the credit on delete/edit.
     with engine.connect() as conn:

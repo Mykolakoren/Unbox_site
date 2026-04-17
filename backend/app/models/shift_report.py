@@ -14,6 +14,10 @@ class ShiftReportBase(SQLModel):
     notes: Optional[str] = Field(default=None)
     shift_start: datetime
     shift_end: datetime
+    # NULL = global close (all branches); non-null = branch-scoped close.
+    # Isolates per-branch histories: a branch close uses only prior closes of
+    # the SAME branch as its baseline.
+    branch: Optional[str] = Field(default=None, index=True)
 
 
 class ShiftReport(ShiftReportBase, table=True):

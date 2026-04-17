@@ -19,6 +19,7 @@ export function ShiftReportsTable() {
                 <thead>
                     <tr className="text-xs text-gray-400 border-b border-gray-100">
                         <th className="font-medium py-3 pl-2">Период</th>
+                        <th className="font-medium py-3">Филиал</th>
                         <th className="font-medium py-3">Админ</th>
                         <th className="font-medium py-3 text-right">Ожидаемо</th>
                         <th className="font-medium py-3 text-right">Факт</th>
@@ -47,6 +48,17 @@ export function ShiftReportsTable() {
                                     </div>
                                 </td>
                                 <td className="py-3 align-top">
+                                    {r.branch ? (
+                                        <span className="inline-block text-[10px] uppercase tracking-wider font-semibold text-unbox-green bg-unbox-green/10 rounded-md px-2 py-0.5">
+                                            {r.branch}
+                                        </span>
+                                    ) : (
+                                        <span className="inline-block text-[10px] uppercase tracking-wider font-semibold text-gray-500 bg-gray-100 rounded-md px-2 py-0.5">
+                                            Все
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="py-3 align-top">
                                     <span className="text-gray-700">{r.adminName}</span>
                                 </td>
                                 <td className="py-3 align-top text-right font-medium text-gray-700">
@@ -62,7 +74,8 @@ export function ShiftReportsTable() {
                                 </td>
                                 <td className="py-3 pr-2 align-top">
                                     <span className="text-gray-500 text-xs truncate max-w-[150px] block">
-                                        {r.notes || '—'}
+                                        {/* Legacy "[Branch] ..." prefix is stripped — branch now lives in its own column. */}
+                                        {(r.notes || '').replace(/^\[[^\]]+\]\s*/, '') || '—'}
                                     </span>
                                 </td>
                             </tr>
