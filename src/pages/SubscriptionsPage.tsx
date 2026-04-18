@@ -440,14 +440,14 @@ export function SubscriptionsPage() {
                             </div>
                             <div>
                                 <h3 className="font-bold text-unbox-dark">Скидка за длительность сессии</h3>
-                                <p className="text-xs text-unbox-grey">Бронируете больше — платите меньше за час</p>
+                                <p className="text-xs text-unbox-grey">Непрерывная бронь в одном кабинете — чем длиннее, тем дешевле час</p>
                             </div>
                         </div>
                         <div className="space-y-2.5">
                             {[
-                                { label: '2 часа подряд', percent: '10%' },
-                                { label: '3 часа подряд', percent: '15%' },
-                                { label: '4+ часа подряд', percent: '20%' },
+                                { label: '2 часа подряд в одном кабинете', percent: '10%' },
+                                { label: '3 часа подряд в одном кабинете', percent: '15%' },
+                                { label: '4+ часа подряд в одном кабинете', percent: '20%' },
                             ].map(tier => (
                                 <div key={tier.label} className="flex items-center gap-3 bg-blue-50/50 rounded-xl px-4 py-2.5">
                                     <Timer size={16} className="text-blue-500 flex-shrink-0" />
@@ -456,6 +456,9 @@ export function SubscriptionsPage() {
                                 </div>
                             ))}
                         </div>
+                        <p className="text-xs text-unbox-grey/80 leading-relaxed pt-1">
+                            Разорванные или параллельные брони в разных кабинетах в эту скидку не складываются.
+                        </p>
                     </div>
 
                     {/* 3. Hot Booking */}
@@ -466,16 +469,16 @@ export function SubscriptionsPage() {
                             </div>
                             <div>
                                 <h3 className="font-bold text-unbox-dark">Горячая бронь</h3>
-                                <p className="text-xs text-unbox-grey">Скидка 10% при бронировании менее чем за 12 часов</p>
+                                <p className="text-xs text-unbox-grey">Бронь менее чем за 12 часов — требует одобрения</p>
                             </div>
                         </div>
                         <div className="bg-orange-50/60 rounded-xl p-4 space-y-2">
                             <div className="flex items-center gap-2">
                                 <Flame size={16} className="text-orange-500" />
-                                <span className="text-sm text-unbox-dark font-medium">-10% на любой кабинет</span>
+                                <span className="text-sm text-unbox-dark font-medium">Одобрение администратора</span>
                             </div>
                             <p className="text-xs text-unbox-grey leading-relaxed">
-                                Если до сессии осталось менее 12 часов, бронь стоит дешевле. Невозвратная и без переноса — но по лучшей цене.
+                                Если до сессии осталось менее 12 часов, бронь требует подтверждения администратора. После одобрения — обычная цена без скидки и без надбавки.
                             </p>
                         </div>
                     </div>
@@ -518,23 +521,25 @@ export function SubscriptionsPage() {
                         </div>
                     </div>
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-0">
-                        {[
-                            { label: 'Абонемент', desc: 'Фиксированная цена', color: 'bg-violet-100 text-violet-700 border-violet-200' },
-                            { label: 'Персональная', desc: 'Индивидуальный %', color: 'bg-purple-100 text-purple-700 border-purple-200' },
-                            { label: 'За объём', desc: 'Недельные часы', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-                            { label: 'За длительность', desc: '2+ часа подряд', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-                            { label: 'Горячая бронь', desc: 'Менее 12ч', color: 'bg-orange-100 text-orange-700 border-orange-200' },
-                        ].map((step, i) => (
-                            <div key={step.label} className="flex items-center gap-2 flex-1">
-                                <div className={`flex-1 rounded-xl border px-3 py-2.5 text-center ${step.color}`}>
-                                    <div className="text-xs font-bold">{step.label}</div>
-                                    <div className="text-[10px] opacity-70">{step.desc}</div>
+                        {(() => {
+                            const steps = [
+                                { label: 'Абонемент', desc: 'Фиксированная цена', color: 'bg-violet-100 text-violet-700 border-violet-200' },
+                                { label: 'Персональная', desc: 'Индивидуальный %', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+                                { label: 'За объём', desc: 'Недельные часы', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+                                { label: 'За длительность', desc: '2+ часа подряд в одном кабинете', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+                            ];
+                            return steps.map((step, i) => (
+                                <div key={step.label} className="flex items-center gap-2 flex-1">
+                                    <div className={`flex-1 rounded-xl border px-3 py-2.5 text-center ${step.color}`}>
+                                        <div className="text-xs font-bold">{step.label}</div>
+                                        <div className="text-[10px] opacity-70">{step.desc}</div>
+                                    </div>
+                                    {i < steps.length - 1 && (
+                                        <ChevronRight size={14} className="text-unbox-grey shrink-0 hidden sm:block" />
+                                    )}
                                 </div>
-                                {i < 4 && (
-                                    <ChevronRight size={14} className="text-unbox-grey shrink-0 hidden sm:block" />
-                                )}
-                            </div>
-                        ))}
+                            ));
+                        })()}
                     </div>
                     <p className="text-xs text-unbox-grey mt-3 text-center">
                         Система автоматически выбирает лучший вариант. Скидки не суммируются между собой.

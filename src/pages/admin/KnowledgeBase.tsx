@@ -637,7 +637,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                     <div style={boxHair}>
                         <div style={subhead}>Скидка за длительность · одна бронь</div>
                         <p style={{ ...para, fontSize: 12, color: GH.ink60, marginTop: 0, marginBottom: 10 }}>
-                            Применяется к одной непрерывной брони. Чем длиннее блок, тем выше процент:
+                            Применяется только к <strong style={{ color: GH.ink, fontWeight: 700 }}>непрерывной</strong> брони в <strong style={{ color: GH.ink, fontWeight: 700 }}>одном кабинете</strong>. Чем длиннее блок, тем выше процент:
                         </p>
                         {durationTiers.map(([label, disc], i) => (
                             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < durationTiers.length - 1 ? `1px solid ${GH.ink10}` : 'none' }}>
@@ -645,6 +645,9 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                                 <strong style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>{disc}</strong>
                             </div>
                         ))}
+                        <p style={{ ...para, fontSize: 11, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic' }}>
+                            Разорванные или параллельные брони в разных кабинетах в эту скидку не складываются.
+                        </p>
                     </div>
                     <div style={boxHair}>
                         <div style={subhead}>Приветственный бонус</div>
