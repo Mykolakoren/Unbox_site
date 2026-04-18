@@ -314,7 +314,11 @@ def _handle_bookings(session: Session, chat_id: int, user: Optional[User]) -> di
               "https://unbox.com.ge/profile")
         return {"ok": True}
 
-    today = datetime.now()
+    # Day start at UTC midnight. The previous `today.replace(hour=0, minute=0)`
+    # left seconds/microseconds from `now()` — so today's bookings with
+    # `date = 2026-04-18 00:00:00` got silently filtered out when the current
+    # microsecond was > 0, which is always.
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     # Match bookings either by email (legacy soft FK) OR by UUID (primary FK
     # on modern rows). Fixes the case where a user booked via the site and
     # later linked Telegram — the bookings live on the same user row, but the
@@ -326,7 +330,7 @@ def _handle_bookings(session: Session, chat_id: int, user: Optional[User]) -> di
             (Booking.user_uuid == user.id) | (Booking.user_id == user.email)
         )
         .where(Booking.status == "confirmed")
-        .where(Booking.date >= today.replace(hour=0, minute=0))
+        .where(Booking.date >= today_start)
         .order_by(Booking.date, Booking.start_time)
     ).all()
 
