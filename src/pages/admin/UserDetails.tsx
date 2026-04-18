@@ -744,6 +744,46 @@ export function AdminUserDetails() {
                                         </div>
                                     </button>
                                 )}
+
+                                {/* Merge two accounts — senior_admin/owner only */}
+                                {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
+                                    <button
+                                        onClick={async () => {
+                                            const source = prompt(
+                                                `Слить другой аккаунт В этот (${user.email})?\n\n` +
+                                                'Введите email или UUID поглощаемого аккаунта.\n' +
+                                                'Его брони, waitlist, транзакции и баланс перейдут сюда.\n' +
+                                                'Поглощённый аккаунт будет удалён.',
+                                            );
+                                            if (!source) return;
+                                            const trimmed = source.trim();
+                                            if (!trimmed) return;
+                                            const ok = window.confirm(
+                                                `Слить аккаунт?\n\n` +
+                                                `Поглощаемый: ${trimmed}\n` +
+                                                `Оставить:    ${user.email}\n\n` +
+                                                'Действие необратимо. Продолжить?',
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.mergeUsers(trimmed, user.id);
+                                                toast.success(`Аккаунт ${trimmed} слит в текущий. Обновите страницу.`);
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Ошибка слияния');
+                                            }
+                                        }}
+                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-indigo-50 border border-dashed border-indigo-200 transition-colors text-left"
+                                    >
+                                        <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                                            <Shield size={14} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="text-sm font-medium text-unbox-dark">Слить с аккаунтом</div>
+                                            <div className="text-[10px] text-unbox-grey">Объединить дубликаты (TG-placeholder + сайт)</div>
+                                        </div>
+                                    </button>
+                                )}
                             </div>
                         )}
                     </Card>

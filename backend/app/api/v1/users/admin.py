@@ -524,3 +524,156 @@ def change_user_email(
     session.commit()
     session.refresh(user)
     return user
+
+
+# ── Merge two user accounts ──────────────────────────────────────────────────
+# Closes a long-standing duplicate-account problem: the same human can end up
+# with both a placeholder Telegram-Login user (`<chat_id>@telegram.unbox`) and
+# a regular site account (`real@gmail.com`). Merging consolidates everything
+# the user owns onto the keeper and deletes the duplicate.
+
+class _MergeUsersRequest(_Pyd):
+    """source: account to absorb (will be deleted).
+       target: account to keep (gets all data)."""
+    source: str  # email or UUID of the account being absorbed
+    target: str  # email or UUID of the account being kept
+
+
+@router.post("/merge", response_model=UserRead)
+def merge_users(
+    *,
+    session: Session = Depends(get_session),
+    payload: _MergeUsersRequest,
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    if current_user.role not in ("senior_admin", "owner"):
+        raise HTTPException(403, "Только старший администратор или владелец")
+
+    src = _resolve_user(session, payload.source)
+    tgt = _resolve_user(session, payload.target)
+    if src.id == tgt.id:
+        raise HTTPException(400, "Нельзя слить аккаунт сам с собой")
+
+    from sqlalchemy import text
+    user_table = '"user"' if session.bind.dialect.name == 'postgresql' else 'user'
+
+    moved: dict[str, int] = {}
+
+    def _bulk(sql: str, label: str, params: dict) -> None:
+        res = session.execute(text(sql), params)
+        moved[label] = int(getattr(res, "rowcount", 0) or 0)
+
+    # 1) Re-point all referencing rows from src → tgt.
+    # Bookings (uuid + email)
+    _bulk(
+        'UPDATE booking SET user_uuid = :t WHERE user_uuid = :s',
+        "booking.user_uuid", {"s": src.id, "t": tgt.id},
+    )
+    _bulk(
+        'UPDATE booking SET user_id = :t_email WHERE user_id = :s_email',
+        "booking.user_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+    _bulk(
+        'UPDATE booking SET cancelled_by = :t_email WHERE cancelled_by = :s_email',
+        "booking.cancelled_by", {"s_email": src.email, "t_email": tgt.email},
+    )
+    # Waitlist
+    _bulk(
+        'UPDATE waitlist SET user_uuid = :t WHERE user_uuid = :s',
+        "waitlist.user_uuid", {"s": src.id, "t": tgt.id},
+    )
+    _bulk(
+        'UPDATE waitlist SET user_id = :t_email WHERE user_id = :s_email',
+        "waitlist.user_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+    # Cashbox: client_id (email or UUID) + credited_user_id (UUID)
+    _bulk(
+        'UPDATE cashbox_transactions SET client_id = :t_email WHERE client_id = :s_email',
+        "cashbox_transactions.client_id(email)",
+        {"s_email": src.email, "t_email": tgt.email},
+    )
+    _bulk(
+        'UPDATE cashbox_transactions SET client_id = :t_uuid WHERE client_id = :s_uuid',
+        "cashbox_transactions.client_id(uuid)",
+        {"s_uuid": str(src.id), "t_uuid": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE cashbox_transactions SET credited_user_id = :t WHERE credited_user_id = :s',
+        "cashbox_transactions.credited_user_id",
+        {"s": str(src.id), "t": str(tgt.id)},
+    )
+    # Notifications
+    _bulk(
+        'UPDATE notifications SET recipient_id = :t WHERE recipient_id = :s',
+        "notifications.recipient_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    # User self-refs (responsible / attracted admin links by email)
+    _bulk(
+        f'UPDATE {user_table} SET responsible_admin_id = :t_email WHERE responsible_admin_id = :s_email',
+        "user.responsible_admin_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+    _bulk(
+        f'UPDATE {user_table} SET attracted_by_admin_id = :t_email WHERE attracted_by_admin_id = :s_email',
+        "user.attracted_by_admin_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+
+    # 2) Carry over scalar/JSON fields where the target is empty.
+    if not tgt.telegram_id and src.telegram_id:
+        tgt.telegram_id = src.telegram_id
+    if not tgt.google_id and src.google_id:
+        tgt.google_id = src.google_id
+    if not tgt.phone and src.phone:
+        tgt.phone = src.phone
+    if not tgt.avatar_url and src.avatar_url:
+        tgt.avatar_url = src.avatar_url
+    if not tgt.name and src.name:
+        tgt.name = src.name
+    # Sum balances; src can be negative (debt) — we honour that.
+    tgt.balance = float(tgt.balance or 0) + float(src.balance or 0)
+    # Take the higher credit limit / personal discount
+    tgt.credit_limit = max(float(tgt.credit_limit or 0), float(src.credit_limit or 0))
+    tgt.personal_discount_percent = max(
+        int(tgt.personal_discount_percent or 0),
+        int(src.personal_discount_percent or 0),
+    )
+    # Subscription: keep target's, fall back to src's
+    if not tgt.subscription and src.subscription:
+        tgt.subscription = src.subscription
+    # Append history lists
+    if src.comment_history:
+        tgt.comment_history = (tgt.comment_history or []) + list(src.comment_history)
+    if src.admin_tasks:
+        tgt.admin_tasks = (tgt.admin_tasks or []) + list(src.admin_tasks)
+    if getattr(src, "discount_history", None):
+        tgt.discount_history = (tgt.discount_history or []) + list(src.discount_history)
+    # Tags union
+    if src.tags:
+        tgt.tags = sorted(set((tgt.tags or []) + list(src.tags)))
+
+    # 3) Drop telegram_id from src first (avoids any unique-collision
+    # downstream if we ever add a unique constraint).
+    src.telegram_id = None
+    src.email = f"merged-into-{tgt.id}-{src.id}@deleted.unbox"  # unique placeholder
+    session.add(src)
+
+    # 4) Audit on the keeper.
+    audit = (tgt.comment_history or []).copy()
+    audit.append({
+        "text": f"Слияние аккаунта {src.email if not src.email.startswith('merged-into-') else '(deleted source)'} → {tgt.email}",
+        "author_id": str(current_user.id),
+        "author_name": current_user.name or current_user.email,
+        "created_at": datetime.now().isoformat(),
+        "type": "user_merge",
+        "absorbed_id": str(src.id),
+        "moved": moved,
+    })
+    tgt.comment_history = audit
+    tgt.updated_at = datetime.now()
+    session.add(tgt)
+    session.flush()
+
+    # 5) Delete the absorbed user.
+    session.delete(src)
+    session.commit()
+    session.refresh(tgt)
+    return tgt

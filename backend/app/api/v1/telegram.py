@@ -232,6 +232,23 @@ def _handle_start(session: Session, chat_id: int, text: str, username: Optional[
             _send(chat_id, "⏰ Ссылка истекла. Сгенерируйте новую в профиле.")
             return {"ok": True}
 
+    # Auto-merge: if another user already has this chat_id (typically a
+    # placeholder created by the Telegram Login Widget — `<chat_id>@telegram.unbox`)
+    # — consolidate them onto the real account we're binding to.
+    merged_note = ""
+    existing = session.exec(
+        select(User).where(User.telegram_id == str(chat_id), User.id != user.id)
+    ).first()
+    if existing:
+        try:
+            _merge_into(session, absorb=existing, keep=user)
+            merged_note = f"\n\nДанные предыдущего Telegram-аккаунта объединены."
+            logger.info("[tg:webhook] auto-merged user=%s into=%s (chat_id=%s)",
+                        existing.id, user.id, chat_id)
+        except Exception as e:
+            logger.error("[tg:webhook] auto-merge failed: %r", e)
+            # Fall through — still bind the token so the link works.
+
     user.telegram_id = str(chat_id)
     user.telegram_link_token = None
     user.telegram_link_token_expires_at = None
@@ -241,13 +258,53 @@ def _handle_start(session: Session, chat_id: int, text: str, username: Optional[
     handle = f" (@{escape(username)})" if username else ""
     _send(
         chat_id,
-        f"✅ Готово, <b>{name}</b>{handle}! Telegram подключён.\n\n"
+        f"✅ Готово, <b>{name}</b>{handle}! Telegram подключён.{escape(merged_note)}\n\n"
         f"Вы будете получать подтверждения и напоминания о бронях сюда. "
         f"Команды — в кнопке меню снизу слева.",
         parse_mode="HTML",
     )
     logger.info("[tg:webhook] bound user=%s chat_id=%s", user.id, chat_id)
     return {"ok": True}
+
+
+def _merge_into(session: Session, *, absorb: User, keep: User) -> None:
+    """Move every FK from `absorb` onto `keep`, sum balances, delete `absorb`.
+    Trimmed version of /users/merge — no audit trail, for auto-merge only.
+    Runs inside the caller's transaction; the caller commits."""
+    from sqlalchemy import text as _text
+
+    params_uuid = {"s": absorb.id, "t": keep.id}
+    params_sstr = {"s_str": str(absorb.id), "t_str": str(keep.id)}
+    params_email = {"s_email": absorb.email, "t_email": keep.email}
+
+    for sql, p in [
+        ('UPDATE booking SET user_uuid = :t WHERE user_uuid = :s', params_uuid),
+        ('UPDATE booking SET user_id = :t_email WHERE user_id = :s_email', params_email),
+        ('UPDATE booking SET cancelled_by = :t_email WHERE cancelled_by = :s_email', params_email),
+        ('UPDATE waitlist SET user_uuid = :t WHERE user_uuid = :s', params_uuid),
+        ('UPDATE waitlist SET user_id = :t_email WHERE user_id = :s_email', params_email),
+        ('UPDATE cashbox_transactions SET client_id = :t_email WHERE client_id = :s_email', params_email),
+        ('UPDATE cashbox_transactions SET client_id = :t_str WHERE client_id = :s_str', params_sstr),
+        ('UPDATE cashbox_transactions SET credited_user_id = :t_str WHERE credited_user_id = :s_str', params_sstr),
+        ('UPDATE notifications SET recipient_id = :t_str WHERE recipient_id = :s_str', params_sstr),
+    ]:
+        session.execute(_text(sql), p)
+
+    # Carry over scalar fields where the keeper is empty
+    for attr in ("name", "phone", "avatar_url", "google_id"):
+        if not getattr(keep, attr, None) and getattr(absorb, attr, None):
+            setattr(keep, attr, getattr(absorb, attr))
+    keep.balance = float(keep.balance or 0) + float(absorb.balance or 0)
+    keep.credit_limit = max(float(keep.credit_limit or 0), float(absorb.credit_limit or 0))
+    if not keep.subscription and absorb.subscription:
+        keep.subscription = absorb.subscription
+
+    # Drop telegram_id + poison-email the absorbee, then delete.
+    absorb.telegram_id = None
+    absorb.email = f"merged-into-{keep.id}-{absorb.id}@deleted.unbox"
+    session.add(absorb)
+    session.flush()
+    session.delete(absorb)
 
 
 def _handle_bookings(session: Session, chat_id: int, user: Optional[User]) -> dict:

@@ -43,6 +43,17 @@ export const usersApi = {
         return response.data;
     },
 
+    /** Merge two user accounts: `source` is absorbed into `target` and
+     *  deleted. All FKs (booking/waitlist/cashbox/notifications) move to
+     *  the target, balances sum, subscription fallback, tags union. */
+    mergeUsers: async (sourceIdOrEmail: string, targetIdOrEmail: string) => {
+        const response = await api.post<User>('/users/merge', {
+            source: sourceIdOrEmail,
+            target: targetIdOrEmail,
+        });
+        return response.data;
+    },
+
     getDiscountProgress: async () => {
         const response = await api.get<{
             accumulatedHours: number;
