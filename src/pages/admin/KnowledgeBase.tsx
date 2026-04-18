@@ -579,7 +579,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                 <div style={subhead}>Основные правила бронирования</div>
                 <div style={li}><span style={bullet}>01</span><strong style={{ fontWeight: 700 }}>Минималка.</strong> 1 час (60 мин). Шаг тарификации: 30 мин.</div>
                 <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>55+5.</strong> 55 мин работы + 5 мин буфер перед следующим специалистом.</div>
-                <div style={li}><span style={bullet}>03</span><strong style={{ fontWeight: 700, color: GH.danger }}>Overstay.</strong> Задержка &gt;10 мин — +30 мин к счёту. Продление только если следом нет брони.</div>
+                <div style={li}><span style={bullet}>03</span><strong style={{ fontWeight: 700, color: GH.danger }}>Overstay.</strong> Задержка &gt;5 мин — +30 мин к счёту. Продление только если следом нет брони.</div>
             </div>
             <div style={boxHair}>
                 <div style={subhead}>Отмена и горящие окна</div>
@@ -649,10 +649,11 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
 
     const Subscriptions = () => {
         const plans = [
-            { name: 'Тёплый старт', price: '180 GEL', period: '30 дней', hours: '10 часов', discount: '10%', fmt: 'Индивидуальный', perk: null },
-            { name: 'Регулярный практик', price: '340 GEL', period: '30 дней', hours: '20 часов', discount: '15%', fmt: 'Индивидуальный', perk: '1 бесплатный перенос' },
-            { name: 'Профи+', price: '640 GEL', period: '45 дней', hours: '40 часов (+2 бонусных)', discount: '20%', fmt: 'Инд. и Групповой', perk: 'Приоритет · внеурочный доступ · рекомендуемый специалист' },
-            { name: 'Групповой мастер', price: '420 GEL', period: '30 дней', hours: '16 часов', discount: '25%', fmt: 'Групповой · Кабинет', perk: 'Анонс мероприятия по базе' },
+            { name: 'Пробный', price: '70 GEL', period: '14 дней', hours: '4 часа инд. + 1 час капсула', discount: '—', fmt: 'Индивидуальный', perk: 'Для первого знакомства' },
+            { name: 'Тёплый старт', price: '180 GEL', period: '30 дней', hours: '10 часов инд. + 4 часа капсула', discount: '10%', fmt: 'Индивидуальный', perk: null },
+            { name: 'Регулярный практик', price: '350 GEL', period: '30 дней', hours: '20 часов инд. + 6 часов капсула', discount: '15%', fmt: 'Индивидуальный', perk: '1 бесплатный перенос' },
+            { name: 'Профи+', price: '650 GEL', period: '45 дней', hours: '40 часов инд. + 10 часов капсула', discount: '20%', fmt: 'Инд. и Групповой', perk: 'Приоритет · внеурочный доступ · рекомендуемый специалист' },
+            { name: 'Групповой мастер', price: '450 GEL', period: '45 дней', hours: '20 часов групп. + 4 часа инд.', discount: '25%', fmt: 'Групповой · Кабинет', perk: 'Анонс мероприятия по базе' },
         ];
         return (
             <div>
