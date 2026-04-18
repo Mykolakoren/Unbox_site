@@ -9,6 +9,7 @@ import type { Specialist } from '../components/Specialists/SpecialistCard';
 import { useBookingStore } from '../store/bookingStore';
 import { SpecialistBookingChessboard } from '../components/Specialists/SpecialistBookingChessboard';
 import { SpecialistBookingChessboardGrid } from '../components/Specialists/SpecialistBookingChessboardGrid';
+import { NextAvailableSlots } from '../components/Specialists/NextAvailableSlots';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 export function SpecialistProfilePage() {
@@ -633,6 +634,12 @@ export function SpecialistProfilePage() {
                         </Link>
                     </div>
                 )}
+
+                {/* Quick-pick: next 5 free slots. Saves the client from scanning
+                    the full 14-day grid just to answer "when can I see X?". */}
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
+                    <NextAvailableSlots specialistId={specialist.id} />
+                </motion.div>
 
                 {/* Booking Chessboard */}
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>

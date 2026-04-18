@@ -8,6 +8,7 @@ import { OptionsStep } from './components/Wizard/OptionsStep';
 import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 // Store
 import { useBookingStore } from './store/bookingStore';
+import { useUserStore } from './store/userStore';
 
 // Public pages (loaded eagerly — critical path)
 import { ExplorePage } from './pages/ExplorePage';
@@ -56,8 +57,14 @@ import { useDesignFlag, GH, GH_SANS } from './hooks/useDesignFlag';
 
 // Booking Flow Wrapper
 function BookingWizard() {
-  const { step, editBookingId, reset } = useBookingStore();
+  const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
+  const users = useUserStore(s => s.users);
   const isGH = useDesignFlag();
+
+  // Resolve friendly name for the "booking-for" admin-proxy banner
+  const proxyUser = bookingForUser
+    ? users.find(u => u.email === bookingForUser || u.id === bookingForUser)
+    : null;
 
   /* GH card style */
   const ghCard: React.CSSProperties = {
@@ -84,6 +91,56 @@ function BookingWizard() {
               style={isGH ? { fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' } : undefined}
               className={isGH ? '' : "text-sm font-bold underline hover:no-underline"}>
               Отменить редактирование
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Admin-proxy booking banner — visible on every step so the admin
+          can't forget whose booking they're creating. Click "Сбросить" to
+          clear target and book for themselves. */}
+      {bookingForUser && (
+        <div
+          className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}
+          style={{ position: 'sticky', top: 8, zIndex: 20 }}
+        >
+          <div style={{
+            background: '#EDE9FE',
+            border: `1px solid ${GH.ink10}`,
+            color: '#5B21B6',
+            padding: '12px 16px',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            fontFamily: GH_SANS,
+            fontSize: 14,
+            boxShadow: '0 4px 12px rgba(91,33,182,0.08)',
+          }}>
+            <span>
+              <strong style={{ fontWeight: 700 }}>
+                Бронь для клиента: {proxyUser?.name || bookingForUser}
+              </strong>
+              {proxyUser?.email && proxyUser.email !== proxyUser.name && (
+                <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 13 }}>
+                  {proxyUser.email}
+                </span>
+              )}
+            </span>
+            <button
+              onClick={() => setBookingForUser(null)}
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                textDecoration: 'underline',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#5B21B6',
+              }}
+            >
+              Сбросить → бронь для себя
             </button>
           </div>
         </div>
@@ -129,7 +186,6 @@ function BookingWizard() {
   );
 }
 
-import { useUserStore } from './store/userStore';
 import { Toaster } from 'sonner';
 import { ModuleErrorBoundary } from './components/ui/ModuleErrorBoundary';
 

@@ -24,6 +24,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
 import type { BookingHistoryItem } from '../store/types';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { EmptyState } from '../components/ui/EmptyState';
 
 // Parse backend UTC date string (no 'Z' suffix) correctly
 const parseUTC = (d: string | Date) => {
@@ -2659,10 +2660,14 @@ function GridHouseMyBookings({
                         </div>
                     )}
                     {totalBookings === 0 && (
-                        <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink30 }}>
-                            <p style={{ fontSize: 15, fontWeight: 600 }}>Нет бронирований</p>
-                            <p style={{ fontSize: 13 }}>Перейдите в шахматку для бронирования</p>
-                        </div>
+                        <EmptyState
+                            title="Пока нет бронирований"
+                            hint="Забронируйте кабинет в один клик, шахматка сверху покажет свободное время."
+                            action={{
+                                label: '+ Забронировать кабинет',
+                                onClick: () => navigate('/booking'),
+                            }}
+                        />
                     )}
                 </div>
             )}

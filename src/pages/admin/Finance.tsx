@@ -196,21 +196,27 @@ export function AdminFinance() {
                             <span className="hidden sm:inline">Корректировка</span>
                         </button>
                     )}
-                    {/* Yesterday shift status badge (#61) */}
-                    <div
-                        className={
-                            yesterdayShiftStatus === 'closed'
-                                ? 'hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200'
-                        }
-                        title={
-                            yesterdayShiftStatus === 'closed'
-                                ? 'Вчерашняя смена была закрыта.'
-                                : 'Вчерашняя смена не была закрыта. Проверьте и закройте её сегодня.'
-                        }
-                    >
-                        {yesterdayShiftStatus === 'closed' ? '✓ Вчера закрыта' : '⚠ Вчера не закрыта'}
-                    </div>
+                    {/* Yesterday shift status badge (#61).
+                        When it reads "Вчера не закрыта" the admin should be able
+                        to fix it in one click — it now opens the checklist → end-shift
+                        modal flow directly. */}
+                    {yesterdayShiftStatus === 'closed' ? (
+                        <div
+                            className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            title="Вчерашняя смена была закрыта."
+                        >
+                            ✓ Вчера закрыта
+                        </div>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={() => setShowCloseChecklist(true)}
+                            className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 cursor-pointer transition-colors"
+                            title="Вчерашняя смена не была закрыта. Нажмите, чтобы закрыть."
+                        >
+                            ⚠ Вчера не закрыта · закрыть →
+                        </button>
+                    )}
                     <button
                         onClick={() => setShowCloseChecklist(true)}
                         className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -587,27 +593,45 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 Корректировка
                             </button>
                         )}
-                        {/* Yesterday shift status (Excel #61) */}
-                        <div
-                            title={
-                                p.yesterdayShiftStatus === 'closed'
-                                    ? 'Вчерашняя смена была закрыта.'
-                                    : 'Вчерашняя смена не была закрыта.'
-                            }
-                            style={{
-                                padding: '10px 12px',
-                                fontSize: 10,
-                                fontFamily: GH_MONO,
-                                letterSpacing: '0.14em',
-                                textTransform: 'uppercase',
-                                border: `1px solid ${GH.ink}`,
-                                background: p.yesterdayShiftStatus === 'closed' ? GH.paper : GH.ink,
-                                color: p.yesterdayShiftStatus === 'closed' ? GH.ink : GH.paper,
-                                alignSelf: 'center',
-                            }}
-                        >
-                            {p.yesterdayShiftStatus === 'closed' ? '✓ Вчера закрыта' : '⚠ Вчера не закрыта'}
-                        </div>
+                        {/* Yesterday shift status (Excel #61) — clickable when missed,
+                            to open the close-shift checklist in one step. */}
+                        {p.yesterdayShiftStatus === 'closed' ? (
+                            <div
+                                title="Вчерашняя смена была закрыта."
+                                style={{
+                                    padding: '10px 12px',
+                                    fontSize: 10,
+                                    fontFamily: GH_MONO,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    border: `1px solid ${GH.ink}`,
+                                    background: GH.paper,
+                                    color: GH.ink,
+                                    alignSelf: 'center',
+                                }}
+                            >
+                                ✓ Вчера закрыта
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => p.setShowCloseChecklist(true)}
+                                title="Вчерашняя смена не была закрыта. Нажмите, чтобы закрыть."
+                                style={{
+                                    padding: '10px 12px',
+                                    fontSize: 10,
+                                    fontFamily: GH_MONO,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    border: `1px solid ${GH.ink}`,
+                                    background: GH.ink,
+                                    color: GH.paper,
+                                    alignSelf: 'center',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                ⚠ Вчера не закрыта · закрыть →
+                            </button>
+                        )}
                         <button onClick={() => p.setShowCloseChecklist(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
                             <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Закрыть смену
