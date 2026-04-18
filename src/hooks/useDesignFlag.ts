@@ -1,32 +1,20 @@
 /**
- * Grid House design flag.
+ * Grid House is the only design.
  *
- * Grid House is now the DEFAULT design.
- * - `?design=off`    in URL switches to legacy and persists via localStorage.
- * - `?design=grid`   in URL switches back to GH and clears the override.
- * - Otherwise, GH is used unless localStorage says 'off'.
+ * This hook stays here only so existing callsites keep compiling while we
+ * unwind the dual-UI code. It always returns `true`, so every
+ * `if (useDesignFlag())` branch passes and the legacy `else` paths
+ * become dead code (to be removed file-by-file in a follow-up pass).
  *
- * Returns `true` when the Grid House variant should render.
+ * The `?design=off` URL override is gone — there is no more "off" variant.
  */
-export function useDesignFlag(): boolean {
-    if (typeof window === 'undefined') return false;
-
-    const urlValue = new URLSearchParams(window.location.search).get('design');
-    if (urlValue === 'off') {
-        localStorage.setItem('unbox_design_flag', 'off');
-        return false;
-    }
-    if (urlValue === 'grid') {
-        localStorage.removeItem('unbox_design_flag');
-        return true;
-    }
-    // Default: GH on, unless explicitly opted out
-    return localStorage.getItem('unbox_design_flag') !== 'off';
+export function useDesignFlag(): true {
+    return true;
 }
 
 /**
- * Grid House design tokens — single source of truth.
- * Mirror of the tokens used in SpecialistBookingChessboardGrid + SpecialistProfilePage.
+ * Grid House design tokens — single source of truth. Imported across the
+ * codebase; do not rename without a full grep first.
  */
 export const GH = {
     ink: '#0F0F10',
