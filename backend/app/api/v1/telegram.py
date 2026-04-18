@@ -258,9 +258,17 @@ def _handle_bookings(session: Session, chat_id: int, user: Optional[User]) -> di
         return {"ok": True}
 
     today = datetime.now()
+    # Match bookings either by email (legacy soft FK) OR by UUID (primary FK
+    # on modern rows). Fixes the case where a user booked via the site and
+    # later linked Telegram — the bookings live on the same user row, but the
+    # `user_id` column may be stale (e.g. after an email change), while
+    # `user_uuid` is always stable.
     bookings = session.exec(
         select(Booking)
-        .where(Booking.user_id == user.email, Booking.status == "confirmed")
+        .where(
+            (Booking.user_uuid == user.id) | (Booking.user_id == user.email)
+        )
+        .where(Booking.status == "confirmed")
         .where(Booking.date >= today.replace(hour=0, minute=0))
         .order_by(Booking.date, Booking.start_time)
     ).all()
