@@ -602,10 +602,10 @@ function GridHouseSubscriptions() {
                 <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
                         <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
-                        <span style={{ ...ghsubMono, color: GH.ink30, fontSize: 9 }}>ТАРИФЫ</span>
+                        <span style={{ ...ghsubMono, color: GH.label, fontSize: 9 }}>ТАРИФЫ</span>
                     </div>
                     <nav style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <button onClick={() => navigate(-1)} style={{ ...ghsubMono, color: GH.ink60, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0' }}>← Назад</button>
+                        <button onClick={() => navigate(-1)} style={{ ...ghsubMono, color: GH.label, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0' }}>← Назад</button>
                         {currentUser && (
                             <Link to="/dashboard" style={{ ...ghsubMono, color: GH.ink, textDecoration: 'none', padding: '4px 0' }}>{currentUser.name}</Link>
                         )}
@@ -616,7 +616,7 @@ function GridHouseSubscriptions() {
             <div style={{ maxWidth: 1100, margin: '0 auto', padding: '48px clamp(16px, 4vw, 24px) 80px' }}>
             {/* Header */}
             <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 48, textAlign: 'center' }}>
-                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 8 }}>ТАРИФЫ</div>
+                <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ТАРИФЫ</div>
                 <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
                     Тарифы и скидки Unbox
                 </h1>
@@ -627,7 +627,7 @@ function GridHouseSubscriptions() {
 
             {/* Standard prices */}
             <div style={{ marginBottom: 48 }}>
-                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>СТАНДАРТНЫЕ ЦЕНЫ</div>
+                <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>СТАНДАРТНЫЕ ЦЕНЫ</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 0, border: ghsubHairline }}>
                     {STANDARD_PRICES.map((p, i) => (
                         <div key={i} style={{ padding: '20px 16px', borderRight: i < STANDARD_PRICES.length - 1 ? ghsubHairline : 'none' }}>
@@ -642,7 +642,7 @@ function GridHouseSubscriptions() {
             </div>
 
             {/* Subscription plans */}
-            <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>АБОНЕМЕНТЫ</div>
+            <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>АБОНЕМЕНТЫ</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16, marginBottom: 48 }}>
                 {SUBSCRIPTIONS.map(plan => (
                     <div key={plan.id} style={{ border: plan.popular ? `2px solid ${GH.ink}` : ghsubHairline, padding: 24, display: 'flex', flexDirection: 'column' }}>
@@ -684,7 +684,7 @@ function GridHouseSubscriptions() {
                             ))}
                             {plan.bonuses.length > 0 && (
                                 <div style={{ marginTop: 12 }}>
-                                    <div style={{ ...ghsubMono, color: GH.ink30, fontSize: 9, marginBottom: 6 }}>БОНУСЫ</div>
+                                    <div style={{ ...ghsubMono, color: GH.label, fontSize: 9, marginBottom: 6 }}>БОНУСЫ</div>
                                     {plan.bonuses.map((b, j) => (
                                         <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
                                             <Gift size={10} style={{ color: GH.accent, marginTop: 3, flexShrink: 0 }} />
@@ -718,7 +718,7 @@ function GridHouseSubscriptions() {
                 welcome hour, priority-of-charges note. Keep numbers in sync
                 with backend PRICING_CONFIG. */}
             <div style={{ marginBottom: 48 }}>
-                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>СКИДКИ</div>
+                <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>СКИДКИ</div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: 0, border: ghsubHairline, marginBottom: 16 }}>
                     {/* Weekly progressive */}
@@ -781,11 +781,11 @@ function GridHouseSubscriptions() {
                         </div>
                         <div style={{ display: 'flex', gap: 24, alignItems: 'baseline', flexWrap: 'wrap' }}>
                             <div>
-                                <div style={{ ...ghsubMono, color: GH.ink60 }}>Номинал</div>
+                                <div style={{ ...ghsubMono, color: GH.label }}>Номинал</div>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>20 ₾</div>
                             </div>
                             <div>
-                                <div style={{ ...ghsubMono, color: GH.ink60 }}>Срок</div>
+                                <div style={{ ...ghsubMono, color: GH.label }}>Срок</div>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>90 дней</div>
                             </div>
                         </div>
@@ -797,7 +797,7 @@ function GridHouseSubscriptions() {
 
                 {/* Priority of charges */}
                 <div style={{ border: ghsubHairline, padding: '14px 16px' }}>
-                    <div style={{ ...ghsubMono, color: GH.ink60, marginBottom: 8 }}>ПРИОРИТЕТ ПРИМЕНЕНИЯ СКИДОК</div>
+                    <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ПРИОРИТЕТ ПРИМЕНЕНИЯ СКИДОК</div>
                     <p style={{ fontSize: 13, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
                         Скидки не суммируются — применяется одна, наиболее выгодная для вас:
                         {' '}<strong>Абонемент</strong> → <strong>Персональная</strong> → <strong>За объём</strong> → <strong>За длительность</strong>.
@@ -807,7 +807,7 @@ function GridHouseSubscriptions() {
 
                 {/* Hot booking — approval, not a discount */}
                 <div style={{ border: ghsubHairline, padding: '14px 16px', marginTop: 12 }}>
-                    <div style={{ ...ghsubMono, color: GH.ink60, marginBottom: 8 }}>ГОРЯЧАЯ БРОНЬ</div>
+                    <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ГОРЯЧАЯ БРОНЬ</div>
                     <p style={{ fontSize: 13, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
                         Бронь менее чем за 12 часов до начала требует подтверждения администратора. После одобрения — обычная цена, без скидки и без надбавки.
                     </p>
@@ -816,7 +816,7 @@ function GridHouseSubscriptions() {
 
             {/* Conditions */}
             <div style={{ marginBottom: 48 }}>
-                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>УСЛОВИЯ</div>
+                <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>УСЛОВИЯ</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 0, border: ghsubHairline }}>
                     {CONDITIONS.map((c, i) => (
                         <div key={i} style={{ padding: 20, borderRight: i < CONDITIONS.length - 1 ? ghsubHairline : 'none' }}>
@@ -848,7 +848,7 @@ function GridHouseSubscriptions() {
 
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghsubMono, color: GH.ink30 }}>UNBOX · 2026</span>
+                <span style={{ ...ghsubMono, color: GH.label }}>UNBOX · 2026</span>
                 <span style={{ ...ghsubMono, color: GH.ink10 }}>GRID HOUSE</span>
             </footer>
             </div>

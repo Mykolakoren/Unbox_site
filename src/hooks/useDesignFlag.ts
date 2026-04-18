@@ -27,6 +27,10 @@ export const GH = {
     cellDead: '#F6F2E8',
     accent: '#476D6B',
     danger: '#B84A2F',
+    // Teal-ink for mono-uppercase labels. A shade deeper than `accent` so that
+    // 10-11px letter-spaced text on paper hits ~5:1 contrast (WCAG AA for
+    // small text). Swap to `ink60` to revert the "teal labels" experiment.
+    label: '#2F5F5E',
 } as const;
 
 export const GH_SANS = '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';

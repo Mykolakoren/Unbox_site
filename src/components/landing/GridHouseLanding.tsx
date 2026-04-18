@@ -45,7 +45,8 @@ const MONO_LABEL: React.CSSProperties = {
     fontSize: 10,
     letterSpacing: '0.18em',
     textTransform: 'uppercase',
-    color: GH.ink60,
+    // Teal label experiment — swap back to GH.ink60 to revert.
+    color: GH.label,
 };
 const MONO_LABEL_INK: React.CSSProperties = { ...MONO_LABEL, color: GH.ink };
 
