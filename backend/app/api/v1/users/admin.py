@@ -62,15 +62,18 @@ def update_user(
         if current_user.role == "owner":
             pass  # Allowed
         elif current_user.role == "senior_admin":
-            if target_role not in ["admin", "user"]:
+            # Senior admin can assign any role that isn't more privileged than
+            # their own. That includes "specialist" now — practitioners
+            # joining the platform need a role flip, not a ticket to the owner.
+            if target_role not in ["admin", "user", "specialist"]:
                 raise HTTPException(
                     status_code=403,
-                    detail="Senior Admin can only assign 'admin' or 'user' roles",
+                    detail="Старший администратор может назначать только роли: 'admin', 'specialist', 'user'",
                 )
             if current_role_db in ["owner", "senior_admin"]:
                 raise HTTPException(
                     status_code=403,
-                    detail="Senior Admin cannot modify Owner or System Admin accounts",
+                    detail="Старший администратор не может менять роль Владельца или другого Старшего администратора",
                 )
         else:
             raise HTTPException(status_code=403, detail="Not authorized to change roles")
