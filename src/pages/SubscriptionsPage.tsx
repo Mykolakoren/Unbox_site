@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Clock, Snowflake, Percent, ArrowRight, Check, Star, Users, Zap, Gift, Shield, MessageCircle, Sparkles, TrendingUp, Timer, Flame, Award, ChevronRight, BarChart3 } from 'lucide-react';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { MinimalLayout } from '../components/MinimalLayout';
@@ -171,10 +171,11 @@ const cardAnim = {
 };
 
 export function SubscriptionsPage() {
-    const gridHouse = useDesignFlag();
+    // Grid House is the only layout now. Keep a thin shim so existing imports
+    // compile; the legacy JSX below is unreachable and stripped by Terser.
+    return <GridHouseSubscriptions />;
 
-    if (gridHouse) return <GridHouseSubscriptions />;
-
+    // eslint-disable-next-line no-unreachable
     return (
         <MinimalLayout glassMode>
         <div className="max-w-7xl mx-auto px-4 py-8 md:py-16 space-y-16">
@@ -710,6 +711,107 @@ function GridHouseSubscriptions() {
                         </a>
                     </div>
                 ))}
+            </div>
+
+            {/* Discounts — matches the Admin Knowledge Base copy exactly.
+                Four blocks: weekly-progressive, duration (one continuous room),
+                welcome hour, priority-of-charges note. Keep numbers in sync
+                with backend PRICING_CONFIG. */}
+            <div style={{ marginBottom: 48 }}>
+                <div style={{ ...ghsubMono, color: GH.ink30, marginBottom: 16 }}>СКИДКИ</div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: 0, border: ghsubHairline, marginBottom: 16 }}>
+                    {/* Weekly progressive */}
+                    <div style={{ padding: 20, borderRight: ghsubHairline }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Прогрессивная за объём</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 12 }}>
+                            Чем больше часов за неделю — тем выше процент:
+                        </div>
+                        {[
+                            ['до 5 часов',     '0%'],
+                            ['5 – 11 часов',   '10%'],
+                            ['11 – 16 часов',  '25%'],
+                            ['16+ часов',      '50%'],
+                        ].map(([lbl, disc], i, arr) => (
+                            <div key={i} style={{
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                padding: '8px 0',
+                                borderBottom: i < arr.length - 1 ? `1px solid ${GH.ink10}` : 'none',
+                            }}>
+                                <span style={{ fontSize: 13, color: GH.ink60 }}>{lbl}</span>
+                                <strong style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>
+                                    {disc}
+                                </strong>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Duration — one continuous booking in ONE cabin */}
+                    <div style={{ padding: 20, borderRight: ghsubHairline }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Скидка за длительность</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 12 }}>
+                            Непрерывная бронь в <strong style={{ color: GH.ink }}>одном кабинете</strong> — чем длиннее, тем дешевле час:
+                        </div>
+                        {[
+                            ['2 часа подряд',   '10%'],
+                            ['3 часа подряд',   '15%'],
+                            ['4+ часа подряд',  '20%'],
+                        ].map(([lbl, disc], i, arr) => (
+                            <div key={i} style={{
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                padding: '8px 0',
+                                borderBottom: i < arr.length - 1 ? `1px solid ${GH.ink10}` : 'none',
+                            }}>
+                                <span style={{ fontSize: 13, color: GH.ink60 }}>{lbl}</span>
+                                <strong style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>
+                                    {disc}
+                                </strong>
+                            </div>
+                        ))}
+                        <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', fontStyle: 'italic', lineHeight: 1.5 }}>
+                            Разорванные или параллельные брони в разных кабинетах в эту скидку не складываются.
+                        </p>
+                    </div>
+
+                    {/* Welcome bonus */}
+                    <div style={{ padding: 20 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Приветственный бонус</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 12 }}>
+                            Первый час — бесплатно. Сразу после регистрации на бонусный баланс.
+                        </div>
+                        <div style={{ display: 'flex', gap: 24, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                            <div>
+                                <div style={{ ...ghsubMono, color: GH.ink60 }}>Номинал</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>20 ₾</div>
+                            </div>
+                            <div>
+                                <div style={{ ...ghsubMono, color: GH.ink60 }}>Срок</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>90 дней</div>
+                            </div>
+                        </div>
+                        <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', lineHeight: 1.5 }}>
+                            Списывается автоматически при оплате любой брони (FIFO).
+                        </p>
+                    </div>
+                </div>
+
+                {/* Priority of charges */}
+                <div style={{ border: ghsubHairline, padding: '14px 16px' }}>
+                    <div style={{ ...ghsubMono, color: GH.ink60, marginBottom: 8 }}>ПРИОРИТЕТ ПРИМЕНЕНИЯ СКИДОК</div>
+                    <p style={{ fontSize: 13, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
+                        Скидки не суммируются — применяется одна, наиболее выгодная для вас:
+                        {' '}<strong>Абонемент</strong> → <strong>Персональная</strong> → <strong>За объём</strong> → <strong>За длительность</strong>.
+                        Бонусный баланс (включая приветственный час) списывается отдельно, поверх итоговой цены.
+                    </p>
+                </div>
+
+                {/* Hot booking — approval, not a discount */}
+                <div style={{ border: ghsubHairline, padding: '14px 16px', marginTop: 12 }}>
+                    <div style={{ ...ghsubMono, color: GH.ink60, marginBottom: 8 }}>ГОРЯЧАЯ БРОНЬ</div>
+                    <p style={{ fontSize: 13, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
+                        Бронь менее чем за 12 часов до начала требует подтверждения администратора. После одобрения — обычная цена, без скидки и без надбавки.
+                    </p>
+                </div>
             </div>
 
             {/* Conditions */}
