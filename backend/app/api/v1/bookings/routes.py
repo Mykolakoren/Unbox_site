@@ -3,7 +3,8 @@ import logging
 from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from app.core.rate_limit import limiter
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
 from app.api import deps
@@ -145,29 +146,46 @@ def read_bookings(
 
 
 @router.get("/public", response_model=List[BookingPublicRead])
+@limiter.limit("60/minute")
 def read_public_bookings(
+    request: Request,
     session: Session = Depends(deps.get_session),
-    start_date: str = None,
-    end_date: str = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> Any:
     """Retrieve confirmed bookings for availability display (Public).
-    Returns BookingPublicRead — no user PII (email/uuid) exposed."""
-    query = select(Booking).where(Booking.status == "confirmed")
+    Returns BookingPublicRead — no user PII (email/uuid) exposed.
 
-    if start_date:
-        try:
-            s_date = datetime.strptime(start_date, "%Y-%m-%d")
-            query = query.where(Booking.date >= s_date)
-        except ValueError:
-            pass
+    * A `start_date` is enforced (default: today) so the endpoint never
+      streams the full booking history to the internet.
+    * Window is capped to 60 days ahead — more than any real chessboard
+      needs, but prevents `start_date=2020-01-01` style pulls.
+    * Result is capped to 1000 rows defensively.
+    """
+    # Default start_date = today. This is the big one — without it the query
+    # used to return every booking ever created.
+    try:
+        s_date = datetime.strptime(start_date, "%Y-%m-%d") if start_date else datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    except ValueError:
+        s_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    if end_date:
-        try:
-            e_date = datetime.strptime(end_date, "%Y-%m-%d")
-            e_date = e_date.replace(hour=23, minute=59, second=59)
-            query = query.where(Booking.date <= e_date)
-        except ValueError:
-            pass
+    # end_date defaults to start + 60 days; any `end_date` further is clamped.
+    max_window_days = 60
+    default_end = s_date + timedelta(days=max_window_days)
+    try:
+        e_date = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if end_date else default_end
+    except ValueError:
+        e_date = default_end
+    if (e_date - s_date).days > max_window_days:
+        e_date = s_date + timedelta(days=max_window_days)
+
+    query = (
+        select(Booking)
+        .where(Booking.status == "confirmed")
+        .where(Booking.date >= s_date)
+        .where(Booking.date <= e_date)
+        .limit(1000)
+    )
 
     bookings = session.exec(query).all()
     return [enrich_booking_status(b) for b in bookings]
@@ -180,7 +198,9 @@ def read_public_bookings(
 # straight in GCal so the chessboard can render them as "busy".
 
 @router.get("/external-events")
+@limiter.limit("30/minute")  # guards the downstream Google Calendar API quota
 def read_external_events(
+    request: Request,
     resource_id: str,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,

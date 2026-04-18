@@ -255,28 +255,36 @@ def init_data():
     migrate_add_columns()
     with Session(engine) as session:
         
-        # Init User
-        user = session.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).first()
-        if not user:
-            logger.info(f"Creating first superuser: {settings.FIRST_SUPERUSER}")
-            user_in = UserCreate(
-                email=settings.FIRST_SUPERUSER,
-                password=settings.FIRST_SUPERUSER_PASSWORD,
-                name="Admin",
-                phone="+995000000000",
-                is_admin=True, 
-                role="owner"
+        # Init User — guarded: skip the seed if the operator left the default
+        # placeholder in place. This prevents a predictable owner account from
+        # landing on production if .env was never configured.
+        if settings.FIRST_SUPERUSER_PASSWORD in ("CHANGE_ME_ON_FIRST_DEPLOY", "admin123", ""):
+            logger.warning(
+                "Skipping first-superuser seed: FIRST_SUPERUSER_PASSWORD is the "
+                "default placeholder. Set a real value in .env and re-run."
             )
-            
-            user_data = user_in.model_dump()
-            del user_data["password"]
-            user_data["hashed_password"] = get_password_hash(user_in.password)
-            db_obj = User(**user_data)
-            session.add(db_obj)
-            session.commit()
-            logger.info("First superuser created")
         else:
-            logger.info("First superuser already exists")
+            user = session.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).first()
+            if not user:
+                logger.info(f"Creating first superuser: {settings.FIRST_SUPERUSER}")
+                user_in = UserCreate(
+                    email=settings.FIRST_SUPERUSER,
+                    password=settings.FIRST_SUPERUSER_PASSWORD,
+                    name="Admin",
+                    phone="+995000000000",
+                    is_admin=True,
+                    role="owner",
+                )
+
+                user_data = user_in.model_dump()
+                del user_data["password"]
+                user_data["hashed_password"] = get_password_hash(user_in.password)
+                db_obj = User(**user_data)
+                session.add(db_obj)
+                session.commit()
+                logger.info("First superuser created")
+            else:
+                logger.info("First superuser already exists")
 
         # Init Resources
         init_resources(session)

@@ -169,4 +169,4 @@ ssh root@138.68.111.248 "rm -rf /var/www/unbox/dist && mv /var/www/unbox/dist-ba
 
 ## Тестовые аккаунты (prod)
 - Owner: koren.nikolas@gmail.com (Google OAuth)
-- Бета: admin@unbox.com / admin123
+- Для бета-доступа — запроси пароль у владельца (встроенный bootstrap-аккаунт отключён).

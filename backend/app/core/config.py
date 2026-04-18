@@ -19,9 +19,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_USERNAME: str = "Unbox_Booking_G_Bot"  # without @, used for deep-link
     TELEGRAM_WEBHOOK_SECRET: Optional[str] = None       # validated against X-Telegram-Bot-Api-Secret-Token
 
-    # First Superuser (for auto-creation on deploy)
+    # First Superuser (for auto-creation on deploy) — MUST be overridden via
+    # env vars in production. The literal "CHANGE_ME_ON_FIRST_DEPLOY" default
+    # trips the guard in db.init_data so the seed is skipped if it leaks through.
     FIRST_SUPERUSER: str = "admin@unbox.com"
-    FIRST_SUPERUSER_PASSWORD: str = "admin123"
+    FIRST_SUPERUSER_PASSWORD: str = "CHANGE_ME_ON_FIRST_DEPLOY"
     
     # Database
     DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env
