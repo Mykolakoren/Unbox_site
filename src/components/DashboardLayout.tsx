@@ -1,17 +1,15 @@
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
-import { SidebarLayout } from './SidebarLayout';
 import { QuickActionsFab, type QuickAction } from './ui/QuickActionsFab';
 import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut, Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmAccessToggle } from './CrmAccessToggle';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 export function DashboardLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
     const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(true);
-    const isGridHouse = useDesignFlag();
 
     useEffect(() => {
         const token = localStorage.getItem('token');
@@ -33,7 +31,7 @@ export function DashboardLayout() {
 
     if (isLoading || !currentUser) {
         return (
-            <div className="flex items-center justify-center min-h-screen" style={{ background: isGridHouse ? GH.paper : undefined }}>
+            <div className="flex items-center justify-center min-h-screen" style={{ background: GH.paper }}>
                 <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
             </div>
         );
@@ -54,23 +52,12 @@ export function DashboardLayout() {
         { label: 'Найти специалиста', sub: 'Каталог и запись', path: '/specialists', icon: Search },
     ];
 
-    // ── Grid House shell ─────────────────────────────────────────────
-    if (isGridHouse) {
-        return (
-            <GridHouseDashboardShell
-                navItems={navItems}
-                currentUser={currentUser}
-                quickActions={quickActions}
-            />
-        );
-    }
-
-    // ── Classic shell ────────────────────────────────────────────────
     return (
-        <SidebarLayout navItems={navItems} customTopContent={<CrmAccessToggle />}>
-            <Outlet />
-            <QuickActionsFab actions={quickActions} />
-        </SidebarLayout>
+        <GridHouseDashboardShell
+            navItems={navItems}
+            currentUser={currentUser}
+            quickActions={quickActions}
+        />
     );
 }
 

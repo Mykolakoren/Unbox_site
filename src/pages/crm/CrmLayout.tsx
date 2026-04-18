@@ -23,7 +23,7 @@ import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import { useCrmStore } from '../../store/crmStore';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { User } from '../../store/types';
 import clsx from 'clsx';
 
@@ -176,13 +176,10 @@ export function CrmLayout() {
         </div>
     );
 
-    // ── GRID HOUSE shell ────────────────────────────────────────────────
-    // Flag via useDesignFlag (?design=grid). Full rollback: remove this block
-    // and the GridHouseCrmShell component below, plus the imports.
-    if (useDesignFlag()) {
-        return <GridHouseCrmShell isAdmin={isAdmin} currentUser={currentUser} quickActions={quickActions} />;
-    }
+    return <GridHouseCrmShell isAdmin={isAdmin} currentUser={currentUser} quickActions={quickActions} />;
 
+    // Legacy SidebarLayout-based CRM shell removed; Grid House is the only layout.
+    // eslint-disable-next-line no-unreachable
     return (
         <SidebarLayout navItems={sidebarNavItems} customBottomContent={customBottomContent}>
             <CrmTopTabs />

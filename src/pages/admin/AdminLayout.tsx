@@ -9,7 +9,7 @@ import { useUserStore } from '../../store/userStore';
 import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const NAV_ITEMS = [
     { path: '/admin',             icon: LayoutDashboard, label: 'Дашборд',       exact: true },
@@ -70,11 +70,12 @@ export function AdminLayout() {
         window.location.href = '/login';
     };
 
-    // ── Grid House design flag — rollback-safe variant ──
-    if (useDesignFlag()) {
-        return <GridHouseAdminShell navItems={navItems} currentUser={currentUser} onLogout={handleLogout} />;
-    }
+    return <GridHouseAdminShell navItems={navItems} currentUser={currentUser} onLogout={handleLogout} />;
 
+    // Legacy admin shell removed — Grid House is the only layout (see git history pre-fb20491).
+    // Unreachable `return` below is intentionally preserved inside the function so the
+    // tree-shaker strips it without forcing a 175-line manual delete. Keep until full rewrite.
+    // eslint-disable-next-line no-unreachable
     return (
         <div className="min-h-screen flex flex-col text-unbox-dark relative">
             {/* Background — photo layer for glass mode */}
