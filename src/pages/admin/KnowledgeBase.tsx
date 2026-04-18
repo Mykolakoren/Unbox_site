@@ -595,11 +595,16 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             ['Индивидуальный · Капсула', '10 GEL'],
             ['Групповой · Кабинет', '35 GEL'],
         ];
-        const tiers = [
+        const weeklyTiers = [
             ['до 5 часов', '0%'],
             ['5 – 11 часов', '10%'],
             ['11 – 16 часов', '25%'],
             ['16+ часов', '50%'],
+        ];
+        const durationTiers = [
+            ['2 – 2:59 часа подряд', '10%'],
+            ['3 – 3:59 часа подряд', '15%'],
+            ['4+ часа подряд', '20%'],
         ];
         return (
             <div>
@@ -615,17 +620,57 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                     </div>
                     <div style={boxHair}>
                         <div style={subhead}>Еженедельная прогрессивная скидка</div>
-                        {tiers.map(([label, disc], i) => (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < tiers.length - 1 ? `1px solid ${GH.ink10}` : 'none' }}>
+                        <p style={{ ...para, fontSize: 12, color: GH.ink60, marginTop: 0, marginBottom: 10 }}>
+                            Чем больше часов за неделю, тем выше процент:
+                        </p>
+                        {weeklyTiers.map(([label, disc], i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < weeklyTiers.length - 1 ? `1px solid ${GH.ink10}` : 'none' }}>
                                 <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>{label}</span>
                                 <strong style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>{disc}</strong>
                             </div>
                         ))}
                     </div>
                 </div>
+
+                {/* Скидка за несколько часов подряд + приветственный "первый час бесплатно" */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20, marginBottom: 20 }}>
+                    <div style={boxHair}>
+                        <div style={subhead}>Скидка за длительность · одна бронь</div>
+                        <p style={{ ...para, fontSize: 12, color: GH.ink60, marginTop: 0, marginBottom: 10 }}>
+                            Применяется к одной непрерывной брони. Чем длиннее блок, тем выше процент:
+                        </p>
+                        {durationTiers.map(([label, disc], i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < durationTiers.length - 1 ? `1px solid ${GH.ink10}` : 'none' }}>
+                                <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>{label}</span>
+                                <strong style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>{disc}</strong>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={boxHair}>
+                        <div style={subhead}>Приветственный бонус</div>
+                        <p style={{ ...para, fontSize: 14, marginTop: 0, marginBottom: 10 }}>
+                            <strong style={{ fontWeight: 700 }}>Первый час — бесплатно.</strong>{' '}
+                            Все новые клиенты получают 1 час индивидуального бронирования в подарок сразу после регистрации.
+                        </p>
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                            <div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Номинал</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>20 GEL</div>
+                            </div>
+                            <div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Срок действия</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>90 дней</div>
+                            </div>
+                        </div>
+                        <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: '10px 0 0' }}>
+                            Начисляется автоматически на бонусный баланс. Списывается FIFO при оплате любой брони.
+                        </p>
+                    </div>
+                </div>
+
                 <div style={{ border: `1px solid ${GH.ink10}`, padding: 16, marginBottom: 20 }}>
                     <p style={{ ...para, margin: 0, fontSize: 12, color: GH.ink60 }}>
-                        <strong style={{ color: GH.ink, fontWeight: 700 }}>Примечание.</strong> Скидки не суммируются. Применяется наиболее выгодный для клиента вариант.
+                        <strong style={{ color: GH.ink, fontWeight: 700 }}>Примечание.</strong> Скидки не суммируются — применяется одна, наиболее выгодная для клиента. Бонусный баланс и приветственный час списываются отдельно, поверх итоговой цены.
                     </p>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
@@ -633,7 +678,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                         <div style={subhead}>Приоритет расчётов · один чек</div>
                         <div style={li}><span style={bullet}>01</span>Базовая цена (тариф × длительность)</div>
                         <div style={li}><span style={bullet}>02</span>Одна скидка: ручная → абонемент → недельная → за длительность</div>
-                        <div style={li}><span style={bullet}>03</span>Списание с баланса (бонусы)</div>
+                        <div style={li}><span style={bullet}>03</span>Списание с баланса (бонусы, приветственный час)</div>
                     </div>
                     <div style={boxHair}>
                         <div style={subhead}>Еженедельный кэшбэк</div>
@@ -705,7 +750,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         { id: 'day', num: '02', title: 'В течение дня.', subtitle: 'Поддержание порядка и координация гостей', body: <DayChecklist /> },
         { id: 'evening', num: '03', title: 'Вечерний чек-лист.', subtitle: 'Выключение, уборка, отчёт по кассе', body: <EveningChecklist /> },
         { id: 'rules', num: '04', title: 'Правила пространства.', subtitle: 'Бронирование, отмены, горящие окна', body: <Rules /> },
-        { id: 'pricing', num: '05', title: 'Ценовая политика.', subtitle: 'Тарифы, прогрессивная скидка, кэшбэк', body: <Pricing /> },
+        { id: 'pricing', num: '05', title: 'Ценовая политика.', subtitle: 'Тарифы, скидки, приветственный час, кэшбэк', body: <Pricing /> },
         { id: 'subscriptions', num: '06', title: 'Абонементы.', subtitle: 'Пакеты часов для регулярной практики', body: <Subscriptions /> },
     ];
 
