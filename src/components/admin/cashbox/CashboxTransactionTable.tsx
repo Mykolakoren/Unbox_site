@@ -113,18 +113,21 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
         <>
             {/* Desktop table — hidden on mobile */}
             <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left border-collapse" style={{ minWidth: 960 }}>
+                {/* Доделки R1 — column widths increased + px-3 gutter on every cell.
+                    Previous layout had py-only padding, so columns touched
+                    on narrow viewports. minWidth bumped to match new widths. */}
+                <table className="w-full text-left border-collapse" style={{ minWidth: 1100 }}>
                     <thead>
                         <tr className="text-xs text-gray-400 border-b border-gray-100">
-                            <th className="font-medium py-3 pl-2 whitespace-nowrap" style={{ width: 90 }}>Дата</th>
-                            <th className="font-medium py-3 whitespace-nowrap" style={{ width: 100 }}>Сумма</th>
-                            <th className="font-medium py-3 whitespace-nowrap" style={{ width: 120 }}>Способ</th>
-                            <th className="font-medium py-3 whitespace-nowrap" style={{ width: 140 }}>Категория</th>
-                            <th className="font-medium py-3 whitespace-nowrap" style={{ width: 80 }}>Филиал</th>
-                            <th className="font-medium py-3 whitespace-nowrap" style={{ width: 140 }}>Клиент</th>
-                            <th className="font-medium py-3 whitespace-nowrap">Описание</th>
-                            <th className="font-medium py-3 whitespace-nowrap" style={{ width: 100 }}>Админ</th>
-                            <th className="font-medium py-3 pr-2 text-right" style={{ width: 56 }}></th>
+                            <th className="font-medium py-3 pl-2 pr-3 whitespace-nowrap" style={{ width: 110 }}>Дата</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 110 }}>Сумма</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 130 }}>Способ</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 150 }}>Категория</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 100 }}>Филиал</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 150 }}>Клиент</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap">Описание</th>
+                            <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 110 }}>Админ</th>
+                            <th className="font-medium py-3 pr-2 pl-3 text-right" style={{ width: 60 }}></th>
                         </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -138,16 +141,16 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
 
                             return (
                                 <tr key={tx.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
-                                    <td className="py-3 pl-2 align-top whitespace-nowrap">
+                                    <td className="py-3 pl-2 pr-3 align-top whitespace-nowrap">
                                         <div className="font-medium text-gray-900">{formattedDate}</div>
                                         <div className="text-xs text-gray-400">{formattedTime}</div>
                                     </td>
-                                    <td className="py-3 align-top whitespace-nowrap">
+                                    <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <div className={`font-bold ${isIncome ? 'text-green-700' : 'text-red-600'}`}>
                                             {isIncome ? '+' : '-'}{tx.amount.toFixed(2)} ₾
                                         </div>
                                     </td>
-                                    <td className="py-3 align-top whitespace-nowrap">
+                                    <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <div className="flex items-center gap-1.5">
                                             <div className="w-6 h-6 rounded-full bg-gray-50 flex items-center justify-center text-gray-500 shrink-0">
                                                 {getMethodIcon(tx.paymentMethod)}
@@ -155,22 +158,22 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                             <span className="text-gray-600 text-xs">{getMethodLabelFull(tx.paymentMethod)}</span>
                                         </div>
                                     </td>
-                                    <td className="py-3 align-top">
+                                    <td className="py-3 px-3 align-top">
                                         <span className="text-gray-700 text-sm">{tx.categoryName || '—'}</span>
                                     </td>
-                                    <td className="py-3 align-top whitespace-nowrap">
+                                    <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <span className="text-gray-600 text-xs">{tx.branch || '—'}</span>
                                     </td>
-                                    <td className="py-3 align-top whitespace-nowrap">
+                                    <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <span className="text-gray-700 text-sm">{tx.clientName || '—'}</span>
                                     </td>
-                                    <td className="py-3 align-top">
-                                        <span className="text-gray-600 text-sm truncate max-w-[180px] block">{tx.description || '—'}</span>
+                                    <td className="py-3 px-3 align-top">
+                                        <span className="text-gray-600 text-sm truncate max-w-[220px] block">{tx.description || '—'}</span>
                                     </td>
-                                    <td className="py-3 align-top whitespace-nowrap">
+                                    <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <span className="text-xs text-gray-400">{tx.adminName}</span>
                                     </td>
-                                    <td className="py-3 pr-2 align-top text-right">
+                                    <td className="py-3 pr-2 pl-3 align-top text-right">
                                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
                                             {canEdit && (
                                                 <button

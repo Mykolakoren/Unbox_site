@@ -11,10 +11,27 @@ interface Props {
     onClose: () => void;
 }
 
+// Excel #64 — admins were confused by the difference between methods.
+// Tooltip strings are shown as native `title` on each button.
 const PAYMENT_METHODS = [
-    { id: 'cash', label: 'Наличные', icon: '💵' },
-    { id: 'card_tbc', label: 'Карта TBC', icon: '💳' },
-    { id: 'card_bog', label: 'Карта BOG', icon: '🏛️' },
+    {
+        id: 'cash',
+        label: 'Наличные',
+        icon: '💵',
+        hint: 'Кэш в кассу. Бумажные деньги на руках у админа.',
+    },
+    {
+        id: 'card_tbc',
+        label: 'Карта TBC',
+        icon: '💳',
+        hint: 'Терминал TBC. Оплата банковской картой на месте — зачисляется на счёт TBC.',
+    },
+    {
+        id: 'card_bog',
+        label: 'Карта BOG',
+        icon: '🏛️',
+        hint: 'Терминал Bank of Georgia. Оплата картой на месте — зачисляется на счёт BOG.',
+    },
 ] as const;
 
 const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
@@ -241,6 +258,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                     key={pm.id}
                                     type="button"
                                     onClick={() => setPaymentMethod(pm.id)}
+                                    title={pm.hint}
                                     className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
                                         paymentMethod === pm.id
                                             ? 'border-unbox-green bg-gray-50 text-unbox-dark font-medium'
@@ -252,6 +270,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                 </button>
                             ))}
                         </div>
+                        <p className="mt-2 text-[11px] text-gray-400 leading-snug">
+                            Наличные — кэш в кассу. TBC / BOG — оплата картой на терминале.
+                        </p>
                     </div>
 
                     {/* Transfer target account */}
@@ -264,6 +285,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                         key={pm.id}
                                         type="button"
                                         onClick={() => setTransferTo(pm.id)}
+                                        title={pm.hint}
                                         className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
                                             transferTo === pm.id
                                                 ? 'border-blue-400 bg-blue-50 text-blue-800 font-medium'

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { startOfToday, startOfMonth, endOfMonth, isAfter, format } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
@@ -80,6 +81,22 @@ export function AdminDashboard() {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5);
 
+    // Excel #12 — count of bookings created today + yesterday, for the
+    // "Входящий поток" header. Covers weekend hand-offs where yesterday
+    // matters as much as today. (Reuses `now` from above.)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+    const tomorrowStart = todayStart + 24 * 60 * 60 * 1000;
+    const incomingCounts = bookings.reduce(
+        (acc, b) => {
+            const ts = new Date(b.createdAt).getTime();
+            if (ts >= todayStart && ts < tomorrowStart) acc.today += 1;
+            else if (ts >= yesterdayStart && ts < todayStart) acc.yesterday += 1;
+            return acc;
+        },
+        { today: 0, yesterday: 0 },
+    );
+
     // ── Grid House design flag — rollback-safe variant ──
     if (useDesignFlag()) {
         return (
@@ -94,6 +111,7 @@ export function AdminDashboard() {
                 allBookings={bookings}
                 users={users}
                 monthAnalytics={monthAnalytics}
+                incomingCounts={incomingCounts}
             />
         );
     }
@@ -216,6 +234,8 @@ interface GHDashProps {
     allBookings: BookingHistoryItem[];
     users: AppUser[];
     monthAnalytics: CashboxAnalytics | null;
+    /** Excel #12 — header counter "Сегодня N · Вчера M". */
+    incomingCounts: { today: number; yesterday: number };
 }
 
 function GridHouseAdminDashboard({
@@ -229,7 +249,9 @@ function GridHouseAdminDashboard({
     allBookings,
     users,
     monthAnalytics,
+    incomingCounts,
 }: GHDashProps) {
+    const navigate = useNavigate();
     const hairline = `1px solid ${GH.ink10}`;
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
     useEffect(() => {
@@ -362,6 +384,12 @@ function GridHouseAdminDashboard({
                 >
                     Входящий поток
                 </h2>
+                {/* Excel #12 — counter of bookings CREATED today + yesterday. */}
+                <div style={{ ...monoLabel, marginBottom: narrow ? 12 : 18, color: GH.ink60 }}>
+                    Сегодня {String(incomingCounts.today).padStart(2, '0')}
+                    {' · '}
+                    Вчера {String(incomingCounts.yesterday).padStart(2, '0')}
+                </div>
                 <div style={{ border: hairline }}>
                     {/* Header */}
                     {!narrow && (
@@ -393,14 +421,22 @@ function GridHouseAdminDashboard({
                         const statusText = b.status === 'confirmed' ? 'Подтв.' : b.status === 'cancelled' ? 'Отмен.' : b.status === 're-rented' ? 'Пересд.' : b.status;
                         if (narrow) {
                             return (
-                                <div
+                                <button
                                     key={b.id}
+                                    type="button"
+                                    onClick={() => navigate(`/admin/bookings?view=grid&highlight=${b.id}`)}
+                                    title="Открыть в шахматке"
                                     style={{
                                         padding: '12px 14px',
                                         borderBottom: i < recentBookings.length - 1 ? hairline : undefined,
                                         display: 'flex',
                                         flexDirection: 'column',
                                         gap: 4,
+                                        width: '100%',
+                                        textAlign: 'left',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        cursor: 'pointer',
                                     }}
                                 >
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
@@ -428,19 +464,32 @@ function GridHouseAdminDashboard({
                                         </span>
                                         <span style={{ ...monoLabel, color: statusColor, fontSize: 9 }}>{statusText}</span>
                                     </div>
-                                </div>
+                                </button>
                             );
                         }
                         return (
-                            <div
+                            // Excel #12 — row is clickable, opens the booking
+                            // in the chessboard with this booking highlighted.
+                            <button
                                 key={b.id}
+                                type="button"
+                                onClick={() => navigate(`/admin/bookings?view=grid&highlight=${b.id}`)}
+                                title="Открыть в шахматке"
                                 style={{
                                     display: 'grid',
                                     gridTemplateColumns: '64px 120px 1fr 140px 120px',
                                     padding: '16px 20px',
                                     borderBottom: i < recentBookings.length - 1 ? hairline : undefined,
                                     alignItems: 'center',
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    transition: 'background 0.12s',
                                 }}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = GH.ink5; }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                             >
                                 <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                                     {String(i + 1).padStart(2, '0')}
@@ -461,7 +510,7 @@ function GridHouseAdminDashboard({
                                 >
                                     {b.paymentMethod === 'subscription' ? 'Абн.' : `${b.finalPrice} ₾`}
                                 </div>
-                            </div>
+                            </button>
                         );
                     })}
                 </div>

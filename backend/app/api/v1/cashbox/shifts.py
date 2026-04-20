@@ -39,6 +39,78 @@ def open_shift(
     return log
 
 
+@router.get("/shifts/preview")
+def preview_close_shift(
+    branch: Optional[str] = Query(None),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_reports),
+):
+    """Preview the shift-close math WITHOUT writing a ShiftReport (Excel #13).
+
+    Admins reported phantom discrepancies even when totals looked right.
+    This endpoint returns the exact same breakdown `end_shift` would use
+    (starting_balance, cash_in, cash_out, expected, plus the window
+    [shift_start, now]) so the admin can see WHERE the disagreement is
+    before submitting — and we can diff against the frontend balance
+    (which counts globally). If preview.expected != cashboxStore.balance.cash
+    for the same branch, there's a backdated tx somewhere.
+    """
+    now = datetime.now()
+
+    last_query = select(ShiftReport).order_by(desc(ShiftReport.shift_end)).limit(1)
+    if branch:
+        last_query = last_query.where(ShiftReport.branch == branch)
+    else:
+        last_query = last_query.where(ShiftReport.branch.is_(None))  # type: ignore
+    last_shift = session.exec(last_query).first()
+
+    shift_start = last_shift.shift_end if last_shift else datetime.min
+    starting_balance = float(last_shift.actual_balance) if last_shift else 0.0
+
+    cash_in_q = (
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "income")
+        .where(CashboxTransaction.payment_method == "cash")
+        .where(CashboxTransaction.date >= shift_start)
+    )
+    cash_out_q = (
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "expense")
+        .where(CashboxTransaction.payment_method == "cash")
+        .where(CashboxTransaction.date >= shift_start)
+    )
+    if branch:
+        cash_in_q = cash_in_q.where(CashboxTransaction.branch == branch)
+        cash_out_q = cash_out_q.where(CashboxTransaction.branch == branch)
+
+    cash_in = float(session.exec(cash_in_q).one())
+    cash_out = float(session.exec(cash_out_q).one())
+    expected = round(starting_balance + cash_in - cash_out, 2)
+
+    # Count of transactions that make up this window — gives the admin a
+    # "did I expect this many?" sanity check.
+    tx_count_q = (
+        select(func.count(CashboxTransaction.id))  # type: ignore
+        .where(CashboxTransaction.payment_method == "cash")
+        .where(CashboxTransaction.date >= shift_start)
+    )
+    if branch:
+        tx_count_q = tx_count_q.where(CashboxTransaction.branch == branch)
+    tx_count = int(session.exec(tx_count_q).one())
+
+    return {
+        "starting_balance": round(starting_balance, 2),
+        "cash_in": round(cash_in, 2),
+        "cash_out": round(cash_out, 2),
+        "expected": expected,
+        "tx_count": tx_count,
+        "shift_start": shift_start.isoformat() if shift_start != datetime.min else None,
+        "now": now.isoformat(),
+        "branch": branch,
+        "prev_close_id": str(last_shift.id) if last_shift else None,
+    }
+
+
 @router.get("/shifts/open/current", response_model=Optional[ShiftOpenLogRead])
 def get_current_open_shift(
     branch: Optional[str] = Query(None),

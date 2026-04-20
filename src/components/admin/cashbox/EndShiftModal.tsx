@@ -22,17 +22,19 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
     const [saving, setSaving] = useState(false);
     const [branchCash, setBranchCash] = useState<number | null>(null);
     const [loadingBranchCash, setLoadingBranchCash] = useState(false);
+    // Excel #13 — backend breakdown so the admin can see how `expected` is
+    // made up (starting + cash_in − cash_out) and spot backdated txs.
+    const [preview, setPreview] = useState<Awaited<ReturnType<typeof cashboxApi.previewCloseShift>> | null>(null);
 
-    // The expected balance MUST be branch-scoped when closing a branch shift —
-    // otherwise the modal showed the global cash total, the admin saw "no
-    // discrepancy" because they happened to match, then the backend (which
-    // already computes branch-scoped) returned a real discrepancy in the toast.
-    // Fetch the branch's own cash so what the user sees and what backend
-    // computes line up. (Excel #7.)
     useEffect(() => {
         if (!isOpen) return;
         setActualBalance('');
         setNotes('');
+        setPreview(null);
+        // Preview runs for every open; branch filter applied at backend.
+        cashboxApi.previewCloseShift(branch || undefined)
+            .then(setPreview)
+            .catch(() => setPreview(null));
         if (branch) {
             setLoadingBranchCash(true);
             setBranchCash(null);
@@ -82,6 +84,18 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
             } else {
                 toast.warning(`Смена закрыта — расхождение: ${disc > 0 ? '+' : ''}${disc.toFixed(2)} ₾`);
             }
+            // Excel #75 — final lock-up reminder AFTER cash reconciliation.
+            // Casa is now sealed in the report; admin can safely lock up and leave.
+            // Long duration so admins walking out of the centre actually see it.
+            toast('🔒 Не забудьте: запереть двери, закрыть окна, активировать сигнализацию', {
+                duration: 15000,
+                style: {
+                    background: '#fef3c7',
+                    border: '1px solid #fbbf24',
+                    color: '#92400e',
+                    fontWeight: 500,
+                },
+            });
             onClose();
         } catch {
             toast.error('Ошибка закрытия смены');
@@ -131,6 +145,33 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                                 ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
                                 : `${cashBalance.toFixed(2)} ₾`}
                         </div>
+                        {/* Excel #13 — backend breakdown so the admin can audit
+                            where the expected figure came from. If the totals
+                            don't match the display above, a backdated tx in
+                            this branch's period is the usual culprit. */}
+                        {preview && (
+                            <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500 leading-relaxed">
+                                <div className="flex justify-between">
+                                    <span>Остаток с прошлой смены</span>
+                                    <span className="font-mono">{preview.starting_balance.toFixed(2)} ₾</span>
+                                </div>
+                                <div className="flex justify-between text-emerald-700">
+                                    <span>+ Приход за смену</span>
+                                    <span className="font-mono">{preview.cash_in.toFixed(2)} ₾</span>
+                                </div>
+                                <div className="flex justify-between text-red-700">
+                                    <span>− Расход за смену</span>
+                                    <span className="font-mono">{preview.cash_out.toFixed(2)} ₾</span>
+                                </div>
+                                <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
+                                    <span>= Ожидается</span>
+                                    <span className="font-mono">{preview.expected.toFixed(2)} ₾</span>
+                                </div>
+                                <div className="text-gray-400 mt-1">
+                                    Движений за период: {preview.tx_count}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Actual balance */}

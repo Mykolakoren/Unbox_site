@@ -53,11 +53,9 @@ const ITEMS: Item[] = [
         label: 'Кабинеты осмотрены',
         sub: 'Свет и кондиционеры выключены, кабинеты прибраны, вещей клиентов нет',
     },
-    {
-        key: 'secured',
-        label: 'Помещение заперто',
-        sub: 'Окна закрыты, двери заперты, сигнализация (если есть) активирована',
-    },
+    // Excel #75 — "Помещение заперто" moved OUT of the pre-close checklist.
+    // Admin cannot physically count cash after locking up; we now remind them
+    // AFTER cash reconciliation in EndShiftModal.
 ];
 
 export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {

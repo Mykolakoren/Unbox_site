@@ -175,6 +175,26 @@ export const cashboxApi = {
         return data;
     },
 
+    /** Preview close-shift math WITHOUT writing a ShiftReport.
+     *  Excel #13 — admins see starting_balance + cash_in − cash_out breakdown
+     *  before submitting, so phantom discrepancies are traceable. */
+    previewCloseShift: async (branch?: string): Promise<{
+        starting_balance: number;
+        cash_in: number;
+        cash_out: number;
+        expected: number;
+        tx_count: number;
+        shift_start: string | null;
+        now: string;
+        branch: string | null;
+        prev_close_id: string | null;
+    }> => {
+        const { data } = await api.get('/cashbox/shifts/preview', {
+            params: branch ? { branch } : {},
+        });
+        return data;
+    },
+
     /** Most recent open event since the last close. Returns null if no open
      *  shift currently in progress. */
     getCurrentOpenShift: async (branch?: string): Promise<ShiftOpenLog | null> => {

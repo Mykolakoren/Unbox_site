@@ -354,10 +354,43 @@ function GridHouseAdminFinance(p: GHAFProps) {
                             <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Открыть смену
                         </button>
-                        <button onClick={() => p.setShowCloseChecklist(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
-                            <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                            Закрыть смену
-                        </button>
+                        {/* Excel #68 — branch picker sits RIGHT before "Закрыть смену"
+                            so the admin picks the scope first. Bound to the same
+                            selectedBranch as the period filter to avoid split state. */}
+                        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+                            <select
+                                value={p.selectedBranch}
+                                onChange={e => p.setSelectedBranch(e.target.value)}
+                                title="Филиал для закрытия смены"
+                                style={{
+                                    padding: '10px 14px',
+                                    fontSize: 10,
+                                    fontFamily: GH_MONO,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    border: `1px solid ${GH.ink}`,
+                                    borderRight: 'none',
+                                    background: GH.paper,
+                                    color: GH.ink,
+                                    cursor: 'pointer',
+                                    appearance: 'none',
+                                    paddingRight: 28,
+                                    backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(-45deg, transparent 50%, currentColor 50%)',
+                                    backgroundPosition: 'calc(100% - 14px) 50%, calc(100% - 9px) 50%',
+                                    backgroundSize: '5px 5px',
+                                    backgroundRepeat: 'no-repeat',
+                                }}
+                            >
+                                <option value="">Все филиалы</option>
+                                <option value="Unbox Uni">Unbox Uni</option>
+                                <option value="Unbox One">Unbox One</option>
+                                <option value="Neo School">Neo School</option>
+                            </select>
+                            <button onClick={() => p.setShowCloseChecklist(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
+                                <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                Закрыть смену
+                            </button>
+                        </div>
                         <button onClick={() => p.setShowAddTx(true)} style={{ ...inkBtn, padding: '10px 14px', fontSize: 10 }}>
                             <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Новая операция

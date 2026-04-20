@@ -1,15 +1,72 @@
+import { useEffect } from 'react';
 import { Receipt, CreditCard, Banknote, Landmark } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
+import { useCashboxStore } from '../../store/cashboxStore';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { parseUTC, formatBatumi } from '../../utils/dateUtils';
 
 interface UserTransactionsProps {
     email: string;
 }
 
+/**
+ * Excel #60 — admins reported "paid but nothing shows in the client card".
+ *
+ * The root cause: legacy userStore.transactions is a local Zustand slice
+ * that's not populated from the real source of truth anymore. Real money
+ * movements live in cashboxStore.transactions (API-backed). We now merge
+ * both sources and dedupe by id, so any cashbox transaction linked to
+ * this user — either via client_id (booked-for-client) or via
+ * credited_user_id (balance top-up) — appears in the card.
+ */
 export function UserTransactions({ email }: UserTransactionsProps) {
-    const { getTransactionsByUser } = useUserStore();
-    const transactions = getTransactionsByUser(email);
+    const { users, getTransactionsByUser } = useUserStore();
+    const { transactions: cashboxTxs, fetchTransactions } = useCashboxStore();
+
+    const user = users.find(u => u.email === email);
+    const userUuid = user?.id;
+
+    // Fetch cashbox history on mount; fine to refetch, store dedupes by id.
+    useEffect(() => {
+        fetchTransactions();
+    }, [fetchTransactions]);
+
+    // Legacy source (kept for older manually-added test rows).
+    const legacyTransactions = getTransactionsByUser(email);
+
+    // Cashbox source, filtered to this user. We check both client_id
+    // (admin picked this client when recording the tx) and
+    // credited_user_id (balance-top-up marker from create_transaction).
+    const cashboxForUser = cashboxTxs.filter(t =>
+        (userUuid && (t.clientId === userUuid || (t as any).creditedUserId === userUuid))
+    );
+
+    // Normalise cashbox rows into the same shape as legacy rows so the
+    // render loop below stays unchanged.
+    const normalisedCashbox = cashboxForUser.map(t => ({
+        id: t.id,
+        date: t.date,
+        amount: t.type === 'expense' ? -t.amount : t.amount,
+        currency: t.currency,
+        paymentMethod: t.paymentMethod === 'card_tbc' ? 'tbc'
+            : t.paymentMethod === 'card_bog' ? 'bog'
+            : t.paymentMethod === 'card_terminal' ? 'card'
+            : t.paymentMethod === 'bank_transfer' ? 'transfer'
+            : t.paymentMethod,
+        description: t.description || t.categoryName || '',
+        category: t.type === 'income' ? 'deposit' : 'shop',
+        type: t.type === 'income' ? 'deposit' : 'manual_correction',
+        status: 'completed' as const,
+        adminName: t.adminName,
+        source: 'cashbox' as const,
+    }));
+
+    // Dedupe: if a legacy tx happens to share an id with cashbox, prefer cashbox.
+    const seen = new Set(normalisedCashbox.map(t => t.id));
+    const legacyUnique = legacyTransactions.filter(t => !seen.has(t.id));
+    const transactions = [...normalisedCashbox, ...legacyUnique]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     if (transactions.length === 0) {
         return (
@@ -50,7 +107,6 @@ export function UserTransactions({ email }: UserTransactionsProps) {
     };
 
     const getPurposeLabel = (t: any) => {
-        // Fallback for old data
         if (!t.category) {
             if (t.type === 'subscription_purchase') return 'Абонемент';
             if (t.type === 'booking_payment') return 'Разовая бронь';
@@ -68,7 +124,7 @@ export function UserTransactions({ email }: UserTransactionsProps) {
     };
 
     const getStatusBadge = (status?: string) => {
-        const s = status || 'completed'; // Default to completed for old data
+        const s = status || 'completed';
         const styles = {
             completed: 'bg-green-100 text-green-700',
             pending: 'bg-yellow-100 text-yellow-700',
@@ -94,6 +150,9 @@ export function UserTransactions({ email }: UserTransactionsProps) {
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2">
                 <Receipt size={20} className="text-gray-400" />
                 История платежей и операций
+                <span className="text-xs font-normal text-gray-400 ml-2">
+                    {transactions.length} {transactions.length === 1 ? 'запись' : 'записей'}
+                </span>
             </h3>
 
             <div className="overflow-x-auto">
@@ -109,9 +168,12 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                         </tr>
                     </thead>
                     <tbody className="text-sm">
-                        {transactions.map((txn) => {
-                            const formattedDate = format(new Date(txn.date), 'd MMM yyyy', { locale: ru });
-                            const formattedTime = format(new Date(txn.date), 'HH:mm');
+                        {transactions.map((txn: any) => {
+                            const d = parseUTC(txn.date);
+                            const formattedDate = formatBatumi(d, 'd MMM yyyy', ru);
+                            const formattedTime = formatBatumi(d, 'HH:mm');
+                            const amountNum = Number(txn.amount);
+                            const isNegative = amountNum < 0;
 
                             return (
                                 <tr key={txn.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
@@ -120,8 +182,8 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                                         <div className="text-xs text-gray-400">{formattedTime}</div>
                                     </td>
                                     <td className="py-3 align-top">
-                                        <div className="font-bold text-gray-900">
-                                            {txn.amount} {txn.currency === 'USD' ? '$' : txn.currency === 'EUR' ? '€' : '₾'}
+                                        <div className={`font-bold ${isNegative ? 'text-red-600' : 'text-green-700'}`}>
+                                            {isNegative ? '' : '+'}{amountNum} {txn.currency === 'USD' ? '$' : txn.currency === 'EUR' ? '€' : '₾'}
                                         </div>
                                     </td>
                                     <td className="py-3 align-top">
@@ -135,7 +197,7 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                                     <td className="py-3 align-top">
                                         <div className="text-gray-900">{getPurposeLabel(txn)}</div>
                                         {txn.description && txn.description !== getPurposeLabel(txn) && (
-                                            <div className="text-xs text-gray-400 truncate max-w-[150px]">{txn.description}</div>
+                                            <div className="text-xs text-gray-400 truncate max-w-[200px]">{txn.description}</div>
                                         )}
                                     </td>
                                     <td className="py-3 align-top">
@@ -147,7 +209,6 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                                                 by {txn.adminName}
                                             </div>
                                         )}
-                                        {/* Future: Link to bookings */}
                                     </td>
                                 </tr>
                             );
@@ -158,7 +219,7 @@ export function UserTransactions({ email }: UserTransactionsProps) {
 
             <div className="mt-4 pt-4 border-t border-gray-50 text-right">
                 <div className="text-xs text-gray-400">
-                    * Платеж может покрывать несколько бронирований
+                    * Платёж может покрывать несколько бронирований. Минусовые суммы — возвраты или списания.
                 </div>
             </div>
         </div>
