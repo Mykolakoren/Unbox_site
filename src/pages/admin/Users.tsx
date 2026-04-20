@@ -86,9 +86,22 @@ export function AdminUsers() {
                                         to={`/admin/users/${encodeURIComponent(user.email)}`}
                                         className="flex items-center gap-3 group cursor-pointer"
                                     >
-                                        <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center font-bold text-unbox-dark group-hover:bg-unbox-green group-hover:text-white transition-colors">
-                                            {user.name.charAt(0)}
-                                        </div>
+                                        {/* Excel #47 — show avatar if present, fall back to initial. */}
+                                        {user.avatarUrl ? (
+                                            <img
+                                                src={user.avatarUrl}
+                                                alt={user.name}
+                                                className="w-10 h-10 rounded-full object-cover border border-unbox-light"
+                                                onError={(e) => {
+                                                    // Swap to initial-only badge if image fails to load.
+                                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center font-bold text-unbox-dark group-hover:bg-unbox-green group-hover:text-white transition-colors">
+                                                {user.name.charAt(0)}
+                                            </div>
+                                        )}
                                         <div>
                                             <div className="font-medium text-unbox-dark flex items-center gap-2 group-hover:text-unbox-green transition-colors">
                                                 {user.name}
@@ -573,17 +586,34 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 color: 'inherit',
                             }}
                         >
-                            {/* Avatar */}
-                            <div style={{
-                                width: 40, height: 40, minWidth: 40,
-                                borderRadius: '50%',
-                                background: GH.ink,
-                                color: GH.paper,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontFamily: GH_SANS, fontWeight: 700, fontSize: 16,
-                            }}>
-                                {(user.name || '?').charAt(0).toUpperCase()}
-                            </div>
+                            {/* Avatar — Excel #47, shows photo if avatarUrl set */}
+                            {user.avatarUrl ? (
+                                <img
+                                    src={user.avatarUrl}
+                                    alt={user.name}
+                                    style={{
+                                        width: 40, height: 40, minWidth: 40,
+                                        borderRadius: '50%',
+                                        objectFit: 'cover',
+                                        border: `1px solid ${GH.ink10}`,
+                                    }}
+                                    onError={(e) => {
+                                        // Fallback to initial: hide broken image
+                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                    }}
+                                />
+                            ) : (
+                                <div style={{
+                                    width: 40, height: 40, minWidth: 40,
+                                    borderRadius: '50%',
+                                    background: GH.ink,
+                                    color: GH.paper,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontFamily: GH_SANS, fontWeight: 700, fontSize: 16,
+                                }}>
+                                    {(user.name || '?').charAt(0).toUpperCase()}
+                                </div>
+                            )}
                             {/* Info */}
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{

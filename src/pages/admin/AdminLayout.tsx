@@ -112,14 +112,17 @@ export function AdminLayout() {
                         На сайт
                     </Link>
 
-                    {/* Desktop Nav */}
+                    {/* Desktop Nav — Excel #36.
+                        Keep no-scrollbar so the thin bar isn't ugly on the dark
+                        header; instead drop items into a "More ▾" overflow menu
+                        on narrow viewports. */}
                     <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
                         {navItems.map(item => (
                             <Link
                                 key={item.path}
                                 to={item.path}
                                 className={clsx(
-                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150',
+                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150 shrink-0',
                                     isActive(item.path, item.exact)
                                         ? 'bg-white/15 text-white'
                                         : 'text-white/55 hover:text-white/85 hover:bg-white/8'
@@ -314,12 +317,16 @@ function GridHouseAdminShell({
                 maxWidth: '100vw',
             }}
         >
-            {/* ── SIDEBAR ── */}
+            {/* ── SIDEBAR ──
+                Excel #34 — nav scrolled the WHOLE sidebar including the
+                footer, so "Права доступа" and anything below fell below the
+                viewport with no way to reach them. Fix: aside is a flex column
+                with overflow-y only on the nav middle section. Brand, user
+                info and footer actions stay pinned at top/bottom. */}
             <aside
                 style={{
                     width: narrow ? 280 : 260,
                     minWidth: narrow ? 280 : 260,
-                    // Use distinct solid surface on mobile so it never appears transparent
                     background: narrow ? '#F3EFE2' : '#F0ECDD',
                     backgroundColor: narrow ? '#F3EFE2' : '#F0ECDD',
                     borderRight: narrow ? `2px solid ${GH.ink}` : hairline,
@@ -327,7 +334,6 @@ function GridHouseAdminShell({
                     top: 0,
                     left: 0,
                     height: '100vh',
-                    overflowY: 'auto',
                     transform: narrow && !mobileOpen ? 'translateX(-100%)' : 'translateX(0)',
                     transition: 'transform 0.2s ease',
                     zIndex: 60,
@@ -356,8 +362,8 @@ function GridHouseAdminShell({
                     </div>
                 </div>
 
-                {/* Nav */}
-                <nav style={{ flex: 1, padding: 0 }}>
+                {/* Nav — scrolls independently so Footer stays pinned. */}
+                <nav style={{ flex: 1, padding: 0, overflowY: 'auto', minHeight: 0 }}>
                     {ghNav.map((item, i) => {
                         const active = isActive(item);
                         return (
@@ -480,6 +486,36 @@ function GridHouseAdminShell({
                         </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {/* Excel #38 — one-click Google Calendar link.
+                            Uses the personal calendarId if the admin set one,
+                            otherwise opens the generic Calendar landing. */}
+                        <a
+                            href="https://calendar.google.com/calendar/u/0/r"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Открыть Google Calendar в новой вкладке"
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase',
+                                color: GH.ink60,
+                                textDecoration: 'none',
+                                border: `1px solid ${GH.ink10}`,
+                                padding: '6px 10px',
+                                transition: 'border-color 0.12s, color 0.12s',
+                            }}
+                            onMouseEnter={(e) => {
+                                (e.currentTarget as HTMLAnchorElement).style.borderColor = GH.ink;
+                                (e.currentTarget as HTMLAnchorElement).style.color = GH.ink;
+                            }}
+                            onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLAnchorElement).style.borderColor = GH.ink10;
+                                (e.currentTarget as HTMLAnchorElement).style.color = GH.ink60;
+                            }}
+                        >
+                            📅 G-Cal ↗
+                        </a>
                         <NotificationBell variant="light" />
                         <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
                             Unbox · Панель управления

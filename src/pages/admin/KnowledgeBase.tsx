@@ -4,7 +4,7 @@ import { FileText, Sun, Moon, Clock, BookOpen, AlertCircle, ChevronDown, Star } 
 import clsx from 'clsx';
 import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
-type SectionId = 'morning' | 'evening' | 'day' | 'rules' | 'pricing' | 'subscriptions';
+type SectionId = 'morning' | 'evening' | 'day' | 'rules' | 'pricing' | 'subscriptions' | 'glossary';
 
 export function AdminKnowledgeBase() {
     const gridHouse = useDesignFlag();
@@ -753,6 +753,86 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         );
     };
 
+    // Excel #65 — glossary explaining admin-specific terms that tripped up new
+    // staff (сессия vs бронь was the one they hit most).
+    const Glossary = () => (
+        <div>
+            <p style={para}>
+                Короткий словарь терминов, которые встречаются в CRM и на сайте.
+                Если путаешь понятия — сюда.
+            </p>
+
+            <div style={boxHair}>
+                <div style={subhead}>Бронь vs сессия</div>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Бронь</strong> — это аренда кабинета на
+                    конкретное время. Физический ресурс. Видна в шахматке
+                    «/dashboard/bookings» и «/admin/bookings». Оплачивается по тарифу
+                    кабинета.
+                </p>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Сессия</strong> — это встреча
+                    специалист⇄клиент в CRM. Запись о приёме. Видна в «/crm/sessions».
+                    Оплачивается отдельно (клиент → специалисту, отдельно от аренды).
+                </p>
+                <p style={para}>
+                    Одна бронь может содержать одну сессию (специалист арендовал кабинет
+                    и принял клиента), несколько сессий (групповой приём), или ни одной
+                    (клиент арендовал кабинет для своей работы без CRM-записи).
+                </p>
+            </div>
+
+            <div style={boxHair}>
+                <div style={subhead}>Статусы бронирования</div>
+                <div style={li}><span style={bullet}>01</span><strong>Подтверждена</strong> — активная бронь, клиент придёт.</div>
+                <div style={li}><span style={bullet}>02</span><strong>Пересдана</strong> (re-rented) — владелец выставил на переаренду, другой клиент подхватил. Первоначальная бронь отменена с 50% возвратом.</div>
+                <div style={li}><span style={bullet}>03</span><strong>На переаренде</strong> — владелец выставил слот на переаренду, но никто пока не подхватил. Бронь ещё активна.</div>
+                <div style={li}><span style={bullet}>04</span><strong>Отменена</strong> — бронь отменена (возврат зависит от политики — см. ценовую политику).</div>
+                <div style={li}><span style={bullet}>05</span><strong>Завершена</strong> — бронь прошла, время вышло.</div>
+                <div style={li}><span style={bullet}>06</span><strong>No-show</strong> — клиент не пришёл без отмены. Попадает в чек-лист закрытия смены.</div>
+            </div>
+
+            <div style={boxHair}>
+                <div style={subhead}>Финансы: способы оплаты</div>
+                <div style={li}><span style={bullet}>01</span><strong>Наличные</strong> — кэш в кассу, бумажные деньги на руках у админа.</div>
+                <div style={li}><span style={bullet}>02</span><strong>Карта TBC / BOG</strong> — оплата картой на терминале TBC или BOG. Зачисляется на соответствующий банковский счёт.</div>
+                <div style={li}><span style={bullet}>03</span><strong>Перевод</strong> — внутренний перевод между счетами (наличные → карта и наоборот). Создаёт две транзакции (расход с одного + приход на другой).</div>
+                <div style={li}><span style={bullet}>04</span><strong>С баланса</strong> — списание с баланса клиента (внутренняя валюта).</div>
+            </div>
+
+            <div style={boxHair}>
+                <div style={subhead}>Смена</div>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Открыть смену</strong> — админ утром
+                    фиксирует начало рабочего дня, остаток кассы. Запись попадает в журнал.
+                </p>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Закрыть смену</strong> — админ вечером
+                    проходит чек-лист (брони, расчёты, состояние центра), пересчитывает кассу,
+                    фиксирует расхождение (если есть). Всё пишется в ShiftReport.
+                </p>
+            </div>
+
+            <div style={boxHair}>
+                <div style={subhead}>Бонусы, абонементы, баланс</div>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Баланс</strong> — денежный счёт клиента.
+                    Пополняется при оплате с галкой «Зачислить на баланс». Тратится на любые услуги.
+                </p>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Абонемент</strong> — пакет часов с
+                    включёнными форматами (кабинет, капсула). Действует определённый период.
+                    Часы списываются перед балансом.
+                </p>
+                <p style={para}>
+                    <strong style={{ fontWeight: 700 }}>Бонус</strong> — бесплатные часы
+                    (приветственный, за приглашение друга, за лояльность). FIFO-очередь: сначала
+                    тратятся бонусы, потом абонемент, потом баланс.
+                </p>
+            </div>
+        </div>
+    );
+
     const sections: GHSection[] = [
         { id: 'morning', num: '01', title: 'Утренний чек-лист.', subtitle: 'Открытие, подготовка филиала, чистота', body: <MorningChecklist /> },
         { id: 'day', num: '02', title: 'В течение дня.', subtitle: 'Поддержание порядка и координация гостей', body: <DayChecklist /> },
@@ -760,6 +840,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         { id: 'rules', num: '04', title: 'Правила пространства.', subtitle: 'Бронирование, отмены, горящие окна', body: <Rules /> },
         { id: 'pricing', num: '05', title: 'Ценовая политика.', subtitle: 'Тарифы, скидки, приветственный час, кэшбэк', body: <Pricing /> },
         { id: 'subscriptions', num: '06', title: 'Абонементы.', subtitle: 'Пакеты часов для регулярной практики', body: <Subscriptions /> },
+        { id: 'glossary', num: '07', title: 'Глоссарий.', subtitle: 'Термины: бронь vs сессия, статусы, способы оплаты', body: <Glossary /> },
     ];
 
     return (

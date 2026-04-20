@@ -29,6 +29,9 @@ export function SpecialistsPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [formatFilter, setFormatFilter] = useState('all');
     const [roleFilter, setRoleFilter] = useState('all');
+    // Excel #56 — clickable specialisation chips. null = nothing selected,
+    // string = filter specialists whose `specializations[]` includes it.
+    const [specFilter, setSpecFilter] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchSpecialists = async () => {
@@ -46,23 +49,57 @@ export function SpecialistsPage() {
         fetchSpecialists();
     }, []);
 
-    // Extract unique roles from taglines (e.g. "Психолог, арт-терапевт" → "Психолог")
+    // Excel #21 — always show the canonical role tabs even when the current
+    // roster doesn't have anyone in a category yet. Extra roles found in
+    // taglines are appended so we don't hide new professions.
+    const CORE_ROLES = ['Психолог', 'Коуч', 'Педагог', 'Тренер', 'Терапевт'];
+
     const roleFilters = useMemo(() => {
-        const roles = new Map<string, number>();
+        const found = new Map<string, number>();
         specialists.forEach(s => {
             const role = s.tagline?.split(',')[0]?.trim();
-            if (role) roles.set(role, (roles.get(role) || 0) + 1);
+            if (role) found.set(role, (found.get(role) || 0) + 1);
         });
-        return Array.from(roles.entries())
+        // Start with core roles (always visible), then append discovered ones.
+        const seen = new Set<string>();
+        const ordered: string[] = [];
+        for (const r of CORE_ROLES) {
+            ordered.push(r);
+            seen.add(r.toLowerCase());
+        }
+        Array.from(found.entries())
             .sort((a, b) => b[1] - a[1])
-            .map(([role]) => role);
+            .forEach(([r]) => {
+                if (!seen.has(r.toLowerCase())) {
+                    ordered.push(r);
+                    seen.add(r.toLowerCase());
+                }
+            });
+        return ordered;
+    }, [specialists]);
+
+    // Excel #56 — collect all specialisations across the roster for the
+    // chip filter row. Sorted by popularity.
+    const allSpecializations = useMemo(() => {
+        const counts = new Map<string, number>();
+        specialists.forEach(s => {
+            (s.specializations || []).forEach(spec => {
+                const clean = spec.trim();
+                if (clean) counts.set(clean, (counts.get(clean) || 0) + 1);
+            });
+        });
+        return Array.from(counts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(([spec]) => spec);
     }, [specialists]);
 
     const filteredSpecialists = specialists.filter(s => {
         // Format filter
         if (formatFilter !== 'all' && !s.formats.includes(formatFilter)) return false;
-        // Role filter
+        // Role filter — matches tagline starts with selected role
         if (roleFilter !== 'all' && !s.tagline?.toLowerCase().startsWith(roleFilter.toLowerCase())) return false;
+        // Specialisation filter (Excel #56) — must include the selected chip
+        if (specFilter && !(s.specializations || []).some(sp => sp.toLowerCase() === specFilter.toLowerCase())) return false;
         // Search
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
@@ -82,6 +119,8 @@ export function SpecialistsPage() {
             formatFilter={formatFilter} setFormatFilter={setFormatFilter}
             roleFilter={roleFilter} setRoleFilter={setRoleFilter}
             roleFilters={roleFilters}
+            specFilter={specFilter} setSpecFilter={setSpecFilter}
+            allSpecializations={allSpecializations}
         />
     );
 
@@ -285,12 +324,16 @@ interface GridHouseSpecialistsPageProps {
     roleFilter: string;
     setRoleFilter: (r: string) => void;
     roleFilters: string[];
+    specFilter: string | null;
+    setSpecFilter: (s: string | null) => void;
+    allSpecializations: string[];
 }
 
 function GridHouseSpecialistsPage({
     specialists, filteredSpecialists, isLoading, error,
     searchQuery, setSearchQuery, formatFilter, setFormatFilter,
     roleFilter, setRoleFilter, roleFilters,
+    specFilter, setSpecFilter, allSpecializations,
 }: GridHouseSpecialistsPageProps) {
     const { currentUser, logout } = useUserStore();
     const navigate = useNavigate();
@@ -379,8 +422,10 @@ function GridHouseSpecialistsPage({
                     </div>
                 </div>
 
-                {/* Role filter pills */}
-                {roleFilters.length > 1 && (
+                {/* Excel #21 — role tabs (Психолог / Коуч / Педагог / Тренер / Терапевт)
+                    shown even when a category is empty, so admins see all
+                    categories and can add specialists into them. */}
+                {roleFilters.length > 0 && (
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
                         <button
                             onClick={() => setRoleFilter('all')}
@@ -407,6 +452,45 @@ function GridHouseSpecialistsPage({
                                 {role}
                             </button>
                         ))}
+                    </div>
+                )}
+
+                {/* Excel #56 — specialisation tags as a second filter row. */}
+                {allSpecializations.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <div style={{ ...ghspMono, color: GH.ink30, alignSelf: 'center', marginRight: 6 }}>Направление:</div>
+                        <button
+                            onClick={() => setSpecFilter(null)}
+                            style={{
+                                padding: '4px 10px', fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                                cursor: 'pointer',
+                                border: specFilter === null ? `1px solid ${GH.ink}` : ghspHairline,
+                                background: specFilter === null ? GH.ink : 'transparent',
+                                color: specFilter === null ? GH.paper : GH.ink60,
+                                textTransform: 'uppercase' as const,
+                            }}
+                        >
+                            Все
+                        </button>
+                        {allSpecializations.map(spec => {
+                            const active = specFilter === spec;
+                            return (
+                                <button
+                                    key={spec}
+                                    onClick={() => setSpecFilter(active ? null : spec)}
+                                    style={{
+                                        padding: '4px 10px', fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                                        cursor: 'pointer',
+                                        border: active ? `1px solid ${GH.ink}` : ghspHairline,
+                                        background: active ? GH.ink : 'transparent',
+                                        color: active ? GH.paper : GH.ink60,
+                                        textTransform: 'uppercase' as const,
+                                    }}
+                                >
+                                    {spec}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
 
