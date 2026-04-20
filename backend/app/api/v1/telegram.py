@@ -89,6 +89,115 @@ SLOT_STEP_MIN = 30
 DURATION_OPTIONS = [60, 90, 120, 180]
 
 
+# ── POST /telegram/send-reminders ──────────────────────────────────────────
+# Called by cron every 10-15 minutes. Scans for bookings starting in ~2h that
+# haven't been reminded yet and fires the Telegram reminder. Excel #58.
+#
+# Auth: pass `?secret=<TELEGRAM_REMINDER_SECRET>` matching the setting, so
+# random HTTP probes can't trigger notifications. Same pattern as the
+# webhook secret.
+
+@router.post("/send-reminders")
+def send_reminders_endpoint(
+    secret: Optional[str] = None,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None) or settings.TELEGRAM_BOT_TOKEN
+    if not expected:
+        raise HTTPException(status_code=503, detail="Telegram reminders not configured")
+    if secret != expected:
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    from app.services.telegram import telegram_service
+    from datetime import datetime as _dt, timedelta as _td
+
+    # Scan window: bookings starting in 2h ± 10 minutes that haven't been
+    # reminded yet. Window half-width = 10m keeps us aligned with a 15-minute
+    # cron cadence (so a slot can't slip through between two runs).
+    now = _dt.now()
+    target_lower = now + _td(hours=1, minutes=50)
+    target_upper = now + _td(hours=2, minutes=10)
+
+    # Broad date filter first (date column is indexed), then narrow by
+    # start_time in Python — start_time is a "HH:MM" string, not a timestamp.
+    day_start = target_lower.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = target_upper.replace(hour=23, minute=59, second=59, microsecond=0)
+    candidates = session.exec(
+        select(Booking)
+        .where(Booking.status == "confirmed")
+        .where(Booking.reminder_sent_at.is_(None))  # type: ignore
+        .where(Booking.date >= day_start)
+        .where(Booking.date <= day_end)
+    ).all()
+
+    scanned = 0
+    sent = 0
+    skipped_no_tg = 0
+    skipped_wrong_window = 0
+    for booking in candidates:
+        scanned += 1
+        try:
+            h, m = map(int, booking.start_time.split(":")[:2])
+            start_dt = booking.date.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            continue
+        if not (target_lower <= start_dt <= target_upper):
+            skipped_wrong_window += 1
+            continue
+
+        # Resolve owner + resource/location labels
+        owner: Optional[User] = None
+        if booking.user_uuid:
+            owner = session.get(User, booking.user_uuid)
+        if not owner and booking.user_id:
+            owner = session.exec(select(User).where(User.email == booking.user_id)).first()
+        if not owner or not owner.telegram_id:
+            skipped_no_tg += 1
+            continue
+
+        resource_name = booking.resource_id
+        location_name: Optional[str] = None
+        location_address: Optional[str] = None
+        try:
+            res_obj = session.get(Resource, booking.resource_id)
+            if res_obj:
+                resource_name = res_obj.name or booking.resource_id
+                if res_obj.location_id:
+                    loc_obj = session.get(Location, res_obj.location_id)
+                    if loc_obj:
+                        location_name = loc_obj.name
+                        location_address = loc_obj.address
+        except Exception:
+            pass
+
+        ok = telegram_service.send_booking_reminder(
+            chat_id=str(owner.telegram_id),
+            resource_name=resource_name,
+            location_name=location_name,
+            location_address=location_address,
+            date=booking.date,
+            start_time=booking.start_time,
+            duration_minutes=booking.duration,
+            booking_id=str(booking.id),
+        )
+        if ok:
+            booking.reminder_sent_at = _dt.now()
+            session.add(booking)
+            sent += 1
+
+    if sent:
+        session.commit()
+
+    return {
+        "scanned": scanned,
+        "sent": sent,
+        "skipped_no_telegram": skipped_no_tg,
+        "skipped_wrong_window": skipped_wrong_window,
+        "window_from": target_lower.isoformat(),
+        "window_to": target_upper.isoformat(),
+    }
+
+
 # ── POST /telegram/link-token ─────────────────────────────────────────────────
 
 @router.post("/link-token")

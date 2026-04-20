@@ -1057,6 +1057,37 @@ def cancel_booking(
         },
     )
 
+    # ── Telegram notification to the booking owner (Excel #58) ──
+    # Non-blocking — failure here must never break the cancel flow.
+    try:
+        if booking_owner and booking_owner.telegram_id:
+            resource_name = booking.resource_id
+            location_name: Optional[str] = None
+            try:
+                from app.models.resource import Resource as ResModel
+                from app.models.location import Location as LocModel
+                res_obj = session.get(ResModel, booking.resource_id)
+                if res_obj:
+                    resource_name = res_obj.name or booking.resource_id
+                    if res_obj.location_id:
+                        loc_obj = session.get(LocModel, res_obj.location_id)
+                        if loc_obj:
+                            location_name = loc_obj.name
+            except Exception:
+                pass
+            telegram_service.send_booking_cancelled(
+                chat_id=str(booking_owner.telegram_id),
+                resource_name=resource_name,
+                location_name=location_name,
+                date=booking.date,
+                start_time=booking.start_time,
+                refund_percent=applied_refund,
+                reason=reason,
+                booking_id=str(booking.id),
+            )
+    except Exception as e:
+        logger.warning(f"[Booking cancelled] Telegram notification failed: {e}")
+
     return booking
 
 
@@ -1266,6 +1297,37 @@ def reschedule_booking(
             "price_diff": price_diff if room_changed else None,
         },
     )
+
+    # ── Excel #58 — Telegram reschedule notification (non-blocking). ──
+    # Reset reminder_sent_at so the T-2h reminder fires for the NEW slot if
+    # that slot is still >2h away. If admin moves a booking into the next
+    # 2 hours, the scheduler will just skip it (window check).
+    booking.reminder_sent_at = None
+    session.add(booking)
+    session.commit()
+    try:
+        notify_owner = _resolve_booking_owner(session, booking)
+        if notify_owner and notify_owner.telegram_id:
+            resource_name = booking.resource_id
+            try:
+                from app.models.resource import Resource as ResModel
+                res_obj = session.get(ResModel, booking.resource_id)
+                if res_obj:
+                    resource_name = res_obj.name or booking.resource_id
+            except Exception:
+                pass
+            telegram_service.send_booking_rescheduled(
+                chat_id=str(notify_owner.telegram_id),
+                resource_name=resource_name,
+                old_date=old_date,
+                old_start_time=old_time,
+                new_date=booking.date,
+                new_start_time=booking.start_time,
+                duration_minutes=booking.duration,
+                booking_id=str(booking.id),
+            )
+    except Exception as e:
+        logger.warning(f"[Booking rescheduled] Telegram notification failed: {e}")
 
     return enrich_booking_status(booking)
 

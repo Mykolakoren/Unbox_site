@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_BOT_USERNAME: str = "Unbox_Booking_G_Bot"  # without @, used for deep-link
     TELEGRAM_WEBHOOK_SECRET: Optional[str] = None       # validated against X-Telegram-Bot-Api-Secret-Token
+    # Excel #58 — cron hits /telegram/send-reminders?secret=<TELEGRAM_REMINDER_SECRET>.
+    # If unset, the endpoint falls back to TELEGRAM_BOT_TOKEN (bot token is a
+    # secret anyway, so reusing it is safe). Set a dedicated value to rotate
+    # without having to rotate the bot token itself.
+    TELEGRAM_REMINDER_SECRET: Optional[str] = None
 
     # First Superuser (for auto-creation on deploy) — MUST be overridden via
     # env vars in production. The literal "CHANGE_ME_ON_FIRST_DEPLOY" default

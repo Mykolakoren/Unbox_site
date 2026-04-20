@@ -56,6 +56,11 @@ class Booking(BookingBase, table=True):
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
 
+    # Excel #58 — when a T-minus-2h reminder was sent via Telegram. NULL = not
+    # yet sent. The reminder scheduler skips bookings where this column is
+    # populated so we never double-notify.
+    reminder_sent_at: Optional[datetime] = Field(default=None, index=True)
+
 class BookingCreate(BookingBase):
     # Override required fields from BookingBase — backend computes pricing server-side
     final_price: float = 0.0

@@ -269,6 +269,109 @@ class TelegramService:
             logger.error("[tg:network-error] chat_id=%s err=%r", chat_id, e)
             return False
 
+    # ─── Excel #58 — cancel / reschedule / reminder ──────────────────────────
+
+    def send_booking_cancelled(
+        self,
+        *,
+        chat_id: str,
+        resource_name: str,
+        location_name: Optional[str],
+        date: datetime,
+        start_time: str,
+        refund_percent: float = 1.0,
+        reason: Optional[str] = None,
+        booking_id: Optional[str] = None,
+    ) -> bool:
+        """Notify the booking owner that their booking was cancelled.
+
+        refund_percent: 1.0 = full refund, 0.5 = 50% penalty, 0.0 = no refund.
+        reason: optional human-readable note (shown verbatim to the user).
+        """
+        if not chat_id:
+            return False
+
+        date_label = self._fmt_date(date)
+        refund_label = (
+            "полный возврат" if refund_percent >= 0.99
+            else f"возврат {int(refund_percent * 100)}%" if refund_percent > 0
+            else "без возврата"
+        )
+        loc_line = f" · {escape(location_name)}" if location_name else ""
+        reason_line = f"\n\n<i>Причина: {escape(reason)}</i>" if reason else ""
+        id_line = f"\n<code>#{booking_id[:8]}</code>" if booking_id else ""
+
+        text = (
+            f"✖ <b>Бронь отменена</b>\n\n"
+            f"📅 {escape(date_label)}, {escape(start_time)}\n"
+            f"📍 {escape(resource_name)}{loc_line}\n"
+            f"💰 {refund_label}{reason_line}{id_line}"
+        )
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
+    def send_booking_rescheduled(
+        self,
+        *,
+        chat_id: str,
+        resource_name: str,
+        old_date: datetime,
+        old_start_time: str,
+        new_date: datetime,
+        new_start_time: str,
+        duration_minutes: int,
+        booking_id: Optional[str] = None,
+    ) -> bool:
+        """Notify the booking owner that their booking moved to a new slot."""
+        if not chat_id:
+            return False
+
+        old_label = f"{self._fmt_date(old_date)}, {old_start_time}"
+        new_end = self._compute_end(new_start_time, duration_minutes)
+        new_label = f"{self._fmt_date(new_date)}, {new_start_time}–{new_end}"
+        id_line = f"\n<code>#{booking_id[:8]}</code>" if booking_id else ""
+
+        text = (
+            f"↻ <b>Бронь перенесена</b>\n\n"
+            f"📍 {escape(resource_name)}\n"
+            f"\n"
+            f"Было: <s>{escape(old_label)}</s>\n"
+            f"Стало: <b>{escape(new_label)}</b>{id_line}"
+        )
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
+    def send_booking_reminder(
+        self,
+        *,
+        chat_id: str,
+        resource_name: str,
+        location_name: Optional[str],
+        location_address: Optional[str],
+        date: datetime,
+        start_time: str,
+        duration_minutes: int,
+        booking_id: Optional[str] = None,
+    ) -> bool:
+        """Send a T-minus-2h reminder. Caller should stamp reminder_sent_at on
+        the booking when this returns True so we never double-notify."""
+        if not chat_id:
+            return False
+
+        date_label = self._fmt_date(date)
+        end_time = self._compute_end(start_time, duration_minutes)
+        loc_line = f" · {escape(location_name)}" if location_name else ""
+        address_line = f"\n<i>{escape(location_address)}</i>" if location_address else ""
+        id_line = f"\n<code>#{booking_id[:8]}</code>" if booking_id else ""
+
+        text = (
+            f"⏰ <b>Напоминание</b>\n"
+            f"\n"
+            f"Через 2 часа — ваша бронь:\n"
+            f"\n"
+            f"📅 {escape(date_label)}, <b>{escape(start_time)} — {escape(end_time)}</b>\n"
+            f"📍 {escape(resource_name)}{loc_line}{address_line}{id_line}"
+        )
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
     @staticmethod
