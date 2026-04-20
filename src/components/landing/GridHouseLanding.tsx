@@ -193,17 +193,21 @@ function GateColumn({
             }}
         >
             <div>
+                {/* Excel #42 — admins wanted "small caption UNDER the big title"
+                    ("Я клиент" + "Ищу специалиста" below). Previously the tag
+                    sat above the title as a header; we now put it right below
+                    the big type so it reads like an actual subtitle. */}
                 <div
                     style={{
                         fontFamily: GH_MONO,
                         fontSize: 11,
                         letterSpacing: '0.18em',
                         textTransform: 'uppercase',
-                        opacity: 0.6,
+                        opacity: 0.5,
                         marginBottom: 24,
                     }}
                 >
-                    {num} · {tag}
+                    {num}
                 </div>
                 <div
                     style={{
@@ -211,10 +215,22 @@ function GateColumn({
                         fontWeight: 800,
                         lineHeight: 0.95,
                         letterSpacing: '-0.02em',
-                        marginBottom: 28,
+                        marginBottom: 12,
                     }}
                 >
                     {title}
+                </div>
+                <div
+                    style={{
+                        fontFamily: GH_MONO,
+                        fontSize: 12,
+                        letterSpacing: '0.16em',
+                        textTransform: 'uppercase',
+                        opacity: 0.72,
+                        marginBottom: 24,
+                    }}
+                >
+                    {tag}
                 </div>
                 <div style={{ fontSize: 17, lineHeight: 1.5, maxWidth: 420, opacity: 0.78 }}>{body}</div>
             </div>
@@ -274,27 +290,30 @@ function Masthead({
                 }}
             >
                 {/* Left: wordmark + mode switch */}
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 20, flexWrap: 'wrap' }}>
                     <Link to="/" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>
                         Unbox
                     </Link>
-                    {!narrow && (
-                        <button
-                            type="button"
-                            onClick={onReset}
-                            title="Сменить режим"
-                            style={{
-                                ...MONO_LABEL,
-                                background: 'transparent',
-                                border: 'none',
-                                padding: 0,
-                                cursor: 'pointer',
-                                color: GH.ink60,
-                            }}
-                        >
-                            Режим: {modeLabel.toLowerCase()} ↔
-                        </button>
-                    )}
+                    {/* Excel #42 — mode-switch indicator is now shown on every
+                        width (was hidden on narrow) so visitors on phones can
+                        actually flip between "Клиент" and "Специалист"
+                        instead of getting stuck in whichever they picked once. */}
+                    <button
+                        type="button"
+                        onClick={onReset}
+                        title="Сменить режим"
+                        style={{
+                            ...MONO_LABEL,
+                            background: 'transparent',
+                            border: `1px solid ${GH.ink10}`,
+                            padding: narrow ? '4px 8px' : '3px 10px',
+                            cursor: 'pointer',
+                            color: GH.ink60,
+                            fontSize: narrow ? 9 : 10,
+                        }}
+                    >
+                        Режим: {modeLabel.toLowerCase()} ↔
+                    </button>
                 </div>
 
                 {/* Right: nav */}

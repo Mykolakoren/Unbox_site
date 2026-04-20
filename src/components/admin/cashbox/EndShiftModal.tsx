@@ -9,9 +9,13 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     branch?: string;
+    /** Excel #54 — if the admin bypassed the pre-close checklist with a
+     *  justification, that reason is passed here and appended to the shift
+     *  report notes so the audit log records why the list was skipped. */
+    checklistSkipReason?: string;
 }
 
-export function EndShiftModal({ isOpen, onClose, branch }: Props) {
+export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: Props) {
     const { balances, endShift } = useCashboxStore();
     const [actualBalance, setActualBalance] = useState('');
     const [notes, setNotes] = useState('');
@@ -61,10 +65,15 @@ export function EndShiftModal({ isOpen, onClose, branch }: Props) {
             return;
         }
         setSaving(true);
+        // Excel #54 — if the checklist was bypassed, prepend the reason to
+        // notes so the shift report carries the justification forward.
+        const finalNotes = checklistSkipReason
+            ? `[Чек-лист пропущен: ${checklistSkipReason}]${notes ? '\n\n' + notes : ''}`
+            : notes || undefined;
         try {
             const report = await endShift({
                 actual_balance: actualValue,
-                notes: notes || undefined,
+                notes: finalNotes,
                 branch: branch || undefined,
             });
             const disc = report.discrepancy;
@@ -96,6 +105,15 @@ export function EndShiftModal({ isOpen, onClose, branch }: Props) {
                 </button>
 
                 <h3 className="text-lg font-bold text-unbox-dark mb-1">Закрытие смены</h3>
+                {checklistSkipReason && (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-xs text-amber-800">
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                        <div>
+                            <div className="font-semibold mb-0.5">Чек-лист пропущен</div>
+                            <div className="leading-snug">«{checklistSkipReason}» — записано в журнал смены.</div>
+                        </div>
+                    </div>
+                )}
                 <p className="text-sm text-unbox-grey mb-5">
                     {branch
                         ? <>Филиал: <span className="font-semibold text-unbox-dark">{branch}</span> · пересчитайте наличные в кассе</>

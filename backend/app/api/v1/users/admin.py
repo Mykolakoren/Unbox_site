@@ -1,9 +1,10 @@
 """Users — admin management endpoints (list, update, freeze, discount, etc.)."""
-from typing import Any, List
+from typing import Any, List, Optional
 from datetime import datetime
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlmodel import Session, select
+from pydantic import BaseModel
 from app.api import deps
 from app.db.session import get_session
 from app.models.user import User, UserRead, UserUpdateAdmin
@@ -34,11 +35,81 @@ def read_users(
     session: Session = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
+    include_archived: bool = Query(False, description="Include soft-deleted users (Excel #11)"),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
-    """Retrieve users (Admin only)."""
-    users = session.exec(select(User).offset(skip).limit(limit)).all()
+    """Retrieve users (Admin only). Excludes archived by default."""
+    stmt = select(User)
+    if not include_archived:
+        stmt = stmt.where(User.archived_at.is_(None))  # type: ignore
+    users = session.exec(stmt.offset(skip).limit(limit)).all()
     return users
+
+
+# ── Archive / Unarchive (Soft delete) — Excel #11 ─────────────────────────────
+
+class ArchiveRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/{user_id}/archive", response_model=UserRead)
+def archive_user(
+    *,
+    user_id: str,
+    payload: ArchiveRequest = Body(default_factory=ArchiveRequest),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Soft-delete a user (Excel #11).
+
+    Archived users can't log in and are hidden from the admin list by default
+    (pass `?include_archived=true` to see them). All related history
+    (bookings, payments, bonuses) is preserved. Only `owner` can hard-delete
+    via direct SQL — there is no UI path for permanent deletion.
+    """
+    user = _resolve_user(session, user_id)
+
+    # Safety: can't archive yourself or another owner
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя архивировать собственный аккаунт")
+    if user.role == "owner":
+        raise HTTPException(status_code=403, detail="Нельзя архивировать владельца центра")
+    # Senior admins can archive admins/specialists/users; regular admins — users/specialists only
+    if current_user.role == "admin" and user.role in ("senior_admin", "admin"):
+        raise HTTPException(status_code=403, detail="Недостаточно прав для архивации администратора")
+
+    if user.archived_at is not None:
+        return user  # already archived, idempotent
+
+    user.archived_at = datetime.now()
+    user.archived_by_id = str(current_user.id)
+    user.archived_reason = (payload.reason or "").strip() or None
+    user.updated_at = datetime.now()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/unarchive", response_model=UserRead)
+def unarchive_user(
+    *,
+    user_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Restore an archived user (Excel #11)."""
+    user = _resolve_user(session, user_id)
+    if user.archived_at is None:
+        return user  # not archived, idempotent
+    user.archived_at = None
+    user.archived_by_id = None
+    user.archived_reason = None
+    user.updated_at = datetime.now()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
 
 
 # ── Update user (Admin) ──────────────────────────────────────────────────────

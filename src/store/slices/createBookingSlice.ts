@@ -143,9 +143,9 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         };
     }),
 
-    cancelBooking: async (id, _isFreeReschedule = false, _reason, _adminUser) => {
+    cancelBooking: async (id, _isFreeReschedule = false, _reason, _adminUser, opts) => {
         try {
-            const cancelledBooking = await bookingsApi.cancelBooking(id);
+            const cancelledBooking = await bookingsApi.cancelBooking(id, opts);
             set((state) => ({
                 bookings: state.bookings.map(b =>
                     b.id === id ? cancelledBooking : b

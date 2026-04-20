@@ -5,7 +5,9 @@ import {
     Wallet, Plus, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
     GripVertical, Settings2, RotateCw, Check, Gift,
+    CalendarPlus, UserCheck,
 } from 'lucide-react';
+import { QuickActionsStrip } from '../components/ui/QuickActionsStrip';
 import { Button } from '../components/ui/Button';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
 import { RESOURCES } from '../utils/data';
@@ -819,8 +821,12 @@ function GridHouseDashboardOverview({
                 </div>
             </div>
 
-            {/* Quick actions */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 32, flexWrap: 'wrap' }}>
+            {/* Quick actions — Excel #20.
+                Desktop: visible strip of cards (QuickActionsStrip below).
+                Mobile: falls back to QuickActionsFab rendered by DashboardLayout.
+                We also keep the primary "Забронировать кабинет" ink button for
+                mobile where the strip is hidden. */}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
                 <button
                     onClick={() => navigate('/dashboard/bookings')}
                     style={{
@@ -831,6 +837,14 @@ function GridHouseDashboardOverview({
                     + Забронировать кабинет
                 </button>
             </div>
+            <QuickActionsStrip
+                actions={[
+                    { label: 'Оформить абонемент', sub: 'Выгоднее почасовой аренды', path: '/subscriptions', icon: CalendarPlus },
+                    { label: 'Получить бонусы', sub: 'Приведи друга — бонус обоим', path: '/dashboard/bonuses', icon: Gift },
+                    { label: 'Стать специалистом', sub: 'Принимать клиентов в Unbox', path: '/crm/apply', icon: UserCheck },
+                ]}
+                heading="Что дальше"
+            />
 
             {/* Two-column: bookings + payments */}
             <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: narrow ? 24 : 32 }}>

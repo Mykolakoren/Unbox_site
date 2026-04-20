@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
@@ -49,11 +50,41 @@ type CellInfo =
 export function AdminChessboardView() {
     const { bookings, users, fetchAllBookings, cancelBooking, listForReRent, setManualPrice } = useUserStore();
     const { resources, fetchResources } = useBookingStore();
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const [filterLocation, setFilterLocation] = useState<string>('all');
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [selectedBooking, setSelectedBooking] = useState<BookingHistoryItem | null>(null);
+
+    // Excel #59 — "Перенести бронь" in a client's history deep-links here with
+    // ?highlight=<bookingId>. We jump the week/day to the booking's date,
+    // select it (so the detail card opens), and scroll its row into view.
+    // Then we strip the query param so a later reload doesn't re-trigger.
+    const highlightId = searchParams.get('highlight');
+    useEffect(() => {
+        if (!highlightId || bookings.length === 0) return;
+        const booking = bookings.find(b => b.id === highlightId);
+        if (!booking) return;
+        try {
+            const d = parseBookingDate(booking.date);
+            setSelectedDate(d);
+            setWeekStart(startOfWeek(d, { weekStartsOn: 1 }));
+            setSelectedBooking(booking);
+            // Scroll the resource row into view on next paint.
+            setTimeout(() => {
+                const el = document.querySelector(`[data-resource-row="${booking.resourceId}"]`);
+                if (el && 'scrollIntoView' in el) {
+                    (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 250);
+        } finally {
+            // Clean the param so refresh doesn't re-jump.
+            const next = new URLSearchParams(searchParams);
+            next.delete('highlight');
+            setSearchParams(next, { replace: true });
+        }
+    }, [highlightId, bookings, searchParams, setSearchParams]);
 
     // Admin booking state
     const [adminBookSlot, setAdminBookSlot] = useState<{ resId: string; time: string; date: Date; duration?: number } | null>(null);
@@ -824,7 +855,9 @@ export function AdminChessboardView() {
                     {/* Header: time labels */}
                     <thead>
                         <tr className="bg-unbox-light/40">
-                            <th className="p-2 text-left font-semibold text-unbox-dark border-r border-b border-unbox-light">
+                            {/* Sticky first column (Excel #71) — keeps resource
+                                names visible while admin scrolls time to the right. */}
+                            <th className="sticky left-0 z-30 bg-unbox-light/40 p-2 text-left font-semibold text-unbox-dark border-r border-b border-unbox-light shadow-[2px_0_4px_rgba(0,0,0,0.04)]">
                                 Ресурс
                             </th>
                             {TIME_SLOTS.map(slot => (
@@ -850,9 +883,9 @@ export function AdminChessboardView() {
                         {filteredResources.map(resource => {
                             const cells = rowCellsMap.get(resource.id) ?? [];
                             return (
-                                <tr key={resource.id} className="border-b border-unbox-light/40 group">
-                                    {/* Resource label */}
-                                    <td className="border-r border-unbox-light p-2 bg-white group-hover:bg-unbox-light/10 transition-colors">
+                                <tr key={resource.id} data-resource-row={resource.id} className="border-b border-unbox-light/40 group">
+                                    {/* Resource label — sticky (R71) */}
+                                    <td className="sticky left-0 z-10 border-r border-unbox-light p-2 bg-white group-hover:bg-unbox-light/10 transition-colors shadow-[2px_0_4px_rgba(0,0,0,0.04)]">
                                         <div className="font-semibold text-unbox-dark text-[12px] leading-tight truncate">
                                             {resource.name}
                                         </div>

@@ -2,10 +2,27 @@ import { api } from './client';
 import type { User } from '../store/types';
 
 export const usersApi = {
-    getUsers: async (skip = 0, limit = 100) => {
+    getUsers: async (skip = 0, limit = 100, includeArchived = false) => {
         const response = await api.get<User[]>('/users/', {
-            params: { skip, limit }
+            params: { skip, limit, include_archived: includeArchived }
         });
+        return response.data;
+    },
+
+    /** Soft-delete a user (Excel #11). Preserves all history; prevents login. */
+    archiveUser: async (id: string, reason?: string) => {
+        const response = await api.post<User>(
+            `/users/${encodeURIComponent(id)}/archive`,
+            { reason: reason || null },
+        );
+        return response.data;
+    },
+
+    /** Restore a previously archived user. */
+    unarchiveUser: async (id: string) => {
+        const response = await api.post<User>(
+            `/users/${encodeURIComponent(id)}/unarchive`,
+        );
         return response.data;
     },
 

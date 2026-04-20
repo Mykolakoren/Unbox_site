@@ -66,6 +66,7 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
     return (
         <div
             ref={rootRef}
+            className="quick-actions-fab-root"
             style={{
                 position: 'fixed',
                 right: 20,
@@ -74,6 +75,13 @@ export function QuickActionsFab({ actions, label = 'Быстрые действ�
                 fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
             }}
         >
+            {/* Excel #19/#20 — on desktop we render a visible strip via
+                QuickActionsStrip, so the FAB only appears on mobile. */}
+            <style>{`
+                @media (min-width: 768px) {
+                    .quick-actions-fab-root { display: none !important; }
+                }
+            `}</style>
             {open && (
                 <div
                     role="menu"

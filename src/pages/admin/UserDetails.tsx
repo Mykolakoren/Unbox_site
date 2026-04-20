@@ -217,8 +217,10 @@ export function AdminUserDetails() {
         }
     };
 
+    // Excel #59 — jump to the chessboard with this booking pre-selected
+    // and scrolled into view, so the admin can drag it to the new time.
     const handleRescheduleBooking = (id: string) => {
-        navigate(`/admin/bookings?reschedule=${id}`);
+        navigate(`/admin/bookings?view=grid&highlight=${id}`);
     };
 
     const handleTopup = async () => {
@@ -744,6 +746,63 @@ export function AdminUserDetails() {
                                         </div>
                                     </button>
                                 )}
+
+                                {/* Archive / Unarchive — Excel #11 soft delete.
+                                    Available to any admin role; the backend
+                                    enforces hierarchy (admins can't archive
+                                    each other, nobody can archive owner). */}
+                                <button
+                                    onClick={async () => {
+                                        const isArchived = !!user.archivedAt;
+                                        if (isArchived) {
+                                            const ok = window.confirm(
+                                                `Восстановить пользователя ${user.email} из архива?\n\n` +
+                                                'Сможет снова входить на сайт и будет видим в обычных списках.',
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.unarchiveUser(user.id);
+                                                toast.success('Пользователь восстановлен');
+                                                await useUserStore.getState().fetchUsers();
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Не удалось восстановить');
+                                            }
+                                        } else {
+                                            const reason = prompt(
+                                                `Архивировать пользователя ${user.email}?\n\n` +
+                                                'Не сможет входить на сайт. Вся история (брони, оплаты, бонусы) сохраняется.\n' +
+                                                'Можно восстановить в любой момент.\n\n' +
+                                                'Опционально: укажите причину (для аудита):',
+                                                '',
+                                            );
+                                            if (reason === null) return; // cancelled
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.archiveUser(user.id, reason.trim() || undefined);
+                                                toast.success('Пользователь отправлен в архив');
+                                                await useUserStore.getState().fetchUsers();
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Не удалось архивировать');
+                                            }
+                                        }
+                                    }}
+                                    className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
+                                >
+                                    <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                                        <Shield size={14} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-unbox-dark">
+                                            {user.archivedAt ? 'Восстановить из архива' : 'Архивировать пользователя'}
+                                        </div>
+                                        <div className="text-[10px] text-unbox-grey">
+                                            {user.archivedAt
+                                                ? `В архиве с ${new Date(user.archivedAt).toLocaleDateString('ru-RU')}`
+                                                : 'Заблокирует вход, сохранит всю историю. Обратимо.'}
+                                        </div>
+                                    </div>
+                                </button>
 
                                 {/* Merge two accounts — senior_admin/owner only */}
                                 {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (

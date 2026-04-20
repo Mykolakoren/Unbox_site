@@ -14,6 +14,7 @@ import { AddCashboxTransactionModal } from '../../components/admin/cashbox/AddCa
 import { CategoryManager } from '../../components/admin/cashbox/CategoryManager';
 import { EndShiftModal } from '../../components/admin/cashbox/EndShiftModal';
 import { OpenShiftModal } from '../../components/admin/cashbox/OpenShiftModal';
+import { MorningChecklistModal } from '../../components/admin/cashbox/MorningChecklistModal';
 import { PreCloseShiftChecklist } from '../../components/admin/cashbox/PreCloseShiftChecklist';
 import { ShiftReportsTable } from '../../components/admin/cashbox/ShiftReportsTable';
 import { CashboxAnalytics } from '../../components/admin/cashbox/CashboxAnalytics';
@@ -76,6 +77,10 @@ export function AdminFinance() {
     const [showOpenShift, setShowOpenShift] = useState(false);
     // Step 1 of shift close (Excel #53): pre-close checklist
     const [showCloseChecklist, setShowCloseChecklist] = useState(false);
+    // Excel #54 — reason set only when the admin bypasses the checklist.
+    // Propagated into the EndShift notes so the shift report records WHY the
+    // list wasn't completed.
+    const [checklistSkipReason, setChecklistSkipReason] = useState<string | null>(null);
     const [showCorrection, setShowCorrection] = useState(false);
     const [corrAccount, setCorrAccount] = useState('cash');
     const [corrBranch, setCorrBranch] = useState('');
@@ -158,6 +163,7 @@ export function AdminFinance() {
                 showEndShift={showEndShift} setShowEndShift={setShowEndShift}
                 showOpenShift={showOpenShift} setShowOpenShift={setShowOpenShift}
                 showCloseChecklist={showCloseChecklist} setShowCloseChecklist={setShowCloseChecklist}
+                checklistSkipReason={checklistSkipReason} setChecklistSkipReason={setChecklistSkipReason}
                 showCorrection={showCorrection} setShowCorrection={setShowCorrection}
                 corrAccount={corrAccount} setCorrAccount={setCorrAccount}
                 corrBranch={corrBranch} setCorrBranch={setCorrBranch}
@@ -189,6 +195,7 @@ type GHAFProps = {
     showEndShift: boolean; setShowEndShift: (v: boolean) => void;
     showOpenShift: boolean; setShowOpenShift: (v: boolean) => void;
     showCloseChecklist: boolean; setShowCloseChecklist: (v: boolean) => void;
+    checklistSkipReason: string | null; setChecklistSkipReason: (v: string | null) => void;
     showCorrection: boolean; setShowCorrection: (v: boolean) => void;
     corrAccount: string; setCorrAccount: (v: string) => void;
     corrBranch: string; setCorrBranch: (v: string) => void;
@@ -225,6 +232,7 @@ function GHFSection({ number, title, children }: { number: string; title: string
 }
 
 function GridHouseAdminFinance(p: GHAFProps) {
+    const currentUser = useUserStore(s => s.currentUser);
     const inkBtn: React.CSSProperties = {
         fontFamily: GH_MONO,
         fontSize: 11,
@@ -553,10 +561,26 @@ function GridHouseAdminFinance(p: GHAFProps) {
             <PreCloseShiftChecklist
                 isOpen={p.showCloseChecklist}
                 onClose={() => p.setShowCloseChecklist(false)}
-                onProceed={() => { p.setShowCloseChecklist(false); p.setShowEndShift(true); }}
+                // Excel #54: capture skip reason (if any) and pass into EndShiftModal
+                // which will append it to the shift-report notes for audit.
+                onProceed={(skipReason) => {
+                    p.setChecklistSkipReason(skipReason ?? null);
+                    p.setShowCloseChecklist(false);
+                    p.setShowEndShift(true);
+                }}
             />
-            <EndShiftModal isOpen={p.showEndShift} onClose={() => p.setShowEndShift(false)} branch={p.selectedBranch || undefined} />
+            <EndShiftModal
+                isOpen={p.showEndShift}
+                onClose={() => { p.setShowEndShift(false); p.setChecklistSkipReason(null); }}
+                branch={p.selectedBranch || undefined}
+                checklistSkipReason={p.checklistSkipReason || undefined}
+            />
             <OpenShiftModal isOpen={p.showOpenShift} onClose={() => p.setShowOpenShift(false)} branch={p.selectedBranch || undefined} />
+
+            {/* Excel #54 variant B — morning checklist, soft reminder only.
+                Shown at most once per day per admin. Closing doesn't block
+                access to Finance. */}
+            {currentUser?.email && <MorningChecklistModal adminEmail={currentUser.email} />}
 
             {/* Grid House balance correction modal */}
             {p.showCorrection && p.canCorrectBalance && createPortal(

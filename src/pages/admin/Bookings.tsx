@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
 import { ConfirmationModal, PromptModal } from '../../components/ui/ConfirmationModal';
+import { AdminCancelBookingModal } from '../../components/admin/AdminCancelBookingModal';
 
 type ViewMode = 'list' | 'grid';
 
@@ -54,11 +55,14 @@ const ghTableLinkBtn = (color: string): React.CSSProperties => ({
 
 export function AdminBookings() {
     const [searchParams] = useSearchParams();
+    // Excel #59 — ?view=grid deep-link from "Перенести" action flips to the
+    // chessboard right away so the highlighted booking is visible.
+    const viewFromQuery = searchParams.get('view');
     const navigate = useNavigate();
     const { bookings, users, fetchUsers, cancelBooking, listForReRent, setManualPrice } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
-    const [viewMode, setViewMode] = useState<ViewMode>('list');
+    const [viewMode, setViewMode] = useState<ViewMode>(viewFromQuery === 'grid' ? 'grid' : 'list');
 
     // Modal state for replacing native confirm/prompt
     const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; destructive?: boolean }>({ open: false, title: '', message: '', onConfirm: () => {} });
@@ -91,17 +95,32 @@ export function AdminBookings() {
         setPriceModal({ open: true, bookingId, currentPrice });
     };
 
+    // Excel #66 — instead of a yes/no confirm, open the admin cancel modal
+    // so the admin picks refund policy (100% / 50% / 0%) and records a reason
+    // for anything other than the default full refund.
+    const [cancelModal, setCancelModal] = useState<{ open: boolean; bookingId: string; label: string }>({ open: false, bookingId: '', label: '' });
     const handleCancel = (bookingId: string) => {
-        setConfirmModal({
-            open: true,
-            title: 'Отмена бронирования',
-            message: 'Вы уверены, что хотите отменить это бронирование? Средства будут возвращены клиенту.',
-            destructive: true,
-            onConfirm: () => {
-                cancelBooking(bookingId);
-                toast.success('Бронирование отменено');
-            },
-        });
+        const b = bookings.find(x => x.id === bookingId);
+        const userName = b ? getUserName(b.userId) : '';
+        const label = b ? `${userName} · ${b.startTime} · ${b.finalPrice}₾` : '';
+        setCancelModal({ open: true, bookingId, label });
+    };
+    const handleCancelConfirm = async (option: 'full' | 'half' | 'none', reason: string) => {
+        const refundPercent = option === 'full' ? 1.0 : option === 'half' ? 0.5 : 0.0;
+        try {
+            await cancelBooking(cancelModal.bookingId, undefined, undefined, undefined, {
+                refundPercent,
+                reason: reason || undefined,
+            });
+            const msg = option === 'full'
+                ? 'Бронь отменена, возврат 100%'
+                : option === 'half'
+                ? 'Бронь отменена, возврат 50%'
+                : 'Бронь отменена, возврат 0% (штраф)';
+            toast.success(msg);
+        } catch {
+            // cancelBooking slice already shows an error toast
+        }
     };
 
     // Excel #67: same button toggles. Previously the modal always said
@@ -153,11 +172,11 @@ export function AdminBookings() {
         });
     };
 
-    // "Перенести" — navigate to the chessboard focused on this booking so admin
-    // can drag it. Full implementation of R59 (pre-selected drag source) is a
-    // follow-up; this already moves the admin to the right place.
+    // Excel #59 — "Перенести" navigates to the grid view with this booking
+    // highlighted and scrolled into view. The admin then drags it to the new
+    // slot using the existing drag-to-move handler in AdminChessboardView.
     const handleMove = (bookingId: string) => {
-        navigate(`/admin/chessboard?highlight=${bookingId}`);
+        navigate(`/admin/bookings?view=grid&highlight=${bookingId}`);
     };
 
     const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -199,6 +218,12 @@ export function AdminBookings() {
     // Shared modals rendered in both variants
     const modals = (
         <>
+            <AdminCancelBookingModal
+                isOpen={cancelModal.open}
+                onClose={() => setCancelModal(p => ({ ...p, open: false }))}
+                onConfirm={handleCancelConfirm}
+                bookingLabel={cancelModal.label}
+            />
             <ConfirmationModal
                 isOpen={confirmModal.open}
                 onClose={() => setConfirmModal(p => ({ ...p, open: false }))}

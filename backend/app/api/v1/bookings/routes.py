@@ -939,6 +939,12 @@ def cancel_booking(
     booking_id: str,
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user),
+    # Excel #66 — admin-only cancellation policy override.
+    # refund_percent: 1.0 (default, full refund), 0.5 (50% penalty), 0.0 (full penalty).
+    # reason: free-text audit trail for anything other than default.
+    # Non-admins ignore these params; they always get the time-based policy.
+    refund_percent: float = 1.0,
+    reason: str | None = None,
 ) -> Any:
     try:
         b_uuid = UUID(booking_id)
@@ -950,11 +956,20 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     is_owner = _check_ownership(booking, current_user)
-    if not is_owner and not current_user.role in ADMIN_ROLES:
+    is_admin = current_user.role in ADMIN_ROLES
+    if not is_owner and not is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status == "cancelled":
         return booking
+
+    # Sanitize admin-provided refund_percent; clients never get this power.
+    if is_admin:
+        if refund_percent < 0 or refund_percent > 1:
+            raise HTTPException(status_code=400, detail="refund_percent must be between 0 and 1")
+        applied_refund = refund_percent
+    else:
+        applied_refund = 1.0  # client cancellation = always 100% refund when allowed
 
     # ── Past booking protection ──
     if _is_past(booking):
@@ -976,7 +991,7 @@ def cancel_booking(
     hours_until_start = (booking_start - datetime.now()).total_seconds() / 3600
     is_late_cancellation = hours_until_start < 24
 
-    if is_late_cancellation and not _is_past(booking) and not current_user.role in ADMIN_ROLES:
+    if is_late_cancellation and not _is_past(booking) and not is_admin:
         raise HTTPException(
             status_code=400,
             detail=f"Cancellation is not allowed less than 24 hours before start. Time remaining: {hours_until_start:.1f}h",
@@ -996,11 +1011,21 @@ def cancel_booking(
     if not booking_owner:
         logger.warning(f"Cannot refund: booking owner not found for booking {booking.id}")
         refund_meta = {"warning": "Booking owner not found, no refund issued"}
+    elif applied_refund > 0:
+        refund_meta = _refund_booking_to_owner(session, booking, booking_owner, refund_percent=applied_refund)
     else:
-        refund_meta = _refund_booking_to_owner(session, booking, booking_owner)
+        refund_meta = {"refund_percent": 0.0, "note": "Admin cancelled with no refund (full penalty)"}
+
+    # Build a cancellation reason that captures the admin's policy choice so it
+    # shows up in the audit trail and in the user-facing booking history.
+    if is_admin and (applied_refund != 1.0 or reason):
+        refund_label = f"{int(applied_refund * 100)}% возврат"
+        base_reason = reason.strip() if reason else "Отменено администратором"
+        booking.cancellation_reason = f"{base_reason} ({refund_label})"
+    else:
+        booking.cancellation_reason = reason.strip() if reason else "User cancelled"
 
     booking.status = "cancelled"
-    booking.cancellation_reason = "User cancelled"
     booking.cancelled_by = current_user.email
 
     session.add(booking)
@@ -1022,10 +1047,12 @@ def cancel_booking(
         target_id=str(booking.id),
         target_type="booking",
         event_type="booking_cancelled",
-        description=f"Booking cancelled by {current_user.name} ({current_user.role}). Time to start: {hours_until_start:.1f}h",
+        description=f"Booking cancelled by {current_user.name} ({current_user.role}). Refund: {int(applied_refund * 100)}%. Time to start: {hours_until_start:.1f}h",
         metadata={
             "is_late_cancellation": is_late_cancellation,
             "hours_until_start": hours_until_start,
+            "refund_percent": applied_refund,
+            "admin_reason": reason,
             **refund_meta,
         },
     )

@@ -64,8 +64,18 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
-    cancelBooking: async (id: string) => {
-        const response = await api.delete<any>(`/bookings/${id}`);
+    /**
+     * Cancel a booking. Excel #66 — admins can override the default full-refund
+     * with a penalty percentage; clients' refund_percent is ignored server-side.
+     *
+     *   refundPercent: 1.0 = full refund, 0.5 = 50% penalty, 0.0 = full penalty.
+     *   reason: free-text audit note (shown in booking history for admin-penalised cancels).
+     */
+    cancelBooking: async (id: string, opts?: { refundPercent?: number; reason?: string }) => {
+        const params: Record<string, any> = {};
+        if (opts?.refundPercent !== undefined) params.refund_percent = opts.refundPercent;
+        if (opts?.reason) params.reason = opts.reason;
+        const response = await api.delete<any>(`/bookings/${id}`, { params });
         return mapToFrontend(response.data);
     },
 

@@ -58,8 +58,30 @@ import { GH, GH_SANS } from './hooks/useDesignFlag';
 // Booking Flow Wrapper
 function BookingWizard() {
   const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
+  const selectedSlots = useBookingStore(s => s.selectedSlots);
   const users = useUserStore(s => s.users);
   const isGH = true;
+
+  // Excel #73 — warn before leaving an in-progress booking.
+  // Browser-native confirm via beforeunload covers: tab close, page reload,
+  // external navigation (typing a new URL). For internal React Router
+  // navigation we rely on the fact that most exit points in the wizard are
+  // explicit buttons — they reset the store themselves. Having the full
+  // useBlocker solution would need upgrading to a data router; beforeunload
+  // already catches the real "oh no I closed the tab" case.
+  useEffect(() => {
+    const hasUnsavedWork = selectedSlots.length > 0 && step >= 2 && !editBookingId;
+    if (!hasUnsavedWork) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Chrome/Edge require setting returnValue explicitly. Modern browsers
+      // ignore the custom string and show their own generic prompt.
+      e.returnValue = 'Вы не завершили процесс бронирования. Уйти со страницы?';
+      return e.returnValue;
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [selectedSlots.length, step, editBookingId]);
 
   // Resolve friendly name for the "booking-for" admin-proxy banner
   const proxyUser = bookingForUser

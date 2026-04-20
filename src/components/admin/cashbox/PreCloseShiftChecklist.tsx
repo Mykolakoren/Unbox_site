@@ -6,8 +6,11 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     /** Called when every checklist item is confirmed. Parent opens the
-     *  actual "Закрыть смену" (cash reconciliation) modal from here. */
-    onProceed: () => void;
+     *  actual "Закрыть смену" (cash reconciliation) modal from here.
+     *  Excel #54 — optional `skipReason` is set when admin bypassed the
+     *  checklist via "Пропустить с обоснованием". Parent should persist
+     *  it to audit log / shift report notes. */
+    onProceed: (skipReason?: string) => void;
 }
 
 /**
@@ -31,7 +34,9 @@ const ITEMS: Item[] = [
     {
         key: 'bookings',
         label: 'Все брони за день проверены',
-        sub: 'Посещения отмечены, отсутствующие — переведены в соответствующий статус',
+        // Excel #74 — rewrite for clarity. "Переведены в соответствующий статус"
+        // was opaque; spell out what the two groups are.
+        sub: 'Пришедшие клиенты отмечены как посетившие. Неявки помечены "No-show". Истёкшие без отметки — закрыты.',
     },
     {
         key: 'transactions',
@@ -76,6 +81,26 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
         if (!allDone) return;
         setChecked({});  // reset for next time
         onProceed();
+    };
+
+    // Excel #54 — mandatory checklist was too rigid (can't close if a fire
+    // just broke out and you haven't counted the cash yet). Soft bypass with
+    // a required reason — still gates the cash step, still audited.
+    const handleSkipWithReason = () => {
+        const reason = window.prompt(
+            'Пропустить чек-лист с обоснованием?\n\n' +
+            'Причина попадёт в журнал закрытия смены. Используйте только в нестандартных ситуациях.\n\n' +
+            'Укажите причину:',
+            '',
+        );
+        if (reason === null) return; // cancelled
+        const trimmed = reason.trim();
+        if (trimmed.length < 5) {
+            window.alert('Слишком короткая причина (минимум 5 символов).');
+            return;
+        }
+        setChecked({});
+        onProceed(trimmed);
     };
 
     return createPortal(
@@ -170,6 +195,17 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                     >
                         {allDone ? 'Дальше — сверка кассы' : `Ещё ${ITEMS.length - doneCount} пункт${ITEMS.length - doneCount === 1 ? '' : 'а'}`}
                     </button>
+                    {/* Excel #54 — soft bypass. Only offered when the admin
+                        hasn't ticked everything, to avoid tempting them to
+                        skip when they're already done. */}
+                    {!allDone && (
+                        <button
+                            onClick={handleSkipWithReason}
+                            className="w-full text-amber-700 hover:text-amber-900 text-xs font-semibold py-2 border border-amber-200 bg-amber-50 hover:bg-amber-100 rounded-xl transition-colors"
+                        >
+                            Пропустить с обоснованием →
+                        </button>
+                    )}
                     <button
                         onClick={handleClose}
                         className="w-full text-gray-500 text-sm font-medium py-1.5 hover:text-gray-800"

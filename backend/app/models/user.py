@@ -46,6 +46,15 @@ class UserBase(SQLModel):
     telegram_link_token_expires_at: Optional[datetime] = None
     avatar_url: Optional[str] = None
 
+    # Excel #11 — soft delete. `archived_at` set = user is archived:
+    #   - can't log in (checked in auth endpoints)
+    #   - hidden from user lists by default
+    #   - history (bookings/payments/bonuses) preserved for reporting
+    # Only `owner` can hard-delete (via SQL); UI offers only archive/unarchive.
+    archived_at: Optional[datetime] = Field(default=None, index=True)
+    archived_by_id: Optional[str] = Field(default=None)
+    archived_reason: Optional[str] = Field(default=None)
+
 class User(UserBase, table=True):
     __tablename__ = "user" # type: ignore
     

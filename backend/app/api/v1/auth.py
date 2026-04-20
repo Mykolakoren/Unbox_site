@@ -80,6 +80,13 @@ def login_access_token(
 
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
+
+    # Excel #11 — archived users can't log in.
+    if user.archived_at is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Аккаунт архивирован. Свяжитесь с администратором для восстановления.",
+        )
     
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
