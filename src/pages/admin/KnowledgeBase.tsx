@@ -651,9 +651,13 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                     </div>
                     <div style={boxHair}>
                         <div style={subhead}>Приветственный бонус</div>
-                        <p style={{ ...para, fontSize: 14, marginTop: 0, marginBottom: 10 }}>
-                            <strong style={{ fontWeight: 700 }}>Первый час — бесплатно.</strong>{' '}
-                            Все новые клиенты получают 1 час индивидуального бронирования в подарок сразу после регистрации.
+                        <p style={{ ...para, fontSize: 14, marginTop: 0, marginBottom: 10, lineHeight: 1.55 }}>
+                            При регистрации на счёт клиента автоматически зачисляется{' '}
+                            <strong style={{ fontWeight: 700 }}>20 ₾</strong> — эквивалент одного часа индивидуального
+                            бронирования. Бонус ведёт себя как обычные деньги: может быть использован для оплаты
+                            <strong style={{ fontWeight: 700 }}> любой</strong> брони (кабинет, капсула, групповой формат).
+                            При оформлении брони бонус автоматически вычитается из суммы; если бронь дороже — клиент
+                            доплачивает разницу с основного баланса.
                         </p>
                         <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
                             <div>
@@ -662,11 +666,12 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                             </div>
                             <div>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Срок действия</div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>90 дней</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>15 дней</div>
                             </div>
                         </div>
                         <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: '10px 0 0' }}>
-                            Начисляется автоматически на бонусный баланс. Списывается FIFO при оплате любой брони.
+                            Начисляется на бонусный кошелёк. Списывается FIFO. Срок 15 дней — за это время
+                            клиент должен попробовать пространство, иначе бонус сгорает.
                         </p>
                     </div>
                 </div>

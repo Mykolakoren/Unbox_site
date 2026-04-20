@@ -776,8 +776,12 @@ function GridHouseSubscriptions() {
                     {/* Welcome bonus */}
                     <div style={{ padding: 20 }}>
                         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Приветственный бонус</div>
-                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 12 }}>
-                            Первый час — бесплатно. Сразу после регистрации на бонусный баланс.
+                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 12, lineHeight: 1.55 }}>
+                            При регистрации мы зачисляем на ваш счёт <strong style={{ color: GH.ink }}>20 ₾</strong> —
+                            эквивалент одного часа индивидуального бронирования. Бонус работает как обычные деньги:
+                            можно оплатить им <strong style={{ color: GH.ink }}>любую</strong> бронь — кабинет, капсулу
+                            или групповой формат. При оплате брони бонус автоматически вычитается из суммы; если
+                            бронь дороже — доплачиваете разницу с основного баланса.
                         </div>
                         <div style={{ display: 'flex', gap: 24, alignItems: 'baseline', flexWrap: 'wrap' }}>
                             <div>
@@ -786,11 +790,12 @@ function GridHouseSubscriptions() {
                             </div>
                             <div>
                                 <div style={{ ...ghsubMono, color: GH.label }}>Срок</div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>90 дней</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>15 дней</div>
                             </div>
                         </div>
                         <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', lineHeight: 1.5 }}>
-                            Списывается автоматически при оплате любой брони (FIFO).
+                            Срок ограничен — успейте попробовать пространство в первые две недели.
+                            Списание FIFO (в первую очередь сгорает то, что начислено раньше).
                         </p>
                     </div>
                 </div>

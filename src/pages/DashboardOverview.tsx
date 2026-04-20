@@ -704,7 +704,7 @@ export function DashboardOverview() {
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                             <div className="text-sm text-amber-700 font-medium">Ваш бонус</div>
                             <div className="text-3xl font-bold text-amber-600 mt-1">1 час</div>
-                            <div className="text-xs text-amber-500 mt-1">Действителен 90 дней</div>
+                            <div className="text-xs text-amber-500 mt-1">Действителен 15 дней</div>
                         </div>
                         <button
                             onClick={() => {

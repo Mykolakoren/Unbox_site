@@ -23,8 +23,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+WELCOME_BONUS_EXPIRY_DAYS = 15  # how long the new-user "free hour" stays redeemable
+
+
 def _create_welcome_bonus(session: Session, user: User) -> None:
-    """Create a 1-hour free booking bonus for a new user."""
+    """Create a 1-hour free booking bonus for a new user.
+
+    Stored as a regular Bonus row so it goes through the same FIFO redemption
+    pipeline as paid top-ups. Expires WELCOME_BONUS_EXPIRY_DAYS after signup —
+    short window is intentional, encourages the user to actually try the
+    space rather than collecting credits.
+    """
     try:
         from app.models.bonus import Bonus
         bonus = Bonus(
@@ -35,7 +44,7 @@ def _create_welcome_bonus(session: Session, user: User) -> None:
             description="Добро пожаловать в Unbox! 1 час аренды в подарок",
             granted_by_id="system",
             granted_by_name="Система",
-            expires_at=datetime.now() + timedelta(days=90),
+            expires_at=datetime.now() + timedelta(days=WELCOME_BONUS_EXPIRY_DAYS),
         )
         session.add(bonus)
         session.commit()
