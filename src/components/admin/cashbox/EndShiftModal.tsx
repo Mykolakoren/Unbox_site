@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, AlertTriangle, CheckCircle } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
+import { cashboxApi } from '../../../api/cashbox';
 
 interface Props {
     isOpen: boolean;
@@ -12,23 +13,46 @@ interface Props {
 
 export function EndShiftModal({ isOpen, onClose, branch }: Props) {
     const { balances, endShift } = useCashboxStore();
-    const cashBalance = balances.cash;
     const [actualBalance, setActualBalance] = useState('');
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
+    const [branchCash, setBranchCash] = useState<number | null>(null);
+    const [loadingBranchCash, setLoadingBranchCash] = useState(false);
 
+    // The expected balance MUST be branch-scoped when closing a branch shift —
+    // otherwise the modal showed the global cash total, the admin saw "no
+    // discrepancy" because they happened to match, then the backend (which
+    // already computes branch-scoped) returned a real discrepancy in the toast.
+    // Fetch the branch's own cash so what the user sees and what backend
+    // computes line up. (Excel #7.)
     useEffect(() => {
-        if (isOpen) {
-            setActualBalance('');
-            setNotes('');
+        if (!isOpen) return;
+        setActualBalance('');
+        setNotes('');
+        if (branch) {
+            setLoadingBranchCash(true);
+            setBranchCash(null);
+            cashboxApi.getBalance(branch)
+                .then(b => setBranchCash(b.cash))
+                .catch(() => setBranchCash(null))
+                .finally(() => setLoadingBranchCash(false));
+        } else {
+            setBranchCash(null);
+            setLoadingBranchCash(false);
         }
-    }, [isOpen]);
+    }, [isOpen, branch]);
 
     if (!isOpen) return null;
 
+    // For branch closes use the freshly fetched per-branch cash. For global
+    // closes fall back to the store's overall cash total.
+    const cashBalance = branch ? (branchCash ?? 0) : balances.cash;
+
     const actualValue = parseFloat(actualBalance);
     const hasAmount = !isNaN(actualValue) && actualValue >= 0;
-    const discrepancy = hasAmount ? Math.round((actualValue - cashBalance) * 100) / 100 : null;
+    const discrepancy = hasAmount && !loadingBranchCash
+        ? Math.round((actualValue - cashBalance) * 100) / 100
+        : null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -81,8 +105,14 @@ export function EndShiftModal({ isOpen, onClose, branch }: Props) {
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Expected cash balance */}
                     <div className="bg-gray-50 rounded-xl px-4 py-3">
-                        <div className="text-xs text-gray-500 mb-0.5">Ожидаемый остаток наличных</div>
-                        <div className="text-xl font-bold text-unbox-dark">{cashBalance.toFixed(2)} ₾</div>
+                        <div className="text-xs text-gray-500 mb-0.5">
+                            Ожидаемый остаток наличных {branch && <span className="text-unbox-grey/70">· {branch}</span>}
+                        </div>
+                        <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
+                            {loadingBranchCash
+                                ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
+                                : `${cashBalance.toFixed(2)} ₾`}
+                        </div>
                     </div>
 
                     {/* Actual balance */}

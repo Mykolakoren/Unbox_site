@@ -26,6 +26,7 @@ from .therapist_note import TherapistNote, TherapistNoteCreate, TherapistNoteRea
 from .expense_category import ExpenseCategory, ExpenseCategoryCreate, ExpenseCategoryRead
 from .cashbox_transaction import CashboxTransaction, CashboxTransactionCreate, CashboxTransactionRead
 from .shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
+from .shift_open_log import ShiftOpenLog, ShiftOpenLogCreate, ShiftOpenLogRead
 
 # Team members
 from .team_member import TeamMember, TeamMemberCreate, TeamMemberRead, TeamMemberUpdate

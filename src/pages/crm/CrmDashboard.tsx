@@ -1185,7 +1185,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     {([
                         { label: 'Добавить клиента', sub: 'Создать новую карточку', path: '/crm/clients' },
                         { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions' },
-                        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard' },
+                        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard/bookings' },
                         {
                             label: 'Открыть Google Calendar',
                             sub: calendarIdSaved ? 'Ваш личный календарь' : 'Google Calendar',

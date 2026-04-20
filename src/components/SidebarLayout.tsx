@@ -3,8 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { LogOut, Menu, X, ArrowLeft } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../store/userStore';
-import { useDesignFlag } from '../hooks/useDesignFlag';
-
 export interface NavItem {
     path: string;
     icon: React.ElementType;
@@ -25,7 +23,7 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const isGridHouse = useDesignFlag();
+    const isGridHouse = true;
 
     const isActive = (path: string, exact?: boolean) => {
         if (exact) return location.pathname === path;

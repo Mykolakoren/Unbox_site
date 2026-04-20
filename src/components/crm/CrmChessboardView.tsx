@@ -16,6 +16,7 @@ import { bookingsApi } from '../../api/bookings';
 import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { CrmClient } from '../../api/crm';
+import { ChessboardScroller } from '../ui/ChessboardScroller';
 
 // ─── Time Slots: 09:00 – 21:00 (30-min steps) ───────────────────────────────
 const TIME_SLOTS: string[] = (() => {
@@ -1198,7 +1199,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             {selectedBar}
 
             {/* Grid */}
-            <div className="overflow-x-auto scrollbar-visible rounded-2xl border border-gray-100 bg-white">
+            <ChessboardScroller minGridWidth={180 + TIME_SLOTS.length * SLOT_W}>
                 <table className="border-collapse" style={{ minWidth: `${180 + TIME_SLOTS.length * SLOT_W}px` }}>
                     <thead>
                         <tr>
@@ -1352,7 +1353,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         })}
                     </tbody>
                 </table>
-            </div>
+            </ChessboardScroller>
 
             {/* Legend */}
             <div className="flex gap-4 text-xs text-gray-500">

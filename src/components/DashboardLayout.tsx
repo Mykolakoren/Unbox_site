@@ -47,7 +47,9 @@ export function DashboardLayout() {
     ];
 
     const quickActions: QuickAction[] = [
-        { label: 'Забронировать кабинет', sub: 'Быстрая бронь', path: '/booking', icon: Plus },
+        // Excel #17: was '/booking' (wizard) but admins wanted the chessboard.
+        // /dashboard/bookings is where users actually pick a slot and confirm.
+        { label: 'Забронировать кабинет', sub: 'Выбрать слот в шахматке', path: '/dashboard/bookings', icon: Plus },
         { label: 'Мои бронирования', sub: 'Ближайшие и история', path: '/dashboard/bookings', icon: Calendar },
         { label: 'Найти специалиста', sub: 'Каталог и запись', path: '/specialists', icon: Search },
     ];

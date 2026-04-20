@@ -70,6 +70,16 @@ export interface ShiftReport {
     branch?: string | null;
 }
 
+export interface ShiftOpenLog {
+    id: string;
+    branch?: string | null;
+    startingBalance: number;
+    notes?: string;
+    adminId: string;
+    adminName: string;
+    openedAt: string;
+}
+
 export interface CashboxAnalytics {
     dailyData: { date: string; income: number; expense: number }[];
     categoryBreakdown: { categoryName: string; total: number; percentage: number }[];
@@ -157,6 +167,21 @@ export const cashboxApi = {
     endShift: async (payload: { actual_balance: number; notes?: string; branch?: string }): Promise<ShiftReport> => {
         const { data } = await api.post('/cashbox/shifts', payload);
         return data;
+    },
+
+    /** Mark the start of an admin's shift (audit + UI badge, no cash math). */
+    openShift: async (payload: { branch?: string; starting_balance?: number; notes?: string }): Promise<ShiftOpenLog> => {
+        const { data } = await api.post('/cashbox/shifts/open', payload);
+        return data;
+    },
+
+    /** Most recent open event since the last close. Returns null if no open
+     *  shift currently in progress. */
+    getCurrentOpenShift: async (branch?: string): Promise<ShiftOpenLog | null> => {
+        const { data } = await api.get('/cashbox/shifts/open/current', {
+            params: branch ? { branch } : {},
+        });
+        return data ?? null;
     },
 
     getAnalytics: async (dateFrom?: string, dateTo?: string): Promise<CashboxAnalytics> => {

@@ -1,6 +1,6 @@
-import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useCashboxStore } from '../../../store/cashboxStore';
+import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
 
 export function ShiftReportsTable() {
     const { shiftReports } = useCashboxStore();
@@ -29,7 +29,7 @@ export function ShiftReportsTable() {
                 </thead>
                 <tbody className="text-sm">
                     {shiftReports.map(r => {
-                        const end = new Date(r.shiftEnd);
+                        const end = parseUTC(r.shiftEnd);
                         const discColor =
                             Math.abs(r.discrepancy) < 0.01
                                 ? 'text-green-600'
@@ -41,10 +41,10 @@ export function ShiftReportsTable() {
                             <tr key={r.id} className="hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
                                 <td className="py-3 pl-2 align-top">
                                     <div className="font-medium text-gray-900">
-                                        {format(end, 'd MMM yyyy', { locale: ru })}
+                                        {formatBatumi(end, 'd MMM yyyy', ru)}
                                     </div>
                                     <div className="text-xs text-gray-400">
-                                        {format(end, 'HH:mm')}
+                                        {formatBatumi(end, 'HH:mm')}
                                     </div>
                                 </td>
                                 <td className="py-3 align-top">

@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
+import { ChessboardScroller } from '../ui/ChessboardScroller';
 
 // ─── Time Slots: 09:00 – 20:30 (30-min steps) ───────────────────────────────
 const TIME_SLOTS: string[] = (() => {
@@ -451,9 +452,19 @@ export function AdminChessboardView() {
             if (!isNaN(p)) { setManualPrice(b.id, p); setSelectedBooking(null); }
         }
     };
-    const handleToggleReRent = (b: BookingHistoryItem) => {
-        listForReRent(b.id);
-        setSelectedBooking(null);
+    // Excel #67: previously this fired listForReRent and dropped the dialog
+    // immediately — if the request errored or was slow, the admin saw "nothing
+    // happened" with no feedback. Now we await so the toast (success or
+    // failure, raised inside listForReRent) lines up with the action, and we
+    // pull fresh state to keep the chessboard's own copy of the booking
+    // honest.
+    const handleToggleReRent = async (b: BookingHistoryItem) => {
+        try {
+            await listForReRent(b.id);
+            await fetchAllBookings();
+        } finally {
+            setSelectedBooking(null);
+        }
     };
 
     // ─── Render ───────────────────────────────────────────────────────────────
@@ -798,7 +809,7 @@ export function AdminChessboardView() {
             </div>
 
             {/* ── Grid ── */}
-            <div className="overflow-x-auto scrollbar-visible rounded-xl border border-unbox-light shadow-sm bg-white">
+            <ChessboardScroller minGridWidth={130 + TIME_SLOTS.length * 44 + 110}>
                 <table
                     className="border-collapse text-xs"
                     style={{ minWidth: `${130 + TIME_SLOTS.length * 44}px` }}
@@ -989,7 +1000,7 @@ export function AdminChessboardView() {
                         )}
                     </tbody>
                 </table>
-            </div>
+            </ChessboardScroller>
 
             {/* ── Legend ── */}
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-gray-700 pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-gray-100">

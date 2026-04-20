@@ -2665,7 +2665,7 @@ function GridHouseMyBookings({
                             hint="Забронируйте кабинет в один клик, шахматка сверху покажет свободное время."
                             action={{
                                 label: '+ Забронировать кабинет',
-                                onClick: () => navigate('/booking'),
+                                onClick: () => navigate('/dashboard/bookings'),
                             }}
                         />
                     )}

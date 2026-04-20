@@ -93,7 +93,7 @@ export function CrmLayout() {
     const quickActions: QuickAction[] = [
         { label: 'Добавить клиента', sub: 'Создать карточку', path: '/crm/clients', icon: UserPlus },
         { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions', icon: Calendar },
-        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/booking', icon: Plus },
+        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard/bookings', icon: Plus },
         {
             label: 'Открыть Google Calendar',
             sub: calendarId ? 'Ваш личный календарь' : 'Google Calendar',

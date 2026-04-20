@@ -8,14 +8,51 @@ import clsx from 'clsx';
 import { AdminChessboardView } from '../../components/admin/AdminChessboardView';
 import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
 import { ConfirmationModal, PromptModal } from '../../components/ui/ConfirmationModal';
 
 type ViewMode = 'list' | 'grid';
 
+// Grid House style primitives — survive the dual-UI cleanup. These were
+// originally declared at the bottom of the file alongside the inlined GH
+// component; consolidating up here so they're easier to find.
+const ghabMono: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: 10,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase' as const,
+};
+const ghabHairline = `1px solid ${GH.ink10}`;
+
+// Card-style action button used in list view (per-booking action row).
+const ghActionBtn = (color: string, borderColor: string): React.CSSProperties => ({
+    fontFamily: GH_MONO,
+    fontSize: 9,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase' as const,
+    background: 'transparent',
+    color,
+    border: `1px solid ${borderColor}`,
+    cursor: 'pointer',
+    padding: '5px 10px',
+});
+
+// Underlined-text style button used inside the dense table view.
+const ghTableLinkBtn = (color: string): React.CSSProperties => ({
+    fontFamily: GH_MONO,
+    fontSize: 10,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase' as const,
+    background: 'transparent',
+    color,
+    border: 'none',
+    borderBottom: `1px solid ${GH.ink10}`,
+    cursor: 'pointer',
+    padding: '2px 4px',
+});
+
 export function AdminBookings() {
-    const gridHouse = useDesignFlag();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const { bookings, users, fetchUsers, cancelBooking, listForReRent, setManualPrice } = useUserStore();
@@ -67,16 +104,60 @@ export function AdminBookings() {
         });
     };
 
+    // Excel #67: same button toggles. Previously the modal always said
+    // "выставить на переаренду" and the toast always said "выставлен" — even
+    // when the user was actually trying to remove a re-rent listing. Now we
+    // branch on current state and await so the toast reflects what actually
+    // happened (or what failed).
     const handleReRent = (bookingId: string) => {
+        const booking = bookings.find(b => b.id === bookingId);
+        const isCurrentlyListed = !!booking?.isReRentListed;
         setConfirmModal({
             open: true,
-            title: 'Переаренда',
-            message: 'Выставить этот слот на переаренду? Если другой пользователь забронирует, текущая бронь будет отменена с 50% возвратом.',
-            onConfirm: () => {
-                listForReRent(bookingId);
-                toast.success('Слот выставлен на переаренду');
+            title: isCurrentlyListed ? 'Снять с переаренды' : 'Переаренда',
+            message: isCurrentlyListed
+                ? 'Снять этот слот с переаренды? Бронь снова будет видна только владельцу.'
+                : 'Выставить этот слот на переаренду? Если другой пользователь забронирует, текущая бронь будет отменена с 50% возвратом.',
+            onConfirm: async () => {
+                try {
+                    await listForReRent(bookingId);
+                    toast.success(isCurrentlyListed ? 'Слот снят с переаренды' : 'Слот выставлен на переаренду');
+                    // Make sure the chessboard view also picks up the new flag.
+                    useUserStore.getState().fetchAllBookings();
+                } catch {
+                    // listForReRent already toasts the error
+                }
             },
         });
+    };
+
+    // Excel #28 — restore the lost "Продлить +30 мин" action for admins.
+    const [extendingId, setExtendingId] = useState<string | null>(null);
+    const handleExtend = (bookingId: string) => {
+        setConfirmModal({
+            open: true,
+            title: 'Продлить бронь на 30 минут',
+            message: 'Увеличит длительность текущей брони на 30 минут. Проверит, что следующий слот свободен.',
+            onConfirm: async () => {
+                setExtendingId(bookingId);
+                try {
+                    await bookingsApi.extendBooking(bookingId, 30);
+                    toast.success('Бронь продлена на 30 минут');
+                    useUserStore.getState().fetchAllBookings();
+                } catch (e: any) {
+                    toast.error(e?.response?.data?.detail || 'Не удалось продлить — возможно, следующий слот занят');
+                } finally {
+                    setExtendingId(null);
+                }
+            },
+        });
+    };
+
+    // "Перенести" — navigate to the chessboard focused on this booking so admin
+    // can drag it. Full implementation of R59 (pre-selected drag source) is a
+    // follow-up; this already moves the admin to the right place.
+    const handleMove = (bookingId: string) => {
+        navigate(`/admin/chessboard?highlight=${bookingId}`);
     };
 
     const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -155,7 +236,8 @@ export function AdminBookings() {
         </>
     );
 
-    if (gridHouse) return (
+    return (
+
         <>
             {modals}
             <GridHouseAdminBookings
@@ -169,291 +251,45 @@ export function AdminBookings() {
                 handleEditPrice={handleEditPrice}
                 handleCancel={handleCancel}
                 handleReRent={handleReRent}
+                handleExtend={handleExtend}
+                handleMove={handleMove}
                 handleApprove={handleApprove}
                 handleReject={handleReject}
                 approvingId={approvingId}
                 rejectingId={rejectingId}
+                extendingId={extendingId}
             />
         </>
     );
-
-    return (
-        <div className="space-y-6">
-            {modals}
-            {/* ── Header ── */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold">Бронирования</h1>
-                    <p className="text-sm text-unbox-grey mt-0.5">
-                        {bookings.length} всего · {bookings.filter(b => b.status === 'confirmed').length} активных
-                        {bookings.filter(b => b.status === 'pending_approval').length > 0 && (
-                            <span className="text-amber-600 font-medium"> · {bookings.filter(b => b.status === 'pending_approval').length} ожидают</span>
-                        )}
-                    </p>
-                </div>
-
-                <div className="flex gap-2 w-full sm:w-auto items-center">
-                    {/* Add booking button */}
-                    <button
-                        onClick={() => navigate('/checkout')}
-                        className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-unbox-green text-white rounded-lg hover:bg-unbox-green/90 transition-colors"
-                    >
-                        + Бронь
-                    </button>
-                    {/* View toggle */}
-                    <div className="flex rounded-lg border border-unbox-light overflow-hidden bg-white">
-                        <button
-                            onClick={() => setViewMode('list')}
-                            className={clsx(
-                                'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
-                                viewMode === 'list'
-                                    ? 'bg-unbox-green text-white'
-                                    : 'text-unbox-grey hover:bg-unbox-light/50'
-                            )}
-                        >
-                            <List size={15} /> Список
-                        </button>
-                        <button
-                            onClick={() => setViewMode('grid')}
-                            className={clsx(
-                                'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
-                                viewMode === 'grid'
-                                    ? 'bg-unbox-green text-white'
-                                    : 'text-unbox-grey hover:bg-unbox-light/50'
-                            )}
-                        >
-                            <LayoutGrid size={15} /> Шахматка
-                        </button>
-                    </div>
-
-                    {/* List-only controls */}
-                    {viewMode === 'list' && (
-                        <>
-                            <div className="relative flex-1 sm:flex-none">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={16} />
-                                <input
-                                    type="text"
-                                    placeholder="Поиск..."
-                                    className="pl-9 pr-4 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm w-full sm:w-56"
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                />
-                            </div>
-                            <select
-                                className="px-3 py-2 rounded-lg border border-unbox-light bg-white focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
-                                value={filterStatus}
-                                onChange={(e) => setFilterStatus(e.target.value)}
-                            >
-                                <option value="all">Все статусы</option>
-                                <option value="pending_approval">⏳ Ожидает одобрения</option>
-                                <option value="confirmed">Подтверждено</option>
-                                <option value="cancelled">Отменено</option>
-                                <option value="re-rented">Пересдано</option>
-                            </select>
-                        </>
-                    )}
-                </div>
-            </div>
-
-            {/* ── Chessboard view ── */}
-            {viewMode === 'grid' && <AdminChessboardView />}
-
-            {/* ── List view ── */}
-            {viewMode === 'list' && (
-                <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm overflow-x-auto">
-                    <table className="w-full text-left whitespace-nowrap">
-                        <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
-                            <tr>
-                                <th className="p-4 pl-6">Создано</th>
-                                <th className="p-4">Клиент</th>
-                                <th className="p-4">Ресурс</th>
-                                <th className="p-4">Дата и Время</th>
-                                <th className="p-4 text-center">Статус</th>
-                                <th className="p-4 text-right">Цена</th>
-                                <th className="p-4 text-right">Действия</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-unbox-light">
-                            {filteredBookings.map(booking => {
-                                const resourceName = RESOURCES.find(r => r.id === booking.resourceId)?.name || booking.resourceId;
-                                return (
-                                    <tr key={booking.id} className="hover:bg-unbox-light/30 transition-colors text-sm">
-                                        <td className="p-4 pl-6 text-unbox-grey">
-                                            {format(new Date(booking.createdAt), 'dd.MM HH:mm')}
-                                        </td>
-                                        <td className="p-4 font-medium text-unbox-dark">
-                                            <div
-                                                onClick={() => navigate(`/admin/users/${encodeURIComponent(booking.userId)}`)}
-                                                className="cursor-pointer hover:text-unbox-green transition-colors group"
-                                            >
-                                                <div className="group-hover:underline">{getUserName(booking.userId)}</div>
-                                                <div className="text-xs text-unbox-grey font-normal">{booking.userId}</div>
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-unbox-dark">
-                                            {resourceName}
-                                            <div className="text-xs text-unbox-grey">
-                                                {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'}
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-2 text-unbox-dark">
-                                                <CalendarIcon size={14} className="text-unbox-grey" />
-                                                {format(booking.date, 'dd.MM.yyyy')}
-                                            </div>
-                                            <div className="flex items-center gap-2 text-unbox-grey mt-1">
-                                                <ClockIcon size={14} className="text-unbox-grey" />
-                                                {booking.startTime} ({(booking.duration ?? 0) / 60}ч)
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-center">
-                                            <span className={clsx(
-                                                'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-                                                {
-                                                    'bg-unbox-light text-unbox-green': booking.status === 'confirmed',
-                                                    'bg-unbox-light/50 text-unbox-grey': booking.status === 'cancelled',
-                                                    'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
-                                                    'bg-amber-50 text-amber-700 border border-amber-200': booking.status === 'pending_approval',
-                                                }
-                                            )}>
-                                                {booking.status === 'confirmed' && 'Активно'}
-                                                {booking.status === 'cancelled' && 'Отменено'}
-                                                {booking.status === 're-rented' && 'Пересдано'}
-                                                {booking.status === 'pending_approval' && '⏳ Ожидает'}
-                                            </span>
-                                            {booking.isReRentListed && booking.status === 'confirmed' && (
-                                                <div className="mt-1 text-[10px] text-amber-600 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                                    На переаренде
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td className="p-4 text-right font-medium">
-                                            {booking.paymentMethod === 'subscription' ? (
-                                                <span className="text-unbox-green text-sm">Абонемент</span>
-                                            ) : (
-                                                <span className="text-unbox-dark">{booking.finalPrice} ₾</span>
-                                            )}
-                                        </td>
-                                        <td className="p-4 text-right">
-                                            <div className="flex justify-end gap-2">
-                                                {booking.status === 'pending_approval' && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleApprove(booking.id)}
-                                                            disabled={approvingId === booking.id}
-                                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-unbox-green text-white text-xs font-medium hover:bg-unbox-dark transition-colors disabled:opacity-50"
-                                                        >
-                                                            {approvingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                                            Одобрить
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleReject(booking.id)}
-                                                            disabled={rejectingId === booking.id}
-                                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs font-medium hover:bg-red-100 transition-colors disabled:opacity-50"
-                                                        >
-                                                            {rejectingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-                                                            Отклонить
-                                                        </button>
-                                                    </>
-                                                )}
-                                                {booking.status === 'confirmed' && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                            className="text-unbox-grey hover:text-unbox-green text-xs underline"
-                                                        >
-                                                            Цена
-                                                        </button>
-                                                        {!booking.isReRentListed && (
-                                                            <button
-                                                                onClick={() => handleReRent(booking.id)}
-                                                                className="text-unbox-grey hover:text-unbox-green text-xs underline"
-                                                            >
-                                                                Пересдать
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => handleCancel(booking.id)}
-                                                            className="text-unbox-grey hover:text-red-600 text-xs underline"
-                                                        >
-                                                            Отмена
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-
-                    {filteredBookings.length === 0 && (
-                        <div className="p-12 text-center text-unbox-grey">
-                            Бронирований не найдено
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
 }
 
-// ─── Inline SVG icons (avoids Calendar name collision) ────────────────────────
-const CalendarIcon = ({ size, className }: { size: number; className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
-        <line x1="16" x2="16" y1="2" y2="6" />
-        <line x1="8" x2="8" y1="2" y2="6" />
-        <line x1="3" x2="21" y1="10" y2="10" />
-    </svg>
-);
-
-const ClockIcon = ({ size, className }: { size: number; className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-    </svg>
-);
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  GRID HOUSE — AdminBookings
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const ghabMono: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
-};
-const ghabHairline = `1px solid ${GH.ink10}`;
-
-interface GHAdminBookingsProps {
+type GHAdminBookingsProps = {
     bookings: BookingHistoryItem[];
     filteredBookings: BookingHistoryItem[];
-    viewMode: ViewMode;
-    setViewMode: (m: ViewMode) => void;
-    filterStatus: string;
-    setFilterStatus: (s: string) => void;
-    search: string;
-    setSearch: (s: string) => void;
+    viewMode: ViewMode; setViewMode: (m: ViewMode) => void;
+    filterStatus: string; setFilterStatus: (s: string) => void;
+    search: string; setSearch: (s: string) => void;
     navigate: ReturnType<typeof useNavigate>;
     getUserName: (email: string) => string;
-    handleEditPrice: (bookingId: string, currentPrice: number) => void;
-    handleCancel: (bookingId: string) => void;
-    handleReRent: (bookingId: string) => void;
-    handleApprove: (bookingId: string) => Promise<void>;
-    handleReject: (bookingId: string) => Promise<void>;
+    handleEditPrice: (id: string, currentPrice: number) => void;
+    handleCancel: (id: string) => void;
+    handleReRent: (id: string) => void;
+    handleExtend: (id: string) => void;
+    handleMove: (id: string) => void;
+    handleApprove: (id: string) => Promise<void>;
+    handleReject: (id: string) => void;
     approvingId: string | null;
     rejectingId: string | null;
-}
+    extendingId: string | null;
+};
 
 function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     const {
         bookings, filteredBookings, viewMode, setViewMode,
         filterStatus, setFilterStatus, search, setSearch,
         navigate, getUserName, handleEditPrice, handleCancel,
-        handleReRent, handleApprove, handleReject,
-        approvingId, rejectingId,
+        handleReRent, handleExtend, handleMove, handleApprove, handleReject,
+        approvingId, rejectingId, extendingId,
     } = props;
 
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -505,8 +341,10 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                     >
                         Поток броней.
                     </h1>
-                    {/* Add booking */}
-                    <button onClick={() => navigate('/checkout')}
+                    {/* Add booking — Excel #70: was navigating to /checkout (dead route)
+                        which silently fell through to '/'. Send admins straight to the
+                        chessboard where they can create a booking by selecting a slot. */}
+                    <button onClick={() => navigate('/dashboard/bookings')}
                         style={{
                             padding: narrow ? '5px 10px' : '6px 16px',
                             border: ghabHairline,
@@ -752,40 +590,36 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             {booking.status === 'confirmed' && (
                                                 <>
                                                     <button
+                                                        onClick={() => handleMove(booking.id)}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        title="Перенести бронь — откроется шахматка"
+                                                    >
+                                                        Перенести
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleExtend(booking.id)}
+                                                        disabled={extendingId === booking.id}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        title="Продлить бронь на 30 минут"
+                                                    >
+                                                        {extendingId === booking.id ? '...' : '+30 мин'}
+                                                    </button>
+                                                    <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={{
-                                                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em',
-                                                            textTransform: 'uppercase' as const,
-                                                            background: 'transparent', color: GH.ink60,
-                                                            border: `1px solid ${GH.ink10}`, cursor: 'pointer',
-                                                            padding: '5px 10px',
-                                                        }}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
                                                     >
                                                         Цена
                                                     </button>
-                                                    {!booking.isReRentListed && (
-                                                        <button
-                                                            onClick={() => handleReRent(booking.id)}
-                                                            style={{
-                                                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em',
-                                                                textTransform: 'uppercase' as const,
-                                                                background: 'transparent', color: GH.ink60,
-                                                                border: `1px solid ${GH.ink10}`, cursor: 'pointer',
-                                                                padding: '5px 10px',
-                                                            }}
-                                                        >
-                                                            Пересдать
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        onClick={() => handleReRent(booking.id)}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        title={booking.isReRentListed ? 'Снять с переаренды' : 'Поставить на переаренду'}
+                                                    >
+                                                        {booking.isReRentListed ? 'Снять с переаренды' : 'Пересдать'}
+                                                    </button>
                                                     <button
                                                         onClick={() => handleCancel(booking.id)}
-                                                        style={{
-                                                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em',
-                                                            textTransform: 'uppercase' as const,
-                                                            background: 'transparent', color: GH.danger,
-                                                            border: `1px solid ${GH.danger}30`, cursor: 'pointer',
-                                                            padding: '5px 10px',
-                                                        }}
+                                                        style={ghActionBtn(GH.danger, `${GH.danger}30`)}
                                                     >
                                                         Отмена
                                                     </button>
@@ -957,55 +791,36 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             {booking.status === 'confirmed' && (
                                                 <>
                                                     <button
+                                                        onClick={() => handleMove(booking.id)}
+                                                        style={ghTableLinkBtn(GH.ink60)}
+                                                        title="Перенести"
+                                                    >
+                                                        Перен.
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleExtend(booking.id)}
+                                                        disabled={extendingId === booking.id}
+                                                        style={ghTableLinkBtn(GH.ink60)}
+                                                        title="Продлить +30 мин"
+                                                    >
+                                                        +30
+                                                    </button>
+                                                    <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={{
-                                                            fontFamily: GH_MONO,
-                                                            fontSize: 10,
-                                                            letterSpacing: '0.1em',
-                                                            textTransform: 'uppercase',
-                                                            background: 'transparent',
-                                                            color: GH.ink60,
-                                                            border: 'none',
-                                                            borderBottom: `1px solid ${GH.ink10}`,
-                                                            cursor: 'pointer',
-                                                            padding: '2px 4px',
-                                                        }}
+                                                        style={ghTableLinkBtn(GH.ink60)}
                                                     >
                                                         Цена
                                                     </button>
-                                                    {!booking.isReRentListed && (
-                                                        <button
-                                                            onClick={() => handleReRent(booking.id)}
-                                                            style={{
-                                                                fontFamily: GH_MONO,
-                                                                fontSize: 10,
-                                                                letterSpacing: '0.1em',
-                                                                textTransform: 'uppercase',
-                                                                background: 'transparent',
-                                                                color: GH.ink60,
-                                                                border: 'none',
-                                                                borderBottom: `1px solid ${GH.ink10}`,
-                                                                cursor: 'pointer',
-                                                                padding: '2px 4px',
-                                                            }}
-                                                        >
-                                                            Пересд.
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        onClick={() => handleReRent(booking.id)}
+                                                        style={ghTableLinkBtn(GH.ink60)}
+                                                        title={booking.isReRentListed ? 'Снять с переаренды' : 'Поставить на переаренду'}
+                                                    >
+                                                        {booking.isReRentListed ? 'Снять' : 'Пересд.'}
+                                                    </button>
                                                     <button
                                                         onClick={() => handleCancel(booking.id)}
-                                                        style={{
-                                                            fontFamily: GH_MONO,
-                                                            fontSize: 10,
-                                                            letterSpacing: '0.1em',
-                                                            textTransform: 'uppercase',
-                                                            background: 'transparent',
-                                                            color: GH.danger,
-                                                            border: 'none',
-                                                            borderBottom: `1px solid ${GH.ink10}`,
-                                                            cursor: 'pointer',
-                                                            padding: '2px 4px',
-                                                        }}
+                                                        style={ghTableLinkBtn(GH.danger)}
                                                     >
                                                         Отмена
                                                     </button>

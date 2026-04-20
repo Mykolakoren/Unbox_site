@@ -2,7 +2,7 @@ import { ArrowLeft, LogIn, LayoutDashboard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 interface MinimalLayoutProps {
     children: React.ReactNode;
@@ -32,7 +32,7 @@ export function MinimalLayout({
     const navigate = useNavigate();
     const resetBooking = useBookingStore(s => s.reset);
     const { currentUser } = useUserStore();
-    const isGH = useDesignFlag();
+    const isGH = true;
 
     const handleBack = () => {
         if (onBack) onBack();

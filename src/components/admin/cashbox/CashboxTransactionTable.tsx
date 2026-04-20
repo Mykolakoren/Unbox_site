@@ -1,5 +1,4 @@
 import { Banknote, CreditCard, Landmark, Trash2, Loader2, Pencil, X, Check } from 'lucide-react';
-import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { createPortal } from 'react-dom';
 import { useCashboxStore } from '../../../store/cashboxStore';
@@ -7,6 +6,7 @@ import { useUserStore } from '../../../store/userStore';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import type { CashboxTransaction } from '../../../api/cashbox';
+import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
 
@@ -129,9 +129,9 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                     </thead>
                     <tbody className="text-sm">
                         {filteredTransactions.map(tx => {
-                            const d = new Date(tx.date);
-                            const formattedDate = format(d, 'd MMM yyyy', { locale: ru });
-                            const formattedTime = format(d, 'HH:mm');
+                            const d = parseUTC(tx.date);
+                            const formattedDate = formatBatumi(d, 'd MMM yyyy', ru);
+                            const formattedTime = formatBatumi(d, 'HH:mm');
                             const isIncome = tx.type === 'income';
                             const canEdit = canEditTx(tx);
                             const canDelete = canEdit;
@@ -205,9 +205,9 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
             {/* Mobile card list — hidden on desktop */}
             <div className="md:hidden space-y-2">
                 {filteredTransactions.map(tx => {
-                    const d = new Date(tx.date);
-                    const formattedDate = format(d, 'd MMM', { locale: ru });
-                    const formattedTime = format(d, 'HH:mm');
+                    const d = parseUTC(tx.date);
+                    const formattedDate = formatBatumi(d, 'd MMM', ru);
+                    const formattedTime = formatBatumi(d, 'HH:mm');
                     const isIncome = tx.type === 'income';
                     const canEdit = canEditTx(tx);
                     const canDelete = canEdit;

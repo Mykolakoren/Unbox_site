@@ -11,7 +11,7 @@ import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock 
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 import { isPeakTime } from '../../utils/pricing';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 // Hook to detect mobile viewport
 function useIsMobile(breakpoint = 768) {
@@ -43,7 +43,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
     const [isLoadingBookings, setIsLoadingBookings] = useState(true);
     const isMobile = useIsMobile();
-    const isGH = useDesignFlag();
+    const isGH = true;
 
     // Refresh bookings on mount — admin sees ALL bookings, users see only their own
     useEffect(() => {

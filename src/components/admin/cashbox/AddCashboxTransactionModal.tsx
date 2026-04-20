@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
+import { formatBatumi } from '../../../utils/dateUtils';
 
 interface Props {
     isOpen: boolean;
@@ -59,7 +59,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [selectedPlan, setSelectedPlan] = useState('');
     const [description, setDescription] = useState('');
     const [branch, setBranch] = useState('');
-    const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+    const [txDate, setTxDate] = useState(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [transferTo, setTransferTo] = useState('card_tbc');
     const [clientId, setClientId] = useState('');
     const [clientSearch, setClientSearch] = useState('');
@@ -139,7 +139,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             setDescription('');
             setCategoryId('');
             setBranch('');
-            setTxDate(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+            setTxDate(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
             onClose();
         } catch {
             toast.error('Ошибка при сохранении');

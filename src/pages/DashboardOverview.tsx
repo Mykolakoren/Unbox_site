@@ -439,7 +439,7 @@ export function DashboardOverview() {
                     <div className="p-6 rounded-2xl flex flex-col justify-center gap-4" style={glassStyle}>
                         <h3 className="font-bold text-lg">Быстрые действия</h3>
                         <div>
-                            <Button onClick={() => navigate('/booking')} className="w-full justify-start py-6" size="lg">
+                            <Button onClick={() => navigate('/dashboard/bookings')} className="w-full justify-start py-6" size="lg">
                                 <Plus className="mr-2" />
                                 Новое бронирование
                             </Button>
@@ -822,7 +822,7 @@ function GridHouseDashboardOverview({
             {/* Quick actions */}
             <div style={{ display: 'flex', gap: 12, marginBottom: 32, flexWrap: 'wrap' }}>
                 <button
-                    onClick={() => navigate('/booking')}
+                    onClick={() => navigate('/dashboard/bookings')}
                     style={{
                         padding: '10px 20px', background: GH.ink, color: GH.paper, fontWeight: 700,
                         fontSize: 13, fontFamily: GH_SANS, border: 'none', cursor: 'pointer',

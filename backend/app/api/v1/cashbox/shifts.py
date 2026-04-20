@@ -8,9 +8,67 @@ from app.models.user import User
 from app.models.expense_category import ExpenseCategory
 from app.models.cashbox_transaction import CashboxTransaction
 from app.models.shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
+from app.models.shift_open_log import ShiftOpenLog, ShiftOpenLogCreate, ShiftOpenLogRead
 from app.api.v1.cashbox import require_cashbox, require_reports
 
 router = APIRouter()
+
+
+@router.post("/shifts/open", response_model=ShiftOpenLogRead)
+def open_shift(
+    payload: ShiftOpenLogCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_cashbox),
+):
+    """Mark the start of a shift for this admin (Excel #61, Иры).
+
+    Doesn't change cash math — the close in `end_shift` still windows from the
+    previous close. This is purely an audit + UX marker so admins have a clear
+    "I started" action and we can later show "open since 09:12 by Ира".
+    """
+    log = ShiftOpenLog(
+        branch=payload.branch,
+        starting_balance=payload.starting_balance,
+        notes=payload.notes,
+        admin_id=str(current_user.id),
+        admin_name=current_user.name or "",
+    )
+    session.add(log)
+    session.commit()
+    session.refresh(log)
+    return log
+
+
+@router.get("/shifts/open/current", response_model=Optional[ShiftOpenLogRead])
+def get_current_open_shift(
+    branch: Optional[str] = Query(None),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_reports),
+):
+    """Most recent open event since the last close.
+
+    If `branch` is provided we scope to that branch. Otherwise we return the
+    very last open event globally (used to show the "current shift" banner on
+    the finance dashboard).
+
+    Returns null if the most recent close happened after the most recent open
+    (shift is fully closed) or if there's never been an open event.
+    """
+    open_q = select(ShiftOpenLog).order_by(desc(ShiftOpenLog.opened_at)).limit(1)
+    close_q = select(ShiftReport).order_by(desc(ShiftReport.shift_end)).limit(1)
+    if branch:
+        open_q = open_q.where(ShiftOpenLog.branch == branch)
+        close_q = close_q.where(ShiftReport.branch == branch)
+
+    last_open = session.exec(open_q).first()
+    if not last_open:
+        return None
+
+    last_close = session.exec(close_q).first()
+    if last_close and last_close.shift_end >= last_open.opened_at:
+        return None  # close is newer → shift is closed
+
+    return last_open
 
 
 @router.get("/shifts", response_model=List[ShiftReportRead])

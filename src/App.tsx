@@ -53,13 +53,13 @@ const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ de
 const CrmProfile = lazy(() => import('./pages/crm/CrmProfile').then(m => ({ default: m.CrmProfile })));
 
 import { glassPanel, glassSummary } from './utils/styles';
-import { useDesignFlag, GH, GH_SANS } from './hooks/useDesignFlag';
+import { GH, GH_SANS } from './hooks/useDesignFlag';
 
 // Booking Flow Wrapper
 function BookingWizard() {
   const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
   const users = useUserStore(s => s.users);
-  const isGH = useDesignFlag();
+  const isGH = true;
 
   // Resolve friendly name for the "booking-for" admin-proxy banner
   const proxyUser = bookingForUser

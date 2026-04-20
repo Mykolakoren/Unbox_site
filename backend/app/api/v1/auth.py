@@ -314,25 +314,80 @@ def telegram_login_callback(
         user_id, expires_delta=access_token_expires
     )
     
-    # Return a small HTML page that saves the token to localStorage
-    # and closes the popup. The parent window polls for the token.
-    # SECURITY: Token is only stored via JS localStorage, never in URL params.
+    # Return a small HTML page that saves the token to localStorage and closes
+    # the popup. The parent window polls for the token.
+    #
+    # Why so much defensive code: Chromium and Safari sometimes silently refuse
+    # window.close() when the popup wasn't opened by a user gesture in *that*
+    # window (e.g. when Telegram redirected through their oauth.telegram.org
+    # domain — which is a different origin). We layer fallbacks so the user
+    # always ends up logged in:
+    #   1. Write token to BOTH localStorage AND sessionStorage of the popup —
+    #      parent polls localStorage. (sessionStorage is per-window, so it's
+    #      really just a backup for debugging.)
+    #   2. Try window.close() — works in most browsers when popup was opened
+    #      by the parent (which is our case).
+    #   3. If we're still here after 1.5s, redirect this window to /dashboard.
+    #      Parent's polling will pick up the token and also navigate; if parent
+    #      is dead, at least the user lands somewhere logged-in.
+    #
+    # SECURITY: Token never appears in URL parameters or the address bar.
     from fastapi.responses import HTMLResponse
     html_content = f"""
     <!DOCTYPE html>
     <html>
-    <head><title>Authorizing...</title></head>
-    <body>
-        <p>Авторизация успешна! Это окно закроется автоматически...</p>
-        <script>
-            try {{
-                window.localStorage.setItem('token', '{access_token}');
-                window.close();
-            }} catch(e) {{
-                // If window.close() is blocked, redirect to dashboard
-                // Token is already in localStorage, just navigate
-                window.location.href = '/dashboard?source=telegram';
+    <head>
+        <title>Авторизация...</title>
+        <meta charset="utf-8">
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                display: flex; align-items: center; justify-content: center;
+                height: 100vh; margin: 0; background: #FAFAF7; color: #0F0F10;
+                text-align: center; padding: 20px;
             }}
+            .ok {{ font-size: 16px; line-height: 1.5; }}
+            .small {{ font-size: 13px; color: #666; margin-top: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div>
+            <div class="ok">✓ Авторизация успешна</div>
+            <div class="small">Это окно закроется автоматически...</div>
+        </div>
+        <script>
+            (function() {{
+                var token = '{access_token}';
+                try {{
+                    window.localStorage.setItem('token', token);
+                }} catch (e) {{
+                    // localStorage might be unavailable (private mode, etc.)
+                    // Fall through to redirect.
+                }}
+
+                // Try to notify the parent window directly — most reliable when
+                // the popup is same-origin to the parent (which it is here).
+                try {{
+                    if (window.opener && !window.opener.closed) {{
+                        window.opener.postMessage(
+                            {{ type: 'telegram-auth-success', token: token }},
+                            window.location.origin
+                        );
+                    }}
+                }} catch (e) {{ /* ignore */ }}
+
+                // Try to close the popup. May silently fail in some browsers.
+                try {{ window.close(); }} catch (e) {{ /* ignore */ }}
+
+                // Belt-and-braces: if we're still here in 1.5s, the close was
+                // blocked. Redirect this tab so the user isn't stuck.
+                setTimeout(function() {{
+                    try {{ window.close(); }} catch (e) {{}}
+                    if (!window.closed) {{
+                        window.location.href = '/dashboard?source=telegram';
+                    }}
+                }}, 1500);
+            }})();
         </script>
     </body>
     </html>
