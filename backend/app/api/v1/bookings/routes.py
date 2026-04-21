@@ -629,6 +629,212 @@ def create_booking(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ─── Multi-slot (same-day split-periods in one resource) ────────────────────
+# IMPORTANT: This must be registered BEFORE /{booking_id} routes so FastAPI
+# matches "/multi-slot" exactly instead of treating it as a booking_id.
+
+class MultiSlotItem(PydanticBaseModel):
+    resource_id: str
+    location_id: str = "unbox_one"
+    date: str          # "YYYY-MM-DD"
+    start_time: str    # "HH:MM"
+    duration: int = 60
+    format: str = "individual"
+
+
+class MultiSlotRequest(PydanticBaseModel):
+    slots: List[MultiSlotItem]
+    payment_method: str = "balance"
+    target_user_id: Optional[str] = None
+    crm_client_id: Optional[str] = None
+
+
+@router.post("/multi-slot")
+def create_multi_slot_booking(
+    *,
+    session: Session = Depends(deps.get_session),
+    data: MultiSlotRequest,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Excel #24 — book multiple non-contiguous periods in the same (or
+    different) cabinets in one operation. All slots share one
+    `recurring_group_id` so the admin can later cancel the whole series
+    with a single click.
+
+    Pricing: each slot is priced independently (duration discount applies
+    per slot, not across the whole series).
+
+    Atomicity: availability is checked for ALL slots first; if any clashes,
+    nothing is created. If pricing fails mid-way through the loop, any
+    already-created bookings are rolled back via the session.
+    """
+    from app.services.pricing import PricingService
+    from uuid import uuid4 as gen_uuid4
+
+    if not data.slots:
+        raise HTTPException(400, "At least one slot required")
+    if len(data.slots) > 20:
+        raise HTTPException(400, "Too many slots in one batch (max 20)")
+
+    # Resolve owner (admin can book for another user)
+    booking_owner = current_user
+    if current_user.role in ADMIN_ROLES and data.target_user_id:
+        target = None
+        try:
+            target = session.get(User, UUID(data.target_user_id))
+        except ValueError:
+            pass
+        if not target:
+            target = session.exec(
+                select(User).where(User.email == data.target_user_id)
+            ).first()
+        if target:
+            booking_owner = target
+
+    # Parse + validate dates
+    parsed_slots: List[tuple[MultiSlotItem, datetime]] = []
+    for s in data.slots:
+        try:
+            d = datetime.strptime(s.date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, f"Invalid date format for slot: {s.date}")
+        parsed_slots.append((s, d))
+
+    # Availability check for ALL slots before creating any
+    conflicts = []
+    for s, d in parsed_slots:
+        available, reason = check_availability(
+            session=session,
+            resource_id=s.resource_id,
+            date=d,
+            start_time=s.start_time,
+            duration=s.duration,
+        )
+        if not available:
+            conflicts.append({
+                "resource_id": s.resource_id,
+                "date": s.date,
+                "start_time": s.start_time,
+                "reason": reason,
+            })
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"{len(conflicts)} of {len(parsed_slots)} slots not available",
+                "conflicts": conflicts,
+            },
+        )
+
+    # All available — create bookings under a single group id
+    group_id = str(gen_uuid4())
+    created_bookings = []
+    total_cost = 0.0
+    pricing_service = PricingService(session)
+
+    for s, d in parsed_slots:
+        try:
+            h, m = map(int, s.start_time.split(":"))
+            start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            start_dt = d
+
+        quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=s.resource_id,
+            start_time=start_dt,
+            duration_minutes=s.duration,
+            format_type=s.format,
+        )
+
+        # Payment (per slot)
+        if data.payment_method == "subscription":
+            if quote.applied_rule != "SUBSCRIPTION":
+                raise HTTPException(
+                    400,
+                    f"Subscription insufficient for slot {s.date} {s.start_time}",
+                )
+            if booking_owner.subscription:
+                new_sub = booking_owner.subscription.copy()
+                remaining = new_sub.get("remainingHours", 0) or 0
+                hours_deducted = quote.hours_deducted or 0
+                if remaining < hours_deducted:
+                    raise HTTPException(
+                        400,
+                        f"Not enough subscription hours for slot {s.date} {s.start_time}",
+                    )
+                new_sub["remainingHours"] = remaining - hours_deducted
+                booking_owner.subscription = new_sub
+        else:  # balance
+            available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
+            if available_funds < quote.final_price:
+                raise HTTPException(
+                    400,
+                    f"Insufficient balance for slot {s.date} {s.start_time}. "
+                    f"Need {quote.final_price}₾, have {available_funds}₾.",
+                )
+            booking_owner.balance = (booking_owner.balance or 0) - quote.final_price
+
+        total_cost += quote.final_price
+
+        booking = Booking(
+            resource_id=s.resource_id,
+            location_id=s.location_id,
+            date=d,
+            start_time=s.start_time,
+            duration=s.duration,
+            status="confirmed",
+            final_price=quote.final_price,
+            base_price=quote.base_price,
+            applied_rule=quote.applied_rule,
+            discount_amount=quote.discount_amount,
+            discount_percent=quote.discount_percent,
+            payment_method=data.payment_method,
+            payment_source=(
+                "subscription" if data.payment_method == "subscription" else "deposit"
+            ),
+            hours_deducted=quote.hours_deducted,
+            format=s.format,
+            user_id=booking_owner.email,
+            user_uuid=booking_owner.id,
+            recurring_group_id=group_id,
+            crm_client_id=data.crm_client_id,
+        )
+        session.add(booking)
+        created_bookings.append(booking)
+
+    session.add(booking_owner)
+    session.commit()
+    for b in created_bookings:
+        session.refresh(b)
+
+    # Audit log
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=group_id,
+        target_type="booking_series",
+        event_type="multi_slot_booking_created",
+        description=(
+            f"{len(created_bookings)} slots booked in one operation "
+            f"by {current_user.name} for {booking_owner.email}. Total: {total_cost}₾"
+        ),
+        metadata={
+            "group_id": group_id,
+            "slot_count": len(created_bookings),
+            "total_cost": total_cost,
+        },
+    )
+
+    return {
+        "ok": True,
+        "group_id": group_id,
+        "bookings": [enrich_booking_status(b) for b in created_bookings],
+        "total_cost": total_cost,
+    }
+
+
 # ─── Recurring bookings ──────────────────────────────────────────────────────
 # IMPORTANT: These must be registered BEFORE /{booking_id} routes so FastAPI
 # matches "/recurring" and "/recurring-groups" exactly instead of treating

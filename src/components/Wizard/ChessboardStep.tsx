@@ -29,7 +29,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         locationId, date, setDate, format: bookingFormat, groupSize, setFormat,
         selectedSlots,
         setStep,
-        highlightedResourceId, setHighlightedResourceId
+        highlightedResourceId, setHighlightedResourceId,
+        pendingAddResourceId,
     } = useBookingStore();
 
     const { bookings, fetchBookings, fetchAllBookings, currentUser } = useUserStore();
@@ -374,7 +375,25 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             }
 
             if (!hasBlocked) {
-                setSlotRange(resId, newSlots);
+                // Excel #24 — if user clicked "+ Ещё период" for this resource,
+                // merge the new drag range with the preserved earlier range
+                // instead of replacing it. setSlotRange always overwrites the
+                // resource, so we rebuild the combined list here.
+                const storeState = useBookingStore.getState();
+                if (
+                    storeState.pendingAddResourceId === resId &&
+                    storeState.preservedResourceSlots.length > 0
+                ) {
+                    const preservedTimes = storeState.preservedResourceSlots
+                        .map(s => s.split('|')[1])
+                        .filter(Boolean);
+                    const dragTimes = newSlots;
+                    // Drop accidental overlap between preserved and drag; Set de-dupes.
+                    const merged = Array.from(new Set<string>([...preservedTimes, ...dragTimes]));
+                    setSlotRange(resId, merged);
+                } else {
+                    setSlotRange(resId, newSlots);
+                }
             }
         }
         else if (dragMode === 'resize-end' && dragInitialBlock) {
@@ -435,6 +454,14 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         dragInitialBlockRef.current = null;
         dragInitialSlotsRef.current = [];
         forceDragUpdate();
+
+        // Excel #24 — "+ Ещё период" mode is one-shot: once the drag that
+        // follows the click lands, we clear the pending state so the next
+        // drag is a normal "replace resource" drag again.
+        const stateAfterDrag = useBookingStore.getState();
+        if (stateAfterDrag.pendingAddResourceId) {
+            stateAfterDrag.clearAddMore();
+        }
 
         // Min 1h logic Enforcement on release
         const state = useBookingStore.getState();
@@ -909,6 +936,38 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     return (
         <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 24, paddingBottom: 112, padding: '24px 24px 112px', fontFamily: GH_SANS, position: 'relative' as const } : undefined}
              className={isGH ? '' : "space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-28 px-6 pt-6 relative"}>
+            {/* Excel #24 — banner when user clicked "+ Ещё период" in Summary */}
+            {pendingAddResourceId && (
+                <div style={{
+                    background: '#FEF3C7',
+                    border: `1px solid ${GH.ink10}`,
+                    color: '#92400E',
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    fontFamily: GH_SANS,
+                    fontSize: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                }}>
+                    <span>
+                        <strong style={{ fontWeight: 700 }}>Добавление периода:</strong>
+                        {' '}Выделите второй интервал в <em>{resources.find(r => r.id === pendingAddResourceId)?.name || pendingAddResourceId}</em>.
+                        {' '}Первый период сохранится.
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => useBookingStore.getState().clearAddMore()}
+                        style={{
+                            fontSize: 13, fontWeight: 700, textDecoration: 'underline',
+                            background: 'none', border: 'none', cursor: 'pointer', color: '#92400E',
+                        }}
+                    >
+                        Отмена
+                    </button>
+                </div>
+            )}
             {/* Loading overlay while bookings are being fetched */}
             {isLoadingBookings && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: 'rgba(250,250,247,0.85)', backdropFilter: 'blur(4px)' }}>

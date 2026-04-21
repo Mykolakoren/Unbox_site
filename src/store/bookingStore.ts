@@ -31,10 +31,21 @@ export interface BookingStore extends BookingState {
     toggleExtra: (extraId: string) => void;
     toggleSlot: (resourceId: string, time: string) => void;
     setSlotRange: (resourceId: string, timeSlots: string[]) => void;
+    /** Excel #24 — append a disconnected range to the same resource. */
+    addSlotRange: (resourceId: string, timeSlots: string[]) => void;
     replaceSlots: (newSlots: string[]) => void;
     clearCart: () => void;
     setPaymentMethod: (method: 'balance' | 'subscription' | 'bonus') => void;
     selectedSlots: string[]; // "resId|time"
+
+    // Excel #24 — when the user clicks "+ Ещё период в этом кабинете" in
+    // Summary, we remember the resource they want to append to and the slots
+    // they already selected there. On return to the chessboard, any new drag
+    // in that resource merges with the preserved slots instead of replacing.
+    pendingAddResourceId: string | null;
+    preservedResourceSlots: string[];  // slots of pendingAddResourceId captured at click time
+    startAddMoreSlots: (resourceId: string) => void;
+    clearAddMore: () => void;
 
     // Edit Mode
     editBookingId: string | null;
@@ -212,6 +223,36 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         return { selectedSlots: [...otherSlots, ...newSlots] };
     }),
 
+    // Excel #24 — add a second independent block to the same resource without
+    // wiping the first. Used when the user already has a range in this
+    // resource and clicks "+ Ещё период" to pick an adjacent-but-not-touching
+    // interval (e.g. 10:00-12:00 AND 15:00-17:00 in cabinet #3).
+    addSlotRange: (resourceId, timeSlots) => set((state) => {
+        const existing = new Set(state.selectedSlots);
+        const additions = timeSlots
+            .map(time => `${resourceId}|${time}`)
+            .filter(id => !existing.has(id));
+        return { selectedSlots: [...state.selectedSlots, ...additions] };
+    }),
+
+    pendingAddResourceId: null,
+    preservedResourceSlots: [],
+
+    startAddMoreSlots: (resourceId) => set((state) => {
+        // Snapshot current slots for the target resource so a subsequent drag
+        // in the chessboard can merge rather than replace.
+        const preserved = state.selectedSlots.filter(s => s.startsWith(`${resourceId}|`));
+        return {
+            pendingAddResourceId: resourceId,
+            preservedResourceSlots: preserved,
+        };
+    }),
+
+    clearAddMore: () => set({
+        pendingAddResourceId: null,
+        preservedResourceSlots: [],
+    }),
+
     replaceSlots: (newSlots) => set({ selectedSlots: newSlots }),
 
     clearCart: () => set({ selectedSlots: [], quote: null }),
@@ -234,7 +275,11 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         get().fetchQuote();
     },
 
-    reset: () => set({ ...INITIAL_STATE, editBookingId: null, mode: 'create', bookingForUser: null, quote: null }),
+    reset: () => set({
+        ...INITIAL_STATE,
+        editBookingId: null, mode: 'create', bookingForUser: null, quote: null,
+        pendingAddResourceId: null, preservedResourceSlots: [],
+    }),
 
     fetchQuote: async () => {
         const { resourceId, date, startTime, duration, format } = get();

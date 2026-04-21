@@ -2,7 +2,7 @@ import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
 import type { PricingResult } from '../types';
 
-import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck, Sunrise } from 'lucide-react';
+import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck, Sunrise, Plus } from 'lucide-react';
 import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
 import { EXTRAS, RESOURCES } from '../utils/data';
@@ -127,36 +127,60 @@ export function Summary() {
                 {cartBookings.length === 0 ? (
                     <div className="text-gray-400 text-sm text-center py-4">Выберите время в расписании</div>
                 ) : (
-                    cartBookings.map((b, idx) => (
-                        <div key={idx} className="rounded-xl p-3 text-sm relative group"
-                            style={{
-                                background: 'rgba(255,255,255,0.35)',
-                                backdropFilter: 'blur(20px) saturate(150%)',
-                                WebkitBackdropFilter: 'blur(20px) saturate(150%)',
-                                border: '1px solid rgba(255,255,255,0.55)',
-                                boxShadow: '0 4px 12px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.60)',
-                            }}>
-                            <div className="flex justify-between font-medium">
-                                <span>{RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}</span>
-                                <span>{b.price.finalPrice} ₾</span>
+                    cartBookings.map((b, idx) => {
+                        // Excel #24 — show "+ Ещё период" only once per resource (on the
+                        // last cart entry for that resource), and only when not
+                        // already in add-mode for this resource.
+                        const isLastForResource = !cartBookings
+                            .slice(idx + 1)
+                            .some(next => next.resourceId === b.resourceId);
+                        const resourceLabel = RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId;
+                        return (
+                            <div key={idx} className="rounded-xl p-3 text-sm relative group"
+                                style={{
+                                    background: 'rgba(255,255,255,0.35)',
+                                    backdropFilter: 'blur(20px) saturate(150%)',
+                                    WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+                                    border: '1px solid rgba(255,255,255,0.55)',
+                                    boxShadow: '0 4px 12px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.60)',
+                                }}>
+                                <div className="flex justify-between font-medium">
+                                    <span>{resourceLabel}</span>
+                                    <span>{b.price.finalPrice} ₾</span>
+                                </div>
+                                <div className="text-gray-500 flex gap-1 items-center">
+                                    <Clock size={12} />
+                                    {b.startTime} - {b.endTime} ({b.duration / 60} ч)
+                                </div>
+                                {b.price.discountAmount > 0 && (() => {
+                                    const info = DISCOUNT_INFO[b.price.discountType];
+                                    const pct = Math.round(b.price.discountAmount / b.price.basePrice * 100);
+                                    return (
+                                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-unbox-green bg-unbox-light/60 rounded-md px-2 py-0.5 w-fit">
+                                            {info && <info.Icon size={10} />}
+                                            Скидка {pct}% · -{b.price.discountAmount.toFixed(1)} ₾
+                                            {info && <span className="text-unbox-grey/80 font-normal">({info.label})</span>}
+                                        </div>
+                                    );
+                                })()}
+                                {/* Excel #24 — "+ Ещё период в этом же кабинете" */}
+                                {isLastForResource && state.step !== 2 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            state.startAddMoreSlots(b.resourceId);
+                                            state.setStep(2);
+                                        }}
+                                        className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-unbox-green hover:text-unbox-dark transition-colors"
+                                        title={`Добавить второй период в ${resourceLabel}`}
+                                    >
+                                        <Plus size={12} />
+                                        Ещё период в этом кабинете
+                                    </button>
+                                )}
                             </div>
-                            <div className="text-gray-500 flex gap-1 items-center">
-                                <Clock size={12} />
-                                {b.startTime} - {b.endTime} ({b.duration / 60} ч)
-                            </div>
-                            {b.price.discountAmount > 0 && (() => {
-                                const info = DISCOUNT_INFO[b.price.discountType];
-                                const pct = Math.round(b.price.discountAmount / b.price.basePrice * 100);
-                                return (
-                                    <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-unbox-green bg-unbox-light/60 rounded-md px-2 py-0.5 w-fit">
-                                        {info && <info.Icon size={10} />}
-                                        Скидка {pct}% · -{b.price.discountAmount.toFixed(1)} ₾
-                                        {info && <span className="text-unbox-grey/80 font-normal">({info.label})</span>}
-                                    </div>
-                                );
-                            })()}
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </div>
 

@@ -98,16 +98,50 @@ export function AdminBookings() {
     // Excel #66 — instead of a yes/no confirm, open the admin cancel modal
     // so the admin picks refund policy (100% / 50% / 0%) and records a reason
     // for anything other than the default full refund.
-    const [cancelModal, setCancelModal] = useState<{ open: boolean; bookingId: string; label: string }>({ open: false, bookingId: '', label: '' });
+    const [cancelModal, setCancelModal] = useState<{
+        open: boolean; bookingId: string; label: string;
+        // Excel #24 — if this booking is part of a series, track the size and
+        // let the admin pick single vs whole-series cancellation.
+        seriesGroupId?: string; seriesSize?: number; seriesScope?: 'single' | 'all';
+    }>({ open: false, bookingId: '', label: '' });
+
     const handleCancel = (bookingId: string) => {
         const b = bookings.find(x => x.id === bookingId);
         const userName = b ? getUserName(b.userId) : '';
         const label = b ? `${userName} · ${b.startTime} · ${b.finalPrice}₾` : '';
+
+        // Excel #24 — if booking is part of a multi-slot / recurring series,
+        // ask scope first via a native confirm (quick and universal).
+        const groupId = (b as any)?.recurringGroupId;
+        if (groupId) {
+            const seriesSize = bookings.filter(x => (x as any).recurringGroupId === groupId).length;
+            if (seriesSize > 1) {
+                const answer = window.confirm(
+                    `Эта бронь — часть серии из ${seriesSize} периодов.\n\n` +
+                    `OK — отменить ВСЮ серию (${seriesSize} броней).\n` +
+                    `Отмена — отменить только этот период.`,
+                );
+                setCancelModal({
+                    open: true, bookingId, label,
+                    seriesGroupId: groupId, seriesSize,
+                    seriesScope: answer ? 'all' : 'single',
+                });
+                return;
+            }
+        }
         setCancelModal({ open: true, bookingId, label });
     };
+
     const handleCancelConfirm = async (option: 'full' | 'half' | 'none', reason: string) => {
         const refundPercent = option === 'full' ? 1.0 : option === 'half' ? 0.5 : 0.0;
         try {
+            if (cancelModal.seriesScope === 'all' && cancelModal.seriesGroupId) {
+                // Whole-series cancel via dedicated endpoint (server handles refunds).
+                await bookingsApi.cancelRecurringSeries(cancelModal.seriesGroupId);
+                toast.success(`Серия отменена — ${cancelModal.seriesSize ?? ''} броней`);
+                useUserStore.getState().fetchAllBookings();
+                return;
+            }
             await cancelBooking(cancelModal.bookingId, undefined, undefined, undefined, {
                 refundPercent,
                 reason: reason || undefined,

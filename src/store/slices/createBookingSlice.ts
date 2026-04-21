@@ -70,11 +70,51 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         }
     },
 
-    // addBooking(s) batch is rarely used now, but we can keep it for data migration if needed
-    // or deprecate it. Leaving as no-op or mapping to loop for now.
+    // Excel #24 — when the user selected multiple non-contiguous blocks
+    // (multiple `cartDetails` entries for the same flow), we route through
+    // the batch endpoint so all slots land in one transaction with one
+    // `recurring_group_id` — failure is atomic, and the admin can cancel
+    // the whole series with a single click later.
+    //
+    // Single-slot calls still fall through to the old one-by-one path so
+    // we don't lose the existing error handling / rollback for those.
     addBookings: async (bookingsData) => {
-        for (const b of bookingsData) {
-            await get().addBooking(b);
+        if (bookingsData.length === 0) return;
+        if (bookingsData.length === 1) {
+            await get().addBooking(bookingsData[0]);
+            return;
+        }
+        // Multi-slot batch path
+        try {
+            const first = bookingsData[0] as any;
+            await bookingsApi.createMultiSlotBooking({
+                slots: bookingsData.map((b: any) => ({
+                    resourceId: b.resourceId,
+                    locationId: b.locationId || 'unbox_one',
+                    date: typeof b.date === 'string' ? b.date : new Date(b.date).toISOString().slice(0, 10),
+                    startTime: b.startTime,
+                    duration: b.duration,
+                    format: b.format || 'individual',
+                })),
+                paymentMethod: first.paymentMethod || 'balance',
+                targetUserId: first.targetUserId,
+                crmClientId: first.crmClientId,
+            });
+            // Refetch state so store matches server truth
+            await get().fetchCurrentUser();
+            const fetchAllBookings = (get() as any).fetchAllBookings;
+            if (typeof fetchAllBookings === 'function') {
+                await fetchAllBookings();
+            }
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            const message = typeof detail === 'string'
+                ? detail
+                : detail?.message
+                    ? `${detail.message}${detail.conflicts ? ' · ' + detail.conflicts.map((c: any) => c.date + ' ' + c.start_time).join(', ') : ''}`
+                    : 'Не удалось создать все периоды — попробуйте ещё раз';
+            toast.error(message);
+            throw error;
         }
     },
 

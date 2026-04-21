@@ -133,6 +133,32 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /** Excel #24 — batch-create multiple non-contiguous slots in one call.
+     *  All slots share one `recurring_group_id` so the whole series can be
+     *  cancelled together later. Each slot is priced independently (duration
+     *  discount per slot, not across the series). */
+    createMultiSlotBooking: async (data: {
+        slots: Array<{
+            resourceId: string;
+            locationId: string;
+            date: string;       // "YYYY-MM-DD"
+            startTime: string;  // "HH:MM"
+            duration: number;
+            format: string;
+        }>;
+        paymentMethod: string;
+        targetUserId?: string;
+        crmClientId?: string;
+    }): Promise<{ ok: boolean; groupId: string; bookings: any[]; totalCost: number }> => {
+        const response = await api.post('/bookings/multi-slot', data);
+        return {
+            ok: response.data.ok,
+            groupId: response.data.group_id,
+            bookings: (response.data.bookings || []).map(mapToFrontend),
+            totalCost: response.data.total_cost,
+        };
+    },
+
     // Recurring bookings
     createRecurringBooking: async (data: {
         resourceId: string;
