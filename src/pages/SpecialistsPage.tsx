@@ -7,7 +7,7 @@ import type { Specialist } from '../components/Specialists/SpecialistCard';
 import { useUserStore } from '../store/userStore';
 import { api } from '../api/client';
 import { Layout } from '../components/Layout';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 const FORMAT_FILTERS = [
     { key: 'all', label: 'Все' },
@@ -22,8 +22,7 @@ const glassPanel: React.CSSProperties = {
 };
 
 export function SpecialistsPage() {
-    const gridHouse = useDesignFlag();
-    const [specialists, setSpecialists] = useState<Specialist[]>([]);
+        const [specialists, setSpecialists] = useState<Specialist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
@@ -111,7 +110,8 @@ export function SpecialistsPage() {
         );
     });
 
-    if (gridHouse) return (
+    return (
+
         <GridHouseSpecialistsPage
             specialists={specialists} filteredSpecialists={filteredSpecialists}
             isLoading={isLoading} error={error}
@@ -123,187 +123,8 @@ export function SpecialistsPage() {
             allSpecializations={allSpecializations}
         />
     );
-
-    return (
-        <Layout>
-            <div className="pb-20 min-h-screen">
-                {/* Hero header */}
-                <div className="relative overflow-hidden mb-10">
-                    {/* Decorative background */}
-                    <div className="absolute inset-0 dot-pattern-light opacity-40 pointer-events-none" />
-                    <div className="absolute -top-20 -right-20 w-80 h-80 bg-unbox-green/5 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute -bottom-10 -left-20 w-60 h-60 bg-unbox-accent/5 rounded-full blur-3xl pointer-events-none" />
-
-                    <div className="relative max-w-7xl mx-auto px-6 pt-8 pb-6">
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.5 }}
-                            className="text-center max-w-2xl mx-auto mb-8"
-                        >
-                            <div className="inline-block px-5 py-2 rounded-2xl mb-4" style={glassPanel}>
-                                <p className="text-unbox-green text-xs font-bold uppercase tracking-widest">Специалисты</p>
-                            </div>
-                            <h1 className="text-3xl md:text-4xl font-bold text-unbox-dark mb-3 tracking-tight">
-                                Наши специалисты
-                            </h1>
-                            <p className="text-unbox-dark/60 text-base sm:text-lg leading-relaxed">
-                                Найдите своего специалиста среди профессионалов, принимающих в пространствах Unbox или онлайн.
-                            </p>
-                        </motion.div>
-
-                        {/* Search + Filters */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 14 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.4, delay: 0.15 }}
-                            className="max-w-2xl mx-auto space-y-4"
-                        >
-                            {/* Search bar */}
-                            <div className="relative">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-unbox-grey/60" size={18} />
-                                <input
-                                    type="text"
-                                    placeholder="Поиск по имени, запросу или методу..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-11 pr-10 py-3 rounded-2xl text-sm text-unbox-dark placeholder:text-unbox-grey/50 outline-none transition-all focus:ring-2 focus:ring-unbox-green/30"
-                                    style={{
-                                        background: 'rgba(255,255,255,0.82)',
-                                        backdropFilter: 'blur(16px)',
-                                        WebkitBackdropFilter: 'blur(16px)',
-                                        border: '1px solid rgba(255,255,255,0.60)',
-                                        boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                                    }}
-                                />
-                                {searchQuery && (
-                                    <button
-                                        onClick={() => setSearchQuery('')}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-unbox-light/60 text-unbox-grey/50 hover:text-unbox-dark transition-colors"
-                                    >
-                                        <X size={16} />
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Format filter pills */}
-                            <div className="flex items-center justify-center gap-2 flex-wrap">
-                                <Filter size={14} className="text-unbox-grey/50 mr-1" />
-                                {FORMAT_FILTERS.map(f => (
-                                    <button
-                                        key={f.key}
-                                        onClick={() => setFormatFilter(f.key)}
-                                        className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
-                                            formatFilter === f.key
-                                                ? 'bg-unbox-dark text-white shadow-sm'
-                                                : 'text-unbox-dark/70 hover:bg-white/70'
-                                        }`}
-                                        style={formatFilter !== f.key ? {
-                                            background: 'rgba(255,255,255,0.45)',
-                                            border: '1px solid rgba(255,255,255,0.50)',
-                                        } : undefined}
-                                    >
-                                        {f.label}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Role filter pills */}
-                            {roleFilters.length > 1 && (
-                                <div className="flex items-center justify-center gap-2 flex-wrap">
-                                    <button
-                                        onClick={() => setRoleFilter('all')}
-                                        className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
-                                            roleFilter === 'all'
-                                                ? 'bg-unbox-green text-white shadow-sm'
-                                                : 'text-unbox-dark/70 hover:bg-white/70'
-                                        }`}
-                                        style={roleFilter !== 'all' ? {
-                                            background: 'rgba(255,255,255,0.45)',
-                                            border: '1px solid rgba(255,255,255,0.50)',
-                                        } : undefined}
-                                    >
-                                        Все профили
-                                    </button>
-                                    {roleFilters.map(role => (
-                                        <button
-                                            key={role}
-                                            onClick={() => setRoleFilter(role)}
-                                            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
-                                                roleFilter === role
-                                                    ? 'bg-unbox-green text-white shadow-sm'
-                                                    : 'text-unbox-dark/70 hover:bg-white/70'
-                                            }`}
-                                            style={roleFilter !== role ? {
-                                                background: 'rgba(255,255,255,0.45)',
-                                                border: '1px solid rgba(255,255,255,0.50)',
-                                            } : undefined}
-                                        >
-                                            {role}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </motion.div>
-                    </div>
-                </div>
-
-                {/* Content */}
-                <div className="max-w-7xl mx-auto px-6">
-                    {isLoading ? (
-                        <div className="flex flex-col items-center justify-center py-24 text-unbox-grey">
-                            <Loader2 className="animate-spin mb-4" size={28} />
-                            <p className="text-sm">Загрузка специалистов...</p>
-                        </div>
-                    ) : error ? (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="text-red-600 p-6 rounded-2xl text-center max-w-lg mx-auto"
-                            style={{ ...glassPanel, borderColor: 'rgba(239,68,68,0.15)' }}
-                        >
-                            {error}
-                        </motion.div>
-                    ) : filteredSpecialists.length === 0 ? (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="text-center py-20 rounded-3xl"
-                            style={glassPanel}
-                        >
-                            <h3 className="text-lg font-bold text-unbox-dark mb-2">Ничего не найдено</h3>
-                            <p className="text-unbox-grey text-sm">Попробуйте изменить параметры поиска</p>
-                        </motion.div>
-                    ) : (
-                        <>
-                            {/* Results count */}
-                            <div className="mb-5">
-                                <p className="text-xs text-unbox-grey/70 font-medium">
-                                    {filteredSpecialists.length === specialists.length
-                                        ? `${specialists.length} специалистов`
-                                        : `${filteredSpecialists.length} из ${specialists.length}`
-                                    }
-                                </p>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                                {filteredSpecialists.map((specialist, index) => (
-                                    <motion.div
-                                        key={specialist.id}
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.4, delay: index * 0.04, ease: [0.16, 1, 0.3, 1] }}
-                                    >
-                                        <SpecialistCard specialist={specialist} />
-                                    </motion.div>
-                                ))}
-                            </div>
-                        </>
-                    )}
-                </div>
-            </div>
-        </Layout>
-    );
 }
+
 
 /* ═══════════════════════════════════════════════════════════════
    Grid House — SpecialistsPage

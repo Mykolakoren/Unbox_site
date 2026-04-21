@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { parseUTC } from '../../utils/dateUtils';
 import { crmApi, type CrmPaymentCreate, type CrmClient, type CrmSession } from '../../api/crm';
 import { totalInGel } from '../../utils/currency';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 type Period = 'day' | 'week' | 'month';
 
@@ -43,8 +43,7 @@ function formatPeriodLabel(date: Date, period: Period): string {
 }
 
 export function CrmFinances() {
-    const gridHouse = useDesignFlag();
-    const navigate = useNavigate();
+        const navigate = useNavigate();
     const {
         payments, sessions, clients,
         fetchPayments, fetchSessions, fetchClients,
@@ -155,8 +154,8 @@ export function CrmFinances() {
     const isToday = period === 'day' && isSameDay(anchor, new Date());
     const isThisMonth = period === 'month' && format(anchor, 'yyyy-MM') === format(new Date(), 'yyyy-MM');
 
-    if (gridHouse) {
-        return (
+    return (
+
             <GridHouseCrmFinances
                 period={period} setPeriod={setPeriod}
                 anchor={anchor} setAnchor={setAnchor}
@@ -177,200 +176,8 @@ export function CrmFinances() {
                 navigate={navigate}
             />
         );
-    }
-
-    return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold">Финансы</h1>
-                    <p className="text-unbox-dark/60 text-sm">Платежи и задолженности</p>
-                </div>
-                <button
-                    onClick={() => setShowForm(true)}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
-                >
-                    <Plus className="w-4 h-4" />
-                    Добавить платёж
-                </button>
-            </div>
-
-            {/* Period selector + navigation */}
-            <div className="flex flex-wrap items-center gap-3">
-                {/* Period tabs */}
-                <div className="flex gap-1 bg-white rounded-xl border border-unbox-light p-1 shadow-sm">
-                    {PERIODS.map(p => (
-                        <button
-                            key={p.id}
-                            onClick={() => setPeriod(p.id)}
-                            className={[
-                                'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                                period === p.id
-                                    ? 'bg-unbox-green text-white shadow-sm'
-                                    : 'text-unbox-grey hover:text-unbox-dark',
-                            ].join(' ')}
-                        >
-                            {p.label}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Navigation arrows */}
-                <div className="flex items-center gap-2 bg-white rounded-xl border border-unbox-light px-1 py-1 shadow-sm">
-                    <button
-                        onClick={() => setAnchor(d => navigatePeriod(d, period, -1))}
-                        className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
-                    >
-                        <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <span className="font-medium text-sm w-36 sm:w-44 text-center capitalize">
-                        {formatPeriodLabel(anchor, period)}
-                    </span>
-                    <button
-                        onClick={() => setAnchor(d => navigatePeriod(d, period, 1))}
-                        className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
-                    >
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
-                </div>
-
-                {/* Today / This month shortcut */}
-                {!isToday && !isThisMonth && (
-                    <button
-                        onClick={() => setAnchor(new Date())}
-                        className="flex items-center gap-1.5 px-3 py-2 text-xs text-unbox-grey bg-white border border-unbox-light rounded-xl hover:text-unbox-dark transition-colors shadow-sm"
-                    >
-                        <Calendar size={13} />
-                        Сейчас
-                    </button>
-                )}
-            </div>
-
-            {/* Stats cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="w-9 h-9 rounded-xl bg-green-50 text-green-600 flex items-center justify-center">
-                            <TrendingUp className="w-5 h-5" />
-                        </div>
-                        <div className="text-sm text-unbox-grey">Получено</div>
-                    </div>
-                    <div className="text-lg font-bold text-green-600 leading-snug">{stats.revenueLabel}</div>
-                    {stats.revenueGel && <div className="text-xs text-unbox-grey mt-0.5">{stats.revenueGel}</div>}
-                </div>
-
-                <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="w-9 h-9 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center">
-                            <AlertTriangle className="w-5 h-5" />
-                        </div>
-                        <div className="text-sm text-unbox-grey">Общий долг</div>
-                    </div>
-                    <div className="text-lg font-bold text-orange-600 leading-snug">{stats.debtLabel}</div>
-                    <div className="text-xs text-unbox-grey mt-0.5">{stats.unpaidCount} сессий{stats.debtGel ? ` · ${stats.debtGel}` : ''}</div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="w-9 h-9 rounded-xl bg-unbox-light text-unbox-green flex items-center justify-center">
-                            <Banknote className="w-5 h-5" />
-                        </div>
-                        <div className="text-sm text-unbox-grey">Платежей</div>
-                    </div>
-                    <div className="text-2xl font-bold text-unbox-dark">{stats.totalPayments}</div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-unbox-light p-5 shadow-sm">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                            <Calendar className="w-5 h-5" />
-                        </div>
-                        <div className="text-sm text-unbox-grey">Сессий</div>
-                    </div>
-                    <div className="text-2xl font-bold text-unbox-dark">{stats.held}</div>
-                </div>
-            </div>
-
-            {/* New Payment Form */}
-            {showForm && (
-                <PaymentForm
-                    clients={clients.filter(c => c.isActive)}
-                    onSave={async (data) => {
-                        await createPayment(data);
-                        setShowForm(false);
-                        toast.success('Платёж добавлен');
-                    }}
-                    onCancel={() => setShowForm(false)}
-                />
-            )}
-
-            {/* Debt by Client */}
-            {debtByClient.length > 0 && (
-                <div className="bg-white rounded-2xl border border-orange-200 shadow-sm">
-                    <div className="p-5 border-b border-orange-100 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-orange-500" />
-                        <h2 className="font-bold text-lg">Задолженности по клиентам</h2>
-                    </div>
-                    <div className="divide-y divide-gray-50">
-                        {debtByClient.map(({ client, count, total }) => (
-                            <div
-                                key={client.id}
-                                className="flex items-center justify-between px-5 py-3.5 hover:bg-orange-50/30 cursor-pointer transition-colors"
-                                onClick={() => navigate(`/crm/clients/${client.id}`)}
-                            >
-                                <div>
-                                    <div className="font-medium text-unbox-dark hover:text-unbox-green transition-colors">{client.name}</div>
-                                    <div className="text-sm text-unbox-grey">{count} неоплаченных сессий</div>
-                                </div>
-                                <div className="text-lg font-bold text-orange-600">{total} {client.currency}</div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Payments List */}
-            <div className="bg-white rounded-2xl border border-unbox-light shadow-sm">
-                <div className="p-5 border-b border-unbox-light flex items-center gap-2">
-                    <Wallet className="w-5 h-5 text-unbox-grey" />
-                    <h2 className="font-bold text-lg">Платежи за период</h2>
-                </div>
-
-                {loading && !payments.length ? (
-                    <div className="flex items-center justify-center h-32">
-                        <Loader2 className="w-6 h-6 animate-spin text-unbox-grey" />
-                    </div>
-                ) : payments.length === 0 ? (
-                    <div className="p-8 text-center text-unbox-grey">Нет платежей за выбранный период</div>
-                ) : (
-                    <div className="divide-y divide-gray-50">
-                        {payments.map(p => {
-                            const client = clientMap.get(p.clientId);
-                            return (
-                                <div key={p.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-unbox-light/30 transition-colors">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-lg bg-green-50 text-green-600 flex items-center justify-center">
-                                            <Banknote className="w-4 h-4" />
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-unbox-dark text-sm">{client?.name || 'Неизвестный'}</div>
-                                            <div className="text-xs text-unbox-grey">
-                                                {format(parseUTC(p.date), 'dd.MM.yyyy HH:mm')}
-                                                {p.account && ` · ${p.account}`}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="font-semibold text-green-600">+{p.amount} {p.currency}</div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
 }
+
 
 // ── Payment Form ─────────────────────────────────────────────────────────────
 

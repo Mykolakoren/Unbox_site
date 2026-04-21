@@ -7,11 +7,10 @@ import clsx from 'clsx';
 import { TimelineList } from '../../components/Timeline/TimelineList';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 export function AdminUsers() {
-    const gridHouse = useDesignFlag();
-    const { users, updateUserById, fetchUsers } = useUserStore();
+        const { users, updateUserById, fetchUsers } = useUserStore();
     const [search, setSearch] = useState('');
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [showAddUser, setShowAddUser] = useState(false);
@@ -26,7 +25,8 @@ export function AdminUsers() {
         (u.phone || '').includes(search)
     );
 
-    if (gridHouse) return (
+    return (
+
         <GridHouseAdminUsers
             users={users}
             filteredUsers={filteredUsers}
@@ -40,166 +40,8 @@ export function AdminUsers() {
             fetchUsers={fetchUsers}
         />
     );
-
-    return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center gap-4">
-                <h1 className="text-2xl font-bold">Клиенты</h1>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={() => setShowAddUser(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-unbox-green text-white rounded-lg font-medium text-sm hover:bg-unbox-dark transition-colors shadow-sm cursor-pointer"
-                    >
-                        <Plus size={16} />
-                        Новый клиент
-                    </button>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
-                        <input
-                            type="text"
-                            placeholder="Поиск клиента..."
-                            className="pl-10 pr-4 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green w-64"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
-                    </div>
-                </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
-                <table className="w-full text-left">
-                    <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
-                        <tr>
-                            <th className="p-4 pl-6">Клиент</th>
-                            <th className="p-4">Роль</th>
-                            <th className="p-4">Баланс</th>
-                            <th className="p-4">Скидка</th>
-                            <th className="p-4">Тип цен</th>
-                            <th className="p-4 text-right">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-unbox-light">
-                        {filteredUsers.map(user => (
-                            <tr key={user.email} className="hover:bg-unbox-light/30 transition-colors">
-                                <td className="p-4 pl-6">
-                                    <Link
-                                        to={`/admin/users/${encodeURIComponent(user.email)}`}
-                                        className="flex items-center gap-3 group cursor-pointer"
-                                    >
-                                        {/* Excel #47 — show avatar if present, fall back to initial. */}
-                                        {user.avatarUrl ? (
-                                            <img
-                                                src={user.avatarUrl}
-                                                alt={user.name}
-                                                className="w-10 h-10 rounded-full object-cover border border-unbox-light"
-                                                onError={(e) => {
-                                                    // Swap to initial-only badge if image fails to load.
-                                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                                }}
-                                            />
-                                        ) : (
-                                            <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center font-bold text-unbox-dark group-hover:bg-unbox-green group-hover:text-white transition-colors">
-                                                {user.name.charAt(0)}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <div className="font-medium text-unbox-dark flex items-center gap-2 group-hover:text-unbox-green transition-colors">
-                                                {user.name}
-                                                {user.isAdmin && <Shield size={14} className="text-unbox-green" />}
-                                            </div>
-                                            <div className="text-xs text-unbox-grey">{user.email}</div>
-                                            {user.phone && <div className="text-xs text-unbox-grey">{user.phone}</div>}
-                                        </div>
-                                    </Link>
-                                </td>
-                                <td className="p-4">
-                                    <button
-                                        onClick={() => setSelectedUser(user)}
-                                        title="Нажмите чтобы изменить роль"
-                                        className={clsx(
-                                            "px-2 py-1 rounded text-xs font-medium border transition-all hover:ring-2 hover:ring-offset-1",
-                                            user.role === 'owner' ? "bg-purple-50 text-purple-700 border-purple-200 hover:ring-purple-300" :
-                                                user.role === 'senior_admin' ? "bg-unbox-light text-unbox-dark border-blue-200 hover:ring-blue-300" :
-                                                    user.role === 'admin' ? "bg-green-50 text-green-700 border-green-200 hover:ring-green-300" :
-                                                        user.role === 'specialist' ? "bg-amber-50 text-amber-700 border-amber-200 hover:ring-amber-300" :
-                                                            "bg-unbox-light/30 text-unbox-grey border-unbox-light hover:ring-gray-300"
-                                        )}
-                                    >
-                                        {user.role === 'owner' ? 'Владелец' :
-                                            user.role === 'senior_admin' ? 'Ст. Админ' :
-                                                user.role === 'admin' ? 'Админ' :
-                                                    user.role === 'specialist' ? 'Специалист' : 'Пользователь'}
-                                    </button>
-                                </td>
-                                <td className="p-4">
-                                    <span className={clsx(
-                                        "font-medium",
-                                        user.balance < 0 ? "text-red-500" : "text-unbox-green"
-                                    )}>
-                                        {user.balance.toFixed(2)} ₾
-                                    </span>
-                                </td>
-                                <td className="p-4">
-                                    {user.personalDiscountPercent ? (
-                                        <span className="bg-unbox-light text-unbox-green px-2 py-1 rounded text-xs font-bold">
-                                            {user.personalDiscountPercent}%
-                                        </span>
-                                    ) : (
-                                        <span className="text-unbox-grey text-sm">—</span>
-                                    )}
-                                </td>
-                                <td className="p-4 text-sm text-unbox-dark">
-                                    {user.pricingSystem === 'personal' ? 'Персональный' : 'Стандарт'}
-                                </td>
-                                <td className="p-4 text-right">
-                                    <div className="flex justify-end gap-2">
-                                        <Link
-                                            to={`/admin/users/${encodeURIComponent(user.email)}`}
-                                            className="p-2 hover:bg-unbox-light rounded-lg text-unbox-green"
-                                            title="Карточка клиента"
-                                        >
-                                            <UserIcon size={16} />
-                                        </Link>
-                                        <button
-                                            className="p-2 hover:bg-unbox-light rounded-lg text-unbox-grey hover:text-unbox-dark"
-                                            onClick={() => setSelectedUser(user)}
-                                            title="Быстрые настройки"
-                                        >
-                                            <Edit size={16} />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-
-                {filteredUsers.length === 0 && (
-                    <div className="p-8 text-center text-unbox-grey">
-                        Ничего не найдено
-                    </div>
-                )}
-            </div>
-
-            {/* Edit User Modal */}
-            {selectedUser && (
-                <UserEditModal
-                    user={selectedUser}
-                    onClose={() => setSelectedUser(null)}
-                    onUpdate={updateUserById}
-                />
-            )}
-
-            {/* Add User Modal */}
-            {showAddUser && (
-                <AddUserModal
-                    onClose={() => setShowAddUser(false)}
-                    onCreated={() => { setShowAddUser(false); fetchUsers(); }}
-                />
-            )}
-        </div>
-    );
 }
+
 
 // ── Add User Modal ───────────────────────────────────────────────────────────
 

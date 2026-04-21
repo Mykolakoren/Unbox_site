@@ -23,7 +23,7 @@ import { toast } from 'sonner';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
 import type { BookingHistoryItem } from '../store/types';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { EmptyState } from '../components/ui/EmptyState';
 
 // Parse backend UTC date string (no 'Z' suffix) correctly
@@ -1639,8 +1639,7 @@ function BookingsChessboard({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function MyBookingsPage() {
-    const gridHouse = useDesignFlag();
-    const navigate = useNavigate();
+        const navigate = useNavigate();
     const location = useLocation();
     const { currentUser, bookings, users, fetchUsers, cancelBooking, fetchBookings } = useUserStore();
     const startEditing = useBookingStore(s => s.startEditing);
@@ -1791,7 +1790,8 @@ export function MyBookingsPage() {
         setViewMode('grid');
     };
 
-    if (gridHouse) return (
+    return (
+
         <GridHouseMyBookings
             viewMode={viewMode} setViewMode={setViewMode}
             userBookings={userBookings} bookings={bookings}
@@ -1807,180 +1807,8 @@ export function MyBookingsPage() {
             navigate={navigate} location={location}
         />
     );
-
-    return (
-        <div className="space-y-6 pb-20">
-            {/* Header + view toggle */}
-            <div className="px-4 pt-6 space-y-3">
-                <div className="flex items-center justify-between">
-                    <h1 className="text-xl sm:text-2xl font-bold">Мои бронирования</h1>
-                    {viewMode === 'list' && (
-                        <button
-                            onClick={() => setViewMode('grid')}
-                            className="flex items-center gap-1.5 px-3 py-2 bg-unbox-green text-white text-xs font-semibold rounded-xl hover:bg-unbox-dark transition-colors shadow-sm"
-                        >
-                            <Plus size={14} /> <span className="hidden sm:inline">Новая</span> бронь
-                        </button>
-                    )}
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 p-1 rounded-xl border border-unbox-light bg-white/60 shrink-0">
-                        <button
-                            onClick={() => setViewMode('list')}
-                            className={clsx(
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                                viewMode === 'list'
-                                    ? "bg-unbox-green text-white shadow-sm"
-                                    : "text-unbox-grey hover:text-unbox-dark"
-                            )}
-                        >
-                            <LayoutList size={14} /> Список
-                        </button>
-                        <button
-                            onClick={() => setViewMode('grid')}
-                            className={clsx(
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                                viewMode === 'grid'
-                                    ? "bg-unbox-green text-white shadow-sm"
-                                    : "text-unbox-grey hover:text-unbox-dark"
-                            )}
-                        >
-                            <LayoutGrid size={14} /> Шахматка
-                        </button>
-                    </div>
-                    {viewMode === 'grid' && (
-                        <div className="flex items-center gap-1 p-1 rounded-xl border border-unbox-light bg-white/60 overflow-x-auto scrollbar-hide">
-                            {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
-                                <button
-                                    key={loc.id}
-                                    onClick={() => setMobileLocFilter(loc.id)}
-                                    className={clsx(
-                                        'shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap',
-                                        mobileLocFilter === loc.id
-                                            ? 'bg-unbox-green text-white shadow-sm'
-                                            : 'text-unbox-grey hover:text-unbox-dark'
-                                    )}
-                                >
-                                    {loc.name}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {currentUser?.subscription && (
-                <div className="px-4">
-                    <SubscriptionCard user={currentUser} />
-                </div>
-            )}
-
-            {viewMode === 'grid' ? (
-                <div className="px-4">
-                    {crmMode && (
-                        <div className="mb-3 flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
-                            <CalendarIcon className="w-4 h-4 text-orange-500 shrink-0" />
-                            <div className="flex-1 text-sm">
-                                <span className="font-medium text-orange-800">Выберите слот для сессии с </span>
-                                <span className="font-bold text-orange-900">{crmMode.clientName}</span>
-                                <span className="text-orange-600 ml-1">
-                                    · {format(new Date(crmMode.date), 'd MMM HH:mm', { locale: ru })}
-                                </span>
-                            </div>
-                            <button
-                                onClick={() => { setCrmMode(null); navigate('/crm/sessions', { replace: true, state: { statusFilter: location.state?.returnFilter } }); }}
-                                className="p-1 hover:bg-orange-100 rounded-lg text-orange-500 transition-colors"
-                                title="Отмена"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                    <BookingsChessboard
-                        userBookings={userBookings}
-                        allBookings={bookings}
-                        publicBookings={publicBookings}
-                        onCancel={handleCancel}
-                        onReschedule={handleEdit}
-                        onReRent={handleReRent}
-                        onCancelReRent={handleCancelReRent}
-                        onLinkClient={handleLinkClient}
-                        crmClients={crmClients.map(c => ({ id: c.id, name: c.name, aliasCode: c.aliasCode }))}
-                        refreshBookings={refreshBookings}
-                        crmMode={crmMode}
-                        onCrmBooked={() => { setCrmMode(null); navigate('/crm/sessions', { replace: true, state: { statusFilter: location.state?.returnFilter } }); }}
-                        usersMap={usersMap}
-                        mobileLocFilter={mobileLocFilter}
-                    />
-                </div>
-            ) : userBookings.length === 0 ? (
-                <div className="text-center py-20 text-unbox-grey">
-                    <div className="bg-unbox-light/50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Clock size={32} />
-                    </div>
-                    <h2 className="text-xl font-bold text-unbox-dark mb-2">У вас пока нет бронирований</h2>
-                    <p className="mb-6">Самое время забронировать кабинет!</p>
-                    <Button onClick={() => setViewMode('grid')}>Забронировать</Button>
-                </div>
-            ) : (
-                <div className="px-4 space-y-6">
-                    {/* Upcoming bookings */}
-                    {upcomingBookings.length > 0 && (
-                        <div className="space-y-4">
-                            <h2 className="text-sm font-bold text-unbox-dark uppercase tracking-wider flex items-center gap-2">
-                                <BadgeCheck size={14} className="text-unbox-green" /> Предстоящие
-                            </h2>
-                            {upcomingBookings.map(booking => (
-                                <BookingCard
-                                    key={booking.id}
-                                    booking={booking}
-                                    crmClients={crmClients}
-                                    onCancel={handleCancel}
-                                    onEdit={handleEdit}
-                                    onReRent={handleReRent}
-                                    onBookAgain={handleBookAgain}
-                                    onLinkClient={handleLinkClient}
-                                />
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Past bookings */}
-                    {pastBookings.length > 0 && (
-                        <div className="space-y-4">
-                            <h2 className="text-sm font-bold text-unbox-grey uppercase tracking-wider flex items-center gap-2">
-                                <Clock size={14} /> Прошедшие
-                            </h2>
-                            {pastBookings.map(booking => (
-                                <BookingCard
-                                    key={booking.id}
-                                    booking={booking}
-                                    crmClients={crmClients}
-                                    onCancel={handleCancel}
-                                    onEdit={handleEdit}
-                                    onReRent={handleReRent}
-                                    onBookAgain={handleBookAgain}
-                                    onLinkClient={handleLinkClient}
-                                    isPast
-                                />
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <ConfirmationModal
-                isOpen={modalConfig.isOpen}
-                onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
-                onConfirm={modalConfig.onConfirm}
-                title={modalConfig.title}
-                message={modalConfig.message}
-                isDestructive={modalConfig.isDestructive}
-                confirmLabel={modalConfig.confirmLabel}
-            />
-        </div>
-    );
 }
+
 
 
 // ─── Booking Card (List view) ────────────────────────────────────────────────

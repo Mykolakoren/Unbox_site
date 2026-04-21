@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
 import { Loader2, Save, Plus, X } from 'lucide-react';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const SPECIALIZATION_SUGGESTIONS = [
     'Тревога', 'Депрессия', 'Отношения', 'Самооценка', 'Стресс', 'Горе и утрата',
@@ -28,8 +28,7 @@ interface ProfileData {
 }
 
 export function CrmProfile() {
-    const gridHouse = useDesignFlag();
-    const [profile, setProfile] = useState<ProfileData | null>(null);
+        const [profile, setProfile] = useState<ProfileData | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [newSpec, setNewSpec] = useState('');
@@ -83,8 +82,8 @@ export function CrmProfile() {
             return { ...p, formats: fmts };
         });
 
-    if (gridHouse) {
-        return (
+    return (
+
             <GridHouseCrmProfile
                 profile={profile}
                 loading={loading}
@@ -98,208 +97,8 @@ export function CrmProfile() {
                 onToggleFormat={toggleFormat}
             />
         );
-    }
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-24">
-                <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
-            </div>
-        );
-    }
-
-    if (!profile) {
-        return (
-            <div className="text-center py-24 text-unbox-grey">
-                <p className="text-lg font-medium mb-2">Анкета не найдена</p>
-                <p className="text-sm">Обратитесь к администратору для создания анкеты специалиста.</p>
-            </div>
-        );
-    }
-
-    return (
-        <div className="max-w-2xl space-y-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold text-unbox-dark">Моя анкета</h1>
-                    <p className="text-sm text-unbox-grey mt-1">Информация, которую видят клиенты в каталоге</p>
-                </div>
-                <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-unbox-green text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
-                >
-                    {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                    {saving ? 'Сохраняю...' : 'Сохранить'}
-                </button>
-            </div>
-
-            {/* Photo + Name */}
-            <div className="bg-white rounded-2xl border border-unbox-light p-6 space-y-4">
-                <h2 className="font-semibold text-unbox-dark">Основное</h2>
-
-                <div className="flex items-start gap-4">
-                    <div className="shrink-0">
-                        {profile.photoUrl ? (
-                            <img src={profile.photoUrl} alt="" className="w-20 h-20 rounded-2xl object-cover border border-unbox-light" />
-                        ) : (
-                            <div className="w-20 h-20 rounded-2xl bg-unbox-green/15 flex items-center justify-center text-unbox-green font-bold text-2xl border border-unbox-light">
-                                {profile.firstName?.[0]}{profile.lastName?.[0]}
-                            </div>
-                        )}
-                    </div>
-                    <div className="flex-1">
-                        <label className="block text-xs font-medium text-unbox-grey mb-1">URL фото</label>
-                        <input
-                            type="url"
-                            value={profile.photoUrl ?? ''}
-                            onChange={e => setProfile(p => p ? { ...p, photoUrl: e.target.value } : p)}
-                            placeholder="https://..."
-                            className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                        />
-                        <p className="text-[11px] text-unbox-grey mt-1">Вставьте прямую ссылку на фото (jpg, png)</p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-medium text-unbox-grey mb-1">Имя</label>
-                        <input
-                            type="text"
-                            value={profile.firstName}
-                            onChange={e => setProfile(p => p ? { ...p, firstName: e.target.value } : p)}
-                            className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-medium text-unbox-grey mb-1">Фамилия</label>
-                        <input
-                            type="text"
-                            value={profile.lastName}
-                            onChange={e => setProfile(p => p ? { ...p, lastName: e.target.value } : p)}
-                            className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                        />
-                    </div>
-                </div>
-
-                <div>
-                    <label className="block text-xs font-medium text-unbox-grey mb-1">Короткое описание (tagline)</label>
-                    <input
-                        type="text"
-                        value={profile.tagline}
-                        onChange={e => setProfile(p => p ? { ...p, tagline: e.target.value } : p)}
-                        maxLength={150}
-                        placeholder="Психолог, КПТ, 5 лет практики"
-                        className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                    />
-                    <p className="text-[11px] text-unbox-grey mt-1">{profile.tagline.length}/150 символов</p>
-                </div>
-            </div>
-
-            {/* Bio */}
-            <div className="bg-white rounded-2xl border border-unbox-light p-6 space-y-3">
-                <h2 className="font-semibold text-unbox-dark">О себе</h2>
-                <textarea
-                    value={profile.bio}
-                    onChange={e => setProfile(p => p ? { ...p, bio: e.target.value } : p)}
-                    rows={6}
-                    placeholder="Расскажите о своём подходе, образовании, опыте работы..."
-                    className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green resize-none"
-                />
-            </div>
-
-            {/* Specializations */}
-            <div className="bg-white rounded-2xl border border-unbox-light p-6 space-y-3">
-                <h2 className="font-semibold text-unbox-dark">Специализации</h2>
-                <div className="flex flex-wrap gap-2">
-                    {profile.specializations.map(spec => (
-                        <span key={spec} className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-full bg-unbox-green/10 text-unbox-green font-medium">
-                            {spec}
-                            <button onClick={() => removeSpec(spec)} className="ml-1 hover:text-red-500 transition-colors">
-                                <X size={11} />
-                            </button>
-                        </span>
-                    ))}
-                </div>
-                <div className="flex gap-2">
-                    <input
-                        type="text"
-                        value={newSpec}
-                        onChange={e => setNewSpec(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSpec(newSpec); } }}
-                        placeholder="Добавить специализацию..."
-                        className="flex-1 px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                    />
-                    <button
-                        onClick={() => addSpec(newSpec)}
-                        disabled={!newSpec.trim()}
-                        className="px-3 py-2 rounded-lg bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/20 disabled:opacity-40 transition-colors"
-                    >
-                        <Plus size={16} />
-                    </button>
-                </div>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                    <p className="text-[11px] text-unbox-grey w-full mb-1">Быстрое добавление:</p>
-                    {SPECIALIZATION_SUGGESTIONS.filter(s => !profile.specializations.includes(s)).map(s => (
-                        <button
-                            key={s}
-                            onClick={() => addSpec(s)}
-                            className="text-[11px] px-2 py-1 rounded-full border border-unbox-light text-unbox-grey hover:border-unbox-green hover:text-unbox-green transition-colors"
-                        >
-                            + {s}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {/* Formats + Price */}
-            <div className="bg-white rounded-2xl border border-unbox-light p-6 space-y-4">
-                <h2 className="font-semibold text-unbox-dark">Формат и стоимость</h2>
-
-                <div>
-                    <label className="block text-xs font-medium text-unbox-grey mb-2">Формат работы</label>
-                    <div className="flex gap-3">
-                        {FORMAT_OPTIONS.map(opt => (
-                            <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={profile.formats.includes(opt.value)}
-                                    onChange={() => toggleFormat(opt.value)}
-                                    className="w-4 h-4 rounded accent-unbox-green"
-                                />
-                                <span className="text-sm text-unbox-dark/80">{opt.label}</span>
-                            </label>
-                        ))}
-                    </div>
-                </div>
-
-                <div>
-                    <label className="block text-xs font-medium text-unbox-grey mb-1">Базовая стоимость сессии (₾)</label>
-                    <input
-                        type="number"
-                        value={profile.basePriceGel}
-                        onChange={e => setProfile(p => p ? { ...p, basePriceGel: Number(e.target.value) } : p)}
-                        min={0}
-                        step={5}
-                        className="w-32 px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                    />
-                </div>
-            </div>
-
-            {/* Bottom save */}
-            <div className="flex justify-end pb-6">
-                <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="flex items-center gap-2 px-6 py-3 bg-unbox-green text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
-                >
-                    {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                    {saving ? 'Сохраняю...' : 'Сохранить изменения'}
-                </button>
-            </div>
-        </div>
-    );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Grid House variant — Vignelli × Bierut

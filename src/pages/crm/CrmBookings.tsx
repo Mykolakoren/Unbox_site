@@ -26,7 +26,7 @@ import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import clsx from 'clsx';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 // ─── Безопасное извлечение даты из брони ─────────────────────────────────────
 function getSafeBookingDate(booking: BookingHistoryItem): { dateStr: string; dateObj: Date | null } {
@@ -562,8 +562,7 @@ function BookingCard({ booking, linkedClient, linkedSessionId, linkedSessions, c
 
 // ─── Главная страница ─────────────────────────────────────────────────────────
 export function CrmBookings() {
-    const gridHouse = useDesignFlag();
-    const { currentUser, bookings: allBookings } = useUserStore();
+        const { currentUser, bookings: allBookings } = useUserStore();
     const { clients, sessions, fetchClients, fetchSessions } = useCrmStore();
 
     const [viewMode, setViewMode] = useState<'list' | 'chess' | 'series'>('list');
@@ -741,7 +740,8 @@ export function CrmBookings() {
         { key: 'all', label: 'Все', count: stats.total },
     ];
 
-    if (gridHouse) return (
+    return (
+
         <GridHouseCrmBookings
             viewMode={viewMode} setViewMode={setViewMode}
             filter={filter} setFilter={setFilter}
@@ -760,253 +760,8 @@ export function CrmBookings() {
             handleLinkSession={handleLinkSession}
         />
     );
-
-    return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Мои бронирования</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        {viewMode === 'chess'
-                            ? 'Шахматка кабинетов — выдели слот и забронируй с привязкой клиента'
-                            : 'Слоты в Unbox — привяжи клиента, чтобы создать сессию в CRM'}
-                    </p>
-                </div>
-
-                {/* View mode toggle */}
-                <div className="flex gap-1 bg-gray-100 rounded-xl p-1 shrink-0">
-                    <button
-                        onClick={() => setViewMode('list')}
-                        className={clsx(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                            viewMode === 'list'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700'
-                        )}
-                    >
-                        <LayoutList size={15} />
-                        Список
-                    </button>
-                    <button
-                        onClick={() => setViewMode('chess')}
-                        className={clsx(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                            viewMode === 'chess'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700'
-                        )}
-                    >
-                        <LayoutGrid size={15} />
-                        Шахматка
-                    </button>
-                    <button
-                        onClick={() => setViewMode('series')}
-                        className={clsx(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                            viewMode === 'series'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700'
-                        )}
-                    >
-                        <Repeat2 size={15} />
-                        Серии
-                    </button>
-                </div>
-            </div>
-
-            {/* ── Series view ── */}
-            {viewMode === 'series' ? (
-                <div className="space-y-4">
-                    <p className="text-sm text-gray-500">Активные повторяющиеся серии — все будущие брони одним списком. Можно отменить всю серию сразу.</p>
-                    {loadingGroups ? (
-                        <div className="flex items-center justify-center py-16">
-                            <Loader2 className="animate-spin text-unbox-green" size={28} />
-                        </div>
-                    ) : recurringGroups.length === 0 ? (
-                        <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
-                            <Repeat2 size={40} className="mx-auto text-gray-200 mb-3" />
-                            <div className="text-gray-400 text-sm">Нет активных повторяющихся серий</div>
-                            <div className="text-xs text-gray-300 mt-1">Создай серию через шахматку, выбрав паттерн повторения</div>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {recurringGroups.map(g => {
-                                const resource = RESOURCES.find(r => r.id === g.resourceId);
-                                const patternLabel = g.pattern === 'monthly' ? 'Ежемесячно' : g.pattern === 'biweekly' ? 'Раз в 2 недели' : 'Еженедельно';
-                                const patternColor = g.pattern === 'monthly' ? 'bg-purple-100 text-purple-700' : g.pattern === 'biweekly' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700';
-                                const isConfirming = confirmCancelGroupId === g.recurringGroupId;
-                                const isCancelling = cancellingGroupId === g.recurringGroupId;
-                                return (
-                                    <div key={g.recurringGroupId} className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="flex-1 min-w-0">
-                                                <div className="font-semibold text-gray-900 truncate">{resource?.name || g.resourceId}</div>
-                                                <div className="text-sm text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
-                                                    <span className="flex items-center gap-1"><Clock size={12} />{g.startTime} · {g.duration} мин</span>
-                                                    <span className="flex items-center gap-1"><MapPin size={12} />{g.locationId}</span>
-                                                </div>
-                                            </div>
-                                            <span className={clsx('text-xs font-medium px-2 py-1 rounded-full shrink-0', patternColor)}>
-                                                {patternLabel}
-                                            </span>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-3 text-sm">
-                                            <div className="bg-gray-50 rounded-xl p-3 text-center">
-                                                <div className="text-lg font-bold text-gray-900">{g.futureCount}</div>
-                                                <div className="text-xs text-gray-500">осталось броней</div>
-                                            </div>
-                                            <div className="bg-gray-50 rounded-xl p-3 text-center">
-                                                <div className="text-lg font-bold text-gray-900">
-                                                    {g.nextDate ? format(new Date(g.nextDate + 'T00:00:00'), 'd MMM', { locale: ru }) : '—'}
-                                                </div>
-                                                <div className="text-xs text-gray-500">следующая дата</div>
-                                            </div>
-                                        </div>
-                                        {isConfirming ? (
-                                            <div className="bg-red-50 rounded-xl p-3 space-y-2">
-                                                <div className="flex items-center gap-2 text-sm text-red-700">
-                                                    <AlertTriangle size={14} />
-                                                    Отменить все {g.futureCount} будущих броней серии?
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => setConfirmCancelGroupId(null)}
-                                                        className="flex-1 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                                                    >
-                                                        Нет
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleCancelSeries(g.recurringGroupId)}
-                                                        disabled={isCancelling}
-                                                        className="flex-1 py-1.5 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 disabled:opacity-60 transition-colors flex items-center justify-center gap-1"
-                                                    >
-                                                        {isCancelling ? <Loader2 size={12} className="animate-spin" /> : null}
-                                                        Отменить серию
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                onClick={() => setConfirmCancelGroupId(g.recurringGroupId)}
-                                                className="w-full py-2 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors flex items-center justify-center gap-1.5"
-                                            >
-                                                <Trash2 size={13} />
-                                                Отменить серию
-                                            </button>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            ) : null}
-
-            {/* ── Chessboard view ── */}
-            {viewMode === 'chess' ? (
-                <CrmChessboardView />
-            ) : viewMode === 'list' ? (
-                <>
-                    {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {[
-                            { label: 'Всего броней', value: stats.total, color: 'text-gray-700' },
-                            { label: 'Предстоит', value: stats.upcoming, color: 'text-blue-600' },
-                            { label: 'С клиентом', value: stats.linked, color: 'text-unbox-green' },
-                            { label: 'Без клиента', value: stats.unlinked, color: 'text-amber-600' },
-                        ].map(s => (
-                            <div key={s.label} className="bg-white rounded-xl border border-gray-100 p-4 text-center">
-                                <div className={clsx('text-2xl font-bold', s.color)}>{s.value}</div>
-                                <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Filter tabs */}
-                    <div className="flex gap-1 flex-wrap">
-                        {FILTERS.map(f => (
-                            <button
-                                key={f.key}
-                                onClick={() => setFilter(f.key)}
-                                className={clsx(
-                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors',
-                                    filter === f.key
-                                        ? 'bg-unbox-green text-white'
-                                        : 'bg-white border border-gray-200 text-gray-600 hover:border-unbox-green hover:text-unbox-green'
-                                )}
-                            >
-                                {f.label}
-                                {f.count !== undefined && (
-                                    <span className={clsx(
-                                        'px-1.5 py-0.5 rounded-full text-[10px] font-bold',
-                                        filter === f.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
-                                    )}>
-                                        {f.count}
-                                    </span>
-                                )}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Content */}
-                    {loadingClients ? (
-                        <div className="flex items-center justify-center py-16">
-                            <Loader2 className="animate-spin text-unbox-green" size={28} />
-                        </div>
-                    ) : filteredBookings.length === 0 ? (
-                        <div className="text-center py-16">
-                            <Calendar size={40} className="mx-auto text-gray-200 mb-3" />
-                            <div className="text-gray-400 text-sm">
-                                {filter === 'upcoming' ? 'Нет предстоящих бронирований' :
-                                 filter === 'unlinked' ? 'Все активные брони уже привязаны к клиентам' :
-                                 filter === 'linked' ? 'Нет броней с привязанными клиентами' :
-                                 'Бронирований нет'}
-                            </div>
-                            {filter === 'unlinked' && stats.total > 0 && (
-                                <p className="text-xs text-gray-400 mt-1">Отлично!</p>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                            {filteredBookings.map(booking => {
-                                const allLinked = sessionsByBookingId.get(booking.id) || [];
-                                const linkedSession = allLinked[0];
-                                const linkedClient = linkedSession ? clientById.get(linkedSession.clientId) : undefined;
-                                return (
-                                    <BookingCard
-                                        key={booking.id}
-                                        booking={booking}
-                                        linkedClient={linkedClient}
-                                        linkedSessionId={linkedSession?.id}
-                                        linkedSessions={allLinked}
-                                        clientById={clientById}
-                                        onLink={handleOpenModal}
-                                    />
-                                );
-                            })}
-                        </div>
-                    )}
-                </>
-            ) : null}
-
-            {/* Link session modal */}
-            {modalBooking && (
-                <LinkSessionModal
-                    booking={modalBooking}
-                    clients={clients.filter(c => c.isActive)}
-                    existingSessionClientId={modalExistingClientId}
-                    onClose={() => {
-                        setModalBooking(null);
-                        setModalExistingSessionId(undefined);
-                        setModalExistingClientId(undefined);
-                    }}
-                    onConfirm={handleLinkSession}
-                />
-            )}
-        </div>
-    );
 }
+
 
 // ─── Grid House: CrmBookings ─────────────────────────────────────────────────
 

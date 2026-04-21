@@ -14,7 +14,7 @@ import { RESOURCES } from '../utils/data';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { bonusesApi, type Bonus } from '../api/bonuses';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import {
     DndContext,
     closestCenter,
@@ -204,8 +204,7 @@ function saveSizes(sizes: Record<BlockId, BlockSize>) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function DashboardOverview() {
-    const gridHouse = useDesignFlag();
-    const { currentUser, bookings, getTransactionsByUser } = useUserStore();
+        const { currentUser, bookings, getTransactionsByUser } = useUserStore();
     const navigate = useNavigate();
     const [blockOrder, setBlockOrder] = useState<BlockId[]>(loadLayout);
     const [hiddenBlocks, setHiddenBlocks] = useState<Set<BlockId>>(loadHidden);
@@ -567,7 +566,8 @@ export function DashboardOverview() {
     const visibleOrder = isEditing ? blockOrder : blockOrder.filter(id => !hiddenBlocks.has(id));
 
     // ── Grid House design flag — rollback-safe variant ──
-    if (gridHouse) return (
+    return (
+
         <GridHouseDashboardOverview
             currentUser={currentUser}
             isNegative={isNegative}
@@ -584,145 +584,8 @@ export function DashboardOverview() {
             navigate={navigate}
         />
     );
-
-    // Legacy path below
-    return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {isEditing && <style>{wiggleCSS}</style>}
-
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold mb-1">Обзор</h1>
-                    <p className="text-unbox-grey text-sm">Сводка вашего аккаунта и быстрые действия</p>
-                </div>
-                <button
-                    onClick={() => setIsEditing(!isEditing)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
-                        isEditing
-                            ? 'bg-unbox-green text-white border-unbox-green shadow-md'
-                            : 'text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 border-white/60'
-                    }`}
-                >
-                    {isEditing ? <Check size={13} /> : <Settings2 size={13} />}
-                    {isEditing ? 'Готово' : 'Настроить'}
-                </button>
-            </div>
-
-            {/* Inline settings toolbar — widget visibility + reset */}
-            {isEditing && (
-                <div className="flex flex-wrap items-center gap-2 px-4 py-3 rounded-2xl bg-white/60 border border-white/80 shadow-sm animate-in fade-in slide-in-from-top-2 duration-200"
-                     style={{ backdropFilter: 'blur(12px)' }}
-                >
-                    <span className="text-xs font-semibold text-unbox-dark mr-1">Виджеты:</span>
-                    {ALL_BLOCKS.map(block => {
-                        const Icon = block.icon;
-                        const isVisible = !hiddenBlocks.has(block.id);
-                        return (
-                            <button
-                                key={block.id}
-                                onClick={() => toggleVisibility(block.id)}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                                    isVisible
-                                        ? 'bg-unbox-green/10 text-unbox-green border border-unbox-green/30'
-                                        : 'bg-gray-100 text-gray-400 border border-gray-200 line-through'
-                                }`}
-                            >
-                                <div className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
-                                    isVisible ? 'bg-unbox-green' : 'bg-gray-300'
-                                }`}>
-                                    {isVisible && <Check size={10} className="text-white" />}
-                                </div>
-                                <Icon size={13} />
-                                <span className="hidden sm:inline">{block.label}</span>
-                            </button>
-                        );
-                    })}
-                    <div className="flex-1" />
-                    <button
-                        onClick={resetLayout}
-                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-unbox-grey hover:text-unbox-dark bg-white/80 hover:bg-white rounded-lg border border-gray-200 transition-colors"
-                    >
-                        <RotateCw size={11} />
-                        Сброс
-                    </button>
-                    <div className="w-full mt-1 flex items-center gap-1.5 text-[11px] text-unbox-grey">
-                        <GripVertical size={12} className="text-unbox-green shrink-0" />
-                        Перетаскивай за зелёную ручку
-                        <span className="inline-flex w-4 h-4 bg-unbox-green rounded items-center justify-center">
-                            <GripVertical size={8} className="text-white" />
-                        </span>
-                        · Меняй размер кнопкой в правом нижнем углу
-                    </div>
-                </div>
-            )}
-
-            <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={e => setActiveId(String(e.active.id))}
-                onDragEnd={handleDragEnd}
-                onDragCancel={() => setActiveId(null)}
-            >
-                <SortableContext items={visibleOrder} strategy={rectSortingStrategy}>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {visibleOrder.map(blockId => {
-                            const size = blockSizes[blockId] || 'half';
-                            return (
-                                <SortableBlock
-                                    key={blockId}
-                                    id={blockId}
-                                    isEditing={isEditing}
-                                    blockSize={size}
-                                    onToggleSize={() => toggleBlockSize(blockId)}
-                                >
-                                    {renderBlock(blockId)}
-                                </SortableBlock>
-                            );
-                        })}
-                    </div>
-                </SortableContext>
-
-                <DragOverlay>
-                    {activeId ? (
-                        <div className="opacity-90 scale-105 rotate-2 shadow-2xl rounded-2xl">
-                            {renderBlock(activeId as BlockId)}
-                        </div>
-                    ) : null}
-                </DragOverlay>
-            </DndContext>
-
-            {/* Welcome Bonus Popup */}
-            {showWelcome && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center space-y-5 animate-in zoom-in-95 duration-300">
-                        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
-                            <Gift size={32} className="text-amber-600" />
-                        </div>
-                        <h2 className="text-2xl font-bold text-unbox-dark">Добро пожаловать!</h2>
-                        <p className="text-unbox-grey">
-                            Мы дарим вам <span className="font-bold text-amber-600">1 час бесплатной аренды</span> любого кабинета.
-                            Используйте бонус при бронировании!
-                        </p>
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                            <div className="text-sm text-amber-700 font-medium">Ваш бонус</div>
-                            <div className="text-3xl font-bold text-amber-600 mt-1">1 час</div>
-                            <div className="text-xs text-amber-500 mt-1">Действителен 15 дней</div>
-                        </div>
-                        <button
-                            onClick={() => {
-                                setShowWelcome(false);
-                                localStorage.setItem('unbox_welcome_shown', '1');
-                            }}
-                            className="w-full py-3 bg-unbox-green text-white font-bold rounded-xl hover:bg-unbox-dark transition-colors cursor-pointer"
-                        >
-                            Отлично, спасибо!
-                        </button>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
 }
+
 
 /* ═══════════════════════════════════════════════════════════════
    Grid House — DashboardOverview

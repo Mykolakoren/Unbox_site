@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
 import { useCashboxStore } from '../../store/cashboxStore';
 import { cashboxApi, type CashboxAnalytics } from '../../api/cashbox';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem, User as AppUser } from '../../store/types';
 
 
@@ -98,8 +98,8 @@ export function AdminDashboard() {
     );
 
     // ── Grid House design flag — rollback-safe variant ──
-    if (useDesignFlag()) {
-        return (
+    return (
+
             <GridHouseAdminDashboard
                 todayRevenue={todayRevenue}
                 monthRevenue={monthRevenue}
@@ -114,109 +114,8 @@ export function AdminDashboard() {
                 incomingCounts={incomingCounts}
             />
         );
-    }
-
-    return (
-        <div className="space-y-8 animate-in fade-in duration-500">
-            <div className="flex justify-between items-start">
-                <div>
-                    <h1 className="text-2xl font-bold mb-2">Обзор</h1>
-                    <p className="text-unbox-grey">Статистика и сводка по сервису</p>
-                </div>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {stats.map((stat, i) => (
-                    <div key={i} className="bg-white p-6 rounded-2xl border border-unbox-light shadow-sm flex items-center gap-4">
-                        <div className={clsx("w-12 h-12 rounded-xl flex items-center justify-center", stat.color)}>
-                            <stat.icon size={24} />
-                        </div>
-                        <div>
-                            <div className="text-sm text-unbox-grey font-medium">{stat.label}</div>
-                            <div className="text-2xl font-bold text-unbox-dark">{stat.value}</div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Analytics */}
-            <AnalyticsCharts bookings={bookings} />
-
-            {/* Recent Activity */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Recent Bookings List */}
-                <div className="bg-white rounded-2xl border border-unbox-light shadow-sm p-6">
-                    <h2 className="font-bold text-lg mb-4">Последние бронирования</h2>
-                    <div className="space-y-4">
-                        {recentBookings.map(booking => (
-                            <div
-                                key={booking.id}
-                                className="flex items-center justify-between pb-4 border-b border-unbox-light last:border-0 last:pb-0 cursor-pointer hover:bg-unbox-light/30 -mx-2 px-2 rounded-lg transition-colors"
-                                onClick={() => {
-                                    const userName = users.find(u => u.email === booking.userId)?.name || booking.userId;
-                                    window.location.href = `/admin/bookings?search=${encodeURIComponent(userName)}`;
-                                }}
-                            >
-                                <div>
-                                    <div className="font-medium text-unbox-dark">
-                                        {format(new Date(booking.date), 'dd.MM')} · {booking.startTime}
-                                    </div>
-                                    <div className="text-xs text-unbox-grey">
-                                        {users.find(u => u.email === booking.userId)?.name || booking.userId}
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <div className="font-bold text-unbox-dark">
-                                        {booking.paymentMethod === 'subscription' ? 'Абн.' : `${booking.finalPrice} ₾`}
-                                    </div>
-                                    <div className={clsx(
-                                        "text-[10px] px-2 py-0.5 rounded-full inline-block",
-                                        {
-                                            'bg-unbox-light text-unbox-green': booking.status === 'confirmed',
-                                            'bg-unbox-light/50 text-unbox-grey': booking.status === 'cancelled',
-                                            'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
-                                        }
-                                    )}>
-                                        {booking.status}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                        {recentBookings.length === 0 && (
-                            <div className="text-center text-unbox-grey py-4">Нет бронирований</div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Quick Stats */}
-                <div className="bg-unbox-dark rounded-2xl p-6 text-white shadow-lg">
-                    <h2 className="font-bold text-lg mb-2">Быстрый старт</h2>
-                    <p className="text-unbox-light/60 text-sm mb-6">
-                        Используйте панель администратора для управления всеми аспектами сервиса.
-                    </p>
-
-                    <div className="space-y-3">
-                        <div className="flex items-center gap-3 bg-white/10 p-3 rounded-lg border border-white/10">
-                            <CreditCard size={20} className="text-unbox-green" />
-                            <div className="text-sm">
-                                <div className="font-medium">Баланс кассы</div>
-                                <div className="text-white/60">{balance.toFixed(0)} ₾ в кассе</div>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3 bg-white/10 p-3 rounded-lg border border-white/10">
-                            <TrendingUp size={20} className="text-unbox-light" />
-                            <div className="text-sm">
-                                <div className="font-medium">Пересдано броней</div>
-                                <div className="text-white/60">{reRentedCount} успешных возвратов</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════
 // GRID HOUSE VARIANT

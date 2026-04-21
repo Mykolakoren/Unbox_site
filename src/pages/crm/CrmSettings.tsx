@@ -9,7 +9,7 @@ import { crmApi } from '../../api/crm';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
 import { CURRENCIES, EXCHANGE_RATES, fetchExchangeRates } from '../../utils/currency';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const glassCard: React.CSSProperties = {
     background: 'rgba(255,255,255,0.45)',
@@ -20,8 +20,7 @@ const glassCard: React.CSSProperties = {
 };
 
 export function CrmSettings() {
-    const gridHouse = useDesignFlag();
-    const { fetchPaymentAccounts } = useCrmStore();
+        const { fetchPaymentAccounts } = useCrmStore();
     const [calendarId, setCalendarId] = useState('');
     const [calendarSaved, setCalendarSaved] = useState(false);
     const [sourceOfTruth, setSourceOfTruth] = useState(false);
@@ -79,8 +78,8 @@ export function CrmSettings() {
 
     const hasRateChanges = CURRENCIES.some(c => c.code !== 'GEL' && rates[c.code] !== EXCHANGE_RATES[c.code]);
 
-    if (gridHouse) {
-        return (
+    return (
+
             <GridHouseCrmSettings
                 calendarId={calendarId}
                 setCalendarId={setCalendarId}
@@ -96,124 +95,8 @@ export function CrmSettings() {
                 onSaveRates={handleSaveRates}
             />
         );
-    }
-
-    return (
-        <div className="space-y-8 max-w-2xl">
-            <div>
-                <h1 className="text-2xl font-bold text-unbox-dark flex items-center gap-3">
-                    <Settings size={24} /> Настройки CRM
-                </h1>
-                <p className="text-unbox-grey mt-1">Управление счетами, интеграциями и параметрами</p>
-            </div>
-
-            {/* Payment Accounts */}
-            <div className="rounded-2xl p-6" style={glassCard}>
-                <PaymentAccountsManager />
-            </div>
-
-            {/* Currencies & Exchange Rates */}
-            <div className="rounded-2xl p-6" style={glassCard}>
-                <h3 className="font-bold text-unbox-dark flex items-center gap-2 mb-1">
-                    <Coins size={18} /> Валюты и курсы
-                </h3>
-                <p className="text-xs text-unbox-grey mb-4">
-                    Курсы к GEL для расчёта эквивалента. Можно редактировать.
-                </p>
-                <div className="space-y-2">
-                    {CURRENCIES.map(c => (
-                        <div key={c.code} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/50 border border-unbox-light/30">
-                            <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-unbox-light/50 text-unbox-dark font-bold text-sm">
-                                {c.symbol}
-                            </span>
-                            <span className="font-medium text-sm text-unbox-dark flex-1">{c.code}</span>
-                            {c.code !== 'GEL' ? (
-                                <div className="flex items-center gap-1.5">
-                                    <span className="text-xs text-unbox-grey">1 {c.code} =</span>
-                                    <input
-                                        type="number"
-                                        step="0.001"
-                                        value={rates[c.code] ?? ''}
-                                        onChange={e => setRates(r => ({ ...r, [c.code]: parseFloat(e.target.value) || 0 }))}
-                                        className="w-20 px-2 py-1 rounded-lg border border-unbox-light text-sm text-right focus:outline-none focus:ring-1 focus:ring-unbox-green/30"
-                                    />
-                                    <span className="text-xs text-unbox-grey">GEL</span>
-                                </div>
-                            ) : (
-                                <span className="text-xs text-unbox-green font-medium">Базовая валюта</span>
-                            )}
-                        </div>
-                    ))}
-                </div>
-                {hasRateChanges && (
-                    <button
-                        onClick={handleSaveRates}
-                        disabled={ratesSaving}
-                        className="mt-3 px-4 py-2 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors flex items-center gap-1.5"
-                    >
-                        <Save size={14} />
-                        {ratesSaving ? 'Сохранение...' : 'Сохранить курсы'}
-                    </button>
-                )}
-            </div>
-
-            {/* Google Calendar Sync */}
-            <div className="rounded-2xl p-6" style={glassCard}>
-                <h3 className="font-bold text-unbox-dark flex items-center gap-2 mb-3">
-                    <Calendar size={18} /> Синхронизация с Google Calendar
-                </h3>
-                <p className="text-xs text-unbox-grey mb-3">
-                    Укажите ID календаря для автоматической синхронизации сессий.
-                </p>
-                <div className="flex gap-2 mb-5">
-                    <input
-                        type="text"
-                        value={calendarId}
-                        onChange={(e) => setCalendarId(e.target.value)}
-                        placeholder="example@group.calendar.google.com"
-                        className="flex-1 px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                    />
-                    <button
-                        onClick={handleSaveCalendar}
-                        className="px-4 py-2 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors flex items-center gap-1.5"
-                    >
-                        <Link2 size={14} />
-                        {calendarSaved ? 'Сохранено!' : 'Сохранить'}
-                    </button>
-                </div>
-
-                {/* Source of Truth toggle */}
-                <div className="border-t border-unbox-light/40 pt-4">
-                    <div className="flex items-start gap-3">
-                        <button
-                            onClick={handleToggleSourceOfTruth}
-                            disabled={sotSaving}
-                            className={`relative mt-0.5 flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${
-                                sourceOfTruth ? 'bg-unbox-green' : 'bg-unbox-light'
-                            }`}
-                        >
-                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                                sourceOfTruth ? 'translate-x-5' : 'translate-x-0'
-                            }`} />
-                        </button>
-                        <div className="flex-1">
-                            <div className="flex items-center gap-1.5">
-                                <ShieldCheck size={14} className={sourceOfTruth ? 'text-unbox-green' : 'text-unbox-grey'} />
-                                <span className="text-sm font-semibold text-unbox-dark">
-                                    Google Calendar — источник правды
-                                </span>
-                            </div>
-                            <p className="text-xs text-unbox-grey mt-1 leading-relaxed">
-                                Если включено, синхронизация будет обновлять время перенесённых сессий
-                                и автоматически отменять удалённые из календаря.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Grid House variant — Vignelli × Bierut

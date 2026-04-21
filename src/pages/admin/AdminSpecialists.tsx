@@ -11,7 +11,7 @@ import { useUserStore } from '../../store/userStore';
 import { hasPermission } from '../../utils/permissions';
 import type { Specialist } from '../../components/Specialists/SpecialistCard';
 import clsx from 'clsx';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import {
     DndContext, PointerSensor, TouchSensor,
     KeyboardSensor, useSensor, useSensors, type DragEndEvent,
@@ -657,8 +657,7 @@ function DragOverlayRow({ specialist }: { specialist: SpecialistExtended }) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function AdminSpecialists() {
-    const gridHouse = useDesignFlag();
-    const [specialists, setSpecialists] = useState<SpecialistExtended[]>([]);
+        const [specialists, setSpecialists] = useState<SpecialistExtended[]>([]);
     const [editing, setEditing] = useState<SpecialistExtended | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchParams] = useSearchParams();
@@ -763,7 +762,8 @@ export function AdminSpecialists() {
     }, [specialists, specFilter]);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    if (gridHouse) return (
+    return (
+
         <GridHouseAdminSpecialists
             specialists={filteredSpecialists} loading={loading}
             activeTab={activeTab} setActiveTab={setActiveTab}
@@ -781,165 +781,8 @@ export function AdminSpecialists() {
             specFilter={specFilter} setSpecFilter={setSpecFilter} allSpecTags={allSpecTags}
         />
     );
-
-    return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold text-unbox-dark">Специалисты</h1>
-                    <p className="text-sm text-unbox-dark/50 mt-0.5">
-                        {specialists.length} записей · {verifiedCount} видимых на сайте
-                    </p>
-                </div>
-                {activeTab === 'specialists' && (
-                    <div className="flex items-center gap-2">
-                        <div className="flex bg-white/70 backdrop-blur rounded-xl p-1 border border-unbox-light">
-                            <button onClick={() => setViewMode('table')}
-                                className={clsx('p-2 rounded-lg transition-all', viewMode === 'table' ? 'bg-unbox-green text-white shadow-sm' : 'text-gray-400 hover:text-gray-600')}
-                                title="Таблица">
-                                <List size={16} />
-                            </button>
-                            <button onClick={() => setViewMode('cards')}
-                                className={clsx('p-2 rounded-lg transition-all', viewMode === 'cards' ? 'bg-unbox-green text-white shadow-sm' : 'text-gray-400 hover:text-gray-600')}
-                                title="Карточки (как на сайте)">
-                                <LayoutGrid size={16} />
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Tabs */}
-            {canAcceptRequests && (
-                <div className="flex gap-1 bg-white/70 backdrop-blur rounded-xl p-1 border border-unbox-light w-fit">
-                    <button
-                        onClick={() => setActiveTab('specialists')}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                            activeTab === 'specialists'
-                                ? 'bg-unbox-green text-white shadow-sm'
-                                : 'text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/60'
-                        }`}
-                    >
-                        Специалисты
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('crm-requests')}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                            activeTab === 'crm-requests'
-                                ? 'bg-unbox-green text-white shadow-sm'
-                                : 'text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/60'
-                        }`}
-                    >
-                        Запросы CRM
-                    </button>
-                </div>
-            )}
-
-            {activeTab === 'crm-requests' && canAcceptRequests ? (
-                <CrmAccessRequests />
-            ) : (
-                <>
-                    {/* Specialization filter tags */}
-                    {allSpecTags.length > 1 && (
-                        <div className="flex flex-wrap gap-1.5 mb-4">
-                            <button
-                                onClick={() => setSpecFilter('all')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${specFilter === 'all' ? 'bg-unbox-green text-white' : 'bg-unbox-light/50 text-unbox-grey hover:bg-unbox-light'}`}
-                            >
-                                Все направления
-                            </button>
-                            {allSpecTags.map(tag => (
-                                <button
-                                    key={tag}
-                                    onClick={() => setSpecFilter(tag)}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${specFilter === tag ? 'bg-unbox-green text-white' : 'bg-unbox-light/50 text-unbox-grey hover:bg-unbox-light'}`}
-                                >
-                                    {tag}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                    {loading ? (
-                        <div className="text-center py-16 text-unbox-dark/40">
-                            <Loader2 className="h-8 w-8 animate-spin mx-auto text-unbox-green mb-2" />
-                            Загрузка...
-                        </div>
-                    ) : (
-                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                            {viewMode === 'cards' ? (
-                                /* ── Card Grid View (like public site) ── */
-                                <>
-                                    <div className="bg-unbox-light/40 rounded-xl px-4 py-2.5 flex items-center gap-2 text-xs text-unbox-dark/50">
-                                        <GripVertical size={12} />
-                                        Перетащите карточки для изменения порядка отображения на сайте
-                                    </div>
-                                    <SortableContext items={filteredSpecialists.map(s => s.id)} strategy={rectSortingStrategy}>
-                                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                                            {filteredSpecialists.map(s => (
-                                                <SortablePreviewCard key={s.id} specialist={s}
-                                                    onEdit={() => setEditing(s)}
-                                                    onToggleVisibility={() => handleToggleVisibility(s)}
-                                                    onDelete={() => handleDelete(s)}
-                                                    toggling={toggling === s.id}
-                                                    deleting={deleting === s.id}
-                                                />
-                                            ))}
-                                        </div>
-                                    </SortableContext>
-                                </>
-                            ) : (
-                                /* ── Table View ── */
-                                <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
-                                    <table className="w-full text-left">
-                                        <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
-                                            <tr>
-                                                <th className="p-3 pl-4 w-16 text-center">№</th>
-                                                <th className="p-4">Специалист</th>
-                                                <th className="p-4">Категория</th>
-                                                <th className="p-4">Специализации</th>
-                                                <th className="p-4">Цена</th>
-                                                <th className="p-4">Показ</th>
-                                                <th className="p-4 text-right pr-6">Действия</th>
-                                            </tr>
-                                        </thead>
-                                        <SortableContext items={filteredSpecialists.map(s => s.id)} strategy={verticalListSortingStrategy}>
-                                            <tbody className="divide-y divide-unbox-light">
-                                                {filteredSpecialists.map((s, idx) => (
-                                                    <SortableTableRow key={s.id} specialist={s} index={idx}
-                                                        onEdit={() => setEditing(s)}
-                                                        onToggleVisibility={() => handleToggleVisibility(s)}
-                                                        onDelete={() => handleDelete(s)}
-                                                        toggling={toggling === s.id}
-                                                        deleting={deleting === s.id}
-                                                    />
-                                                ))}
-                                            </tbody>
-                                        </SortableContext>
-                                    </table>
-                                </div>
-                            )}
-                            <DragOverlay>
-                                {activeSpecialist && (
-                                    viewMode === 'cards'
-                                        ? <DragOverlayCard specialist={activeSpecialist} />
-                                        : <DragOverlayRow specialist={activeSpecialist} />
-                                )}
-                            </DragOverlay>
-                        </DndContext>
-                    )}
-
-                    {editing && (
-                        <EditModal
-                            specialist={editing}
-                            onClose={() => setEditing(null)}
-                            onSaved={load}
-                        />
-                    )}
-                </>
-            )}
-        </div>
-    );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  GRID HOUSE — AdminSpecialists

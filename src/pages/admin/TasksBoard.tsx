@@ -21,7 +21,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -50,8 +50,7 @@ const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function AdminTasksBoard() {
-    const gridHouse = useDesignFlag();
-    const { tasks, loading, fetchTasks, addTask, updateTask, deleteTask, moveTask } = useAdminTaskStore();
+        const { tasks, loading, fetchTasks, addTask, updateTask, deleteTask, moveTask } = useAdminTaskStore();
     const { users } = useUserStore();
     const admins = useMemo(() => users.filter(u => ['admin', 'senior_admin', 'owner'].includes(u.role || '')), [users]);
 
@@ -142,8 +141,8 @@ export function AdminTasksBoard() {
     const hasFilters = !!searchQuery || !!filterPriority || !!filterAssignee;
     const emptyNewTask = { id: '', title: '', description: '', status: 'TODO', priority: 'MEDIUM', labels: [], checklist: [], attachments: [], participants: [], sortOrder: 0, createdBy: '', createdByName: '', createdAt: '', updatedAt: '' } as AdminTask;
 
-    if (gridHouse) {
-        return (
+    return (
+
             <GridHouseAdminTasksBoard
                 tasks={tasks}
                 loading={loading}
@@ -171,121 +170,8 @@ export function AdminTasksBoard() {
                 emptyNewTask={emptyNewTask}
             />
         );
-    }
-
-    return (
-        <div className="h-full flex flex-col">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-unbox-dark">Задачи</h1>
-                    <p className="text-sm text-unbox-grey mt-0.5">{tasks.length} задач · {tasks.filter(t => t.status === 'DONE').length} завершено</p>
-                </div>
-                <Button onClick={() => setEditingTask(emptyNewTask)}>
-                    <Plus size={16} className="mr-1.5" /> Новая задача
-                </Button>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mb-4">
-                <div className="relative flex-1 min-w-[200px] max-w-sm">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" />
-                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Поиск задач..."
-                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-unbox-green outline-none" />
-                </div>
-                <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)}
-                    className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none">
-                    <option value="">Все приоритеты</option>
-                    <option value="HIGH">🔴 Срочно</option>
-                    <option value="MEDIUM">🟡 Средний</option>
-                    <option value="LOW">🟢 Низкий</option>
-                </select>
-                <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)}
-                    className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none">
-                    <option value="">Все ответственные</option>
-                    {admins.map(a => <option key={a.email} value={String((a as any).id || a.email)}>{a.name}</option>)}
-                </select>
-                {hasFilters && (
-                    <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); }}
-                        className="px-3 py-2 text-sm text-red-500 hover:bg-red-50 rounded-lg flex items-center gap-1">
-                        <X size={14} /> Сбросить
-                    </button>
-                )}
-            </div>
-
-            {loading ? (
-                <div className="flex-1 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-unbox-green" /></div>
-            ) : (
-                <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                    <div className="flex-1 overflow-x-auto pb-4">
-                        <div className="flex gap-4 min-w-max h-full items-stretch">
-                            {COLUMNS.map(col => {
-                                const colTasks = getColumnTasks(col.id);
-                                return (
-                                    <DroppableColumn key={col.id} colId={col.id} className={clsx('w-[320px] rounded-2xl border bg-gray-50/50 flex flex-col', col.color)}>
-                                        <div className={clsx('flex items-center justify-between px-4 py-3 rounded-t-2xl', col.headerBg)}>
-                                            <div className="flex items-center gap-2">
-                                                <h3 className={clsx('font-bold text-sm', col.headerColor)}>{col.title}</h3>
-                                                <span className={clsx('text-xs font-bold px-2 py-0.5 rounded-full bg-white/60', col.headerColor)}>{colTasks.length}</span>
-                                            </div>
-                                            <button onClick={() => { setQuickAddCol(col.id); setQuickAddTitle(''); }}
-                                                className="text-gray-400 hover:text-unbox-dark p-1 rounded-md hover:bg-white/60 transition-colors"><Plus size={16} /></button>
-                                        </div>
-
-                                        {quickAddCol === col.id && (
-                                            <div className="mx-3 mt-3 p-2 bg-white rounded-xl border border-gray-200 shadow-sm">
-                                                <input autoFocus value={quickAddTitle} onChange={e => setQuickAddTitle(e.target.value)}
-                                                    onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(col.id); if (e.key === 'Escape') setQuickAddCol(null); }}
-                                                    placeholder="Название задачи..." className="w-full px-2 py-1.5 text-sm outline-none" />
-                                                <div className="flex justify-end gap-1 mt-1">
-                                                    <button onClick={() => setQuickAddCol(null)} className="px-2 py-1 text-xs text-gray-400 hover:text-gray-600">Отмена</button>
-                                                    <button onClick={() => handleQuickAdd(col.id)} className="px-3 py-1 text-xs font-medium text-white bg-unbox-green rounded-md hover:bg-unbox-dark">Создать</button>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <SortableContext items={colTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-                                            <div className="flex-1 p-3 space-y-2.5 overflow-y-auto min-h-[100px]">
-                                                {colTasks.map(task => (
-                                                    <SortableTaskCard key={task.id} task={task}
-                                                        onEdit={() => setEditingTask(task)}
-                                                        onDelete={() => { deleteTask(task.id); toast.success('Удалено'); }}
-                                                        onMove={(status) => { moveTask(task.id, status); toast.success(`Перемещено в "${COLUMNS.find(c => c.id === status)?.title}"`); }} />
-                                                ))}
-                                                {colTasks.length === 0 && (
-                                                    <div className="flex-1 flex items-center justify-center text-gray-300 text-sm italic py-8 border-2 border-dashed border-gray-200 rounded-xl">
-                                                        Перетащите сюда
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </SortableContext>
-
-                                        {col.id === 'DONE' && archivedCount > 0 && (
-                                            <button onClick={() => setShowArchive(!showArchive)}
-                                                className="mx-3 mb-3 flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 py-2 rounded-lg hover:bg-white/60">
-                                                <Archive size={12} />{showArchive ? 'Скрыть архив' : `Показать архив (${archivedCount})`}
-                                            </button>
-                                        )}
-                                    </DroppableColumn>
-                                );
-                            })}
-                        </div>
-                    </div>
-                    <DragOverlay>{activeTask && <TaskCardView task={activeTask} isDragging />}</DragOverlay>
-                </DndContext>
-            )}
-
-            {editingTask && (
-                <TaskEditModal task={editingTask} admins={admins} onClose={() => setEditingTask(null)}
-                    onSave={async (data) => {
-                        if (editingTask.id) { await updateTask(editingTask.id, data); toast.success('Обновлено'); }
-                        else { await addTask(data as any); toast.success('Создано'); }
-                        setEditingTask(null);
-                    }}
-                    onDelete={editingTask.id ? async () => { await deleteTask(editingTask.id); setEditingTask(null); toast.success('Удалено'); } : undefined}
-                />
-            )}
-        </div>
-    );
 }
+
 
 // ── Droppable Column ─────────────────────────────────────────────────────────
 
