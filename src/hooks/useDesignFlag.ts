@@ -1,20 +1,12 @@
 /**
- * Grid House is the only design.
- *
- * This hook stays here only so existing callsites keep compiling while we
- * unwind the dual-UI code. It always returns `true`, so every
- * `if (useDesignFlag())` branch passes and the legacy `else` paths
- * become dead code (to be removed file-by-file in a follow-up pass).
- *
- * The `?design=off` URL override is gone — there is no more "off" variant.
- */
-export function useDesignFlag(): true {
-    return true;
-}
-
-/**
  * Grid House design tokens — single source of truth. Imported across the
  * codebase; do not rename without a full grep first.
+ *
+ * Historical note: this file used to also export a `useDesignFlag()` hook
+ * that gated the classic vs Grid House designs. Dual-UI was fully unwound
+ * in April 2026 — no more callsites, so the hook is gone. The filename
+ * stays for now to avoid a 40-file import rename; plan is to move the
+ * tokens into a `gh-tokens.ts` module and delete this one in a follow-up.
  */
 export const GH = {
     ink: '#0F0F10',

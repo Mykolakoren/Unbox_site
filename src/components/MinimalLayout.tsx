@@ -32,15 +32,14 @@ export function MinimalLayout({
     const navigate = useNavigate();
     const resetBooking = useBookingStore(s => s.reset);
     const { currentUser } = useUserStore();
-    const isGH = true;
 
     const handleBack = () => {
         if (onBack) onBack();
         else navigate(-1);
     };
 
-    // ── GRID HOUSE MODE ────────────────────────────────────────────────────
-    if (glassMode && isGH) {
+    // Grid House is the only design; glass header lives here.
+    if (glassMode) {
         return (
             <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
                 {/* GH Header */}

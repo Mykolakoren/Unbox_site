@@ -23,7 +23,6 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
     const logout = useUserStore(s => s.logout);
     const currentUser = useUserStore(s => s.currentUser);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const isGridHouse = true;
 
     const isActive = (path: string, exact?: boolean) => {
         if (exact) return location.pathname === path;
@@ -39,15 +38,8 @@ export function SidebarLayout({ children, navItems, customTopContent, customBott
 
     return (
         <div className="min-h-screen flex text-unbox-dark relative">
-            {/* Background — photo for Classic, solid for Grid House */}
-            {isGridHouse ? (
-                <div className="fixed inset-0 z-0" style={{ background: '#FAFAF7' }} />
-            ) : (
-                <div className="fixed inset-0 z-0">
-                    <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
-                    <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
-                </div>
-            )}
+            {/* Grid House paper background — the only theme now. */}
+            <div className="fixed inset-0 z-0" style={{ background: '#FAFAF7' }} />
 
             {/* Sidebar (Desktop) */}
             <aside className="w-64 hidden md:flex flex-col fixed h-full z-10 rounded-r-3xl my-2 ml-2"

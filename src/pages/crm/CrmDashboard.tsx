@@ -24,7 +24,7 @@ import { ru } from 'date-fns/locale';
 import { crmApi } from '../../api/crm';
 import { parseUTC } from '../../utils/dateUtils';
 import { toast } from 'sonner';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const STATUS_COLORS: Record<string, string> = {
     PLANNED: 'bg-blue-100 text-blue-700',

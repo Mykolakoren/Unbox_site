@@ -9,7 +9,7 @@ import { ru } from 'date-fns/locale';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { RESOURCES, SUBSCRIPTION_PLANS } from '../../utils/data';
 import { UserTags } from '../../components/admin/UserTags';
 import { UserTasks } from '../../components/admin/UserTasks';
@@ -34,7 +34,6 @@ const ghudMono: React.CSSProperties = {
 };
 
 export function AdminUserDetails() {
-    const gridHouse = useDesignFlag();
     const { email } = useParams<{ email: string }>();
     const navigate = useNavigate();
     const { users, updateUserById, bookings, addTransaction, currentUser, cancelBooking } = useUserStore();
@@ -279,8 +278,8 @@ export function AdminUserDetails() {
     const currentStatusConfig = STATUS_CONFIG[clientStatus] || STATUS_CONFIG.new;
 
     return (
-        <div className={gridHouse ? '' : "space-y-6 animate-in fade-in slide-in-from-right-4 duration-300"}
-             style={gridHouse ? { fontFamily: GH_SANS, color: GH.ink } : undefined}>
+        <div className=''
+             style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* ... Modals ... */}
             <AddFundsModal
                 isOpen={isAddFundsOpen}
@@ -302,7 +301,7 @@ export function AdminUserDetails() {
             />
 
             {/* Header */}
-            {gridHouse ? (
+            {
                 <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 28 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
                         <button onClick={() => navigate('/admin/users')}
@@ -334,144 +333,10 @@ export function AdminUserDetails() {
                         </div>
                     </div>
                 </div>
-            ) : (
-            <div className="flex items-center gap-4">
-                <button
-                    onClick={() => navigate('/admin/users')}
-                    className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
-                >
-                    <ArrowLeft size={20} />
-                </button>
-                <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-2xl font-bold flex items-center gap-2">
-                            {user.name}
-
-                            {/* Role Badge / Selector */}
-                            {(() => {
-                                const isOwner = currentUser?.role === 'owner';
-                                const isSeniorAdmin = currentUser?.role === 'senior_admin';
-                                const canEditRole = isOwner || (isSeniorAdmin && user.role !== 'owner' && user.role !== 'senior_admin');
-                                const availableRoles = isOwner
-                                    ? ['user', 'specialist', 'admin', 'senior_admin', 'owner']
-                                    : isSeniorAdmin ? ['user', 'specialist', 'admin'] : [];
-                                const ROLE_LABELS: Record<string, string> = {
-                                    user: 'Пользователь', specialist: 'Специалист',
-                                    admin: 'Админ', senior_admin: 'Ст. Админ', owner: 'Владелец',
-                                };
-                                const ROLE_COLORS: Record<string, string> = {
-                                    owner: 'bg-purple-100 text-purple-700',
-                                    senior_admin: 'bg-blue-100 text-blue-700',
-                                    admin: 'bg-green-100 text-green-700',
-                                    specialist: 'bg-amber-100 text-amber-700',
-                                    user: 'bg-gray-100 text-gray-600',
-                                };
-                                const currentRole = user.role || 'user';
-                                return (
-                                    <div className="relative">
-                                        <button
-                                            onClick={() => canEditRole && setIsRoleDropdownOpen(v => !v)}
-                                            title={canEditRole ? 'Изменить роль' : 'Нет прав для изменения'}
-                                            className={clsx(
-                                                'flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold uppercase transition-all',
-                                                ROLE_COLORS[currentRole] ?? 'bg-gray-100 text-gray-600',
-                                                canEditRole && 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-current'
-                                            )}
-                                        >
-                                            <Shield size={13} />
-                                            {ROLE_LABELS[currentRole] ?? currentRole}
-                                        </button>
-                                        {isRoleDropdownOpen && canEditRole && (
-                                            <>
-                                                <div className="fixed inset-0 z-10" onClick={() => setIsRoleDropdownOpen(false)} />
-                                                <div className="absolute top-full left-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-unbox-light overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-150">
-                                                    <div className="p-2 text-[10px] font-bold text-unbox-grey uppercase tracking-wider border-b border-unbox-light">
-                                                        Изменить роль
-                                                    </div>
-                                                    {availableRoles.map(role => (
-                                                        <button
-                                                            key={role}
-                                                            onClick={async () => {
-                                                                setIsRoleDropdownOpen(false);
-                                                                await updateUserById(user.email, { role: role as any });
-                                                                toast.success(`Роль изменена: ${ROLE_LABELS[role]}`);
-                                                            }}
-                                                            className={clsx(
-                                                                'w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-unbox-light/50 transition-colors',
-                                                                currentRole === role && 'font-semibold bg-unbox-light/30'
-                                                            )}
-                                                        >
-                                                            <span className={clsx('w-2 h-2 rounded-full', {
-                                                                'bg-purple-500': role === 'owner',
-                                                                'bg-blue-500': role === 'senior_admin',
-                                                                'bg-green-500': role === 'admin',
-                                                                'bg-amber-500': role === 'specialist',
-                                                                'bg-gray-400': role === 'user',
-                                                            })} />
-                                                            {ROLE_LABELS[role]}
-                                                            {currentRole === role && <span className="ml-auto text-[10px] text-unbox-grey">текущая</span>}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-                        </h1>
-                        <div className="relative">
-                            <button
-                                onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
-                                className={clsx("px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider cursor-pointer border border-transparent hover:border-black/10 transition-colors focus:outline-none flex items-center gap-1", currentStatusConfig.bg, currentStatusConfig.color)}
-                            >
-                                {currentStatusConfig.label}
-                                <ChevronDown size={12} className={clsx("transition-transform", isStatusDropdownOpen ? "rotate-180" : "")} />
-                            </button>
-
-                            {/* Status Dropdown */}
-                            {isStatusDropdownOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-10" onClick={() => setIsStatusDropdownOpen(false)} />
-                                    <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-unbox-light overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
-                                        <div className="p-2 text-xs font-bold text-unbox-grey uppercase tracking-wider">Изменить статус</div>
-                                        <button
-                                            onClick={() => {
-                                                updateUserById(user.email, { manualStatus: undefined });
-                                                setIsStatusDropdownOpen(false);
-                                            }}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/30 flex items-center justify-between group/item"
-                                        >
-                                            <span>Автоматически</span>
-                                            {!user.manualStatus && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
-                                        </button>
-                                        <div className="h-px bg-unbox-light/50 my-1" />
-                                        {['vip', 'partner', 'bad_client'].map(status => (
-                                            <button
-                                                key={status}
-                                                onClick={() => {
-                                                    updateUserById(user.email, { manualStatus: status as any });
-                                                    setIsStatusDropdownOpen(false);
-                                                }}
-                                                className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/30 flex items-center justify-between"
-                                            >
-                                                <span className={STATUS_CONFIG[status].color}>{STATUS_CONFIG[status].label}</span>
-                                                {user.manualStatus === status && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                    <div className="text-sm text-gray-500">
-                        Участник с {user.registrationDate ? format(new Date(user.registrationDate), 'd MMMM yyyy', { locale: ru }) : 'неизвестной даты'}
-                    </div>
-                </div>
-            </div>
-            )}
+            }
 
             {/* Tabs */}
-            {gridHouse ? (
+            {
                 <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 24 }}>
                     {([
                         ['overview', 'ОБЗОР'],
@@ -492,34 +357,7 @@ export function AdminUserDetails() {
                         </button>
                     ))}
                 </div>
-            ) : (
-            <div className="flex gap-1 border-b border-unbox-light">
-                <button
-                    onClick={() => setActiveTab('overview')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'overview' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    Обзор
-                </button>
-                <button
-                    onClick={() => setActiveTab('bookings')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'bookings' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    Бронирования
-                </button>
-                <button
-                    onClick={() => setActiveTab('finance')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'finance' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    Финансы
-                </button>
-                <button
-                    onClick={() => setActiveTab('timeline')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'timeline' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    История событий
-                </button>
-            </div>
-            )}
+            }
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left Column: Profile & Info */}

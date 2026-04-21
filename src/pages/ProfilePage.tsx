@@ -8,144 +8,13 @@ import { SubscriptionCard } from '../components/SubscriptionCard';
 import { toast } from 'sonner';
 import { api } from '../api/client';
 import { hasPermission } from '../utils/permissions';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 export function ProfilePage() {
-    const gridHouse = useDesignFlag();
     const { currentUser, updateUser } = useUserStore();
-
     if (!currentUser) return null;
-
     const isAdmin = currentUser.role && ['owner', 'senior_admin', 'admin'].includes(currentUser.role);
-
-    if (gridHouse) return (
-        <GridHouseProfilePage currentUser={currentUser} updateUser={updateUser} isAdmin={isAdmin} />
-    );
-
-    return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h1 className="text-2xl font-bold">Настройки профиля</h1>
-
-            <div className="bg-white p-6 rounded-2xl border border-unbox-light space-y-6">
-                <div className="flex items-center gap-4 pb-6 border-b border-unbox-light">
-                    <div className="relative group">
-                        <div className="w-16 h-16 rounded-full overflow-hidden bg-unbox-dark text-white flex items-center justify-center text-2xl font-bold">
-                            {currentUser.avatarUrl ? (
-                                <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover" />
-                            ) : (
-                                currentUser.name[0]?.toUpperCase()
-                            )}
-                        </div>
-                        <label className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity">
-                            <Plus size={20} />
-                            <input
-                                type="file"
-                                className="hidden"
-                                accept="image/*"
-                                onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                        const reader = new FileReader();
-                                        reader.onloadend = () => {
-                                            updateUser({ avatarUrl: reader.result as string });
-                                        };
-                                        reader.readAsDataURL(file);
-                                    }
-                                }}
-                            />
-                        </label>
-                    </div>
-                    <div>
-                        <div className="font-bold text-xl">{currentUser.name}</div>
-                        <div className="text-sm text-unbox-grey">Участник с декабря 2025</div>
-                    </div>
-                    <div className="ml-auto bg-unbox-light/30 px-4 py-2 rounded-xl text-right">
-                        <div className="text-xs text-unbox-grey uppercase font-bold">Баланс</div>
-                        <div className="text-xl font-bold text-unbox-dark">{currentUser.balance.toFixed(1)} ₾</div>
-                    </div>
-                </div>
-
-                {/* Subscription Widget */}
-                {currentUser.subscription ? (
-                    <div className="pb-6 border-b border-unbox-light">
-                        <SubscriptionCard user={currentUser} />
-                    </div>
-                ) : (
-                    <div className="pb-6 border-b border-unbox-light text-center py-4 bg-unbox-light/30 rounded-xl">
-                        <p className="text-unbox-grey text-sm">У вас нет активного абонемента</p>
-                    </div>
-                )}
-
-                <div className="space-y-4 max-w-md">
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Имя</label>
-                        <div className="relative">
-                            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
-                            <input
-                                type="text"
-                                className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                                value={currentUser.name}
-                                onChange={(e) => updateUser({ name: e.target.value })}
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Email</label>
-                        <ChangeEmailInline currentEmail={currentUser.email} />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Телефон</label>
-                        <div className="relative">
-                            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
-                            <PhoneInput
-                                className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                                value={currentUser.phone || ''}
-                                onChange={(v) => updateUser({ phone: v })}
-                            />
-                        </div>
-                    </div>
-
-                    <TelegramIdField
-                        value={currentUser.telegramId || ''}
-                        onChange={(v) => updateUser({ telegramId: v })}
-                    />
-
-                    <div className="pt-4">
-                        <Button>Сохранить изменения</Button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Change Password */}
-            <ChangePasswordSection />
-
-            {/* Design Switcher */}
-            <LegacyDesignSwitcher />
-
-            {/* Admin Access Section — only for users with admin role or admin.access permission */}
-            {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
-                <div className="bg-white p-6 rounded-2xl border border-unbox-light">
-                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                        <Shield className="text-unbox-green" size={20} />
-                        Администрирование
-                    </h3>
-
-                    <div className="bg-unbox-light border border-unbox-green/20 rounded-xl p-6">
-                        <p className="text-unbox-dark mb-4">
-                            Вам доступна панель администратора для управления бронированиями и клиентами.
-                        </p>
-                        <Link to="/admin">
-                            <Button className="w-full sm:w-auto">
-                                Перейти в панель администратора
-                            </Button>
-                        </Link>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
+    return <GridHouseProfilePage currentUser={currentUser} updateUser={updateUser} isAdmin={isAdmin} />;
 }
 
 // ── Telegram Connect Hook ───────────────────────────────────────────────────
@@ -201,111 +70,8 @@ function useTelegramConnect() {
 
 // ── Telegram ID Field ───────────────────────────────────────────────────────
 
-function TelegramIdField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-    const { connect, isConnecting, cancel } = useTelegramConnect();
-    // A numeric telegramId means the user has been auto-bound via /start — bot
-    // can now send messages. A @username means manual, no notifications yet.
-    const isBound = !!value && /^\d+$/.test(value);
-    return (
-        <div>
-            <label className="block text-sm font-medium mb-2">Telegram</label>
-
-            {isBound ? (
-                <div className="flex items-center gap-2 p-3 rounded-xl border border-unbox-light bg-green-50">
-                    <CheckCircle2 className="text-green-600" size={18} />
-                    <span className="text-sm text-unbox-dark">Подключено — уведомления активны</span>
-                    <button
-                        type="button"
-                        onClick={() => onChange('')}
-                        className="ml-auto text-xs text-unbox-grey hover:text-unbox-dark underline"
-                    >
-                        Отключить
-                    </button>
-                </div>
-            ) : (
-                <>
-                    <button
-                        type="button"
-                        onClick={isConnecting ? cancel : connect}
-                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition ${
-                            isConnecting
-                                ? 'bg-unbox-light text-unbox-grey'
-                                : 'bg-[#26A5E4] text-white hover:bg-[#1e90cf]'
-                        }`}
-                    >
-                        {isConnecting ? (
-                            <><Loader2 className="animate-spin" size={18} /> Ждём подтверждения… (отмена)</>
-                        ) : (
-                            <><Send size={18} /> Подключить Telegram</>
-                        )}
-                    </button>
-
-                    <div className="mt-3">
-                        <label className="block text-xs text-unbox-grey mb-1">Или укажите @username вручную:</label>
-                        <div className="relative">
-                            <Send className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={16} />
-                            <input
-                                type="text"
-                                className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                                placeholder="@username"
-                                value={value}
-                                onChange={(e) => onChange(e.target.value)}
-                            />
-                        </div>
-                        <p className="text-[11px] text-unbox-grey mt-1.5">
-                            При ручном вводе уведомления придут, только если вы уже писали боту{' '}
-                            <a href="https://t.me/Unbox_Booking_G_Bot" target="_blank" rel="noopener noreferrer" className="text-unbox-green underline">
-                                @Unbox_Booking_G_Bot
-                            </a>.
-                        </p>
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
 
 // ── Legacy Design Switcher ──────────────────────────────────────────────────
-
-function LegacyDesignSwitcher() {
-    const isGH = useDesignFlag();
-    const switchTo = useCallback((mode: 'grid' | 'off') => {
-        if (mode === 'off') {
-            localStorage.setItem('unbox_design_flag', 'off');
-        } else {
-            localStorage.removeItem('unbox_design_flag');
-        }
-        window.location.reload();
-    }, []);
-
-    return (
-        <div className="bg-white p-6 rounded-2xl border border-unbox-light">
-            <h3 className="font-bold text-lg mb-4">Оформление</h3>
-            <div className="grid grid-cols-2 gap-3 max-w-md">
-                <button
-                    onClick={() => !isGH && switchTo('grid')}
-                    className={`p-4 rounded-xl border-2 text-center transition-all cursor-pointer ${
-                        isGH ? 'border-unbox-green bg-unbox-green/5' : 'border-unbox-light hover:border-unbox-green/30'
-                    }`}
-                >
-                    <div className="font-bold text-sm mb-1">Grid House</div>
-                    <div className="text-xs text-unbox-grey">Минимализм</div>
-                    {isGH && <div className="text-xs text-unbox-green font-semibold mt-2">✓ Активен</div>}
-                </button>
-                <button
-                    onClick={() => isGH && switchTo('off')}
-                    className={`p-4 rounded-xl border-2 text-center transition-all cursor-pointer ${
-                        !isGH ? 'border-unbox-green bg-unbox-green/5' : 'border-unbox-light hover:border-unbox-green/30'
-                    }`}
-                >
-                    <div className="font-bold text-sm mb-1">Classic</div>
-                    <div className="text-xs text-unbox-grey">Стекло, тени</div>
-                    {!isGH && <div className="text-xs text-unbox-green font-semibold mt-2">✓ Активен</div>}
-                </button>
-            </div>
-        </div>
-    );
-}
 
 // ── Change Password Section ──────────────────────────────────────────────────
 
@@ -538,67 +304,6 @@ const ghpInput: React.CSSProperties = {
 
 // ── Design Switcher ─────────────────────────────────────────────────────────
 
-function DesignSwitcher() {
-    const isGH = useDesignFlag();
-    const [hover, setHover] = useState<string | null>(null);
-
-    const switchTo = useCallback((mode: 'grid' | 'off') => {
-        if (mode === 'off') {
-            localStorage.setItem('unbox_design_flag', 'off');
-        } else {
-            localStorage.removeItem('unbox_design_flag');
-        }
-        window.location.reload();
-    }, []);
-
-    const optStyle = (active: boolean, id: string): React.CSSProperties => ({
-        flex: 1,
-        padding: '20px 16px',
-        border: active ? `2px solid ${GH.ink}` : `1px solid ${GH.ink10}`,
-        background: active ? GH.ink5 : hover === id ? GH.ink5 : 'transparent',
-        cursor: active ? 'default' : 'pointer',
-        textAlign: 'center',
-        transition: 'all 0.15s ease',
-    });
-
-    return (
-        <div style={{ borderTop: ghpHairline, paddingTop: 24, marginBottom: 32 }}>
-            <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 16 }}>ОФОРМЛЕНИЕ</div>
-            <div style={{ display: 'flex', gap: 12, maxWidth: 480 }}>
-                {/* Grid House option */}
-                <div
-                    style={optStyle(isGH, 'gh')}
-                    onClick={() => !isGH && switchTo('grid')}
-                    onMouseEnter={() => setHover('gh')}
-                    onMouseLeave={() => setHover(null)}
-                >
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30, marginBottom: 8 }}>
-                        АКТИВНО
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Grid House</div>
-                    <div style={{ fontSize: 12, color: GH.ink60 }}>Минимализм, типографика</div>
-                    {isGH && <div style={{ marginTop: 10, fontSize: 11, color: GH.accent, fontWeight: 600 }}>✓ Текущий</div>}
-                </div>
-
-                {/* Classic option */}
-                <div
-                    style={optStyle(!isGH, 'classic')}
-                    onClick={() => isGH && switchTo('off')}
-                    onMouseEnter={() => setHover('classic')}
-                    onMouseLeave={() => setHover(null)}
-                >
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30, marginBottom: 8 }}>
-                        АЛЬТЕРНАТИВА
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Classic</div>
-                    <div style={{ fontSize: 12, color: GH.ink60 }}>Стекло, тени, скругления</div>
-                    {!isGH && <div style={{ marginTop: 10, fontSize: 11, color: GH.accent, fontWeight: 600 }}>✓ Текущий</div>}
-                </div>
-            </div>
-        </div>
-    );
-}
-
 // ── Grid House — Telegram Connect ────────────────────────────────────────────
 
 function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -796,9 +501,6 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                     </Link>
                 </div>
             )}
-
-            {/* Design switcher */}
-            <DesignSwitcher />
 
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>

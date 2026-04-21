@@ -52,7 +52,6 @@ const CrmSchedule = lazy(() => import('./pages/crm/CrmSchedule').then(m => ({ de
 const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ default: m.CrmSettings })));
 const CrmProfile = lazy(() => import('./pages/crm/CrmProfile').then(m => ({ default: m.CrmProfile })));
 
-import { glassPanel, glassSummary } from './utils/styles';
 import { GH, GH_SANS } from './hooks/useDesignFlag';
 
 // Booking Flow Wrapper
@@ -60,7 +59,6 @@ function BookingWizard() {
   const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
   const selectedSlots = useBookingStore(s => s.selectedSlots);
   const users = useUserStore(s => s.users);
-  const isGH = true;
 
   // Excel #73 — warn before leaving an in-progress booking.
   // Browser-native confirm via beforeunload covers: tab close, page reload,
@@ -102,16 +100,14 @@ function BookingWizard() {
       {/* Edit mode banner */}
       {editBookingId && (
         <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
-          <div style={isGH ? {
+          <div style={{
             background: '#FEF3C7', border: `1px solid ${GH.ink10}`, color: '#92400E',
             padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             fontFamily: GH_SANS, fontSize: 14,
-          } : undefined}
-               className={isGH ? '' : "bg-amber-50/90 backdrop-blur-sm border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between"}>
-            <span style={isGH ? { fontWeight: 500 } : undefined} className={isGH ? '' : "font-medium"}>Вы редактируете существующее бронирование</span>
+          }}>
+            <span style={{ fontWeight: 500 }}>Вы редактируете существующее бронирование</span>
             <button onClick={() => reset()}
-              style={isGH ? { fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' } : undefined}
-              className={isGH ? '' : "text-sm font-bold underline hover:no-underline"}>
+              style={{ fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}>
               Отменить редактирование
             </button>
           </div>
@@ -171,7 +167,7 @@ function BookingWizard() {
       {step === 2 ? (
         /* ── Step 2: Full-width chessboard ── */
         <div className="max-w-[1920px] mx-auto px-6 md:px-12">
-          <div style={isGH ? ghCard : glassPanel} className={isGH ? '' : "rounded-[28px] overflow-hidden"}>
+          <div style={ghCard}>
             <ChessboardStep />
           </div>
         </div>
@@ -182,20 +178,19 @@ function BookingWizard() {
             <div className="lg:col-span-8">
               {step === 1 && <Navigate to="/" replace />}
               {step === 3 && (
-                <div style={isGH ? { ...ghCard, padding: 32 } : glassPanel} className={isGH ? '' : "rounded-[28px] overflow-hidden p-8"}>
+                <div style={{ ...ghCard, padding: 32 }}>
                   <OptionsStep />
                 </div>
               )}
               {step === 4 && (
-                <div style={isGH ? { ...ghCard, padding: 32 } : glassPanel} className={isGH ? '' : "rounded-[28px] overflow-hidden p-8"}>
+                <div style={{ ...ghCard, padding: 32 }}>
                   <ConfirmationStep />
                 </div>
               )}
             </div>
             {step < 5 && (
               <div className="lg:col-span-4 hidden lg:block">
-                <div style={isGH ? { ...ghCard, position: 'sticky' as const, top: 80 } : glassSummary}
-                     className={isGH ? '' : "rounded-[28px] overflow-hidden sticky top-[148px]"}>
+                <div style={{ ...ghCard, position: 'sticky' as const, top: 80 }}>
                   <Summary />
                 </div>
               </div>

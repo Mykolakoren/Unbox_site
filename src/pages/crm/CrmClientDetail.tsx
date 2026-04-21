@@ -14,7 +14,7 @@ import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { parseUTC } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
-import { useDesignFlag, GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const STATUS_COLORS: Record<string, string> = {
     PLANNED: 'bg-blue-100 text-blue-700',
@@ -31,7 +31,6 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function CrmClientDetail() {
-    const gridHouse = useDesignFlag();
     const { clientId } = useParams<{ clientId: string }>();
     const navigate = useNavigate();
     const { updateSession, createNote, deleteNote, paymentAccounts } = useCrmStore();
@@ -250,7 +249,7 @@ export function CrmClientDetail() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64" style={gridHouse ? { fontFamily: GH_SANS, color: GH.ink, background: GH.paper } : undefined}>
+            <div className="flex items-center justify-center h-64" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
                 <Loader2 className="w-8 h-8 animate-spin text-unbox-grey" />
             </div>
         );
@@ -258,7 +257,7 @@ export function CrmClientDetail() {
 
     if (!client) {
         return (
-            <div className="text-center py-20 text-unbox-grey" style={gridHouse ? { fontFamily: GH_SANS, color: GH.ink, background: GH.paper } : undefined}>
+            <div className="text-center py-20 text-unbox-grey" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
                 <p className="text-lg font-medium">Клиент не найден</p>
                 <button onClick={() => navigate('/crm/clients')} className="mt-4 text-sm text-unbox-green hover:underline">
                     Вернуться к списку
