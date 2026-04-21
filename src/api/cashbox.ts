@@ -176,18 +176,23 @@ export const cashboxApi = {
     },
 
     /** Preview close-shift math WITHOUT writing a ShiftReport.
-     *  Excel #13 — admins see starting_balance + cash_in − cash_out breakdown
-     *  before submitting, so phantom discrepancies are traceable. */
+     *  Excel #13 — admins see startingBalance + cashIn − cashOut breakdown
+     *  before submitting, so phantom discrepancies are traceable.
+     *
+     *  NOTE: api/client.ts auto-transforms all response keys from snake_case
+     *  to camelCase. Backend sends starting_balance, frontend sees
+     *  startingBalance. Don't reach for the snake_case names here — they're
+     *  undefined on the wire and silently crashed EndShiftModal in Safari. */
     previewCloseShift: async (branch?: string): Promise<{
-        starting_balance: number;
-        cash_in: number;
-        cash_out: number;
+        startingBalance: number;
+        cashIn: number;
+        cashOut: number;
         expected: number;
-        tx_count: number;
-        shift_start: string | null;
+        txCount: number;
+        shiftStart: string | null;
         now: string;
         branch: string | null;
-        prev_close_id: string | null;
+        prevCloseId: string | null;
     }> => {
         const { data } = await api.get('/cashbox/shifts/preview', {
             params: branch ? { branch } : {},

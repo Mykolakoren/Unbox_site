@@ -151,27 +151,30 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         {/* Excel #13 — backend breakdown so the admin can audit
                             where the expected figure came from. If the totals
                             don't match the display above, a backdated tx in
-                            this branch's period is the usual culprit. */}
+                            this branch's period is the usual culprit.
+                            Note: API transformer converts snake_case → camelCase,
+                            so we read `startingBalance`, not `starting_balance`
+                            (root cause of the Safari crash admins reported). */}
                         {preview && (
                             <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500 leading-relaxed">
                                 <div className="flex justify-between">
                                     <span>Остаток с прошлой смены</span>
-                                    <span className="font-mono">{Number(preview.starting_balance ?? 0).toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.startingBalance ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="flex justify-between text-emerald-700">
                                     <span>+ Приход за смену</span>
-                                    <span className="font-mono">{Number(preview.cash_in ?? 0).toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.cashIn ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="flex justify-between text-red-700">
                                     <span>− Расход за смену</span>
-                                    <span className="font-mono">{Number(preview.cash_out ?? 0).toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.cashOut ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
                                     <span>= Ожидается</span>
                                     <span className="font-mono">{Number(preview.expected ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="text-gray-400 mt-1">
-                                    Движений за период: {preview.tx_count ?? 0}
+                                    Движений за период: {preview.txCount ?? 0}
                                 </div>
                             </div>
                         )}
