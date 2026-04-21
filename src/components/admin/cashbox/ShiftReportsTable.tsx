@@ -30,10 +30,18 @@ export function ShiftReportsTable() {
                 <tbody className="text-sm">
                     {shiftReports.map(r => {
                         const end = parseUTC(r.shiftEnd);
+                        // Every numeric field is defensively normalised to a
+                        // number — old rows in the DB have nulls in columns
+                        // that are `number` in the TS interface, and any
+                        // single `.toFixed()` on undefined blows up the
+                        // whole Admin-Panel boundary (reported by Иры).
+                        const expected = Number(r.expectedBalance ?? 0);
+                        const actual = Number(r.actualBalance ?? 0);
+                        const disc = Number(r.discrepancy ?? 0);
                         const discColor =
-                            Math.abs(r.discrepancy) < 0.01
+                            Math.abs(disc) < 0.01
                                 ? 'text-green-600'
-                                : r.discrepancy > 0
+                                : disc > 0
                                     ? 'text-amber-600'
                                     : 'text-red-600';
 
@@ -62,15 +70,15 @@ export function ShiftReportsTable() {
                                     <span className="text-gray-700">{r.adminName}</span>
                                 </td>
                                 <td className="py-3 align-top text-right font-medium text-gray-700">
-                                    {r.expectedBalance.toFixed(2)} ₾
+                                    {expected.toFixed(2)} ₾
                                 </td>
                                 <td className="py-3 align-top text-right font-medium text-gray-900">
-                                    {r.actualBalance.toFixed(2)} ₾
+                                    {actual.toFixed(2)} ₾
                                 </td>
                                 <td className={`py-3 align-top text-right font-bold ${discColor}`}>
-                                    {Math.abs(r.discrepancy) < 0.01
+                                    {Math.abs(disc) < 0.01
                                         ? '0.00'
-                                        : `${r.discrepancy > 0 ? '+' : ''}${r.discrepancy.toFixed(2)}`} ₾
+                                        : `${disc > 0 ? '+' : ''}${disc.toFixed(2)}`} ₾
                                 </td>
                                 <td className="py-3 pr-2 align-top">
                                     <span className="text-gray-500 text-xs truncate max-w-[150px] block">

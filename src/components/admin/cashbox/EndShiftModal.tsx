@@ -52,7 +52,10 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
 
     // For branch closes use the freshly fetched per-branch cash. For global
     // closes fall back to the store's overall cash total.
-    const cashBalance = branch ? (branchCash ?? 0) : balances.cash;
+    // Defensive Number() — a missing `balances.cash` (store not yet populated,
+    // or backend returning `{}`) blew up .toFixed() and crashed the whole
+    // /admin/finance boundary. Reported by Иры.
+    const cashBalance = Number(branch ? (branchCash ?? 0) : (balances?.cash ?? 0));
 
     const actualValue = parseFloat(actualBalance);
     const hasAmount = !isNaN(actualValue) && actualValue >= 0;
@@ -78,7 +81,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                 notes: finalNotes,
                 branch: branch || undefined,
             });
-            const disc = report.discrepancy;
+            const disc = Number(report.discrepancy ?? 0);
             if (Math.abs(disc) < 0.01) {
                 toast.success('Смена закрыта — расхождений нет');
             } else {
@@ -153,22 +156,22 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                             <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500 leading-relaxed">
                                 <div className="flex justify-between">
                                     <span>Остаток с прошлой смены</span>
-                                    <span className="font-mono">{preview.starting_balance.toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.starting_balance ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="flex justify-between text-emerald-700">
                                     <span>+ Приход за смену</span>
-                                    <span className="font-mono">{preview.cash_in.toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.cash_in ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="flex justify-between text-red-700">
                                     <span>− Расход за смену</span>
-                                    <span className="font-mono">{preview.cash_out.toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.cash_out ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
                                     <span>= Ожидается</span>
-                                    <span className="font-mono">{preview.expected.toFixed(2)} ₾</span>
+                                    <span className="font-mono">{Number(preview.expected ?? 0).toFixed(2)} ₾</span>
                                 </div>
                                 <div className="text-gray-400 mt-1">
-                                    Движений за период: {preview.tx_count}
+                                    Движений за период: {preview.tx_count ?? 0}
                                 </div>
                             </div>
                         )}

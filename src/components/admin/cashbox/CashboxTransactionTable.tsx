@@ -147,7 +147,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                     </td>
                                     <td className="py-3 px-3 align-top whitespace-nowrap">
                                         <div className={`font-bold ${isIncome ? 'text-green-700' : 'text-red-600'}`}>
-                                            {isIncome ? '+' : '-'}{tx.amount.toFixed(2)} ₾
+                                            {isIncome ? '+' : '-'}{Number(tx.amount ?? 0).toFixed(2)} ₾
                                         </div>
                                     </td>
                                     <td className="py-3 px-3 align-top whitespace-nowrap">
@@ -228,7 +228,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                             <div className="flex items-center justify-between mb-1.5">
                                 <div className="flex items-center gap-2">
                                     <span className={`text-lg font-bold ${isIncome ? 'text-green-700' : 'text-red-600'}`}>
-                                        {isIncome ? '+' : '-'}{tx.amount.toFixed(0)} ₾
+                                        {isIncome ? '+' : '-'}{Number(tx.amount ?? 0).toFixed(0)} ₾
                                     </span>
                                     <span className="text-xs text-gray-400">{formattedDate}, {formattedTime}</span>
                                 </div>

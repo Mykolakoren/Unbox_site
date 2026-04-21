@@ -53,7 +53,7 @@ export function BalanceCard({ filteredTransactions }: Props) {
                                 "text-sm sm:text-lg font-bold tabular-nums leading-tight",
                                 acc.value < 0 ? "text-red-600" : "text-unbox-dark"
                             )}>
-                                {acc.value.toFixed(2)}<span className="text-[10px] sm:text-xs font-normal text-unbox-grey ml-0.5">₾</span>
+                                {Number(acc.value ?? 0).toFixed(2)}<span className="text-[10px] sm:text-xs font-normal text-unbox-grey ml-0.5">₾</span>
                             </div>
                         </div>
                     </div>
