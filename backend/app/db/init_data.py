@@ -331,9 +331,97 @@ def rescue_orphaned_crm():
         logger.warning(f"[CRM rescue] {src_id} → {tgt_id}: moved {moved}")
 
 
+def auto_backfill_gcal_alias_codes():
+    """Walk each specialist's Google Calendar and rewrite matched events
+    without `#code` to `Name #code`, so future syncs don't have to guess.
+    Idempotent via a timestamp flag in user.crm_data; safe at every boot.
+    Per-specialist try/except — one failing calendar can't block others."""
+    from datetime import datetime
+    from sqlmodel import select as _select
+    from app.models.user import User as _User
+    from app.models.therapist_client import TherapistClient as _TC
+
+    FLAG_KEY = "gcal_alias_backfill_done_at"
+
+    # Lazy imports: Google client pulls in heavy deps, only needed if anyone
+    # actually has a calendar_id. Skip silently otherwise — a dev machine
+    # without google credentials shouldn't crash on boot.
+    try:
+        from app.services.crm_calendar import (
+            sync_from_calendar as _sync,
+            patch_event_summary,
+        )
+    except Exception as e:
+        logger.debug(f"[GCal backfill] service import failed: {e}")
+        return
+
+    with Session(engine) as sess:
+        # Find everyone with a configured calendar who hasn't been backfilled.
+        users = sess.exec(
+            _select(_User).where(_User.role.in_(("specialist", "owner", "senior_admin")))  # type: ignore
+        ).all()
+
+        for u in users:
+            crm_data = dict(u.crm_data or {})
+            if crm_data.get(FLAG_KEY):
+                continue
+            cal_id = crm_data.get("calendar_id")
+            if not cal_id:
+                continue
+
+            clients = sess.exec(
+                _select(_TC).where(_TC.specialist_id == str(u.id))
+            ).all()
+            if not clients:
+                continue
+
+            try:
+                result = _sync(
+                    calendar_id=cal_id,
+                    clients=clients,
+                    months_back=24,
+                    months_forward=3,
+                )
+            except Exception as e:
+                logger.warning(f"[GCal backfill] {u.email}: fetch failed: {e}")
+                continue  # don't mark as done — retry on next boot
+
+            patched = 0
+            failed = 0
+            for entry in result.get("matched", []):
+                if entry.get("has_alias_code"):
+                    continue
+                if entry.get("is_recurring"):
+                    continue
+                if not entry.get("suggested_summary"):
+                    continue
+                try:
+                    patch_event_summary(cal_id, entry["google_event_id"], entry["suggested_summary"])
+                    patched += 1
+                except Exception as e:
+                    failed += 1
+                    logger.debug(f"[GCal backfill] patch failed: {e}")
+
+            logger.warning(
+                f"[GCal backfill] {u.email}: patched={patched} "
+                f"ambiguous={len(result.get('ambiguous', []))} "
+                f"unmatched={len(result.get('unmatched', []))} "
+                f"failed={failed}"
+            )
+
+            # Mark done — even if some patches failed, we don't want to hammer
+            # the API on every boot. Owner can trigger the dedicated endpoint
+            # manually if they need a retry.
+            crm_data[FLAG_KEY] = datetime.now().isoformat()
+            u.crm_data = crm_data
+            sess.add(u)
+            sess.commit()
+
+
 def init_data():
     migrate_add_columns()
     rescue_orphaned_crm()
+    auto_backfill_gcal_alias_codes()
     with Session(engine) as session:
         
         # Init User — guarded: skip the seed if the operator left the default
