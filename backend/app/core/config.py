@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     # trips the guard in db.init_data so the seed is skipped if it leaks through.
     FIRST_SUPERUSER: str = "admin@unbox.com"
     FIRST_SUPERUSER_PASSWORD: str = "CHANGE_ME_ON_FIRST_DEPLOY"
+
+    # Comma-separated list of emails that should always hold `role=owner`.
+    # Evaluated at every app startup (init_data):
+    #   - If a user with that email exists but has a lower role → promoted.
+    #   - If no such user yet → skipped (they'll be created on first OAuth
+    #     login with role=owner auto-applied).
+    # Prevents the "Google OAuth silently creates a fresh user=role=user
+    # when the owner wasn't yet linked" trap — if the real owner's personal
+    # email is in this list, first login promotes automatically.
+    OWNER_EMAILS: str = ""  # e.g. "koren.nikolas@gmail.com,co-founder@gmail.com"
     
     # Database
     DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env

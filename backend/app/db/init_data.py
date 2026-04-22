@@ -286,5 +286,32 @@ def init_data():
             else:
                 logger.info("First superuser already exists")
 
+        # Auto-promote configured OWNER_EMAILS at every startup.
+        # Why: a real person's email (e.g. koren.nikolas@gmail.com) can lose
+        # its owner role — merged into a dupe, accidentally demoted, or never
+        # linked to a Google/TG OAuth identity in the first place. Listing
+        # the email here means on every backend boot we re-assert the role.
+        # It's idempotent and cheap.
+        if settings.OWNER_EMAILS:
+            owner_emails = [e.strip().lower() for e in settings.OWNER_EMAILS.split(",") if e.strip()]
+            for email in owner_emails:
+                existing = session.exec(select(User).where(User.email == email)).first()
+                if existing:
+                    if existing.role != "owner":
+                        logger.warning(
+                            f"[OWNER_EMAILS] Promoting {email}: {existing.role} → owner"
+                        )
+                        existing.role = "owner"
+                        existing.is_admin = True
+                        existing.archived_at = None  # un-archive if accidentally archived
+                        session.add(existing)
+                        session.commit()
+                    else:
+                        logger.debug(f"[OWNER_EMAILS] {email} already owner")
+                else:
+                    logger.info(
+                        f"[OWNER_EMAILS] {email} not yet in DB — will be promoted on first OAuth login"
+                    )
+
         # Init Resources
         init_resources(session)
