@@ -522,7 +522,7 @@ def _handle_help(chat_id: int, user: Optional[User]) -> dict:
         "<b>Нужна помощь?</b>\n\n"
         "• Сайт: https://unbox.com.ge\n"
         "• Мои брони: https://unbox.com.ge/bookings\n"
-        "• Написать администратору: @unbox_admin\n\n"
+        "• Написать администратору: @UnboxCenter\n\n"
     )
     if user:
         body += (
