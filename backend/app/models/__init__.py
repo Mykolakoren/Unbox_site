@@ -33,3 +33,6 @@ from .team_member import TeamMember, TeamMemberCreate, TeamMemberRead, TeamMembe
 
 # Notifications
 from .notification import Notification, NotificationCreate, NotificationRead
+
+# App-wide settings (exchange rates, etc.)
+from .app_setting import AppSetting

@@ -106,8 +106,12 @@ def crm_dashboard(
 
     # --- Extended stats ---
 
-    # Monthly stats (12 months) — convert to GEL equivalent
-    GEL_RATES = {"GEL": 1, "USD": 2.7, "EUR": 2.95, "RUB": 0.03}
+    # Monthly stats (12 months) — convert to GEL equivalent.
+    # Single source of truth: app_settings.exchange_rates (managed via
+    # /settings/exchange_rates GET/PUT). Same numbers the frontend uses,
+    # so the top "ДОХОД" card and the chart's "Получено" can never drift.
+    from app.api.v1.settings import get_exchange_rates
+    GEL_RATES = get_exchange_rates(session)
 
     monthly_stats = []
     for i in range(11, -1, -1):
