@@ -5,6 +5,19 @@ import type { BookingHistoryItem } from '../store/types';
 // Note: api/client.ts intercepts response and converts snake_case to camelCase automatically.
 // So 'b' here is already mostly camelCase.
 // We just need to fix mismatches between transformed keys and Interface keys.
+/**
+ * Normalise startTime to "HH:MM" format. Backend should always send this,
+ * but defending here means a bad row can't crash every consumer that does
+ * `.startTime.split(':')` (chessboard, summary, timeline, pricing).
+ */
+function normaliseStartTime(t: any): string {
+    if (typeof t !== 'string' || !t.includes(':')) return '00:00';
+    const parts = t.split(':');
+    const h = parts[0]?.padStart(2, '0') ?? '00';
+    const m = parts[1]?.padStart(2, '0') ?? '00';
+    return `${h}:${m}`;
+}
+
 const mapToFrontend = (b: any): BookingHistoryItem => ({
     ...b,
     // Interface expects googleCalendarEventId, Transformer gives gcalEventId (from gcal_event_id)
@@ -18,6 +31,10 @@ const mapToFrontend = (b: any): BookingHistoryItem => ({
     userId: b.userId ?? '',
     // Public bookings also hide final_price — default to 0 so rendering doesn't NaN.
     finalPrice: b.finalPrice ?? 0,
+    // Defensive defaults for fields that crashed admin pages on edge data:
+    // a missing duration / startTime crashed the chessboard with split-on-undefined.
+    startTime: normaliseStartTime(b.startTime),
+    duration: typeof b.duration === 'number' ? b.duration : 60,
 });
 
 // Map Frontend -> Backend

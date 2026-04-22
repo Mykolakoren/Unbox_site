@@ -380,8 +380,11 @@ def create_booking(
                             re_rent_booking.gcal_event_id,
                             re_rent_booking.resource_id,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            f"[GCal Auto-cancel re-rent] delete_event failed for "
+                            f"booking={re_rent_booking.id} event={re_rent_booking.gcal_event_id}: {e}"
+                        )
                     re_rent_booking.gcal_event_id = None
 
                 # Audit log for auto-cancel with 50% refund details
@@ -471,7 +474,10 @@ def create_booking(
                     f"(баланс: {booking_owner.balance}₾, кредит: {booking_owner.credit_limit}₾). "
                     f"Пополните баланс перед бронированием.",
                 )
-            booking_owner.balance -= quote.final_price
+            # round(..., 2) — float arithmetic accumulates fractional cents
+            # over thousands of bookings; without rounding the displayed
+            # balance and audit total drift apart.
+            booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
 
         booking_in.final_price = quote.final_price
         booking_in.base_price = quote.base_price
@@ -483,7 +489,7 @@ def create_booking(
         # Peak hours subscription debt: deduct from balance (goes negative = debt)
         peak_debt = quote.subscription_peak_debt
         if peak_debt > 0 and booking_in.payment_method == "subscription":
-            booking_owner.balance -= peak_debt
+            booking_owner.balance = round((booking_owner.balance or 0) - peak_debt, 2)
 
         # ── Hot Booking Approval Gate ──
         # If booking is within 12 hours AND user is NOT admin/owner → require admin approval
@@ -502,7 +508,8 @@ def create_booking(
             # Don't deduct balance — set status to pending_approval
             # Revert balance deduction that happened above
             if booking_in.payment_method != "subscription":
-                booking_owner.balance += quote.final_price  # undo deduction
+                # undo deduction (rounded — see comment above)
+                booking_owner.balance = round((booking_owner.balance or 0) + quote.final_price, 2)
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
@@ -700,7 +707,10 @@ def create_multi_slot_booking(
             raise HTTPException(400, f"Invalid date format for slot: {s.date}")
         parsed_slots.append((s, d))
 
-    # Availability check for ALL slots before creating any
+    # Availability check for ALL slots before creating any.
+    # lock_rows=True takes a SELECT FOR UPDATE on overlapping rows so two
+    # concurrent multi-slot batches can't both pass the availability check
+    # and end up with conflicting bookings (audit found this race).
     conflicts = []
     for s, d in parsed_slots:
         available, reason = check_availability(
@@ -709,6 +719,7 @@ def create_multi_slot_booking(
             date=d,
             start_time=s.start_time,
             duration=s.duration,
+            lock_rows=True,
         )
         if not available:
             conflicts.append({
@@ -808,6 +819,33 @@ def create_multi_slot_booking(
     for b in created_bookings:
         session.refresh(b)
 
+    # Excel #24 + R33 — Google Calendar sync for the whole batch.
+    # Same try/except policy as single-booking create: a GCal failure must
+    # NOT roll back the bookings — the source of truth is the DB. We log a
+    # warning per failed slot so admin can later use the resync tool.
+    gcal_synced = 0
+    gcal_failed = 0
+    for b in created_bookings:
+        try:
+            event_id = gcal_service.create_event(b, user_name=booking_owner.name)
+            if event_id:
+                b.gcal_event_id = event_id
+                session.add(b)
+                gcal_synced += 1
+            else:
+                gcal_failed += 1
+                logger.warning(
+                    f"[GCal Multi-slot] Booking {b.id} created without event_id (no error, just no id returned)"
+                )
+        except Exception as e:
+            gcal_failed += 1
+            logger.warning(f"[GCal Multi-slot] Sync failed for booking {b.id}: {e}")
+    if gcal_synced > 0:
+        session.commit()
+    logger.info(
+        f"[GCal Multi-slot] Synced {gcal_synced}/{len(created_bookings)} slots in group {group_id}"
+    )
+
     # Audit log
     timeline_service.log_event(
         session=session,
@@ -824,6 +862,8 @@ def create_multi_slot_booking(
             "group_id": group_id,
             "slot_count": len(created_bookings),
             "total_cost": total_cost,
+            "gcal_synced": gcal_synced,
+            "gcal_failed": gcal_failed,
         },
     )
 
@@ -832,6 +872,8 @@ def create_multi_slot_booking(
         "group_id": group_id,
         "bookings": [enrich_booking_status(b) for b in created_bookings],
         "total_cost": total_cost,
+        "gcal_synced": gcal_synced,
+        "gcal_failed": gcal_failed,
     }
 
 
@@ -970,7 +1012,7 @@ def create_recurring_booking(
                     400,
                     f"Insufficient funds for {d.strftime('%Y-%m-%d')}. Required: {quote.final_price}, Available: {available_funds}",
                 )
-            booking_owner.balance -= quote.final_price
+            booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
 
         session.add(booking_owner)
 
@@ -1124,8 +1166,11 @@ def cancel_recurring_bookings(
         if b.gcal_event_id:
             try:
                 gcal_service.delete_event(b.gcal_event_id, b.resource_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    f"[GCal Series cancel] delete_event failed for "
+                    f"booking={b.id} event={b.gcal_event_id}: {e}"
+                )
 
         b.status = "cancelled"
         b.cancellation_reason = "Series cancelled"
@@ -1207,8 +1252,11 @@ def cancel_booking(
     if booking.gcal_event_id:
         try:
             gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"[GCal Cancel] delete_event failed for "
+                f"booking={booking.id} event={booking.gcal_event_id}: {e}"
+            )
         booking.gcal_event_id = None
 
     # ── Refund to booking OWNER (not current_user!) ──
@@ -1429,11 +1477,11 @@ def reschedule_booking(
                     detail=f"Недостаточно средств для перерасчёта. "
                     f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
                 )
-            booking_owner.balance -= price_diff
+            booking_owner.balance = round((booking_owner.balance or 0) - price_diff, 2)
             session.add(booking_owner)
         elif price_diff < 0:
             # Price decreased — refund the difference
-            booking_owner.balance += abs(price_diff)
+            booking_owner.balance = round((booking_owner.balance or 0) + abs(price_diff), 2)
             session.add(booking_owner)
 
         # Update booking price fields
@@ -1732,12 +1780,44 @@ def extend_booking(
                 select(User).where(User.email == booking.user_id)
             ).first()
         if target_user:
-            target_user.balance -= extra_price
+            target_user.balance = round((target_user.balance or 0) - extra_price, 2)
             session.add(target_user)
 
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # R33 fix — extend changes the booking duration so the Google Calendar
+    # event needs its endTime updated. We don't have an `update_event`
+    # method; cheapest correct path is delete-old + create-new. If either
+    # step fails, log and move on — the DB is the source of truth and an
+    # admin can use the resync tool to fix the GCal event later.
+    if booking.gcal_event_id:
+        old_event_id = booking.gcal_event_id
+        try:
+            gcal_service.delete_event(old_event_id, booking.resource_id)
+        except Exception as e:
+            logger.warning(f"[GCal Extend] delete_event failed for {old_event_id}: {e}")
+        booking.gcal_event_id = None
+    try:
+        # Resolve owner name for the new event title
+        owner_for_event = (
+            session.get(User, booking.user_uuid) if booking.user_uuid else None
+        )
+        if not owner_for_event and booking.user_id:
+            owner_for_event = session.exec(
+                select(User).where(User.email == booking.user_id)
+            ).first()
+        new_event_id = gcal_service.create_event(
+            booking,
+            user_name=(owner_for_event.name if owner_for_event else booking.user_id),
+        )
+        if new_event_id:
+            booking.gcal_event_id = new_event_id
+            session.add(booking)
+            session.commit()
+    except Exception as e:
+        logger.warning(f"[GCal Extend] create_event failed for booking {booking.id}: {e}")
 
     return enrich_booking_status(booking)
 

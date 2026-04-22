@@ -285,7 +285,13 @@ export function DashboardOverview() {
     const isNegative = currentUser.balance < 0;
     const creditLimit = currentUser.creditLimit || 0;
     const availableCredit = creditLimit + currentUser.balance;
-    const usagePercent = Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / creditLimit) * 100));
+    // Division-by-zero guard — most users have no credit limit, in which case
+    // dividing produces Infinity → Math.min/max passes it through → NaN width
+    // on the progress bar that React renders silently as 0 (not crash, but
+    // visually broken).
+    const usagePercent = creditLimit > 0
+        ? Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / creditLimit) * 100))
+        : 0;
 
     const recentBookings = bookings
         .filter(b => b.userId === currentUser.email || b.userId === currentUser.id)
