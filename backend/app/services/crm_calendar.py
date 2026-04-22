@@ -161,6 +161,18 @@ def update_calendar_event(
     ).execute()
 
 
+def patch_event_summary(calendar_id: str, event_id: str, new_summary: str) -> None:
+    """Update only the summary of an event — used for appending `#alias` codes
+    to historical events without touching start/end/description. Minimal
+    patch keeps the event stable for recurring series and third-party sync."""
+    service = _get_calendar_service()
+    service.events().patch(
+        calendarId=calendar_id,
+        eventId=event_id,
+        body={"summary": new_summary},
+    ).execute()
+
+
 def delete_calendar_event(calendar_id: str, event_id: str) -> None:
     """Delete a Google Calendar event (marks session as cancelled)."""
     service = _get_calendar_service()
@@ -205,16 +217,21 @@ def sync_from_calendar(
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)
 
-    # Build alias → client_id lookup
-    alias_map = {c.alias_code: c.id for c in clients if c.alias_code}
-    # Build name → client_id lookup (full normalized name)
-    name_map = {}
+    # Build alias → client lookup (carries full client object so we can pull
+    # alias_code / canonical name when building suggested summaries).
+    alias_map = {c.alias_code: c for c in clients if c.alias_code}
+
+    # Build name → list of clients (1:many). If the same normalized name is
+    # shared by several clients ("Александр" x 2), name-based matching is
+    # ambiguous — we refuse to guess, caller must use an alias code.
+    name_map: dict = {}
     for c in clients:
         norm = " ".join(c.name.lower().strip().split())
-        name_map[norm] = c.id
+        name_map.setdefault(norm, []).append(c)
 
     matched = []
     unmatched = []
+    ambiguous = []  # events whose name matches 2+ clients — human must disambiguate
 
     for ev in events:
         summary = ev.get("summary", "")
@@ -228,29 +245,46 @@ def sync_from_calendar(
         if start_dt and end_dt:
             duration = max(30, int((end_dt - start_dt).total_seconds() / 60))
 
-        # Try alias code match
+        matched_client = None          # the resolved TherapistClient, or None
+        ambiguous_candidates: list = []  # when name maps to 2+ clients
+
+        # 1) Alias code match — highest confidence, never ambiguous.
         alias = _extract_alias_code(summary)
-        client_id = alias_map.get(alias) if alias else None
+        if alias and alias in alias_map:
+            matched_client = alias_map[alias]
 
-        # Fallback: strict name match (full name, not partial)
-        if not client_id:
+        # 2) Fallback: strict name match (full name only, no partial fuzzy).
+        if not matched_client:
             clean_name = " ".join(re.sub(r"#\d{4}", "", summary).strip().lower().split())
-            # Try exact full name match first
-            if clean_name in name_map:
-                client_id = name_map[clean_name]
-            else:
-                # Try word-set match: all words from client name must be in event, or vice versa
-                clean_words = set(clean_name.split())
-                for name_key, cid in name_map.items():
-                    name_words = set(name_key.split())
-                    if len(name_words) >= 2 and name_words == clean_words:
-                        client_id = cid
-                        break
-                    elif len(name_words) >= 2 and name_words.issubset(clean_words) and len(clean_words) <= len(name_words) + 1:
-                        client_id = cid
-                        break
 
-        # Compare in UTC: start_dt is naive UTC, so use now_utc
+            # 2a. Exact full-name hit.
+            candidates = name_map.get(clean_name, [])
+            if len(candidates) == 1:
+                matched_client = candidates[0]
+            elif len(candidates) >= 2:
+                ambiguous_candidates = candidates
+
+            # 2b. Word-set match — tolerates one extra word in the event
+            # relative to the client (so "Name Surname" in CRM still matches
+            # "Name Surname #old-tag" in GCal). Same ambiguity rules.
+            if not matched_client and not ambiguous_candidates:
+                clean_words = set(clean_name.split())
+                word_set_hits = []
+                for name_key, cs in name_map.items():
+                    name_words = set(name_key.split())
+                    if len(name_words) < 2:
+                        continue
+                    if name_words == clean_words or (
+                        name_words.issubset(clean_words)
+                        and len(clean_words) <= len(name_words) + 1
+                    ):
+                        word_set_hits.extend(cs)
+                if len(word_set_hits) == 1:
+                    matched_client = word_set_hits[0]
+                elif len(word_set_hits) >= 2:
+                    ambiguous_candidates = word_set_hits
+
+        # Session status in UTC (start_dt is naive UTC, now_utc same).
         session_status = "CANCELLED_CLIENT" if event_status == "cancelled" else (
             "COMPLETED" if start_dt < now_utc else "PLANNED"
         )
@@ -262,11 +296,27 @@ def sync_from_calendar(
             "duration_minutes": duration,
             "status": session_status,
             "is_cancelled": event_status == "cancelled",
+            # True when GCal summary already carries a #XXXX code — no patch needed.
+            "has_alias_code": bool(alias),
+            # Set when we have a confident single-client match AND the event
+            # lacks an alias code — callers can patch summary to "Name #code"
+            # in Google Calendar to prevent future ambiguity.
+            "suggested_summary": None,
+            "is_recurring": bool(ev.get("recurringEventId")),
         }
 
-        if client_id:
-            entry["client_id"] = client_id
+        if matched_client:
+            entry["client_id"] = matched_client.id
+            if not alias and matched_client.alias_code:
+                # Offer the canonical summary for backfill: "Client Name #CODE".
+                entry["suggested_summary"] = f"{matched_client.name} #{matched_client.alias_code}"
             matched.append(entry)
+        elif ambiguous_candidates:
+            entry["ambiguous_candidates"] = [
+                {"id": c.id, "name": c.name, "alias_code": c.alias_code}
+                for c in ambiguous_candidates
+            ]
+            ambiguous.append(entry)
         else:
             unmatched.append(entry)
 
@@ -274,6 +324,7 @@ def sync_from_calendar(
         "total": len(events),
         "matched": matched,
         "unmatched": unmatched,
+        "ambiguous": ambiguous,
     }
 
 
