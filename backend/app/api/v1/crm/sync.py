@@ -206,14 +206,147 @@ def sync_from_calendar(
 
     session.commit()
 
+    # ── Backfill alias codes into Google Calendar summaries ──────────────
+    # For every matched event that doesn't yet carry a `#XXXX` code AND has
+    # a single, confident client match — patch the event summary in place.
+    # Next time the calendar is synced, the alias path matches instantly,
+    # so a client rename or a new namesake no longer breaks anything.
+    # Recurring events are skipped to avoid altering a whole series from one
+    # instance.
+    codes_backfilled = 0
+    backfill_errors = 0
+    if not dry_run:
+        from app.services.crm_calendar import patch_event_summary
+        import logging
+        _log = logging.getLogger(__name__)
+        for entry in result["matched"]:
+            if entry.get("has_alias_code"):
+                continue
+            if entry.get("is_recurring"):
+                continue
+            new_summary = entry.get("suggested_summary")
+            if not new_summary:
+                continue
+            try:
+                patch_event_summary(calendar_id, entry["google_event_id"], new_summary)
+                codes_backfilled += 1
+            except Exception as e:
+                _log.warning(
+                    f"[GCal backfill] failed to patch {entry['google_event_id']}: {e}"
+                )
+                backfill_errors += 1
+
     return {
         "total_events": result["total"],
         "matched": len(result["matched"]),
         "unmatched": len(result["unmatched"]),
+        "ambiguous": len(result.get("ambiguous", [])),
         "created": created,
         "updated": updated,
         "auto_created_clients": auto_created_clients,
+        "codes_backfilled": codes_backfilled,
+        "backfill_errors": backfill_errors,
         "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],
+        "ambiguous_summaries": [
+            {
+                "summary": e["summary"],
+                "date": e["date"].isoformat() if e.get("date") else None,
+                "candidates": e.get("ambiguous_candidates", []),
+            }
+            for e in result.get("ambiguous", [])[:20]
+        ],
+    }
+
+
+@router.post("/sync/backfill-alias-codes")
+def backfill_alias_codes(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+    months_back: int = Query(24, description="How far back to walk the calendar"),
+    months_forward: int = Query(3),
+    dry_run: bool = Query(False, description="Preview what would be patched without touching Calendar"),
+):
+    """
+    One-shot housekeeping: walk the calendar, and for every event whose
+    summary maps unambiguously to a CRM client, rewrite the summary to
+    "Name #alias_code" so future syncs never have to guess. Leaves ambiguous
+    and unmatched events alone — the report lists them for manual review.
+    """
+    from app.services.crm_calendar import sync_from_calendar as _sync, patch_event_summary
+
+    calendar_id = get_crm_calendar_id(current_user)
+    if not calendar_id:
+        raise HTTPException(400, "Google Calendar not configured. Set calendar_id in /crm/settings.")
+
+    uid = str(current_user.id)
+    clients = session.exec(
+        select(TherapistClient).where(TherapistClient.specialist_id == uid)
+    ).all()
+
+    try:
+        result = _sync(
+            calendar_id=calendar_id,
+            clients=clients,
+            months_back=months_back,
+            months_forward=months_forward,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Google Calendar error: {e}")
+
+    would_patch = []
+    already_coded = 0
+    recurring_skipped = 0
+
+    for entry in result["matched"]:
+        if entry.get("has_alias_code"):
+            already_coded += 1
+            continue
+        if entry.get("is_recurring"):
+            recurring_skipped += 1
+            continue
+        if not entry.get("suggested_summary"):
+            continue
+        would_patch.append({
+            "event_id": entry["google_event_id"],
+            "date": entry["date"].isoformat() if entry.get("date") else None,
+            "from": entry["summary"],
+            "to": entry["suggested_summary"],
+        })
+
+    patched = 0
+    failed = []
+    if not dry_run:
+        import logging
+        _log = logging.getLogger(__name__)
+        for item in would_patch:
+            try:
+                patch_event_summary(calendar_id, item["event_id"], item["to"])
+                patched += 1
+            except Exception as e:
+                _log.warning(f"[backfill] {item['event_id']}: {e}")
+                failed.append({**item, "error": str(e)})
+
+    return {
+        "dry_run": dry_run,
+        "total_events": result["total"],
+        "already_had_codes": already_coded,
+        "recurring_skipped": recurring_skipped,
+        "would_patch": len(would_patch),
+        "patched": patched,
+        "failed": len(failed),
+        "sample_to_patch": would_patch[:20],
+        "failures": failed[:20],
+        "ambiguous_count": len(result.get("ambiguous", [])),
+        "ambiguous_sample": [
+            {
+                "summary": e["summary"],
+                "date": e["date"].isoformat() if e.get("date") else None,
+                "candidates": e.get("ambiguous_candidates", []),
+            }
+            for e in result.get("ambiguous", [])[:20]
+        ],
+        "unmatched_count": len(result["unmatched"]),
+        "unmatched_sample": [e["summary"] for e in result["unmatched"][:20]],
     }
 
 
