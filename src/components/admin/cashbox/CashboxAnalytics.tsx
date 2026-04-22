@@ -23,9 +23,9 @@ export function CashboxAnalytics() {
             <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-unbox-light/50 shadow-sm">
                 <h3 className="font-bold text-lg mb-1 text-unbox-dark">Динамика кассы</h3>
                 <p className="text-xs text-gray-500 mb-6">
-                    Приход: <span className="font-medium text-green-700">{totalIncome.toFixed(2)} ₾</span>
+                    Приход: <span className="font-medium text-green-700">{Number(totalIncome ?? 0).toFixed(2)} ₾</span>
                     {' / '}
-                    Расход: <span className="font-medium text-red-600">{totalExpense.toFixed(2)} ₾</span>
+                    Расход: <span className="font-medium text-red-600">{Number(totalExpense ?? 0).toFixed(2)} ₾</span>
                 </p>
                 <div className="h-72 w-full">
                     <ResponsiveContainer width="100%" height="100%">

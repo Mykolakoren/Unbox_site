@@ -13,8 +13,10 @@ import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPl
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
+import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { CrmClient } from '../../api/crm';
+import { ChessboardScroller } from '../ui/ChessboardScroller';
 
 // ─── Time Slots: 09:00 – 21:00 (30-min steps) ───────────────────────────────
 const TIME_SLOTS: string[] = (() => {
@@ -61,8 +63,8 @@ function CrmQuickBookModal({
     const [price, setPrice] = useState('');
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
-    const [isRecurring, setIsRecurring] = useState(false);
-    const [recurringWeeks, setRecurringWeeks] = useState(12);
+    const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
+    const [recurringOccurrences, setRecurringOccurrences] = useState(12);
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
     const endTime = (() => {
@@ -91,7 +93,7 @@ function CrmQuickBookModal({
     const handleBook = async () => {
         setSaving(true);
         try {
-            if (isRecurring) {
+            if (recurringPattern) {
                 const result = await bookingsApi.createRecurringBooking({
                     resourceId: slot.resId,
                     locationId: resource?.locationId || 'unbox_one',
@@ -100,10 +102,12 @@ function CrmQuickBookModal({
                     format: resource?.formats?.[0] || 'individual',
                     paymentMethod: 'balance',
                     firstDate: dateStr,
-                    weeks: recurringWeeks,
+                    occurrences: recurringOccurrences,
+                    pattern: recurringPattern,
                     crmClientId: selectedClientId || undefined,
                 });
-                toast.success(`Создано ${result.created} бронирований`);
+                const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+                toast.success(`Серия создана: ${result.created} бронирований (${patternLabel})`);
                 await useUserStore.getState().fetchBookings();
                 onClose();
                 return;
@@ -269,21 +273,51 @@ function CrmQuickBookModal({
                     </div>
                 </div>
 
-                {/* Recurring */}
+                {/* Recurring pattern */}
                 <div className="px-5 space-y-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="rounded" />
-                        <span className="text-sm font-medium text-unbox-dark">Повторять каждую неделю</span>
-                    </label>
-                    {isRecurring && (
-                        <div className="flex items-center gap-2 pl-6">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Повторение</div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {([
+                            { id: '', label: 'Разово' },
+                            { id: 'weekly', label: 'Кажд. неделю' },
+                            { id: 'biweekly', label: 'Раз в 2 нед.' },
+                            { id: 'monthly', label: 'Ежемесячно' },
+                        ] as const).map(p => (
+                            <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => setRecurringPattern(p.id)}
+                                className={clsx(
+                                    'py-1.5 rounded-lg border text-xs font-medium transition-colors text-center',
+                                    recurringPattern === p.id
+                                        ? 'bg-unbox-green text-white border-unbox-green'
+                                        : 'border-gray-200 text-gray-600 hover:border-unbox-green hover:text-unbox-green'
+                                )}
+                            >
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
+                    {recurringPattern && (
+                        <div className="flex items-center gap-2 pt-1">
                             <input
-                                type="number" value={recurringWeeks}
-                                onChange={e => setRecurringWeeks(Math.max(2, Math.min(52, Number(e.target.value))))}
-                                min={2} max={52}
+                                type="number"
+                                value={recurringOccurrences}
+                                onChange={e => {
+                                    const max = recurringPattern === 'monthly' ? 24 : 52;
+                                    setRecurringOccurrences(Math.max(2, Math.min(max, Number(e.target.value))));
+                                }}
+                                min={2}
+                                max={recurringPattern === 'monthly' ? 24 : 52}
                                 className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
                             />
-                            <span className="text-xs text-unbox-grey">недель (≈ {Math.round(recurringWeeks / 4.3)} мес.)</span>
+                            <span className="text-xs text-gray-500">
+                                повторений · {recurringPattern === 'monthly'
+                                    ? `≈ ${recurringOccurrences} мес.`
+                                    : recurringPattern === 'biweekly'
+                                        ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
+                                        : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
+                            </span>
                         </div>
                     )}
                 </div>
@@ -299,7 +333,7 @@ function CrmQuickBookModal({
                         className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        {isRecurring ? `Создать ${recurringWeeks} броней` : selectedClientId ? 'Забронировать + сессия' : 'Забронировать'}
+                        {recurringPattern ? `Создать серию · ${recurringOccurrences} броней` : selectedClientId ? 'Забронировать + сессия' : 'Забронировать'}
                     </button>
                 </div>
             </div>
@@ -863,6 +897,278 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
     const SLOT_W = 48; // px per 30-min slot
 
+    // ── Mobile detection ──
+    const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const handler = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+    }, []);
+
+    const [mobileResIdx, setMobileResIdx] = useState(0);
+    const mobileRes = filteredResources[mobileResIdx] || filteredResources[0];
+
+    // Mobile tap: tap full-hour = select pair (XX:00 + XX:30), tap individual = extend/toggle
+    const handleMobileTap = (resId: string, time: string, _isHourTap: boolean) => {
+        if (isSlotOccupied(resId, time)) return;
+        const slotIdx = TIME_SLOTS.indexOf(time);
+
+        // If tapping an already-selected slot, deselect all
+        if (newSlots.includes(`${resId}|${time}`)) {
+            setNewSlots([]);
+            return;
+        }
+
+        // If we already have a block, extend it — always +1 slot at a time
+        if (selectedBlock && selectedBlock.resId === resId) {
+            const newStart = Math.min(selectedBlock.start, slotIdx);
+            const newEnd = Math.max(selectedBlock.end, slotIdx);
+            const slots: string[] = [];
+            for (let i = newStart; i <= newEnd; i++) {
+                if (isSlotOccupied(resId, TIME_SLOTS[i])) return;
+                slots.push(TIME_SLOTS[i]);
+            }
+            setNewSlotRange(resId, slots);
+        } else {
+            // First selection — ALWAYS auto-select pair (1h minimum)
+            const pairStart = slotIdx % 2 === 0 ? slotIdx : slotIdx - 1;
+            const pairEnd = pairStart + 1;
+            if (pairEnd >= TIME_SLOTS.length) return;
+            const slots: string[] = [];
+            for (let i = pairStart; i <= pairEnd; i++) {
+                if (isSlotOccupied(resId, TIME_SLOTS[i])) return;
+                slots.push(TIME_SLOTS[i]);
+            }
+            setNewSlotRange(resId, slots);
+        }
+    };
+
+    // Group TIME_SLOTS into hour-pairs for mobile grid: [[09:00, 09:30], [10:00, 10:30], ...]
+    const mobileHourPairs = useMemo(() => {
+        const pairs: [string, string | null][] = [];
+        for (let i = 0; i < TIME_SLOTS.length; i += 2) {
+            pairs.push([TIME_SLOTS[i], TIME_SLOTS[i + 1] ?? null]);
+        }
+        return pairs;
+    }, []);
+
+    // ── Shared controls (used in both mobile and desktop) ──
+    const weekNav = (
+        <div className="flex items-center gap-2">
+            <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-medium min-w-[100px] md:min-w-[160px] text-center">
+                {format(weekStart, 'd MMM', { locale: ru })} – {format(endOfWeek(weekStart, { weekStartsOn: 1 }), 'd MMM', { locale: ru })}
+            </span>
+            <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                <ChevronRight size={16} />
+            </button>
+        </div>
+    );
+
+    const daySelector = (
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+            {weekDays.map(day => {
+                const active = isSameDay(day, selectedDate);
+                const today = isToday(day);
+                return (
+                    <button
+                        key={day.toISOString()}
+                        onClick={() => setSelectedDate(day)}
+                        className={clsx(
+                            'flex flex-col items-center px-2.5 md:px-3 py-2 rounded-xl min-w-[44px] md:min-w-[52px] text-sm transition-colors border',
+                            active
+                                ? 'bg-unbox-green text-white border-unbox-green'
+                                : today
+                                    ? 'border-unbox-green text-unbox-green hover:bg-unbox-light/30'
+                                    : 'border-transparent text-gray-500 hover:bg-gray-50'
+                        )}
+                    >
+                        <span className="text-[10px] uppercase font-semibold opacity-70">
+                            {format(day, 'EEEEEE', { locale: ru })}
+                        </span>
+                        <span className="font-bold text-base leading-none">{format(day, 'd')}</span>
+                    </button>
+                );
+            })}
+        </div>
+    );
+
+    const selectedBar = newSlots.length > 0 && selectedBlock ? (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-unbox-green/10 border border-unbox-green/30 rounded-xl px-3 sm:px-4 py-2.5">
+            <span className="text-sm font-medium text-unbox-dark">
+                {RESOURCES.find(r => r.id === selectedBlock.resId)?.name} · {TIME_SLOTS[selectedBlock.start]} – {TIME_SLOTS[selectedBlock.end + 1] ?? '21:00'} ({(selectedBlock.end - selectedBlock.start + 1) * 30} мин)
+            </span>
+            <div className="flex gap-2 w-full sm:w-auto">
+                <button onClick={() => setNewSlots([])} className="flex-1 sm:flex-initial px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+                    Сбросить
+                </button>
+                <button onClick={handleContinue} className="flex-1 sm:flex-initial px-3 py-1.5 text-sm rounded-lg bg-unbox-green text-white hover:bg-unbox-dark font-semibold">
+                    Забронировать →
+                </button>
+            </div>
+        </div>
+    ) : null;
+
+    // ── MOBILE VIEW ──
+    if (isMobile) {
+        // Build a lookup for booking cells by slot
+        const mobileCells = mobileRes ? (rowCellsMap.get(mobileRes.id) ?? []) : [];
+        const bookingBySlot = new Map<string, CellInfo>();
+        mobileCells.forEach(c => { if (c.type === 'booking') bookingBySlot.set(c.slot, c); });
+        // Track which slots are "consumed" by a multi-slot booking so we skip them
+        const consumedSlots = new Set<string>();
+        mobileCells.forEach(c => {
+            if (c.type === 'booking') {
+                const startIdx = TIME_SLOTS.indexOf(c.slot);
+                for (let i = 1; i < c.colspan; i++) consumedSlots.add(TIME_SLOTS[startIdx + i]);
+            }
+        });
+
+        // Render a single mobile slot cell
+        const renderMobileSlot = (slot: string | null, isHourCol: boolean) => {
+            if (!slot || !mobileRes) return <div className="flex-1" />;
+
+            // If consumed by a booking that started earlier, skip
+            if (consumedSlots.has(slot)) return null;
+
+            const bookingCell = bookingBySlot.get(slot);
+            if (bookingCell && bookingCell.type === 'booking') {
+                const { booking, isMine, colspan } = bookingCell;
+                const linkedSessions = sessionsByBookingId.get(booking.id) || [];
+                const firstSession = linkedSessions[0];
+                const linkedClient = firstSession ? clientById.get(firstSession.clientId) : undefined;
+                const endSlotIdx = TIME_SLOTS.indexOf(slot) + colspan;
+                const endTime = endSlotIdx < TIME_SLOTS.length ? TIME_SLOTS[endSlotIdx] : '21:00';
+                // For multi-slot bookings that span to the next column, we'll handle via colspan spanning
+                return (
+                    <button
+                        onClick={isMine ? () => setLinkBooking(booking) : undefined}
+                        className={clsx(
+                            'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px]',
+                            isMine
+                                ? 'bg-unbox-green/10 border border-unbox-green/30 text-unbox-dark'
+                                : 'bg-gray-100 border border-gray-200 text-gray-400'
+                        )}
+                    >
+                        <div className="min-w-0">
+                            <div className="text-xs font-bold tabular-nums">{slot}–{endTime}</div>
+                            <div className="text-[10px] truncate">
+                                {isMine
+                                    ? (linkedSessions.length > 1
+                                        ? `${linkedSessions.length} клиента`
+                                        : linkedClient?.name || 'Привязать клиента')
+                                    : (booking.userId?.split('@')[0] || 'Занято')
+                                }
+                            </div>
+                        </div>
+                        {isMine && <UserPlus size={12} className="text-unbox-green shrink-0" />}
+                    </button>
+                );
+            }
+
+            // Free slot
+            const past = (() => {
+                const cell = mobileCells.find(c => c.slot === slot);
+                return cell?.type === 'free' ? cell.past : false;
+            })();
+            const selected = isNewSlotSelected(mobileRes.id, slot);
+
+            return (
+                <button
+                    onClick={() => !past && handleMobileTap(mobileRes.id, slot, isHourCol)}
+                    disabled={past}
+                    className={clsx(
+                        'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all min-h-[48px]',
+                        past
+                            ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                            : selected
+                                ? 'bg-unbox-green text-white shadow-sm'
+                                : isPeakTime(slot)
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]'
+                                    : 'bg-white text-gray-700 border border-gray-100 active:scale-[0.97]'
+                    )}
+                >
+                    <span className={clsx('text-sm font-bold tabular-nums', selected ? 'text-white' : past ? 'text-gray-300' : 'text-gray-700')}>
+                        {slot}
+                    </span>
+                    {selected ? (
+                        <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                        </div>
+                    ) : !past ? (
+                        <div className="w-5 h-5 rounded-full border-2 border-gray-200" />
+                    ) : null}
+                </button>
+            );
+        };
+
+        return (
+            <div className="space-y-3">
+                {weekNav}
+                {daySelector}
+
+                {/* Resource tabs */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                    {filteredResources.map((r, idx) => (
+                        <button
+                            key={r.id}
+                            onClick={() => setMobileResIdx(idx)}
+                            className={clsx(
+                                'shrink-0 px-3 py-2 rounded-xl text-xs font-medium border transition-colors',
+                                mobileResIdx === idx
+                                    ? 'bg-unbox-green text-white border-unbox-green'
+                                    : 'bg-white text-gray-500 border-gray-200'
+                            )}
+                        >
+                            {r.name}
+                        </button>
+                    ))}
+                </div>
+
+                {selectedBar}
+
+                {/* 2-column time grid */}
+                <div className="rounded-2xl bg-white border border-gray-100 p-2 space-y-1">
+                    {mobileHourPairs.map(([left, right]) => {
+                        const leftRendered = renderMobileSlot(left, true);
+                        const rightRendered = right ? renderMobileSlot(right, false) : <div className="flex-1" />;
+                        // If both are null (consumed by booking), skip row
+                        if (!leftRendered && !rightRendered) return null;
+                        return (
+                            <div key={left} className="flex gap-1.5">
+                                {leftRendered || <div className="flex-1" />}
+                                {rightRendered}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Modals */}
+                {bookSlot && (
+                    <CrmQuickBookModal
+                        slot={bookSlot}
+                        crmClients={clients}
+                        onClose={() => setBookSlot(null)}
+                        onBooked={handleBooked}
+                    />
+                )}
+                {linkBooking && (
+                    <LinkBookingModal
+                        booking={linkBooking}
+                        crmClients={clients}
+                        existingSessions={sessionsByBookingId.get(linkBooking.id)?.map(s => ({ id: s.id, clientId: s.clientId, date: s.date, durationMinutes: s.durationMinutes })) || []}
+                        onClose={() => setLinkBooking(null)}
+                        onSaveMulti={(assignments) => handleMultiSlotSave(linkBooking, assignments)}
+                    />
+                )}
+            </div>
+        );
+    }
+
+    // ── DESKTOP VIEW ──
+
     return (
         <div className="space-y-4" onPointerUp={handleDragUp}>
             {/* Controls */}
@@ -885,75 +1191,15 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     ))}
                 </div>
 
-                {/* Week navigation */}
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setWeekStart(subWeeks(weekStart, 1))}
-                        className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                    >
-                        <ChevronLeft size={16} />
-                    </button>
-                    <span className="text-sm font-medium min-w-[160px] text-center">
-                        {format(weekStart, 'd MMM', { locale: ru })}
-                        {' – '}
-                        {format(endOfWeek(weekStart, { weekStartsOn: 1 }), 'd MMM yyyy', { locale: ru })}
-                    </span>
-                    <button
-                        onClick={() => setWeekStart(addWeeks(weekStart, 1))}
-                        className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                    >
-                        <ChevronRight size={16} />
-                    </button>
-                </div>
+                {weekNav}
             </div>
 
-            {/* Day selector */}
-            <div className="flex gap-1 overflow-x-auto pb-1">
-                {weekDays.map(day => {
-                    const active = isSameDay(day, selectedDate);
-                    const today = isToday(day);
-                    return (
-                        <button
-                            key={day.toISOString()}
-                            onClick={() => setSelectedDate(day)}
-                            className={clsx(
-                                'flex flex-col items-center px-3 py-2 rounded-xl min-w-[52px] text-sm transition-colors border',
-                                active
-                                    ? 'bg-unbox-green text-white border-unbox-green'
-                                    : today
-                                        ? 'border-unbox-green text-unbox-green hover:bg-unbox-light/30'
-                                        : 'border-transparent text-gray-500 hover:bg-gray-50'
-                            )}
-                        >
-                            <span className="text-[10px] uppercase font-semibold opacity-70">
-                                {format(day, 'EEE', { locale: ru })}
-                            </span>
-                            <span className="font-bold text-base leading-none">{format(day, 'd')}</span>
-                        </button>
-                    );
-                })}
-            </div>
+            {daySelector}
 
-            {/* "Продолжить" bar */}
-            {newSlots.length > 0 && selectedBlock && (
-                <div className="flex items-center justify-between bg-unbox-green/10 border border-unbox-green/30 rounded-xl px-4 py-2.5">
-                    <span className="text-sm font-medium text-unbox-dark">
-                        {RESOURCES.find(r => r.id === selectedBlock.resId)?.name} ·{' '}
-                        {TIME_SLOTS[selectedBlock.start]} – {TIME_SLOTS[selectedBlock.end + 1] ?? '21:00'} ({(selectedBlock.end - selectedBlock.start + 1) * 30} мин)
-                    </span>
-                    <div className="flex gap-2">
-                        <button onClick={() => setNewSlots([])} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
-                            Сбросить
-                        </button>
-                        <button onClick={handleContinue} className="px-3 py-1.5 text-sm rounded-lg bg-unbox-green text-white hover:bg-unbox-dark font-semibold">
-                            Забронировать →
-                        </button>
-                    </div>
-                </div>
-            )}
+            {selectedBar}
 
             {/* Grid */}
-            <div className="overflow-x-auto scrollbar-visible rounded-2xl border border-gray-100 bg-white">
+            <ChessboardScroller minGridWidth={180 + TIME_SLOTS.length * SLOT_W}>
                 <table className="border-collapse" style={{ minWidth: `${180 + TIME_SLOTS.length * SLOT_W}px` }}>
                     <thead>
                         <tr>
@@ -963,7 +1209,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             {TIME_SLOTS.map((slot, i) => (
                                 <th
                                     key={slot}
-                                    className="border-b border-gray-50 text-[10px] text-gray-400 font-normal py-1 text-center"
+                                    className={clsx(
+                                        "border-b border-gray-50 text-[10px] font-normal py-1 text-center",
+                                        isPeakTime(slot) ? "text-amber-500 bg-amber-50/30" : "text-gray-400"
+                                    )}
                                     style={{ width: SLOT_W, minWidth: SLOT_W }}
                                 >
                                     {i % 2 === 0 ? slot : ''}
@@ -1087,7 +1336,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                         ? 'bg-gray-50 cursor-not-allowed'
                                                         : isSelected
                                                             ? 'bg-unbox-green/20 cursor-pointer'
-                                                            : 'hover:bg-unbox-light/40 cursor-pointer'
+                                                            : isPeakTime(slot)
+                                                                ? 'bg-amber-50/50 hover:bg-amber-100/40 cursor-pointer'
+                                                                : 'hover:bg-unbox-light/40 cursor-pointer'
                                                 )}
                                                 style={{ width: SLOT_W, minWidth: SLOT_W, height: 40 }}
                                             >
@@ -1102,7 +1353,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         })}
                     </tbody>
                 </table>
-            </div>
+            </ChessboardScroller>
 
             {/* Legend */}
             <div className="flex gap-4 text-xs text-gray-500">

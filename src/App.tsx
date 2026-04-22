@@ -8,6 +8,7 @@ import { OptionsStep } from './components/Wizard/OptionsStep';
 import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 // Store
 import { useBookingStore } from './store/bookingStore';
+import { useUserStore } from './store/userStore';
 
 // Public pages (loaded eagerly — critical path)
 import { ExplorePage } from './pages/ExplorePage';
@@ -49,12 +50,49 @@ const CrmFinances = lazy(() => import('./pages/crm/CrmFinances').then(m => ({ de
 const CrmNotes = lazy(() => import('./pages/crm/CrmNotes').then(m => ({ default: m.CrmNotes })));
 const CrmSchedule = lazy(() => import('./pages/crm/CrmSchedule').then(m => ({ default: m.CrmSchedule })));
 const CrmSettings = lazy(() => import('./pages/crm/CrmSettings').then(m => ({ default: m.CrmSettings })));
+const CrmProfile = lazy(() => import('./pages/crm/CrmProfile').then(m => ({ default: m.CrmProfile })));
 
-import { glassPanel, glassSummary } from './utils/styles';
+import { GH, GH_SANS } from './hooks/useDesignFlag';
 
 // Booking Flow Wrapper
 function BookingWizard() {
-  const { step, editBookingId, reset } = useBookingStore();
+  const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
+  const selectedSlots = useBookingStore(s => s.selectedSlots);
+  const users = useUserStore(s => s.users);
+
+  // Excel #73 — warn before leaving an in-progress booking.
+  // Browser-native confirm via beforeunload covers: tab close, page reload,
+  // external navigation (typing a new URL). For internal React Router
+  // navigation we rely on the fact that most exit points in the wizard are
+  // explicit buttons — they reset the store themselves. Having the full
+  // useBlocker solution would need upgrading to a data router; beforeunload
+  // already catches the real "oh no I closed the tab" case.
+  useEffect(() => {
+    const hasUnsavedWork = selectedSlots.length > 0 && step >= 2 && !editBookingId;
+    if (!hasUnsavedWork) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Chrome/Edge require setting returnValue explicitly. Modern browsers
+      // ignore the custom string and show their own generic prompt.
+      e.returnValue = 'Вы не завершили процесс бронирования. Уйти со страницы?';
+      return e.returnValue;
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [selectedSlots.length, step, editBookingId]);
+
+  // Resolve friendly name for the "booking-for" admin-proxy banner
+  const proxyUser = bookingForUser
+    ? users.find(u => u.email === bookingForUser || u.id === bookingForUser)
+    : null;
+
+  /* GH card style */
+  const ghCard: React.CSSProperties = {
+    background: '#fff',
+    border: `1px solid ${GH.ink8}`,
+    borderRadius: 12,
+    overflow: 'hidden',
+  };
 
   return (
     <MinimalLayout glassMode fullWidth={step === 2} noPadding>
@@ -62,42 +100,97 @@ function BookingWizard() {
       {/* Edit mode banner */}
       {editBookingId && (
         <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
-          <div className="bg-amber-50/90 backdrop-blur-sm border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between">
-            <span className="font-medium">✏️ Вы редактируете существующее бронирование</span>
-            <button onClick={() => reset()} className="text-sm font-bold underline hover:no-underline">
+          <div style={{
+            background: '#FEF3C7', border: `1px solid ${GH.ink10}`, color: '#92400E',
+            padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            fontFamily: GH_SANS, fontSize: 14,
+          }}>
+            <span style={{ fontWeight: 500 }}>Вы редактируете существующее бронирование</span>
+            <button onClick={() => reset()}
+              style={{ fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}>
               Отменить редактирование
             </button>
           </div>
         </div>
       )}
 
+      {/* Admin-proxy booking banner — visible on every step so the admin
+          can't forget whose booking they're creating. Click "Сбросить" to
+          clear target and book for themselves. */}
+      {bookingForUser && (
+        <div
+          className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}
+          style={{ position: 'sticky', top: 8, zIndex: 20 }}
+        >
+          <div style={{
+            background: '#EDE9FE',
+            border: `1px solid ${GH.ink10}`,
+            color: '#5B21B6',
+            padding: '12px 16px',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            fontFamily: GH_SANS,
+            fontSize: 14,
+            boxShadow: '0 4px 12px rgba(91,33,182,0.08)',
+          }}>
+            <span>
+              <strong style={{ fontWeight: 700 }}>
+                Бронь для клиента: {proxyUser?.name || bookingForUser}
+              </strong>
+              {proxyUser?.email && proxyUser.email !== proxyUser.name && (
+                <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 13 }}>
+                  {proxyUser.email}
+                </span>
+              )}
+            </span>
+            <button
+              onClick={() => setBookingForUser(null)}
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                textDecoration: 'underline',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#5B21B6',
+              }}
+            >
+              Сбросить → бронь для себя
+            </button>
+          </div>
+        </div>
+      )}
+
       {step === 2 ? (
-        /* ── Step 2: Full-width chessboard in one big glass panel ── */
+        /* ── Step 2: Full-width chessboard ── */
         <div className="max-w-[1920px] mx-auto px-6 md:px-12">
-          <div className="rounded-[28px] overflow-hidden" style={glassPanel}>
+          <div style={ghCard}>
             <ChessboardStep />
           </div>
         </div>
       ) : (
-        /* ── Steps 3 & 4: two-column glass layout ── */
+        /* ── Steps 3 & 4: two-column layout ── */
         <div className="max-w-6xl mx-auto px-4 md:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8">
               {step === 1 && <Navigate to="/" replace />}
               {step === 3 && (
-                <div className="rounded-[28px] overflow-hidden p-8" style={glassPanel}>
+                <div style={{ ...ghCard, padding: 32 }}>
                   <OptionsStep />
                 </div>
               )}
               {step === 4 && (
-                <div className="rounded-[28px] overflow-hidden p-8" style={glassPanel}>
+                <div style={{ ...ghCard, padding: 32 }}>
                   <ConfirmationStep />
                 </div>
               )}
             </div>
             {step < 5 && (
               <div className="lg:col-span-4 hidden lg:block">
-                <div className="rounded-[28px] overflow-hidden sticky top-[148px]" style={glassSummary}>
+                <div style={{ ...ghCard, position: 'sticky' as const, top: 80 }}>
                   <Summary />
                 </div>
               </div>
@@ -110,7 +203,6 @@ function BookingWizard() {
   );
 }
 
-import { useUserStore } from './store/userStore';
 import { Toaster } from 'sonner';
 import { ModuleErrorBoundary } from './components/ui/ModuleErrorBoundary';
 
@@ -157,7 +249,7 @@ function App() {
         <Route path="/specialists/:id" element={<SpecialistProfilePage />} />
 
         {/* Subscriptions */}
-        <Route path="/subscriptions" element={<MinimalLayout glassMode><SubscriptionsPage /></MinimalLayout>} />
+        <Route path="/subscriptions" element={<SubscriptionsPage />} />
 
         {/* Self-assessment tests */}
         <Route path="/tests/:testId" element={<TestPage />} />
@@ -167,6 +259,10 @@ function App() {
 
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Short-link aliases (used by TG bot, emails, external links) */}
+        <Route path="/profile" element={<Navigate to="/dashboard/profile" replace />} />
+        <Route path="/bookings" element={<Navigate to="/dashboard/bookings" replace />} />
 
         {/* Dashboard */}
         <Route path="/dashboard" element={<DashboardLayout />}>
@@ -186,6 +282,7 @@ function App() {
           <Route path="notes" element={<CrmNotes />} />
           <Route path="schedule" element={<CrmSchedule />} />
           <Route path="settings" element={<CrmSettings />} />
+          <Route path="profile" element={<CrmProfile />} />
         </Route>
 
         <Route path="/admin" element={<ModuleErrorBoundary moduleName="Админ-панель"><AdminLayout /></ModuleErrorBoundary>}>

@@ -22,6 +22,7 @@ class UserBase(SQLModel):
     admin_tasks: List[dict] = Field(default_factory=list, sa_column=Column(JSON)) # Frontend: adminTasks
     comment_history: List[dict] = Field(default_factory=list, sa_column=Column(JSON)) # Frontend: commentHistory
     discount_history: List[dict] = Field(default_factory=list, sa_column=Column(JSON)) # Frontend: discountHistory
+    additional_contacts: List[dict] = Field(default_factory=list, sa_column=Column(JSON)) # Frontend: additionalContacts — [{type, value}]
     crm_data: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSON))
 
     
@@ -41,7 +42,18 @@ class UserBase(SQLModel):
     # OAuth
     google_id: Optional[str] = Field(default=None, index=True)
     telegram_id: Optional[str] = Field(default=None, index=True)
+    telegram_link_token: Optional[str] = Field(default=None, index=True)  # one-time /start token
+    telegram_link_token_expires_at: Optional[datetime] = None
     avatar_url: Optional[str] = None
+
+    # Excel #11 — soft delete. `archived_at` set = user is archived:
+    #   - can't log in (checked in auth endpoints)
+    #   - hidden from user lists by default
+    #   - history (bookings/payments/bonuses) preserved for reporting
+    # Only `owner` can hard-delete (via SQL); UI offers only archive/unarchive.
+    archived_at: Optional[datetime] = Field(default=None, index=True)
+    archived_by_id: Optional[str] = Field(default=None)
+    archived_reason: Optional[str] = Field(default=None)
 
 class User(UserBase, table=True):
     __tablename__ = "user" # type: ignore
@@ -64,6 +76,7 @@ class UserUpdate(SQLModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
+    telegram_id: Optional[str] = None  # @username or numeric chat_id
     
     # User settable? Or Admin only?
     # Let's start with basic profile fields.
@@ -80,6 +93,7 @@ class UserUpdateAdmin(UserUpdate):
     crm_data: Optional[dict] = None
     admin_tasks: Optional[List[dict]] = None
     comment_history: Optional[List[dict]] = None
+    additional_contacts: Optional[List[dict]] = None
     manual_status: Optional[str] = None
     responsible_admin_id: Optional[str] = None
     attracted_by_admin_id: Optional[str] = None

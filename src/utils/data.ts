@@ -73,12 +73,13 @@ export const RESOURCES: Resource[] = [
         id: 'unbox_uni_room_7',
         name: 'Кабинет 7',
         type: 'cabinet',
-        hourlyRate: 30,
+        hourlyRate: 20,
+        groupRate: 35,
         capacity: 20,
         locationId: 'unbox_uni',
         area: 25,
         minBookingHours: 1,
-        formats: ['individual', 'group'],
+        formats: ['individual', 'group', 'intervision'],
         description: 'Большой групповой кабинет для тренингов, лекций, супервизий и мероприятий. Флипчарт, проектор, маркерная доска.',
         photos: ['/img/offices/cabinet_7_liza.webp'],
         services: ['flipchart', 'projector', 'whiteboard', 'climate_control', 'wifi', 'natural_light'],
@@ -88,12 +89,13 @@ export const RESOURCES: Resource[] = [
         id: 'unbox_uni_room_8',
         name: 'Кабинет 8',
         type: 'cabinet',
-        hourlyRate: 30,
+        hourlyRate: 20,
+        groupRate: 35,
         capacity: 20,
         locationId: 'unbox_uni',
         area: 20,
         minBookingHours: 1,
-        formats: ['individual', 'group'],
+        formats: ['individual', 'group', 'intervision'],
         description: 'Просторный групповой кабинет для групповой терапии, воркшопов и обучения. Современное оснащение.',
         photos: ['/img/offices/cabinet_8_liza.webp'],
         services: ['flipchart', 'whiteboard', 'climate_control', 'wifi'],
@@ -104,11 +106,12 @@ export const RESOURCES: Resource[] = [
         name: 'Кабинет 9',
         type: 'cabinet',
         hourlyRate: 20,
+        groupRate: 35,
         capacity: 10,
         locationId: 'unbox_uni',
         area: 16,
         minBookingHours: 1,
-        formats: ['individual', 'group'],
+        formats: ['individual', 'group', 'intervision'],
         description: 'Уютный кабинет для индивидуальной и групповой работы. Отдельный вход, кондиционер.',
         services: ['private_entrance', 'couch', 'climate_control', 'wifi'],
         sortOrder: 7,
@@ -161,14 +164,16 @@ export const CABINET_SERVICES: { id: string; label: string; emoji: string }[] = 
     { id: 'wifi',            label: 'Wi-Fi',               emoji: '📶' },
 ];
 
-export const EXTRAS: ExtraOption[] = [
+/** Extras — fallback, fetched from API at runtime */
+export let EXTRAS: ExtraOption[] = [
     { id: 'sandbox', name: 'Песочница', price: 15 },
     { id: 'sandbox_toys', name: 'Игрушки для песочной терапии', price: 10 },
     { id: 'flipchart', name: 'Флипчарт', price: 10 },
     { id: 'projector', name: 'Проектор', price: 20 },
 ];
 
-export const SUBSCRIPTION_PLANS = [
+/** Subscription plans — fallback, fetched from API at runtime */
+export let SUBSCRIPTION_PLANS = [
     {
         id: 'WARM_START',
         name: 'Тёплый старт',
@@ -196,7 +201,7 @@ export const SUBSCRIPTION_PLANS = [
         price: 640,
         durationDays: 45,
         discountPercent: 20,
-        formats: ['individual', 'group'],
+        formats: ['individual', 'group', 'intervision'],
         perks: ['Приоритет', 'Внеурочный доступ', 'Рекомендация']
     },
     {
@@ -210,3 +215,26 @@ export const SUBSCRIPTION_PLANS = [
         perks: ['Анонс по базе']
     },
 ];
+
+/** Fetch extras and subscription plans from backend */
+import { api } from '../api/client';
+
+export async function fetchAppSettings(): Promise<void> {
+    try {
+        const [extrasRes, plansRes] = await Promise.allSettled([
+            api.get('/settings/extras'),
+            api.get('/settings/subscription_plans'),
+        ]);
+        if (extrasRes.status === 'fulfilled' && Array.isArray(extrasRes.value.data)) {
+            EXTRAS = extrasRes.value.data;
+        }
+        if (plansRes.status === 'fulfilled' && Array.isArray(plansRes.value.data)) {
+            SUBSCRIPTION_PLANS = plansRes.value.data;
+        }
+    } catch {
+        // Use hardcoded fallbacks
+    }
+}
+
+// Auto-fetch on module load (non-blocking)
+fetchAppSettings();

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import type { BookingState, Format, PricingResult, GroupSize } from '../types';
 import { resourcesApi } from '../api/resources';
 import { pricingApi } from '../api/pricing';
@@ -30,10 +31,21 @@ export interface BookingStore extends BookingState {
     toggleExtra: (extraId: string) => void;
     toggleSlot: (resourceId: string, time: string) => void;
     setSlotRange: (resourceId: string, timeSlots: string[]) => void;
+    /** Excel #24 — append a disconnected range to the same resource. */
+    addSlotRange: (resourceId: string, timeSlots: string[]) => void;
     replaceSlots: (newSlots: string[]) => void;
     clearCart: () => void;
     setPaymentMethod: (method: 'balance' | 'subscription' | 'bonus') => void;
     selectedSlots: string[]; // "resId|time"
+
+    // Excel #24 — when the user clicks "+ Ещё период в этом кабинете" in
+    // Summary, we remember the resource they want to append to and the slots
+    // they already selected there. On return to the chessboard, any new drag
+    // in that resource merges with the preserved slots instead of replacing.
+    pendingAddResourceId: string | null;
+    preservedResourceSlots: string[];  // slots of pendingAddResourceId captured at click time
+    startAddMoreSlots: (resourceId: string) => void;
+    clearAddMore: () => void;
 
     // Edit Mode
     editBookingId: string | null;
@@ -43,6 +55,10 @@ export interface BookingStore extends BookingState {
     startEditing: (booking: BookingState & { id: string }, mode?: 'edit' | 'reschedule') => void;
     setBookingForUser: (userId: string | null) => void;
     reset: () => void;
+
+    // Highlighted resource (for visual emphasis on chessboard)
+    highlightedResourceId: string | null;
+    setHighlightedResourceId: (id: string | null) => void;
 
     // Computed
     price: PricingResult;
@@ -70,15 +86,22 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     resources: RESOURCES, // Initial static data
     locations: [],
     quote: null,
+    highlightedResourceId: null,
 
     fetchResources: async () => {
         try {
             const data = await resourcesApi.getAll();
-            // Sort by sort_order (backend may already sort, but ensure consistent order)
+            // Merge photos from static data if API doesn't return them
+            const staticMap = new Map(RESOURCES.map(r => [r.id, r]));
+            for (const r of data) {
+                if ((!r.photos || r.photos.length === 0) && staticMap.has(r.id)) {
+                    r.photos = staticMap.get(r.id)!.photos;
+                }
+            }
             data.sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
             set({ resources: data });
         } catch (error) {
-            console.error("Failed to fetch resources:", error);
+            toast.error('Не удалось загрузить кабинеты');
         }
     },
     fetchLocations: async () => {
@@ -86,27 +109,48 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
             const data = await locationsApi.getLocations();
             set({ locations: data });
         } catch (error) {
-            console.error("Failed to fetch locations:", error);
+            toast.error('Не удалось загрузить локации');
         }
     },
     editBookingId: null,
     mode: 'create',
     bookingForUser: null,
 
-    startEditing: (booking: BookingState & { id: string }, mode = 'edit') => set({
-        step: 1,
-        locationId: booking.locationId,
-        resourceId: booking.resourceId,
-        format: booking.format,
-        groupSize: booking.groupSize || null,
-        date: new Date(booking.date),
-        startTime: booking.startTime,
-        duration: booking.duration,
-        selectedSlots: [],
-        extras: booking.extras,
-        editBookingId: booking.id,
-        mode: mode as any
-    }),
+    startEditing: (booking: BookingState & { id: string }, mode = 'edit') => {
+        // Excel #27 fix: pre-populate selectedSlots from the existing booking
+        // so that ConfirmationStep's cart isn't empty if the user doesn't
+        // re-click slots. Covers the common reschedule path where the admin
+        // just wants to move a single booking to a new time.
+        const slots: string[] = [];
+        try {
+            const [h, m] = (booking.startTime || '').split(':').map(Number);
+            if (!Number.isNaN(h) && !Number.isNaN(m) && booking.duration > 0 && booking.resourceId) {
+                const startMinutes = h * 60 + m;
+                for (let offset = 0; offset < booking.duration; offset += 30) {
+                    const sm = startMinutes + offset;
+                    const hh = Math.floor(sm / 60);
+                    const mm = sm % 60;
+                    slots.push(`${booking.resourceId}|${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`);
+                }
+            }
+        } catch {
+            // Defensive: fall through to empty slots.
+        }
+        return set({
+            step: 1,
+            locationId: booking.locationId,
+            resourceId: booking.resourceId,
+            format: booking.format,
+            groupSize: booking.groupSize || null,
+            date: new Date(booking.date),
+            startTime: booking.startTime,
+            duration: booking.duration,
+            selectedSlots: slots,
+            extras: booking.extras,
+            editBookingId: booking.id,
+            mode: mode as any,
+        });
+    },
 
     price: {
         basePrice: 0,
@@ -114,6 +158,9 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         discountAmount: 0,
         discountType: 'none',
         finalPrice: 0,
+        peakSurcharge: 0,
+        peakSlotCount: 0,
+        subscriptionPeakDebt: 0,
     },
 
     setStep: (step) => set({ step }),
@@ -134,6 +181,7 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         set({ resourceId });
         get().fetchQuote();
     },
+    setHighlightedResourceId: (id) => set({ highlightedResourceId: id }),
 
     setFormat: (format) => {
         set({ format, groupSize: format === 'individual' ? null : get().groupSize });
@@ -175,6 +223,36 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         return { selectedSlots: [...otherSlots, ...newSlots] };
     }),
 
+    // Excel #24 — add a second independent block to the same resource without
+    // wiping the first. Used when the user already has a range in this
+    // resource and clicks "+ Ещё период" to pick an adjacent-but-not-touching
+    // interval (e.g. 10:00-12:00 AND 15:00-17:00 in cabinet #3).
+    addSlotRange: (resourceId, timeSlots) => set((state) => {
+        const existing = new Set(state.selectedSlots);
+        const additions = timeSlots
+            .map(time => `${resourceId}|${time}`)
+            .filter(id => !existing.has(id));
+        return { selectedSlots: [...state.selectedSlots, ...additions] };
+    }),
+
+    pendingAddResourceId: null,
+    preservedResourceSlots: [],
+
+    startAddMoreSlots: (resourceId) => set((state) => {
+        // Snapshot current slots for the target resource so a subsequent drag
+        // in the chessboard can merge rather than replace.
+        const preserved = state.selectedSlots.filter(s => s.startsWith(`${resourceId}|`));
+        return {
+            pendingAddResourceId: resourceId,
+            preservedResourceSlots: preserved,
+        };
+    }),
+
+    clearAddMore: () => set({
+        pendingAddResourceId: null,
+        preservedResourceSlots: [],
+    }),
+
     replaceSlots: (newSlots) => set({ selectedSlots: newSlots }),
 
     clearCart: () => set({ selectedSlots: [], quote: null }),
@@ -197,7 +275,11 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         get().fetchQuote();
     },
 
-    reset: () => set({ ...INITIAL_STATE, editBookingId: null, mode: 'create', bookingForUser: null, quote: null }),
+    reset: () => set({
+        ...INITIAL_STATE,
+        editBookingId: null, mode: 'create', bookingForUser: null, quote: null,
+        pendingAddResourceId: null, preservedResourceSlots: [],
+    }),
 
     fetchQuote: async () => {
         const { resourceId, date, startTime, duration, format } = get();
@@ -232,11 +314,14 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
                     extrasPrice: extrasCost,
                     discountAmount: quote.discountAmount,
                     discountType: quote.appliedRule as any,
-                    finalPrice: quote.finalPrice + extrasCost
+                    finalPrice: quote.finalPrice + extrasCost,
+                    peakSurcharge: quote.peakSurcharge ?? 0,
+                    peakSlotCount: quote.peakSlotCount ?? 0,
+                    subscriptionPeakDebt: quote.subscriptionPeakDebt ?? 0,
                 }
             });
         } catch (error) {
-            console.error("Failed to fetch quote:", error);
+            // Silent for quote — user sees empty price, no need to spam toast
             set({ quote: null });
         }
     },

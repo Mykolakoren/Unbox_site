@@ -56,6 +56,11 @@ class Booking(BookingBase, table=True):
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
 
+    # Excel #58 — when a T-minus-2h reminder was sent via Telegram. NULL = not
+    # yet sent. The reminder scheduler skips bookings where this column is
+    # populated so we never double-notify.
+    reminder_sent_at: Optional[datetime] = Field(default=None, index=True)
+
 class BookingCreate(BookingBase):
     # Override required fields from BookingBase — backend computes pricing server-side
     final_price: float = 0.0
@@ -70,3 +75,17 @@ class BookingRead(BookingBase):
     created_at: datetime
     gcal_sync_failed: bool = False
     recurring_group_id: Optional[str] = None
+
+
+class BookingPublicRead(SQLModel):
+    """Public-facing booking read — NO user PII (email, uuid)."""
+    id: UUID
+    resource_id: str
+    location_id: str
+    date: datetime
+    start_time: str
+    duration: int
+    status: str
+    format: str
+    is_re_rent_listed: bool = False
+    created_at: datetime

@@ -1,9 +1,10 @@
 """Users — admin management endpoints (list, update, freeze, discount, etc.)."""
-from typing import Any, List
+from typing import Any, List, Optional
 from datetime import datetime
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlmodel import Session, select
+from pydantic import BaseModel
 from app.api import deps
 from app.db.session import get_session
 from app.models.user import User, UserRead, UserUpdateAdmin
@@ -34,11 +35,81 @@ def read_users(
     session: Session = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
+    include_archived: bool = Query(False, description="Include soft-deleted users (Excel #11)"),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
-    """Retrieve users (Admin only)."""
-    users = session.exec(select(User).offset(skip).limit(limit)).all()
+    """Retrieve users (Admin only). Excludes archived by default."""
+    stmt = select(User)
+    if not include_archived:
+        stmt = stmt.where(User.archived_at.is_(None))  # type: ignore
+    users = session.exec(stmt.offset(skip).limit(limit)).all()
     return users
+
+
+# ── Archive / Unarchive (Soft delete) — Excel #11 ─────────────────────────────
+
+class ArchiveRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/{user_id}/archive", response_model=UserRead)
+def archive_user(
+    *,
+    user_id: str,
+    payload: ArchiveRequest = Body(default_factory=ArchiveRequest),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Soft-delete a user (Excel #11).
+
+    Archived users can't log in and are hidden from the admin list by default
+    (pass `?include_archived=true` to see them). All related history
+    (bookings, payments, bonuses) is preserved. Only `owner` can hard-delete
+    via direct SQL — there is no UI path for permanent deletion.
+    """
+    user = _resolve_user(session, user_id)
+
+    # Safety: can't archive yourself or another owner
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя архивировать собственный аккаунт")
+    if user.role == "owner":
+        raise HTTPException(status_code=403, detail="Нельзя архивировать владельца центра")
+    # Senior admins can archive admins/specialists/users; regular admins — users/specialists only
+    if current_user.role == "admin" and user.role in ("senior_admin", "admin"):
+        raise HTTPException(status_code=403, detail="Недостаточно прав для архивации администратора")
+
+    if user.archived_at is not None:
+        return user  # already archived, idempotent
+
+    user.archived_at = datetime.now()
+    user.archived_by_id = str(current_user.id)
+    user.archived_reason = (payload.reason or "").strip() or None
+    user.updated_at = datetime.now()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/unarchive", response_model=UserRead)
+def unarchive_user(
+    *,
+    user_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Restore an archived user (Excel #11)."""
+    user = _resolve_user(session, user_id)
+    if user.archived_at is None:
+        return user  # not archived, idempotent
+    user.archived_at = None
+    user.archived_by_id = None
+    user.archived_reason = None
+    user.updated_at = datetime.now()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
 
 
 # ── Update user (Admin) ──────────────────────────────────────────────────────
@@ -62,15 +133,18 @@ def update_user(
         if current_user.role == "owner":
             pass  # Allowed
         elif current_user.role == "senior_admin":
-            if target_role not in ["admin", "user"]:
+            # Senior admin can assign any role that isn't more privileged than
+            # their own. That includes "specialist" now — practitioners
+            # joining the platform need a role flip, not a ticket to the owner.
+            if target_role not in ["admin", "user", "specialist"]:
                 raise HTTPException(
                     status_code=403,
-                    detail="Senior Admin can only assign 'admin' or 'user' roles",
+                    detail="Старший администратор может назначать только роли: 'admin', 'specialist', 'user'",
                 )
             if current_role_db in ["owner", "senior_admin"]:
                 raise HTTPException(
                     status_code=403,
-                    detail="Senior Admin cannot modify Owner or System Admin accounts",
+                    detail="Старший администратор не может менять роль Владельца или другого Старшего администратора",
                 )
         else:
             raise HTTPException(status_code=403, detail="Not authorized to change roles")
@@ -426,3 +500,365 @@ def topup_subscription(
     session.commit()
     session.refresh(user)
     return user
+
+
+# ── Change email (senior_admin / owner only) ─────────────────────────────────
+# Excel #47. Email is used as a soft foreign key in legacy tables
+# (Booking.user_id, Waitlist.user_id, etc.). This endpoint atomically updates
+# User.email plus every row that pins to the old email — so history and balance
+# stay attached to the user after the change.
+
+from pydantic import BaseModel as _Pyd
+
+
+class _ChangeEmailRequest(_Pyd):
+    new_email: str
+
+
+@router.post("/{user_id}/change-email", response_model=UserRead)
+def change_user_email(
+    *,
+    user_id: str,
+    session: Session = Depends(get_session),
+    payload: _ChangeEmailRequest,
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    # Only senior_admin / owner may rename emails — it's a rare privileged op.
+    if current_user.role not in ("senior_admin", "owner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Только старший администратор или владелец может менять email пользователя",
+        )
+
+    user = _resolve_user(session, user_id)
+    old_email = user.email
+    new_email = (payload.new_email or "").strip().lower()
+
+    if not new_email:
+        raise HTTPException(400, "Новый email не может быть пустым")
+
+    import re
+    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", new_email):
+        raise HTTPException(400, "Email имеет некорректный формат")
+
+    if new_email == (old_email or "").lower():
+        raise HTTPException(400, "Новый email совпадает с текущим")
+
+    existing = session.exec(select(User).where(User.email == new_email)).first()
+    if existing and existing.id != user.id:
+        raise HTTPException(409, f"Email {new_email} уже используется другим пользователем")
+
+    # ── Cascade-update every table that stores this email as a soft FK ──
+    from sqlalchemy import text
+    updates: dict[str, int] = {}
+
+    def _bulk(sql: str, label: str) -> None:
+        res = session.execute(text(sql), {"old": old_email, "new": new_email})
+        updates[label] = int(getattr(res, "rowcount", 0) or 0)
+
+    # Bookings — owner reference via email
+    _bulk('UPDATE booking SET user_id = :new WHERE user_id = :old', "booking.user_id")
+    # Bookings — cancelled_by audit field
+    _bulk('UPDATE booking SET cancelled_by = :new WHERE cancelled_by = :old', "booking.cancelled_by")
+    # Waitlist — owner reference via email
+    _bulk('UPDATE waitlist SET user_id = :new WHERE user_id = :old', "waitlist.user_id")
+    # Cashbox — client_id may be stored as email for unregistered picks
+    _bulk(
+        'UPDATE cashbox_transactions SET client_id = :new WHERE client_id = :old',
+        "cashbox_transactions.client_id",
+    )
+    # User self-refs. Postgres requires quoting the reserved word "user".
+    user_table = '"user"' if session.bind.dialect.name == 'postgresql' else 'user'
+    _bulk(
+        f'UPDATE {user_table} SET responsible_admin_id = :new WHERE responsible_admin_id = :old',
+        "user.responsible_admin_id",
+    )
+    _bulk(
+        f'UPDATE {user_table} SET attracted_by_admin_id = :new WHERE attracted_by_admin_id = :old',
+        "user.attracted_by_admin_id",
+    )
+
+    user.email = new_email
+    user.updated_at = datetime.now()
+    session.add(user)
+
+    comment_history = (user.comment_history or []).copy()
+    comment_history.append({
+        "text": f"Email изменён: {old_email} → {new_email}",
+        "author_id": str(current_user.id),
+        "author_name": current_user.name or current_user.email,
+        "created_at": datetime.now().isoformat(),
+        "type": "email_change",
+        "old_email": old_email,
+        "new_email": new_email,
+        "cascade": updates,
+    })
+    user.comment_history = comment_history
+
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+# ── Merge two user accounts ──────────────────────────────────────────────────
+# Closes a long-standing duplicate-account problem: the same human can end up
+# with both a placeholder Telegram-Login user (`<chat_id>@telegram.unbox`) and
+# a regular site account (`real@gmail.com`). Merging consolidates everything
+# the user owns onto the keeper and deletes the duplicate.
+
+class _MergeUsersRequest(_Pyd):
+    """source: account to absorb (will be deleted).
+       target: account to keep (gets all data)."""
+    source: str  # email or UUID of the account being absorbed
+    target: str  # email or UUID of the account being kept
+
+
+@router.post("/merge", response_model=UserRead)
+def merge_users(
+    *,
+    session: Session = Depends(get_session),
+    payload: _MergeUsersRequest,
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    if current_user.role not in ("senior_admin", "owner"):
+        raise HTTPException(403, "Только старший администратор или владелец")
+
+    src = _resolve_user(session, payload.source)
+    tgt = _resolve_user(session, payload.target)
+    if src.id == tgt.id:
+        raise HTTPException(400, "Нельзя слить аккаунт сам с собой")
+
+    from sqlalchemy import text
+    user_table = '"user"' if session.bind.dialect.name == 'postgresql' else 'user'
+
+    moved: dict[str, int] = {}
+
+    def _bulk(sql: str, label: str, params: dict) -> None:
+        res = session.execute(text(sql), params)
+        moved[label] = int(getattr(res, "rowcount", 0) or 0)
+
+    # 1) Re-point all referencing rows from src → tgt.
+    # Bookings (uuid + email)
+    _bulk(
+        'UPDATE booking SET user_uuid = :t WHERE user_uuid = :s',
+        "booking.user_uuid", {"s": src.id, "t": tgt.id},
+    )
+    _bulk(
+        'UPDATE booking SET user_id = :t_email WHERE user_id = :s_email',
+        "booking.user_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+    _bulk(
+        'UPDATE booking SET cancelled_by = :t_email WHERE cancelled_by = :s_email',
+        "booking.cancelled_by", {"s_email": src.email, "t_email": tgt.email},
+    )
+    # Waitlist
+    _bulk(
+        'UPDATE waitlist SET user_uuid = :t WHERE user_uuid = :s',
+        "waitlist.user_uuid", {"s": src.id, "t": tgt.id},
+    )
+    _bulk(
+        'UPDATE waitlist SET user_id = :t_email WHERE user_id = :s_email',
+        "waitlist.user_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+    # Cashbox: client_id (email or UUID) + credited_user_id (UUID)
+    _bulk(
+        'UPDATE cashbox_transactions SET client_id = :t_email WHERE client_id = :s_email',
+        "cashbox_transactions.client_id(email)",
+        {"s_email": src.email, "t_email": tgt.email},
+    )
+    _bulk(
+        'UPDATE cashbox_transactions SET client_id = :t_uuid WHERE client_id = :s_uuid',
+        "cashbox_transactions.client_id(uuid)",
+        {"s_uuid": str(src.id), "t_uuid": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE cashbox_transactions SET credited_user_id = :t WHERE credited_user_id = :s',
+        "cashbox_transactions.credited_user_id",
+        {"s": str(src.id), "t": str(tgt.id)},
+    )
+    # Notifications
+    _bulk(
+        'UPDATE notifications SET recipient_id = :t WHERE recipient_id = :s',
+        "notifications.recipient_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    # Psy-CRM data (therapist_* tables use specialist_id == user.id).
+    # Without these, a merge leaves clients/sessions/payments/notes
+    # orphaned under the absorbed UUID and they vanish from CRM. Was
+    # exactly the trap that bit koren.nikolas when his Telegram got
+    # mis-bound to a sibling account.
+    _bulk(
+        'UPDATE therapist_clients SET specialist_id = :t WHERE specialist_id = :s',
+        "therapist_clients.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE therapy_sessions SET specialist_id = :t WHERE specialist_id = :s',
+        "therapy_sessions.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE therapist_payments SET specialist_id = :t WHERE specialist_id = :s',
+        "therapist_payments.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE therapist_notes SET specialist_id = :t WHERE specialist_id = :s',
+        "therapist_notes.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    # User self-refs (responsible / attracted admin links by email)
+    _bulk(
+        f'UPDATE {user_table} SET responsible_admin_id = :t_email WHERE responsible_admin_id = :s_email',
+        "user.responsible_admin_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+    _bulk(
+        f'UPDATE {user_table} SET attracted_by_admin_id = :t_email WHERE attracted_by_admin_id = :s_email',
+        "user.attracted_by_admin_id", {"s_email": src.email, "t_email": tgt.email},
+    )
+
+    # 2) Carry over scalar/JSON fields where the target is empty.
+    if not tgt.telegram_id and src.telegram_id:
+        tgt.telegram_id = src.telegram_id
+    if not tgt.google_id and src.google_id:
+        tgt.google_id = src.google_id
+    if not tgt.phone and src.phone:
+        tgt.phone = src.phone
+    if not tgt.avatar_url and src.avatar_url:
+        tgt.avatar_url = src.avatar_url
+    if not tgt.name and src.name:
+        tgt.name = src.name
+    # Sum balances; src can be negative (debt) — we honour that.
+    tgt.balance = float(tgt.balance or 0) + float(src.balance or 0)
+    # Take the higher credit limit / personal discount
+    tgt.credit_limit = max(float(tgt.credit_limit or 0), float(src.credit_limit or 0))
+    tgt.personal_discount_percent = max(
+        int(tgt.personal_discount_percent or 0),
+        int(src.personal_discount_percent or 0),
+    )
+    # Subscription: keep target's, fall back to src's
+    if not tgt.subscription and src.subscription:
+        tgt.subscription = src.subscription
+    # Append history lists
+    if src.comment_history:
+        tgt.comment_history = (tgt.comment_history or []) + list(src.comment_history)
+    if src.admin_tasks:
+        tgt.admin_tasks = (tgt.admin_tasks or []) + list(src.admin_tasks)
+    if getattr(src, "discount_history", None):
+        tgt.discount_history = (tgt.discount_history or []) + list(src.discount_history)
+    # Tags union
+    if src.tags:
+        tgt.tags = sorted(set((tgt.tags or []) + list(src.tags)))
+
+    # 3) Drop telegram_id from src first (avoids any unique-collision
+    # downstream if we ever add a unique constraint).
+    src.telegram_id = None
+    src.email = f"merged-into-{tgt.id}-{src.id}@deleted.unbox"  # unique placeholder
+    session.add(src)
+
+    # 4) Audit on the keeper.
+    audit = (tgt.comment_history or []).copy()
+    audit.append({
+        "text": f"Слияние аккаунта {src.email if not src.email.startswith('merged-into-') else '(deleted source)'} → {tgt.email}",
+        "author_id": str(current_user.id),
+        "author_name": current_user.name or current_user.email,
+        "created_at": datetime.now().isoformat(),
+        "type": "user_merge",
+        "absorbed_id": str(src.id),
+        "moved": moved,
+    })
+    tgt.comment_history = audit
+    tgt.updated_at = datetime.now()
+    session.add(tgt)
+    session.flush()
+
+    # 5) Delete the absorbed user.
+    session.delete(src)
+    session.commit()
+    session.refresh(tgt)
+    return tgt
+
+
+# ── Restore orphaned Psy-CRM data ────────────────────────────────────────────
+# When a user gets re-created (e.g. Telegram linked to the wrong sibling
+# account, then corrected), their therapist_* rows keep the *old* user_id
+# as specialist_id and fall out of reach — the CRM filters by the new
+# user_id and finds nothing. `merge` can't rescue it because the source
+# isn't a user anymore, it's a bare UUID in the CRM tables.
+#
+# This endpoint re-points all CRM rows from a raw specialist_id to the
+# current user. Owner-only, reversible by calling it again with the
+# arguments swapped.
+
+class _RestoreCrmRequest(_Pyd):
+    """source_specialist_id: the orphaned UUID (no matching user row).
+       target_user_id: the live user whose CRM this data should appear in."""
+    source_specialist_id: str
+    target_user_id: str
+
+
+@router.post("/restore-crm-data")
+def restore_orphaned_crm(
+    *,
+    session: Session = Depends(get_session),
+    payload: _RestoreCrmRequest,
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    if current_user.role not in ("owner", "senior_admin"):
+        raise HTTPException(403, "Только старший администратор или владелец")
+
+    # Validate UUIDs and target user
+    try:
+        src_id = str(UUID(payload.source_specialist_id))
+        tgt_id = str(UUID(payload.target_user_id))
+    except ValueError:
+        raise HTTPException(400, "Некорректный UUID")
+
+    if src_id == tgt_id:
+        raise HTTPException(400, "source и target совпадают")
+
+    tgt = session.get(User, UUID(tgt_id))
+    if not tgt:
+        raise HTTPException(404, f"Целевой пользователь не найден: {tgt_id}")
+
+    from sqlalchemy import text
+    moved: dict[str, int] = {}
+
+    def _bulk(sql: str, label: str) -> None:
+        res = session.execute(text(sql), {"s": src_id, "t": tgt_id})
+        moved[label] = int(getattr(res, "rowcount", 0) or 0)
+
+    _bulk(
+        "UPDATE therapist_clients  SET specialist_id = :t WHERE specialist_id = :s",
+        "therapist_clients",
+    )
+    _bulk(
+        "UPDATE therapy_sessions   SET specialist_id = :t WHERE specialist_id = :s",
+        "therapy_sessions",
+    )
+    _bulk(
+        "UPDATE therapist_payments SET specialist_id = :t WHERE specialist_id = :s",
+        "therapist_payments",
+    )
+    _bulk(
+        "UPDATE therapist_notes    SET specialist_id = :t WHERE specialist_id = :s",
+        "therapist_notes",
+    )
+
+    # Audit the operation on the recipient.
+    audit = (tgt.comment_history or []).copy()
+    audit.append({
+        "text": f"Восстановление CRM: перенесены записи от specialist_id={src_id}",
+        "author_id": str(current_user.id),
+        "author_name": current_user.name or current_user.email,
+        "created_at": datetime.now().isoformat(),
+        "type": "crm_restore",
+        "source_specialist_id": src_id,
+        "moved": moved,
+    })
+    tgt.comment_history = audit
+    tgt.updated_at = datetime.now()
+    session.add(tgt)
+    session.commit()
+
+    return {
+        "ok": True,
+        "source_specialist_id": src_id,
+        "target_user_id": tgt_id,
+        "moved": moved,
+    }

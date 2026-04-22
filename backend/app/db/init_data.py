@@ -74,7 +74,7 @@ INITIAL_RESOURCES = [
         "location_id": "unbox_uni",
         "area": 25,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
+        "formats": ["individual", "group", "intervision"],
         "description": "Большой групповой кабинет для тренингов, лекций, супервизий и мероприятий.",
         "services": ["flipchart", "projector", "whiteboard", "climate_control", "wifi", "natural_light"]
     },
@@ -87,7 +87,7 @@ INITIAL_RESOURCES = [
         "location_id": "unbox_uni",
         "area": 20,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
+        "formats": ["individual", "group", "intervision"],
         "description": "Просторный групповой кабинет для групповой терапии, воркшопов и обучения.",
         "services": ["flipchart", "whiteboard", "climate_control", "wifi"]
     },
@@ -100,7 +100,7 @@ INITIAL_RESOURCES = [
         "location_id": "unbox_uni",
         "area": 16,
         "min_booking_hours": 1,
-        "formats": ["individual", "group"],
+        "formats": ["individual", "group", "intervision"],
         "description": "Уютный кабинет для индивидуальной и групповой работы.",
         "services": ["private_entrance", "couch", "climate_control", "wifi"]
     },
@@ -157,6 +157,11 @@ def migrate_add_columns():
         ("manual_status",         "VARCHAR"),
         ("responsible_admin_id",  "VARCHAR"),
         ("attracted_by_admin_id", "VARCHAR"),
+        # JSON column — Postgres JSONB, SQLite TEXT; default empty array
+        ("additional_contacts",   "JSONB DEFAULT '[]'::jsonb" if dialect == 'postgresql' else "TEXT DEFAULT '[]'"),
+        # Telegram deep-link binding: one-time token + expiry
+        ("telegram_link_token",            "VARCHAR"),
+        ("telegram_link_token_expires_at", "TIMESTAMP"),
     ]
 
     for col_name, col_type in user_columns:
@@ -172,6 +177,48 @@ def migrate_add_columns():
                 conn.commit()
             except Exception:
                 conn.rollback()  # reset transaction state before next iteration
+
+    # shift_reports: branch — NULL=global close; non-null=branch-scoped close.
+    # Used to filter last_shift baseline per branch (Excel #13 fix).
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text("ALTER TABLE shift_reports ADD COLUMN IF NOT EXISTS branch VARCHAR"))
+            else:
+                conn.execute(text("ALTER TABLE shift_reports ADD COLUMN branch VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # Backfill shift_reports.branch from the legacy "[Branch] ..." prefix in
+    # notes, but only for rows where branch is still NULL.
+    # Regex: '[' + one or more non-']' chars + ']'  at the start of notes.
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text(
+                    "UPDATE shift_reports "
+                    "SET branch = substring(notes FROM '^\\[([^\\]]+)\\]') "
+                    "WHERE branch IS NULL AND notes ~ '^\\[[^\\]]+\\]'"
+                ))
+            else:
+                # SQLite: regex not standard, skip backfill — dev DB is tiny.
+                pass
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # cashbox_transactions: credited_user_id — marks transactions that topped up
+    # a client's balance, so we can reverse the credit on delete/edit.
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text("ALTER TABLE cashbox_transactions ADD COLUMN IF NOT EXISTS credited_user_id VARCHAR"))
+            else:
+                conn.execute(text("ALTER TABLE cashbox_transactions ADD COLUMN credited_user_id VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
     # resource table: services column (JSONB in Postgres, TEXT in SQLite)
     with engine.connect() as conn:
@@ -204,32 +251,148 @@ def migrate_add_columns():
                 conn.rollback()
 
 
+# ── One-time Psy-CRM data rescues ────────────────────────────────────────────
+# When a user's Telegram/Google binding drifts onto a sibling account and is
+# then corrected by hand, the `therapist_*` rows keep the *old* user_id as
+# `specialist_id` and become invisible to the CRM. The regular /users/merge
+# endpoint can't rescue them because the source UUID isn't a user anymore —
+# it's a bare value in the CRM tables.
+#
+# Each entry here is (source_specialist_id, target_user_id, why). On every
+# backend boot we check: if the source still has rows, move them. If the
+# count is zero, the migration is a no-op. Fully idempotent, so leaving the
+# list in the code after the fact is safe.
+#
+# Add a row to RESCUES when a specific user reports "my CRM is empty after
+# an account mix-up", you've confirmed the orphaned specialist_id in the DB,
+# and you want the fix to land on the next backend boot without a bespoke
+# API call.
+_CRM_RESCUES: list[tuple[str, str, str]] = [
+    (
+        "350d00e4-42fd-4a1c-b6ae-019f94630e41",
+        "9357b575-f6a2-433f-bede-02d7e6cc13db",
+        "koren.nikolas@gmail.com — Telegram bind drifted, CRM data orphaned",
+    ),
+]
+
+
+def rescue_orphaned_crm():
+    """Move orphaned therapist_* rows onto their real owner. Idempotent."""
+    from sqlalchemy import text as _text
+
+    CRM_TABLES = (
+        "therapist_clients",
+        "therapy_sessions",
+        "therapist_payments",
+        "therapist_notes",
+    )
+
+    for src_id, tgt_id, note in _CRM_RESCUES:
+        # Fast exit: if the source has no rows anywhere, we already migrated.
+        probe_sql = " UNION ALL ".join(
+            f"SELECT COUNT(*) FROM {t} WHERE specialist_id = :sid" for t in CRM_TABLES
+        )
+        with engine.connect() as conn:
+            try:
+                rows = conn.execute(_text(probe_sql), {"sid": src_id}).fetchall()
+                total = sum(int(r[0]) for r in rows)
+            except Exception as e:
+                logger.warning(f"[CRM rescue] probe failed for {src_id}: {e}")
+                continue
+
+        if total == 0:
+            logger.debug(f"[CRM rescue] {src_id} → {tgt_id}: already migrated")
+            continue
+
+        logger.warning(
+            f"[CRM rescue] Moving {total} orphaned rows from {src_id} → {tgt_id} ({note})"
+        )
+
+        moved = {}
+        for table in CRM_TABLES:
+            # Each UPDATE gets its own connection so a failure on one table
+            # doesn't poison the others.
+            with engine.connect() as conn:
+                try:
+                    res = conn.execute(
+                        _text(
+                            f"UPDATE {table} SET specialist_id = :tgt "
+                            f"WHERE specialist_id = :src"
+                        ),
+                        {"src": src_id, "tgt": tgt_id},
+                    )
+                    moved[table] = int(getattr(res, "rowcount", 0) or 0)
+                    conn.commit()
+                except Exception as e:
+                    logger.error(f"[CRM rescue] {table} update failed: {e}")
+                    conn.rollback()
+                    moved[table] = -1  # signal failure, don't mask
+
+        logger.warning(f"[CRM rescue] {src_id} → {tgt_id}: moved {moved}")
+
+
 def init_data():
     migrate_add_columns()
+    rescue_orphaned_crm()
     with Session(engine) as session:
         
-        # Init User
-        user = session.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).first()
-        if not user:
-            logger.info(f"Creating first superuser: {settings.FIRST_SUPERUSER}")
-            user_in = UserCreate(
-                email=settings.FIRST_SUPERUSER,
-                password=settings.FIRST_SUPERUSER_PASSWORD,
-                name="Admin",
-                phone="+995000000000",
-                is_admin=True, 
-                role="owner"
+        # Init User — guarded: skip the seed if the operator left the default
+        # placeholder in place. This prevents a predictable owner account from
+        # landing on production if .env was never configured.
+        if settings.FIRST_SUPERUSER_PASSWORD in ("CHANGE_ME_ON_FIRST_DEPLOY", "admin123", ""):
+            logger.warning(
+                "Skipping first-superuser seed: FIRST_SUPERUSER_PASSWORD is the "
+                "default placeholder. Set a real value in .env and re-run."
             )
-            
-            user_data = user_in.model_dump()
-            del user_data["password"]
-            user_data["hashed_password"] = get_password_hash(user_in.password)
-            db_obj = User(**user_data)
-            session.add(db_obj)
-            session.commit()
-            logger.info("First superuser created")
         else:
-            logger.info("First superuser already exists")
+            user = session.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).first()
+            if not user:
+                logger.info(f"Creating first superuser: {settings.FIRST_SUPERUSER}")
+                user_in = UserCreate(
+                    email=settings.FIRST_SUPERUSER,
+                    password=settings.FIRST_SUPERUSER_PASSWORD,
+                    name="Admin",
+                    phone="+995000000000",
+                    is_admin=True,
+                    role="owner",
+                )
+
+                user_data = user_in.model_dump()
+                del user_data["password"]
+                user_data["hashed_password"] = get_password_hash(user_in.password)
+                db_obj = User(**user_data)
+                session.add(db_obj)
+                session.commit()
+                logger.info("First superuser created")
+            else:
+                logger.info("First superuser already exists")
+
+        # Auto-promote configured OWNER_EMAILS at every startup.
+        # Why: a real person's email (e.g. koren.nikolas@gmail.com) can lose
+        # its owner role — merged into a dupe, accidentally demoted, or never
+        # linked to a Google/TG OAuth identity in the first place. Listing
+        # the email here means on every backend boot we re-assert the role.
+        # It's idempotent and cheap.
+        if settings.OWNER_EMAILS:
+            owner_emails = [e.strip().lower() for e in settings.OWNER_EMAILS.split(",") if e.strip()]
+            for email in owner_emails:
+                existing = session.exec(select(User).where(User.email == email)).first()
+                if existing:
+                    if existing.role != "owner":
+                        logger.warning(
+                            f"[OWNER_EMAILS] Promoting {email}: {existing.role} → owner"
+                        )
+                        existing.role = "owner"
+                        existing.is_admin = True
+                        existing.archived_at = None  # un-archive if accidentally archived
+                        session.add(existing)
+                        session.commit()
+                    else:
+                        logger.debug(f"[OWNER_EMAILS] {email} already owner")
+                else:
+                    logger.info(
+                        f"[OWNER_EMAILS] {email} not yet in DB — will be promoted on first OAuth login"
+                    )
 
         # Init Resources
         init_resources(session)

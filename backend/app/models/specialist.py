@@ -37,15 +37,15 @@ class SpecialistBase(SQLModel):
 
 class Specialist(SpecialistBase, table=True):
     __tablename__ = "specialists" # type: ignore
-    
+
     id: UUID = Field(default_factory=uuid.uuid4, primary_key=True, index=True)
-    user_id: UUID = Field(foreign_key="user.id", index=True, unique=True)
+    user_id: Optional[UUID] = Field(default=None, foreign_key="user.id", index=True, unique=True)
     
     # Optional relationship back to user
     user: Optional["User"] = Relationship(back_populates="specialist_profile")
 
 class SpecialistCreate(SpecialistBase):
-    user_id: UUID
+    user_id: Optional[UUID] = None
 
 class SpecialistUpdate(SQLModel):
     first_name: Optional[str] = None
@@ -64,5 +64,5 @@ class SpecialistUpdate(SQLModel):
 
 class SpecialistRead(SpecialistBase):
     id: UUID
-    user_id: UUID
+    user_id: Optional[UUID] = None
     sort_order: int = 0

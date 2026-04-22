@@ -51,11 +51,18 @@ export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set)
         try {
             const user = await authApi.getMe();
             set({ currentUser: user });
-        } catch (error) {
+        } catch (error: any) {
             console.error("Failed to fetch current user", error);
-            // Optionally logout if token is invalid
-            // localStorage.removeItem('token');
-            // set({ currentUser: null });
+            // If token is invalid (401/403), purge the stale session so the
+            // sidebar doesn't show a ghost user from a previous login while
+            // CRM endpoints silently return empty data. Without this, the
+            // zustand-persisted currentUser survives expired tokens and the
+            // UI displays a zombie profile ("Николай Корень" etc.) forever.
+            const status = error?.response?.status ?? error?.status;
+            if (status === 401 || status === 403) {
+                localStorage.removeItem('token');
+                set({ currentUser: null });
+            }
         }
     },
 

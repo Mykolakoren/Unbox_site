@@ -1,33 +1,67 @@
 import { useState, useEffect } from 'react';
-import { X, AlertTriangle, CheckCircle } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
+import { cashboxApi } from '../../../api/cashbox';
 
 interface Props {
     isOpen: boolean;
     onClose: () => void;
+    branch?: string;
+    /** Excel #54 — if the admin bypassed the pre-close checklist with a
+     *  justification, that reason is passed here and appended to the shift
+     *  report notes so the audit log records why the list was skipped. */
+    checklistSkipReason?: string;
 }
 
-export function EndShiftModal({ isOpen, onClose }: Props) {
+export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: Props) {
     const { balances, endShift } = useCashboxStore();
-    const cashBalance = balances.cash;
     const [actualBalance, setActualBalance] = useState('');
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
+    const [branchCash, setBranchCash] = useState<number | null>(null);
+    const [loadingBranchCash, setLoadingBranchCash] = useState(false);
+    // Excel #13 — backend breakdown so the admin can see how `expected` is
+    // made up (starting + cash_in − cash_out) and spot backdated txs.
+    const [preview, setPreview] = useState<Awaited<ReturnType<typeof cashboxApi.previewCloseShift>> | null>(null);
 
     useEffect(() => {
-        if (isOpen) {
-            setActualBalance('');
-            setNotes('');
+        if (!isOpen) return;
+        setActualBalance('');
+        setNotes('');
+        setPreview(null);
+        // Preview runs for every open; branch filter applied at backend.
+        cashboxApi.previewCloseShift(branch || undefined)
+            .then(setPreview)
+            .catch(() => setPreview(null));
+        if (branch) {
+            setLoadingBranchCash(true);
+            setBranchCash(null);
+            cashboxApi.getBalance(branch)
+                .then(b => setBranchCash(b.cash))
+                .catch(() => setBranchCash(null))
+                .finally(() => setLoadingBranchCash(false));
+        } else {
+            setBranchCash(null);
+            setLoadingBranchCash(false);
         }
-    }, [isOpen]);
+    }, [isOpen, branch]);
 
     if (!isOpen) return null;
 
+    // For branch closes use the freshly fetched per-branch cash. For global
+    // closes fall back to the store's overall cash total.
+    // Defensive Number() — a missing `balances.cash` (store not yet populated,
+    // or backend returning `{}`) blew up .toFixed() and crashed the whole
+    // /admin/finance boundary. Reported by Иры.
+    const cashBalance = Number(branch ? (branchCash ?? 0) : (balances?.cash ?? 0));
+
     const actualValue = parseFloat(actualBalance);
     const hasAmount = !isNaN(actualValue) && actualValue >= 0;
-    const discrepancy = hasAmount ? Math.round((actualValue - cashBalance) * 100) / 100 : null;
+    const discrepancy = hasAmount && !loadingBranchCash
+        ? Math.round((actualValue - cashBalance) * 100) / 100
+        : null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -36,17 +70,35 @@ export function EndShiftModal({ isOpen, onClose }: Props) {
             return;
         }
         setSaving(true);
+        // Excel #54 — if the checklist was bypassed, prepend the reason to
+        // notes so the shift report carries the justification forward.
+        const finalNotes = checklistSkipReason
+            ? `[Чек-лист пропущен: ${checklistSkipReason}]${notes ? '\n\n' + notes : ''}`
+            : notes || undefined;
         try {
             const report = await endShift({
                 actual_balance: actualValue,
-                notes: notes || undefined,
+                notes: finalNotes,
+                branch: branch || undefined,
             });
-            const disc = report.discrepancy;
+            const disc = Number(report.discrepancy ?? 0);
             if (Math.abs(disc) < 0.01) {
                 toast.success('Смена закрыта — расхождений нет');
             } else {
                 toast.warning(`Смена закрыта — расхождение: ${disc > 0 ? '+' : ''}${disc.toFixed(2)} ₾`);
             }
+            // Excel #75 — final lock-up reminder AFTER cash reconciliation.
+            // Casa is now sealed in the report; admin can safely lock up and leave.
+            // Long duration so admins walking out of the centre actually see it.
+            toast('🔒 Не забудьте: запереть двери, закрыть окна, активировать сигнализацию', {
+                duration: 15000,
+                style: {
+                    background: '#fef3c7',
+                    border: '1px solid #fbbf24',
+                    color: '#92400e',
+                    fontWeight: 500,
+                },
+            });
             onClose();
         } catch {
             toast.error('Ошибка закрытия смены');
@@ -70,13 +122,62 @@ export function EndShiftModal({ isOpen, onClose }: Props) {
                 </button>
 
                 <h3 className="text-lg font-bold text-unbox-dark mb-1">Закрытие смены</h3>
-                <p className="text-sm text-unbox-grey mb-5">Пересчитайте наличные в кассе</p>
+                {checklistSkipReason && (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-xs text-amber-800">
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                        <div>
+                            <div className="font-semibold mb-0.5">Чек-лист пропущен</div>
+                            <div className="leading-snug">«{checklistSkipReason}» — записано в журнал смены.</div>
+                        </div>
+                    </div>
+                )}
+                <p className="text-sm text-unbox-grey mb-5">
+                    {branch
+                        ? <>Филиал: <span className="font-semibold text-unbox-dark">{branch}</span> · пересчитайте наличные в кассе</>
+                        : 'Общая касса · пересчитайте наличные во всех кассах'}
+                </p>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Expected cash balance */}
                     <div className="bg-gray-50 rounded-xl px-4 py-3">
-                        <div className="text-xs text-gray-500 mb-0.5">Ожидаемый остаток наличных</div>
-                        <div className="text-xl font-bold text-unbox-dark">{cashBalance.toFixed(2)} ₾</div>
+                        <div className="text-xs text-gray-500 mb-0.5">
+                            Ожидаемый остаток наличных {branch && <span className="text-unbox-grey/70">· {branch}</span>}
+                        </div>
+                        <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
+                            {loadingBranchCash
+                                ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
+                                : `${cashBalance.toFixed(2)} ₾`}
+                        </div>
+                        {/* Excel #13 — backend breakdown so the admin can audit
+                            where the expected figure came from. If the totals
+                            don't match the display above, a backdated tx in
+                            this branch's period is the usual culprit.
+                            Note: API transformer converts snake_case → camelCase,
+                            so we read `startingBalance`, not `starting_balance`
+                            (root cause of the Safari crash admins reported). */}
+                        {preview && (
+                            <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500 leading-relaxed">
+                                <div className="flex justify-between">
+                                    <span>Остаток с прошлой смены</span>
+                                    <span className="font-mono">{Number(preview.startingBalance ?? 0).toFixed(2)} ₾</span>
+                                </div>
+                                <div className="flex justify-between text-emerald-700">
+                                    <span>+ Приход за смену</span>
+                                    <span className="font-mono">{Number(preview.cashIn ?? 0).toFixed(2)} ₾</span>
+                                </div>
+                                <div className="flex justify-between text-red-700">
+                                    <span>− Расход за смену</span>
+                                    <span className="font-mono">{Number(preview.cashOut ?? 0).toFixed(2)} ₾</span>
+                                </div>
+                                <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
+                                    <span>= Ожидается</span>
+                                    <span className="font-mono">{Number(preview.expected ?? 0).toFixed(2)} ₾</span>
+                                </div>
+                                <div className="text-gray-400 mt-1">
+                                    Движений за период: {preview.txCount ?? 0}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Actual balance */}

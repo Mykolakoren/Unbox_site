@@ -114,7 +114,7 @@ export function SpecialistApplySection() {
                                             className="px-4 py-1.5 rounded-full text-xs font-medium transition-all"
                                             style={form.format === fmt
                                                 ? { background: 'rgba(71,109,107,0.20)', border: '1px solid rgba(71,109,107,0.50)', color: 'var(--color-unbox-green)' }
-                                                : { background: 'rgba(255,255,255,0.55)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.65)', color: 'rgba(0,0,0,0.45)' }
+                                                : { background: 'rgba(255,255,255,0.78)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.65)', color: 'rgba(0,0,0,0.45)' }
                                             }
                                         >
                                             {fmt}

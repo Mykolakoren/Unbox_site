@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import { Send, Instagram, MapPin } from 'lucide-react';
 
 const glassBtn: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.55)',
+    background: 'rgba(255,255,255,0.78)',
     backdropFilter: 'blur(16px)',
     WebkitBackdropFilter: 'blur(16px)',
     border: '1px solid rgba(255,255,255,0.65)',

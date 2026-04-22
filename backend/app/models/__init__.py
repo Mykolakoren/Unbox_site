@@ -5,6 +5,16 @@ from .timeline import TimelineEvent
 from .resource import Resource, ResourceCreate, ResourceRead, ResourceUpdate
 from .location import Location, LocationCreate, LocationRead, LocationUpdate
 from .specialist import Specialist, SpecialistCreate, SpecialistRead
+from .specialist_schedule import (
+    SpecialistSchedule,
+    SpecialistScheduleRead,
+    SpecialistScheduleCreate,
+)
+from .specialist_appointment import (
+    SpecialistAppointment,
+    SpecialistAppointmentRead,
+    SpecialistAppointmentCreate,
+)
 
 # CRM models for specialists
 from .therapist_client import TherapistClient, TherapistClientCreate, TherapistClientRead, TherapistClientUpdate
@@ -16,6 +26,7 @@ from .therapist_note import TherapistNote, TherapistNoteCreate, TherapistNoteRea
 from .expense_category import ExpenseCategory, ExpenseCategoryCreate, ExpenseCategoryRead
 from .cashbox_transaction import CashboxTransaction, CashboxTransactionCreate, CashboxTransactionRead
 from .shift_report import ShiftReport, ShiftReportCreate, ShiftReportRead
+from .shift_open_log import ShiftOpenLog, ShiftOpenLogCreate, ShiftOpenLogRead
 
 # Team members
 from .team_member import TeamMember, TeamMemberCreate, TeamMemberRead, TeamMemberUpdate

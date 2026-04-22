@@ -175,6 +175,10 @@ def quick_pay_session(
         ts.price = client.base_price
         price = client.base_price
 
+    # Freeze currency & account on the session at payment time
+    ts.currency = client.currency
+    ts.account = account
+
     # Create payment record only if amount > 0
     if price and price > 0:
         payment = TherapistPayment(
@@ -183,7 +187,7 @@ def quick_pay_session(
             amount=price,
             currency=client.currency,
             account=account,
-            date=ts.date,
+            date=datetime.now(),  # payment date = today, not session date
             session_id=ts.id,
         )
         session.add(payment)
@@ -257,6 +261,9 @@ def mark_all_sessions_paid(
         if ts.price is None and client.base_price:
             ts.price = client.base_price
             price = client.base_price
+        # Freeze currency & account on the session at payment time
+        ts.currency = client.currency
+        ts.account = client.default_account
         # Create payment only if amount > 0
         if price and price > 0:
             payment = TherapistPayment(

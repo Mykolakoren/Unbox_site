@@ -5,6 +5,19 @@ import type { BookingHistoryItem } from '../store/types';
 // Note: api/client.ts intercepts response and converts snake_case to camelCase automatically.
 // So 'b' here is already mostly camelCase.
 // We just need to fix mismatches between transformed keys and Interface keys.
+/**
+ * Normalise startTime to "HH:MM" format. Backend should always send this,
+ * but defending here means a bad row can't crash every consumer that does
+ * `.startTime.split(':')` (chessboard, summary, timeline, pricing).
+ */
+function normaliseStartTime(t: any): string {
+    if (typeof t !== 'string' || !t.includes(':')) return '00:00';
+    const parts = t.split(':');
+    const h = parts[0]?.padStart(2, '0') ?? '00';
+    const m = parts[1]?.padStart(2, '0') ?? '00';
+    return `${h}:${m}`;
+}
+
 const mapToFrontend = (b: any): BookingHistoryItem => ({
     ...b,
     // Interface expects googleCalendarEventId, Transformer gives gcalEventId (from gcal_event_id)
@@ -13,6 +26,15 @@ const mapToFrontend = (b: any): BookingHistoryItem => ({
     // Previous manual map expected 'dateCreated' or 'created_at'.
     // Ensure we don't overwrite if unnecessary.
     createdAt: b.createdAt || b.dateCreated || new Date().toISOString(),
+    // Public bookings (/bookings/public) hide user_id for privacy — default to ''
+    // so downstream code calling .split/.includes on userId doesn't crash.
+    userId: b.userId ?? '',
+    // Public bookings also hide final_price — default to 0 so rendering doesn't NaN.
+    finalPrice: b.finalPrice ?? 0,
+    // Defensive defaults for fields that crashed admin pages on edge data:
+    // a missing duration / startTime crashed the chessboard with split-on-undefined.
+    startTime: normaliseStartTime(b.startTime),
+    duration: typeof b.duration === 'number' ? b.duration : 60,
 });
 
 // Map Frontend -> Backend
@@ -59,8 +81,18 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
-    cancelBooking: async (id: string) => {
-        const response = await api.delete<any>(`/bookings/${id}`);
+    /**
+     * Cancel a booking. Excel #66 — admins can override the default full-refund
+     * with a penalty percentage; clients' refund_percent is ignored server-side.
+     *
+     *   refundPercent: 1.0 = full refund, 0.5 = 50% penalty, 0.0 = full penalty.
+     *   reason: free-text audit note (shown in booking history for admin-penalised cancels).
+     */
+    cancelBooking: async (id: string, opts?: { refundPercent?: number; reason?: string }) => {
+        const params: Record<string, any> = {};
+        if (opts?.refundPercent !== undefined) params.refund_percent = opts.refundPercent;
+        if (opts?.reason) params.reason = opts.reason;
+        const response = await api.delete<any>(`/bookings/${id}`, { params });
         return mapToFrontend(response.data);
     },
 
@@ -118,6 +150,32 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /** Excel #24 — batch-create multiple non-contiguous slots in one call.
+     *  All slots share one `recurring_group_id` so the whole series can be
+     *  cancelled together later. Each slot is priced independently (duration
+     *  discount per slot, not across the series). */
+    createMultiSlotBooking: async (data: {
+        slots: Array<{
+            resourceId: string;
+            locationId: string;
+            date: string;       // "YYYY-MM-DD"
+            startTime: string;  // "HH:MM"
+            duration: number;
+            format: string;
+        }>;
+        paymentMethod: string;
+        targetUserId?: string;
+        crmClientId?: string;
+    }): Promise<{ ok: boolean; groupId: string; bookings: any[]; totalCost: number }> => {
+        const response = await api.post('/bookings/multi-slot', data);
+        return {
+            ok: response.data.ok,
+            groupId: response.data.group_id,
+            bookings: (response.data.bookings || []).map(mapToFrontend),
+            totalCost: response.data.total_cost,
+        };
+    },
+
     // Recurring bookings
     createRecurringBooking: async (data: {
         resourceId: string;
@@ -127,11 +185,33 @@ export const bookingsApi = {
         format: string;
         paymentMethod: string;
         firstDate: string;
-        weeks: number;
+        occurrences: number;
+        pattern: 'weekly' | 'biweekly' | 'monthly';
+        weeks?: number;  // backward compat
         targetUserId?: string;
         crmClientId?: string;
     }): Promise<{ ok: boolean; recurringGroupId: string; created: number; totalCost: number; dates: string[] }> => {
-        const response = await api.post('/bookings/recurring', data);
+        const response = await api.post('/bookings/recurring', {
+            ...data,
+            weeks: data.occurrences,  // backend compat
+        });
+        return response.data;
+    },
+
+    getRecurringGroups: async (): Promise<Array<{
+        recurringGroupId: string;
+        resourceId: string;
+        locationId: string;
+        startTime: string;
+        duration: number;
+        crmClientId?: string;
+        paymentMethod: string;
+        futureCount: number;
+        totalCount: number;
+        nextDate: string | null;
+        pattern: 'weekly' | 'biweekly' | 'monthly';
+    }>> => {
+        const response = await api.get('/bookings/recurring-groups');
         return response.data;
     },
 

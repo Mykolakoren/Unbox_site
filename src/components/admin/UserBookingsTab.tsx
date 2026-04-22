@@ -199,8 +199,9 @@ export function UserBookingsTab({ bookings, onCancel: propOnCancel, onReschedule
                                         {resource?.name || '—'}
                                     </div>
                                     <div className="flex items-center gap-1.5" title="Формат">
-                                        {booking.format === 'group' ? <Users size={14} className="text-gray-400" /> : <User size={14} className="text-gray-400" />}
-                                        {booking.format === 'group' ? 'Группа' : 'Индивидуально'}
+                                        {booking.format === 'individual' ? <User size={14} className="text-gray-400" /> : <Users size={14} className="text-gray-400" />}
+                                        {booking.format === 'individual' ? 'Индивидуально' :
+                                         booking.format === 'intervision' ? 'Интервизия' : 'Группа'}
                                     </div>
                                     <div className="font-medium text-black">
                                         {booking.finalPrice} ₾

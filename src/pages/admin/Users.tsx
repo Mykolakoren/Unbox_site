@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUserStore, type User } from '../../store/userStore';
 import { Search, Edit, Shield, User as UserIcon, Plus, X, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { PhoneInput } from '../../components/ui/PhoneInput';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { TimelineList } from '../../components/Timeline/TimelineList';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 export function AdminUsers() {
-    const { users, updateUserById, fetchUsers } = useUserStore();
+        const { users, updateUserById, fetchUsers } = useUserStore();
     const [search, setSearch] = useState('');
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [showAddUser, setShowAddUser] = useState(false);
@@ -24,151 +26,22 @@ export function AdminUsers() {
     );
 
     return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center gap-4">
-                <h1 className="text-2xl font-bold">Клиенты</h1>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={() => setShowAddUser(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-unbox-green text-white rounded-lg font-medium text-sm hover:bg-unbox-dark transition-colors shadow-sm cursor-pointer"
-                    >
-                        <Plus size={16} />
-                        Новый клиент
-                    </button>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
-                        <input
-                            type="text"
-                            placeholder="Поиск клиента..."
-                            className="pl-10 pr-4 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green w-64"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
-                    </div>
-                </div>
-            </div>
 
-            <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
-                <table className="w-full text-left">
-                    <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
-                        <tr>
-                            <th className="p-4 pl-6">Клиент</th>
-                            <th className="p-4">Роль</th>
-                            <th className="p-4">Баланс</th>
-                            <th className="p-4">Скидка</th>
-                            <th className="p-4">Тип цен</th>
-                            <th className="p-4 text-right">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-unbox-light">
-                        {filteredUsers.map(user => (
-                            <tr key={user.email} className="hover:bg-unbox-light/30 transition-colors">
-                                <td className="p-4 pl-6">
-                                    <Link
-                                        to={`/admin/users/${encodeURIComponent(user.email)}`}
-                                        className="flex items-center gap-3 group cursor-pointer"
-                                    >
-                                        <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center font-bold text-unbox-dark group-hover:bg-unbox-green group-hover:text-white transition-colors">
-                                            {user.name.charAt(0)}
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-unbox-dark flex items-center gap-2 group-hover:text-unbox-green transition-colors">
-                                                {user.name}
-                                                {user.isAdmin && <Shield size={14} className="text-unbox-green" />}
-                                            </div>
-                                            <div className="text-xs text-unbox-grey">{user.email}</div>
-                                            {user.phone && <div className="text-xs text-unbox-grey">{user.phone}</div>}
-                                        </div>
-                                    </Link>
-                                </td>
-                                <td className="p-4">
-                                    <button
-                                        onClick={() => setSelectedUser(user)}
-                                        title="Нажмите чтобы изменить роль"
-                                        className={clsx(
-                                            "px-2 py-1 rounded text-xs font-medium border transition-all hover:ring-2 hover:ring-offset-1",
-                                            user.role === 'owner' ? "bg-purple-50 text-purple-700 border-purple-200 hover:ring-purple-300" :
-                                                user.role === 'senior_admin' ? "bg-unbox-light text-unbox-dark border-blue-200 hover:ring-blue-300" :
-                                                    user.role === 'admin' ? "bg-green-50 text-green-700 border-green-200 hover:ring-green-300" :
-                                                        user.role === 'specialist' ? "bg-amber-50 text-amber-700 border-amber-200 hover:ring-amber-300" :
-                                                            "bg-unbox-light/30 text-unbox-grey border-unbox-light hover:ring-gray-300"
-                                        )}
-                                    >
-                                        {user.role === 'owner' ? 'Владелец' :
-                                            user.role === 'senior_admin' ? 'Ст. Админ' :
-                                                user.role === 'admin' ? 'Админ' :
-                                                    user.role === 'specialist' ? 'Специалист' : 'Пользователь'}
-                                    </button>
-                                </td>
-                                <td className="p-4">
-                                    <span className={clsx(
-                                        "font-medium",
-                                        user.balance < 0 ? "text-red-500" : "text-unbox-green"
-                                    )}>
-                                        {user.balance.toFixed(2)} ₾
-                                    </span>
-                                </td>
-                                <td className="p-4">
-                                    {user.personalDiscountPercent ? (
-                                        <span className="bg-unbox-light text-unbox-green px-2 py-1 rounded text-xs font-bold">
-                                            {user.personalDiscountPercent}%
-                                        </span>
-                                    ) : (
-                                        <span className="text-unbox-grey text-sm">—</span>
-                                    )}
-                                </td>
-                                <td className="p-4 text-sm text-unbox-dark">
-                                    {user.pricingSystem === 'personal' ? 'Персональный' : 'Стандарт'}
-                                </td>
-                                <td className="p-4 text-right">
-                                    <div className="flex justify-end gap-2">
-                                        <Link
-                                            to={`/admin/users/${encodeURIComponent(user.email)}`}
-                                            className="p-2 hover:bg-unbox-light rounded-lg text-unbox-green"
-                                            title="Карточка клиента"
-                                        >
-                                            <UserIcon size={16} />
-                                        </Link>
-                                        <button
-                                            className="p-2 hover:bg-unbox-light rounded-lg text-unbox-grey hover:text-unbox-dark"
-                                            onClick={() => setSelectedUser(user)}
-                                            title="Быстрые настройки"
-                                        >
-                                            <Edit size={16} />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-
-                {filteredUsers.length === 0 && (
-                    <div className="p-8 text-center text-unbox-grey">
-                        Ничего не найдено
-                    </div>
-                )}
-            </div>
-
-            {/* Edit User Modal */}
-            {selectedUser && (
-                <UserEditModal
-                    user={selectedUser}
-                    onClose={() => setSelectedUser(null)}
-                    onUpdate={updateUserById}
-                />
-            )}
-
-            {/* Add User Modal */}
-            {showAddUser && (
-                <AddUserModal
-                    onClose={() => setShowAddUser(false)}
-                    onCreated={() => { setShowAddUser(false); fetchUsers(); }}
-                />
-            )}
-        </div>
+        <GridHouseAdminUsers
+            users={users}
+            filteredUsers={filteredUsers}
+            search={search}
+            setSearch={setSearch}
+            selectedUser={selectedUser}
+            setSelectedUser={setSelectedUser}
+            showAddUser={showAddUser}
+            setShowAddUser={setShowAddUser}
+            updateUserById={updateUserById}
+            fetchUsers={fetchUsers}
+        />
     );
 }
+
 
 // ── Add User Modal ───────────────────────────────────────────────────────────
 
@@ -258,12 +131,10 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Телефон</label>
-                            <input
-                                type="tel"
+                            <PhoneInput
                                 className="w-full px-4 py-2.5 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                 value={phone}
-                                onChange={e => setPhone(e.target.value)}
-                                placeholder="+995..."
+                                onChange={setPhone}
                             />
                         </div>
                         <div>
@@ -325,7 +196,487 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
 // ── Edit User Modal ──────────────────────────────────────────────────────────
 
-function UserEditModal({ user, onClose, onUpdate }: { user: User, onClose: () => void, onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GRID HOUSE — AdminUsers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ghMono: React.CSSProperties = {
+    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+};
+const ghHairline = `1px solid ${GH.ink10}`;
+
+interface GHAdminUsersProps {
+    users: User[];
+    filteredUsers: User[];
+    search: string;
+    setSearch: (v: string) => void;
+    selectedUser: User | null;
+    setSelectedUser: (u: User | null) => void;
+    showAddUser: boolean;
+    setShowAddUser: (v: boolean) => void;
+    updateUserById: (id: string, data: Partial<User>) => Promise<void>;
+    fetchUsers: () => Promise<void>;
+}
+
+type SortMode = 'name' | 'balance' | 'date';
+type FilterMode = 'all' | 'debtors';
+
+function useNarrow(bp = 768) {
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    React.useEffect(() => { const h = () => setNarrow(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return narrow;
+}
+
+function GridHouseAdminUsers(props: GHAdminUsersProps) {
+    const {
+        users, filteredUsers, search, setSearch,
+        selectedUser, setSelectedUser,
+        showAddUser, setShowAddUser,
+        updateUserById, fetchUsers,
+    } = props;
+
+    const [sortMode, setSortMode] = useState<SortMode>('name');
+    const [filterMode, setFilterMode] = useState<FilterMode>('all');
+    const narrow = useNarrow();
+
+    // Apply filter
+    const filtered = filterMode === 'debtors'
+        ? filteredUsers.filter(u => u.balance < 0)
+        : filteredUsers;
+
+    // Apply sort
+    const sorted = [...filtered].sort((a, b) => {
+        if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '', 'ru');
+        if (sortMode === 'balance') return a.balance - b.balance; // debtors first
+        if (sortMode === 'date') return (b.registrationDate || '').localeCompare(a.registrationDate || ''); // newest first
+        return 0;
+    });
+
+    const totalFmt = String(sorted.length).padStart(3, '0');
+    const allFmt = String(users.length).padStart(3, '0');
+    const debtorCount = filteredUsers.filter(u => u.balance < 0).length;
+
+    const roleLabel = (role: string | undefined) =>
+        role === 'owner' ? 'Владелец'
+        : role === 'senior_admin' ? 'Ст. Админ'
+        : role === 'admin' ? 'Админ'
+        : role === 'specialist' ? 'Специалист'
+        : 'Клиент';
+
+    const monoLabel: React.CSSProperties = {
+        ...ghMono,
+        fontWeight: 500,
+        color: GH.ink60,
+    };
+
+    const sortBtn = (mode: SortMode, _label: string): React.CSSProperties => ({
+        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+        padding: '6px 10px', border: `1px solid ${sortMode === mode ? GH.ink : GH.ink10}`,
+        background: sortMode === mode ? GH.ink : 'transparent',
+        color: sortMode === mode ? GH.paper : GH.ink60,
+        cursor: 'pointer', whiteSpace: 'nowrap',
+    });
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
+            {/* ── Header ── */}
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
+                <div style={{ ...monoLabel, color: GH.ink30, marginBottom: narrow ? 8 : 14 }}>ADMIN · USERS</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
+                    <h1 style={{
+                        fontFamily: GH_SANS,
+                        fontWeight: 800,
+                        fontSize: 'clamp(24px, 3.5vw, 42px)',
+                        lineHeight: 1.1,
+                        letterSpacing: '-0.02em',
+                        margin: 0,
+                    }}>
+                        Реестр клиентов
+                    </h1>
+                    <button
+                        onClick={() => setShowAddUser(true)}
+                        style={{
+                            background: GH.ink,
+                            color: GH.paper,
+                            fontFamily: GH_MONO,
+                            fontSize: narrow ? 9 : 11,
+                            fontWeight: 600,
+                            letterSpacing: '0.18em',
+                            textTransform: 'uppercase',
+                            padding: narrow ? '10px 14px' : '14px 22px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 8,
+                        }}
+                    >
+                        <Plus size={narrow ? 12 : 14} /> {narrow ? '+ Новый' : 'Новый клиент'}
+                    </button>
+                </div>
+            </div>
+
+            {/* ── KPI strip ── */}
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 20 : 32, marginBottom: narrow ? 16 : 32, flexWrap: 'wrap' }}>
+                <div>
+                    <p style={{ ...ghMono, color: GH.ink30, marginBottom: 4, margin: 0 }}>ВСЕГО</p>
+                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                        {allFmt}
+                    </span>
+                </div>
+                <div>
+                    <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
+                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.accent, fontVariantNumeric: 'tabular-nums' }}>
+                        {totalFmt}
+                    </span>
+                </div>
+                {debtorCount > 0 && (
+                    <div>
+                        <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ДОЛЖНИКИ</p>
+                        <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger, fontVariantNumeric: 'tabular-nums' }}>
+                            {String(debtorCount).padStart(3, '0')}
+                        </span>
+                    </div>
+                )}
+            </div>
+
+            {/* ── Search ── */}
+            <div style={{ marginBottom: 28 }}>
+                <div style={{ ...monoLabel, marginBottom: 8 }}>ПОИСК</div>
+                <div style={{ position: 'relative', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8 }}>
+                    <Search style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-80%)', width: 16, height: 16, color: GH.ink60 }} />
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Имя, email, телефон"
+                        style={{
+                            width: '100%',
+                            paddingLeft: 28,
+                            paddingRight: 28,
+                            background: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            fontFamily: GH_SANS,
+                            fontSize: 16,
+                            color: GH.ink,
+                        }}
+                    />
+                    {search && (
+                        <button
+                            onClick={() => setSearch('')}
+                            style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-80%)', background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, padding: 4 }}
+                            aria-label="Очистить поиск"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Sort / Filter controls ── */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+                <span style={{ ...monoLabel, marginRight: 4 }}>СОРТ:</span>
+                <button onClick={() => setSortMode('name')} style={sortBtn('name', 'Имя')}>Имя</button>
+                <button onClick={() => setSortMode('balance')} style={sortBtn('balance', 'Баланс')}>Баланс</button>
+                <button onClick={() => setSortMode('date')} style={sortBtn('date', 'Дата')}>Дата</button>
+                <div style={{ width: 1, height: 20, background: GH.ink10, margin: '0 4px' }} />
+                <button
+                    onClick={() => setFilterMode(filterMode === 'debtors' ? 'all' : 'debtors')}
+                    style={{
+                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                        padding: '6px 10px',
+                        border: `1px solid ${filterMode === 'debtors' ? GH.danger : GH.ink10}`,
+                        background: filterMode === 'debtors' ? GH.danger : 'transparent',
+                        color: filterMode === 'debtors' ? GH.paper : GH.ink60,
+                        cursor: 'pointer', whiteSpace: 'nowrap' as const,
+                    }}
+                >
+                    Должники{debtorCount > 0 ? ` (${debtorCount})` : ''}
+                </button>
+            </div>
+
+            {/* ── List ── */}
+            {sorted.length === 0 ? (
+                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghHairline, padding: '80px 24px', textAlign: 'center' }}>
+                    <div style={{ ...monoLabel, marginBottom: 14 }}>ПУСТО</div>
+                    <h2 style={{
+                        fontFamily: GH_SANS,
+                        fontWeight: 800,
+                        fontSize: 'clamp(28px, 3.5vw, 44px)',
+                        lineHeight: 0.95,
+                        letterSpacing: '-0.02em',
+                        margin: 0,
+                    }}>
+                        Никто не найден.
+                    </h2>
+                </div>
+            ) : narrow ? (
+                /* ── Mobile compact cards ── */
+                <div style={{ borderTop: `2px solid ${GH.ink}` }}>
+                    {sorted.map((user) => (
+                        <Link
+                            key={user.email}
+                            to={`/admin/users/${encodeURIComponent(user.email)}`}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 12,
+                                padding: '14px 0',
+                                borderBottom: ghHairline,
+                                textDecoration: 'none',
+                                color: 'inherit',
+                            }}
+                        >
+                            {/* Avatar — Excel #47, shows photo if avatarUrl set */}
+                            {user.avatarUrl ? (
+                                <img
+                                    src={user.avatarUrl}
+                                    alt={user.name}
+                                    style={{
+                                        width: 40, height: 40, minWidth: 40,
+                                        borderRadius: '50%',
+                                        objectFit: 'cover',
+                                        border: `1px solid ${GH.ink10}`,
+                                    }}
+                                    onError={(e) => {
+                                        // Fallback to initial: hide broken image
+                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                    }}
+                                />
+                            ) : (
+                                <div style={{
+                                    width: 40, height: 40, minWidth: 40,
+                                    borderRadius: '50%',
+                                    background: GH.ink,
+                                    color: GH.paper,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontFamily: GH_SANS, fontWeight: 700, fontSize: 16,
+                                }}>
+                                    {(user.name || '?').charAt(0).toUpperCase()}
+                                </div>
+                            )}
+                            {/* Info */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                }}>
+                                    <span style={{
+                                        fontFamily: GH_SANS, fontWeight: 700, fontSize: 15, letterSpacing: '-0.01em',
+                                        color: GH.ink,
+                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                                    }}>
+                                        {user.name}
+                                    </span>
+                                    {user.isAdmin && <Shield size={12} color={GH.ink60} />}
+                                    {user.role && user.role !== 'user' && (
+                                        <span style={{
+                                            fontFamily: GH_MONO, fontSize: 8, fontWeight: 600,
+                                            letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                                            padding: '2px 5px',
+                                            background: user.role === 'owner' ? GH.ink : `${GH.accent}18`,
+                                            color: user.role === 'owner' ? GH.paper : GH.accent,
+                                            border: user.role === 'owner' ? 'none' : `1px solid ${GH.accent}30`,
+                                            whiteSpace: 'nowrap' as const,
+                                        }}>
+                                            {roleLabel(user.role)}
+                                        </span>
+                                    )}
+                                </div>
+                                <div style={{
+                                    fontFamily: GH_MONO, fontSize: 10, color: GH.ink30,
+                                    letterSpacing: '0.05em', marginTop: 2,
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                                }}>
+                                    {user.email}
+                                </div>
+                            </div>
+                            {/* Balance */}
+                            <div style={{
+                                fontFamily: GH_MONO, fontSize: 13, fontWeight: 700,
+                                color: user.balance < 0 ? GH.danger : GH.ink,
+                                fontVariantNumeric: 'tabular-nums',
+                                whiteSpace: 'nowrap' as const,
+                                textAlign: 'right',
+                                minWidth: 56,
+                            }}>
+                                {user.balance.toFixed(0)} ₾
+                            </div>
+                        </Link>
+                    ))}
+                </div>
+            ) : (
+                /* ── Desktop table ── */
+                <div style={{ borderTop: `2px solid ${GH.ink}`, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                    {/* Column headers */}
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
+                        gap: 16,
+                        padding: '12px 0',
+                        borderBottom: ghHairline,
+                        minWidth: 720,
+                        ...monoLabel,
+                    }}>
+                        <div>#</div>
+                        <div>КЛИЕНТ</div>
+                        <div>РОЛЬ</div>
+                        <div style={{ textAlign: 'right' }}>БАЛАНС</div>
+                        <div style={{ textAlign: 'center' }}>СКИДКА</div>
+                        <div>ТИП ЦЕН</div>
+                        <div style={{ textAlign: 'right' }}></div>
+                    </div>
+
+                    {sorted.map((user, idx) => (
+                        <div
+                            key={user.email}
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: '48px 1fr 140px 120px 80px 140px 60px',
+                                gap: 16,
+                                minWidth: 720,
+                                padding: '18px 0',
+                                borderBottom: ghHairline,
+                                alignItems: 'center',
+                            }}
+                        >
+                            <div style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 11,
+                                letterSpacing: '0.1em',
+                                color: GH.ink60,
+                                fontVariantNumeric: 'tabular-nums',
+                            }}>
+                                {String(idx + 1).padStart(3, '0')}
+                            </div>
+                            <Link
+                                to={`/admin/users/${encodeURIComponent(user.email)}`}
+                                style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+                            >
+                                <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                    {user.name}
+                                    {user.isAdmin && <Shield size={13} color={GH.ink60} />}
+                                </div>
+                                <div style={{ ...monoLabel, color: GH.ink60, marginTop: 3 }}>
+                                    {user.email}{user.phone ? ` · ${user.phone}` : ''}
+                                </div>
+                            </Link>
+                            <button
+                                onClick={() => setSelectedUser(user)}
+                                title="Изменить роль"
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    padding: '5px 9px',
+                                    background: user.role === 'owner' ? GH.ink : 'transparent',
+                                    color: user.role === 'owner' ? GH.paper : GH.ink,
+                                    border: `1px solid ${GH.ink}`,
+                                    cursor: 'pointer',
+                                    justifySelf: 'start',
+                                }}
+                            >
+                                {roleLabel(user.role)}
+                            </button>
+                            <div style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 14,
+                                fontWeight: 600,
+                                textAlign: 'right',
+                                color: user.balance < 0 ? GH.danger : GH.ink,
+                                fontVariantNumeric: 'tabular-nums',
+                            }}>
+                                {user.balance.toFixed(0)} GEL
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                                {user.personalDiscountPercent ? (
+                                    <span style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        padding: '3px 7px',
+                                        color: GH.paper,
+                                        background: GH.ink,
+                                        letterSpacing: '0.05em',
+                                    }}>
+                                        {user.personalDiscountPercent}%
+                                    </span>
+                                ) : (
+                                    <span style={{ ...monoLabel, color: GH.ink30 }}></span>
+                                )}
+                            </div>
+                            <div style={{ ...monoLabel, color: GH.ink }}>
+                                {user.pricingSystem === 'personal' ? 'ПЕРСОНАЛЬНЫЙ' : 'СТАНДАРТ'}
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                                <Link
+                                    to={`/admin/users/${encodeURIComponent(user.email)}`}
+                                    title="Карточка"
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        background: 'transparent',
+                                        border: ghHairline,
+                                        cursor: 'pointer',
+                                        color: GH.ink60,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <UserIcon size={13} />
+                                </Link>
+                                <button
+                                    onClick={() => setSelectedUser(user)}
+                                    title="Быстрые настройки"
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        background: 'transparent',
+                                        border: ghHairline,
+                                        cursor: 'pointer',
+                                        color: GH.ink60,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <Edit size={13} />
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* ── Footer ── */}
+            <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, paddingTop: 16 }}>
+                <p style={{ ...ghMono, color: GH.ink30, margin: 0 }}>UNBOX ADMIN · 2026</p>
+            </div>
+
+            {/* Modals (reuse legacy internals) */}
+            {selectedUser && (
+                <UserEditModal
+                    user={selectedUser}
+                    onClose={() => setSelectedUser(null)}
+                    onUpdate={updateUserById}
+                />
+            )}
+            {showAddUser && (
+                <AddUserModal
+                    onClose={() => setShowAddUser(false)}
+                    onCreated={() => { setShowAddUser(false); fetchUsers(); }}
+                />
+            )}
+        </div>
+    );
+}
+
+// ── Edit User Modal ──────────────────────────────────────────────────────────
+
+function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () => void; onUpdate: (id: string, data: Partial<User>) => Promise<void> }) {
     const currentUser = useUserStore(s => s.currentUser);
     const isOwner = currentUser?.role === 'owner';
     const isSeniorAdmin = currentUser?.role === 'senior_admin';

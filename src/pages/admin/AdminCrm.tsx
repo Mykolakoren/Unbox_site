@@ -17,7 +17,8 @@ import {
 import { subDays, isAfter } from 'date-fns';
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import type { User } from '../../store/types';
+import type { User, Transaction } from '../../store/types';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 type PipelineStage = 'new' | 'active' | 'sleeping' | 'vip' | 'partner' | 'bad_client';
 
@@ -39,7 +40,7 @@ interface AdminPickerState {
 }
 
 export function AdminCrm() {
-    const { users, bookings, transactions, updateUserById } = useUserStore();
+        const { users, bookings, transactions, updateUserById } = useUserStore();
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -103,8 +104,12 @@ export function AdminCrm() {
         };
         clientStages.forEach((stage) => { stageCounts[stage]++; });
 
+        // Доход = входящие деньги (не refund/expense). Только реальные платежи (не внутренние переводы с баланса).
+        const incomeTypes: Transaction['type'][] = ['deposit', 'subscription_purchase', 'booking_payment', 'manual_correction'];
         const recentTransactions = transactions.filter(
-            (t) => isAfter(new Date(t.date), thirtyDaysAgo) && ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod)
+            (t) => isAfter(new Date(t.date), thirtyDaysAgo)
+                && ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod)
+                && incomeTypes.includes(t.type)
         );
         const monthlyRevenue = recentTransactions.reduce((sum, t) => sum + t.amount, 0);
 
@@ -217,225 +222,26 @@ export function AdminCrm() {
     };
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Header */}
-            <div>
-                <h1 className="text-2xl font-bold">CRM Аналитика</h1>
-                <p className="text-unbox-grey text-sm">Управление клиентами и статистика за 30 дней</p>
-            </div>
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <KpiCard icon={Users}        label="Всего клиентов" value={analytics.totalClients}          color="blue" />
-                <KpiCard icon={UserPlus}     label="Новых за месяц" value={analytics.newClients}            color="green" />
-                <KpiCard icon={DollarSign}   label="Доход за месяц" value={`${analytics.monthlyRevenue.toFixed(0)} ₾`} color="emerald" />
-                <KpiCard icon={CalendarCheck} label="Бронирований"  value={analytics.totalBookings}         color="indigo" subtitle={`${analytics.cancelledBookings} отмен`} />
-                <KpiCard icon={Zap}          label="Абонементов"   value={analytics.activeSubscriptions}   color="purple" />
-                <KpiCard icon={AlertTriangle} label="Должников"    value={analytics.debtors.length}         color={analytics.debtors.length > 0 ? 'red' : 'gray'} />
-            </div>
-
-            {/* Search */}
-            <div className="flex items-center gap-3">
-                <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-unbox-grey" />
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Поиск клиента..."
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                    />
-                </div>
-                <div className="text-sm text-unbox-grey hidden md:block">
-                    Перетащите карточку чтобы сменить статус
-                </div>
-            </div>
-
-            {/* Pipeline Kanban */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                {pipeline.map(({ stage, clients: stageClients }) => {
-                    const config = STAGE_CONFIG[stage];
-                    const isOver = dragOverStage === stage;
-                    return (
-                        <div
-                            key={stage}
-                            onDragOver={(e) => handleDragOver(e, stage)}
-                            onDragLeave={(e) => {
-                                // Only clear when truly leaving the column (not entering a child)
-                                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                    setDragOverStage(null);
-                                }
-                            }}
-                            onDrop={(e) => handleDrop(e, stage)}
-                            className={clsx(
-                                'rounded-2xl border overflow-hidden transition-all duration-150',
-                                isOver ? config.dragOver : `${config.border} ${config.bg}`
-                            )}
-                        >
-                            {/* Column header */}
-                            <div className="p-3 border-b border-white/50">
-                                <div className="flex items-center justify-between">
-                                    <span className={`text-sm font-bold ${config.color}`}>{config.label}</span>
-                                    <span className="text-xs font-mono text-unbox-grey bg-white/60 px-1.5 py-0.5 rounded">
-                                        {stageClients.length}
-                                    </span>
-                                </div>
-                            </div>
-
-                            {/* Cards */}
-                            <div className="p-2 space-y-1.5 max-h-[420px] overflow-y-auto custom-scrollbar">
-                                {stageClients.length === 0 ? (
-                                    <div className={clsx(
-                                        'text-xs text-unbox-grey text-center py-6 rounded-xl border-2 border-dashed transition-colors',
-                                        isOver ? 'border-current opacity-60' : 'border-transparent'
-                                    )}>
-                                        {isOver ? '↓ Отпустите' : 'Нет клиентов'}
-                                    </div>
-                                ) : (
-                                    stageClients.slice(0, 15).map((user) => (
-                                        <ClientCard
-                                            key={user.email}
-                                            user={user}
-                                            isDragging={draggingEmail === user.email}
-                                            adminMap={adminMap}
-                                            onNavigate={() => navigate(`/admin/users/${encodeURIComponent(user.email)}`)}
-                                            onDragStart={(e) => handleDragStart(e, user.email)}
-                                            onDragEnd={handleDragEnd}
-                                            onOpenAdminPicker={(type) => setAdminPicker({ user, type })}
-                                        />
-                                    ))
-                                )}
-                                {stageClients.length > 15 && (
-                                    <div className="text-xs text-unbox-grey text-center py-2">
-                                        +{stageClients.length - 15} ещё
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-
-            {/* Debtors */}
-            {analytics.debtors.length > 0 && (
-                <div className="bg-white rounded-2xl border border-red-200 shadow-sm">
-                    <div className="p-5 border-b border-red-100 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-red-500" />
-                        <h2 className="font-bold text-lg">Клиенты с задолженностью</h2>
-                    </div>
-                    <div className="divide-y divide-gray-50">
-                        {analytics.debtors
-                            .sort((a, b) => a.balance - b.balance)
-                            .map((debtor) => (
-                                <div
-                                    key={debtor.email}
-                                    className="flex items-center justify-between px-5 py-3.5 hover:bg-unbox-light/30 cursor-pointer transition-colors"
-                                    onClick={() => navigate(`/admin/users/${encodeURIComponent(debtor.email)}`)}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center text-sm font-bold">
-                                            {debtor.name[0]}
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-unbox-dark text-sm">{debtor.name}</div>
-                                            <div className="text-xs text-unbox-grey">{debtor.email}</div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-lg font-bold text-red-600">{debtor.balance.toFixed(0)} ₾</span>
-                                        <ChevronRight className="w-4 h-4 text-gray-300" />
-                                    </div>
-                                </div>
-                            ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Admin Picker Modal */}
-            {adminPicker && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center"
-                    onClick={() => setAdminPicker(null)}
-                >
-                    <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-                    <div
-                        className="relative bg-white rounded-2xl shadow-2xl w-72 p-5 animate-in zoom-in-95 duration-200"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-center justify-between mb-4">
-                            <div>
-                                <h3 className="font-bold text-unbox-dark">
-                                    {adminPicker.type === 'responsible' ? 'Ответственный менеджер' : 'Кто привлёк клиента'}
-                                </h3>
-                                <p className="text-xs text-unbox-grey mt-0.5">{adminPicker.user.name}</p>
-                            </div>
-                            <button onClick={() => setAdminPicker(null)} className="p-1 rounded-lg hover:bg-unbox-light text-unbox-grey">
-                                <X size={16} />
-                            </button>
-                        </div>
-
-                        <div className="space-y-1">
-                            {/* Clear option */}
-                            <button
-                                onClick={() => handleAssignAdmin(null)}
-                                className={clsx(
-                                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors text-left',
-                                    (() => {
-                                        const current = adminPicker.type === 'responsible'
-                                            ? adminPicker.user.responsibleAdminId
-                                            : adminPicker.user.attractedByAdminId;
-                                        return !current
-                                            ? 'bg-unbox-light text-unbox-dark font-medium'
-                                            : 'text-unbox-grey hover:bg-unbox-light/50';
-                                    })()
-                                )}
-                            >
-                                <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
-                                    <UserCircle size={16} className="text-gray-400" />
-                                </div>
-                                Не назначен
-                            </button>
-
-                            {/* Admin list */}
-                            {adminUsers.map((admin) => {
-                                const current = adminPicker.type === 'responsible'
-                                    ? adminPicker.user.responsibleAdminId
-                                    : adminPicker.user.attractedByAdminId;
-                                const isSelected = current === admin.id;
-                                return (
-                                    <button
-                                        key={admin.id}
-                                        onClick={() => handleAssignAdmin(admin.id)}
-                                        className={clsx(
-                                            'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors text-left',
-                                            isSelected
-                                                ? 'bg-unbox-green text-white font-medium'
-                                                : 'text-unbox-dark hover:bg-unbox-light/50'
-                                        )}
-                                    >
-                                        <div className={clsx(
-                                            'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                                            isSelected ? 'bg-white/20 text-white' : 'bg-unbox-dark text-white'
-                                        )}>
-                                            {admin.name?.[0]?.toUpperCase() ?? '?'}
-                                        </div>
-                                        <div className="min-w-0">
-                                            <div className="truncate">{admin.name}</div>
-                                            <div className={clsx('text-[10px] truncate', isSelected ? 'text-white/70' : 'text-unbox-grey')}>
-                                                {admin.role === 'owner' ? 'Владелец' : admin.role === 'senior_admin' ? 'Ст. Администратор' : 'Администратор'}
-                                            </div>
-                                        </div>
-                                        {isSelected && <UserCheck size={14} className="ml-auto shrink-0" />}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
+            <GridHouseAdminCrm
+                analytics={analytics}
+                pipeline={pipeline}
+                searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                draggingEmail={draggingEmail}
+                dragOverStage={dragOverStage} setDragOverStage={setDragOverStage}
+                handleDragStart={handleDragStart}
+                handleDragEnd={handleDragEnd}
+                handleDragOver={handleDragOver}
+                handleDrop={handleDrop}
+                adminMap={adminMap}
+                adminUsers={adminUsers}
+                adminPicker={adminPicker} setAdminPicker={setAdminPicker}
+                handleAssignAdmin={handleAssignAdmin}
+                navigate={navigate}
+            />
+        );
 }
+
 
 // ── Client Card ───────────────────────────────────────────────────────────────
 
@@ -574,6 +380,433 @@ function KpiCard({
             <div className={`text-xl font-bold ${c.text}`}>{value}</div>
             <div className="text-xs text-unbox-grey">{label}</div>
             {subtitle && <div className="text-[10px] text-unbox-grey mt-0.5">{subtitle}</div>}
+        </div>
+    );
+}
+
+// ============================================================================
+// Grid House variant — CRM pipeline index
+// ============================================================================
+
+type GHCrmProps = {
+    analytics: any;
+    pipeline: { stage: PipelineStage; clients: User[] }[];
+    searchQuery: string; setSearchQuery: (v: string) => void;
+    draggingEmail: string | null;
+    dragOverStage: PipelineStage | null;
+    setDragOverStage: (s: PipelineStage | null) => void;
+    handleDragStart: (e: React.DragEvent, email: string) => void;
+    handleDragEnd: () => void;
+    handleDragOver: (e: React.DragEvent, stage: PipelineStage) => void;
+    handleDrop: (e: React.DragEvent, stage: PipelineStage) => void;
+    adminMap: Map<string, User>;
+    adminUsers: User[];
+    adminPicker: AdminPickerState | null;
+    setAdminPicker: (p: AdminPickerState | null) => void;
+    handleAssignAdmin: (id: string | null) => void;
+    navigate: (path: string) => void;
+};
+
+const GH_STAGE_LABELS: Record<PipelineStage, string> = {
+    new: 'Новые',
+    active: 'Активные',
+    vip: 'VIP',
+    partner: 'Партнёры',
+    sleeping: 'Спящие',
+    bad_client: 'Проблемные',
+};
+
+function GridHouseAdminCrm(p: GHCrmProps) {
+    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+
+    return (
+        <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
+            <div style={{ maxWidth: 1600, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
+                {/* HEAD */}
+                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 40 }}>
+                    <div style={{ ...eyebrow, marginBottom: 12 }}>Раздел · CRM · 30 дней</div>
+                    <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
+                        Клиентский поток.
+                    </h1>
+                </div>
+
+                {/* KPI strip — 6 tabular cells */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
+                    {[
+                        { label: 'Клиентов', value: p.analytics.totalClients, sub: null },
+                        { label: 'Новых · 30д', value: p.analytics.newClients, sub: null },
+                        { label: 'Доход · 30д', value: `${p.analytics.monthlyRevenue.toFixed(0)} ₾`, sub: null },
+                        { label: 'Бронирований', value: p.analytics.totalBookings, sub: `${p.analytics.cancelledBookings} отмен` },
+                        { label: 'Абонементов', value: p.analytics.activeSubscriptions, sub: null },
+                        { label: 'Должников', value: p.analytics.debtors.length, sub: null },
+                    ].map((k, i) => (
+                        <div key={k.label} style={{ padding: '20px 16px', borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none' }}>
+                            <div style={{ ...eyebrow, marginBottom: 8 }}>{k.label}</div>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(28px, 3vw, 38px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1, color: k.label === 'Должников' && p.analytics.debtors.length > 0 ? GH.danger : GH.ink }}>
+                                {k.value}
+                            </div>
+                            {k.sub && <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 6, textTransform: 'uppercase' }}>{k.sub}</div>}
+                        </div>
+                    ))}
+                </div>
+
+                {/* SEARCH */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32, paddingBottom: 16, borderBottom: `1px solid ${GH.ink10}` }}>
+                    <Search size={16} color={GH.ink60} />
+                    <input
+                        type="text"
+                        value={p.searchQuery}
+                        onChange={e => p.setSearchQuery(e.target.value)}
+                        placeholder="Поиск клиента…"
+                        style={{
+                            flex: 1,
+                            fontFamily: GH_SANS,
+                            fontSize: 16,
+                            background: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            padding: '8px 0',
+                            color: GH.ink,
+                            maxWidth: 480,
+                        }}
+                    />
+                    <span style={{ marginLeft: 'auto', ...eyebrow }}>
+                        Перетащите карточку — смените статус
+                    </span>
+                </div>
+
+                {/* PIPELINE · 6 columns */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 0, border: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
+                    {p.pipeline.map(({ stage, clients }, colIdx) => {
+                        const isOver = p.dragOverStage === stage;
+                        return (
+                            <div
+                                key={stage}
+                                onDragOver={(e) => p.handleDragOver(e, stage)}
+                                onDragLeave={(e) => {
+                                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                        p.setDragOverStage(null);
+                                    }
+                                }}
+                                onDrop={(e) => p.handleDrop(e, stage)}
+                                style={{
+                                    borderLeft: colIdx > 0 ? `1px solid ${GH.ink10}` : 'none',
+                                    background: isOver ? GH.ink5 : 'transparent',
+                                    transition: 'background 150ms',
+                                    minHeight: 480,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                }}
+                            >
+                                {/* Column head */}
+                                <div style={{ padding: '16px 12px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 700, color: GH.ink }}>
+                                        {String(colIdx + 1).padStart(2, '0')} · {GH_STAGE_LABELS[stage]}
+                                    </span>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink }}>
+                                        {clients.length}
+                                    </span>
+                                </div>
+
+                                {/* Cards */}
+                                <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 480, overflowY: 'auto', flex: 1 }}>
+                                    {clients.length === 0 ? (
+                                        <div style={{
+                                            padding: '24px 12px',
+                                            border: `1px dashed ${isOver ? GH.ink60 : GH.ink10}`,
+                                            fontFamily: GH_MONO,
+                                            fontSize: 10,
+                                            letterSpacing: '0.16em',
+                                            textTransform: 'uppercase',
+                                            color: GH.ink60,
+                                            textAlign: 'center',
+                                        }}>
+                                            {isOver ? 'Отпустите' : 'Пусто'}
+                                        </div>
+                                    ) : (
+                                        clients.slice(0, 15).map((user, i) => (
+                                            <GHClientCard
+                                                key={user.email}
+                                                user={user}
+                                                index={i}
+                                                isDragging={p.draggingEmail === user.email}
+                                                adminMap={p.adminMap}
+                                                onNavigate={() => p.navigate(`/admin/users/${encodeURIComponent(user.email)}`)}
+                                                onDragStart={(e) => p.handleDragStart(e, user.email)}
+                                                onDragEnd={p.handleDragEnd}
+                                                onOpenAdminPicker={(type) => p.setAdminPicker({ user, type })}
+                                            />
+                                        ))
+                                    )}
+                                    {clients.length > 15 && (
+                                        <div style={{ textAlign: 'center', padding: '8px 0', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: GH.ink60 }}>
+                                            +{clients.length - 15} ещё
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* DEBTORS */}
+                {p.analytics.debtors.length > 0 && (
+                    <section style={{ marginBottom: 40 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 12, marginBottom: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 20 }}>
+                                <span style={{ ...eyebrow, color: GH.danger }}>Раздел · Задолженность</span>
+                                <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(22px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', margin: 0 }}>
+                                    Клиенты с минусом.
+                                </h2>
+                            </div>
+                            <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                                {p.analytics.debtors.length}
+                            </span>
+                        </div>
+                        <div>
+                            {p.analytics.debtors
+                                .sort((a: User, b: User) => a.balance - b.balance)
+                                .map((debtor: User, i: number) => (
+                                    <div
+                                        key={debtor.email}
+                                        onClick={() => p.navigate(`/admin/users/${encodeURIComponent(debtor.email)}`)}
+                                        style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: '60px 1fr 120px 40px',
+                                            alignItems: 'center',
+                                            gap: 16,
+                                            padding: '16px 0',
+                                            borderBottom: `1px solid ${GH.ink10}`,
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                                            {String(i + 1).padStart(2, '0')}
+                                        </span>
+                                        <div>
+                                            <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink }}>{debtor.name}</div>
+                                            <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60, marginTop: 2 }}>{debtor.email}</div>
+                                        </div>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, textAlign: 'right' }}>
+                                            {debtor.balance.toFixed(0)} ₾
+                                        </div>
+                                        <ChevronRight size={16} color={GH.ink60} />
+                                    </div>
+                                ))}
+                        </div>
+                    </section>
+                )}
+
+                {/* Footer */}
+                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 32, display: 'flex', justifyContent: 'space-between', ...eyebrow }}>
+                    <span>Unbox · CRM · {new Date().getFullYear()}</span>
+                    <span>{p.pipeline.reduce((acc, s) => acc + s.clients.length, 0)} клиентов</span>
+                </div>
+            </div>
+
+            {/* ADMIN PICKER MODAL */}
+            {p.adminPicker && (
+                <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,15,16,0.50)', padding: 24 }}
+                    onClick={() => p.setAdminPicker(null)}
+                >
+                    <div
+                        style={{ background: GH.paper, border: `2px solid ${GH.ink}`, width: 360, padding: 28 }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 16 }}>
+                            <div>
+                                <div style={{ ...eyebrow, marginBottom: 6 }}>
+                                    Назначить · {p.adminPicker.type === 'responsible' ? 'Ответственного' : 'Привлёк'}
+                                </div>
+                                <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 700 }}>
+                                    {p.adminPicker.user.name}
+                                </div>
+                            </div>
+                            <button onClick={() => p.setAdminPicker(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div>
+                            {/* Clear option */}
+                            {(() => {
+                                const current = p.adminPicker!.type === 'responsible'
+                                    ? p.adminPicker!.user.responsibleAdminId
+                                    : p.adminPicker!.user.attractedByAdminId;
+                                const isSelected = !current;
+                                return (
+                                    <button
+                                        onClick={() => p.handleAssignAdmin(null)}
+                                        style={{
+                                            width: '100%',
+                                            display: 'grid',
+                                            gridTemplateColumns: '40px 1fr 20px',
+                                            alignItems: 'center',
+                                            gap: 12,
+                                            padding: '12px 0',
+                                            border: 'none',
+                                            background: isSelected ? GH.ink : 'transparent',
+                                            color: isSelected ? GH.paper : GH.ink,
+                                            borderBottom: `1px solid ${isSelected ? GH.paper : GH.ink10}`,
+                                            cursor: 'pointer',
+                                            textAlign: 'left',
+                                        }}
+                                    >
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', color: isSelected ? GH.paper : GH.ink60, paddingLeft: 12 }}>—</span>
+                                        <span style={{ fontFamily: GH_SANS, fontSize: 14 }}>Не назначен</span>
+                                        <span />
+                                    </button>
+                                );
+                            })()}
+                            {p.adminUsers.map((admin, idx) => {
+                                const current = p.adminPicker!.type === 'responsible'
+                                    ? p.adminPicker!.user.responsibleAdminId
+                                    : p.adminPicker!.user.attractedByAdminId;
+                                const isSelected = current === admin.id;
+                                return (
+                                    <button
+                                        key={admin.id}
+                                        onClick={() => p.handleAssignAdmin(admin.id)}
+                                        style={{
+                                            width: '100%',
+                                            display: 'grid',
+                                            gridTemplateColumns: '40px 1fr 20px',
+                                            alignItems: 'center',
+                                            gap: 12,
+                                            padding: '12px 0',
+                                            border: 'none',
+                                            background: isSelected ? GH.ink : 'transparent',
+                                            color: isSelected ? GH.paper : GH.ink,
+                                            borderBottom: `1px solid ${isSelected ? GH.paper : GH.ink10}`,
+                                            cursor: 'pointer',
+                                            textAlign: 'left',
+                                        }}
+                                    >
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: isSelected ? GH.paper : GH.ink60, paddingLeft: 12 }}>
+                                            {String(idx + 1).padStart(2, '0')}
+                                        </span>
+                                        <div>
+                                            <div style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 600 }}>{admin.name}</div>
+                                            <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: isSelected ? GH.paper : GH.ink60, marginTop: 2 }}>
+                                                {admin.role === 'owner' ? 'Владелец' : admin.role === 'senior_admin' ? 'Ст. Админ' : 'Админ'}
+                                            </div>
+                                        </div>
+                                        {isSelected && <UserCheck size={14} />}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ── Grid House Client Card ────────────────────────────────────────────────────
+
+function GHClientCard({
+    user, index, isDragging, adminMap, onNavigate, onDragStart, onDragEnd, onOpenAdminPicker,
+}: {
+    user: User;
+    index: number;
+    isDragging: boolean;
+    adminMap: Map<string, User>;
+    onNavigate: () => void;
+    onDragStart: (e: React.DragEvent) => void;
+    onDragEnd: () => void;
+    onOpenAdminPicker: (type: 'responsible' | 'attracted') => void;
+}) {
+    const responsible = user.responsibleAdminId ? adminMap.get(user.responsibleAdminId) : null;
+    const attracted = user.attractedByAdminId ? adminMap.get(user.attractedByAdminId) : null;
+
+    return (
+        <div
+            draggable={true}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onClick={onNavigate}
+            style={{
+                background: GH.paper,
+                border: `1px solid ${GH.ink10}`,
+                padding: 10,
+                cursor: 'pointer',
+                opacity: isDragging ? 0.4 : 1,
+                transform: isDragging ? 'scale(0.96)' : 'none',
+                transition: 'transform 120ms, opacity 120ms',
+                userSelect: 'none',
+            }}
+            onMouseEnter={(e) => { if (!isDragging) e.currentTarget.style.borderColor = GH.ink; }}
+            onMouseLeave={(e) => { if (!isDragging) e.currentTarget.style.borderColor = GH.ink10; }}
+        >
+            <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 8, alignItems: 'flex-start' }}>
+                <GripVertical size={12} color={GH.ink60} style={{ marginTop: 2, cursor: 'grab' }} />
+                <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', marginBottom: 2 }}>
+                        №{String(index + 1).padStart(3, '0')}
+                    </div>
+                    <div style={{ fontFamily: GH_SANS, fontSize: 12, fontWeight: 700, color: GH.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {user.name}
+                    </div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                        {user.phone || user.email}
+                    </div>
+                    {user.balance !== 0 && (
+                        <div style={{
+                            fontFamily: GH_MONO,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            fontVariantNumeric: 'tabular-nums',
+                            marginTop: 4,
+                            color: user.balance < 0 ? GH.danger : GH.ink,
+                        }}>
+                            {user.balance.toFixed(0)} ₾
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div style={{ borderTop: `1px solid ${GH.ink10}`, marginTop: 8, paddingTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                <button
+                    onClick={(e) => { e.stopPropagation(); onOpenAdminPicker('responsible'); }}
+                    style={{
+                        width: '100%',
+                        display: 'grid',
+                        gridTemplateColumns: '34px 1fr',
+                        gap: 4,
+                        padding: '3px 0',
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                    }}
+                >
+                    <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: GH.ink60 }}>Отв.</span>
+                    <span style={{ fontFamily: GH_SANS, fontSize: 10, color: responsible ? GH.ink : GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: responsible ? 'normal' : 'italic' }}>
+                        {responsible ? responsible.name : 'не назначен'}
+                    </span>
+                </button>
+                <button
+                    onClick={(e) => { e.stopPropagation(); onOpenAdminPicker('attracted'); }}
+                    style={{
+                        width: '100%',
+                        display: 'grid',
+                        gridTemplateColumns: '34px 1fr',
+                        gap: 4,
+                        padding: '3px 0',
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                    }}
+                >
+                    <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: GH.ink60 }}>Прив.</span>
+                    <span style={{ fontFamily: GH_SANS, fontSize: 10, color: attracted ? GH.ink : GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: attracted ? 'normal' : 'italic' }}>
+                        {attracted ? attracted.name : 'не указан'}
+                    </span>
+                </button>
+            </div>
         </div>
     );
 }

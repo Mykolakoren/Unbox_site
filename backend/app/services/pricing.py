@@ -10,20 +10,25 @@ class PriceBreakdown(BaseModel):
     base_price: float
     hourly_rate: float
     booked_hours: float
-    
+
     # Applied Rules
     applied_rule: str # "SUBSCRIPTION", "HOT_BOOKING", "WEEKLY_PROGRESSIVE", "NONE"
-    
+
     # Discount Details
     discount_percent: int = 0
     discount_amount: float = 0.0
-    
+
     # Subscription Details
     subscription_plan: Optional[str] = None
     hours_deducted: float = 0.0
-    
+
     final_price: float
-    
+
+    # Peak hours
+    peak_surcharge: float = 0.0
+    peak_slot_count: int = 0
+    subscription_peak_debt: float = 0.0
+
     # Flags
     is_non_refundable: bool = False
     is_non_reschedulable: bool = False
@@ -50,9 +55,23 @@ class PricingService:
         """Return list of unknown extra IDs (if any)."""
         return [eid for eid in extras_ids if eid not in cls.EXTRAS_PRICES]
 
+    # Base rates lookup — mirrors frontend PRICING_CONFIG.base_rates
+    # Space type (ROOM/CAP) × Format (IND/GRP/INTV) → GEL per hour
+    BASE_RATES = {
+        "ROOM": {"IND": 20.0, "GRP": 35.0, "INTV": 30.0},
+        "CAP": {"IND": 10.0, "GRP": 10.0, "INTV": 10.0},
+    }
+
+    # Format string → lookup code
+    FORMAT_CODES = {
+        "individual": "IND",
+        "group": "GRP",
+        "intervision": "INTV",
+    }
+
     # Pricing Configuration (Mirroring Frontend)
     PRICING_CONFIG = {
-        "hot_booking": {"hours_before": 12, "percent": 10},
+        "hot_booking": {"hours_before": 12, "percent": 0},  # No discount — only admin approval
         "duration": [
             {"min": 2, "max": 2.99, "percent": 10},
             {"min": 3, "max": 3.99, "percent": 15},
@@ -63,8 +82,28 @@ class PricingService:
             {"min": 5, "max": 10.999, "percent": 10},
             {"min": 11, "max": 15.999, "percent": 25},
             {"min": 16, "max": 9999, "percent": 50},
-        ]
+        ],
+        "peak_hours": {
+            "surcharge_percent": 25,
+            "subscription_surcharge_gel": 5,
+            "ranges": [
+                {"start": "09:00", "end": "10:00"},
+                {"start": "20:00", "end": "22:00"},
+            ],
+        },
     }
+
+    @staticmethod
+    def _is_peak_time(time_str: str) -> bool:
+        """Check if HH:MM falls into a peak hour range."""
+        h, m = map(int, time_str.split(":"))
+        mins = h * 60 + m
+        for r in PricingService.PRICING_CONFIG["peak_hours"]["ranges"]:
+            sh, sm = map(int, r["start"].split(":"))
+            eh, em = map(int, r["end"].split(":"))
+            if mins >= sh * 60 + sm and mins < eh * 60 + em:
+                return True
+        return False
 
     def calculate_price(
         self,
@@ -82,21 +121,44 @@ class PricingService:
 
         booked_hours = duration_minutes / 60.0
 
-        # 2. Determine Base Rate
-        base_rate = resource.hourly_rate
-        # Create a simple multiplier for group format if not explicitly stored
-        if format_type == "group" and resource.type == "cabinet":
-             # Logic from config: IND=20, GRP=35. (Multiplier ~1.75 or explicit lookup)
-             pass
+        # 2. Determine Base Rate via config lookup (space_type × format)
+        space_type = "CAP" if resource.type == "capsule" else "ROOM"
+        format_code = self.FORMAT_CODES.get(format_type, "IND")
+        rate_table = self.BASE_RATES.get(space_type, {})
+        # Fallback: resource.hourly_rate if format_code missing (defensive)
+        base_rate = rate_table.get(format_code, resource.hourly_rate)
 
-        base_price = base_rate * booked_hours
+        # 2b. Calculate base price with peak hours surcharge
+        surcharge_pct = self.PRICING_CONFIG["peak_hours"]["surcharge_percent"]
+        peak_surcharge = 0.0
+        peak_slot_count = 0
+        base_price = 0.0
+
+        # Check each 30-min slot for peak hours
+        start_h = start_time.hour
+        start_m = start_time.minute
+        start_total = start_h * 60 + start_m
+        for m in range(start_total, start_total + duration_minutes, 30):
+            h = m // 60
+            mm = m % 60
+            slot_str = f"{h:02d}:{mm:02d}"
+            slot_base = base_rate / 2  # 30-min slot
+            if self._is_peak_time(slot_str):
+                surcharge = slot_base * (surcharge_pct / 100)
+                peak_surcharge += surcharge
+                peak_slot_count += 1
+                base_price += slot_base + surcharge
+            else:
+                base_price += slot_base
 
         breakdown = PriceBreakdown(
             base_price=base_price,
             hourly_rate=base_rate,
             booked_hours=booked_hours,
             applied_rule="NONE",
-            final_price=base_price
+            final_price=base_price,
+            peak_surcharge=peak_surcharge,
+            peak_slot_count=peak_slot_count,
         )
 
         # If user is anonymous — return base price without discounts
@@ -117,11 +179,7 @@ class PricingService:
         if user.pricing_system == "personal" and user.personal_discount_percent > 0:
             personal_percent = user.personal_discount_percent
 
-        # Standard discounts
-        hot_percent = 0
-        if self._is_hot_booking(start_time):
-            hot_percent = self.PRICING_CONFIG["hot_booking"]["percent"]
-
+        # Hot booking: no discount, only admin approval (handled in routes.py)
         duration_percent = 0
         for tier in self.PRICING_CONFIG["duration"]:
             if tier["min"] <= booked_hours < tier["max"]:
@@ -137,7 +195,7 @@ class PricingService:
                 break
 
         # Apply the BEST (max) discount — no stacking
-        best_percent = max(personal_percent, hot_percent, duration_percent, weekly_percent)
+        best_percent = max(personal_percent, duration_percent, weekly_percent)
 
         if best_percent > 0:
             discount_val = breakdown.base_price * (best_percent / 100.0)
@@ -152,10 +210,6 @@ class PricingService:
                 breakdown.applied_rule = "WEEKLY_PROGRESSIVE"
             elif best_percent == duration_percent:
                 breakdown.applied_rule = "CONSECUTIVE_HOURS"
-            else:
-                breakdown.applied_rule = "HOT_BOOKING"
-                breakdown.is_non_refundable = True
-                breakdown.is_non_reschedulable = True
 
         return breakdown
 
@@ -223,7 +277,14 @@ class PricingService:
             breakdown.applied_rule = "SUBSCRIPTION"
             breakdown.subscription_plan = plan_id
             breakdown.hours_deducted = breakdown.booked_hours
-            breakdown.final_price = 0.0 
+            # Peak hours debt: subscription covers base but peak surcharge = +5 GEL/hr
+            if breakdown.peak_slot_count > 0:
+                peak_hours = breakdown.peak_slot_count / 2.0
+                sub_surcharge = self.PRICING_CONFIG["peak_hours"]["subscription_surcharge_gel"]
+                breakdown.subscription_peak_debt = peak_hours * sub_surcharge
+                breakdown.final_price = breakdown.subscription_peak_debt
+            else:
+                breakdown.final_price = 0.0
             return True
         else:
             # Hours exhausted, apply generic plan discount if any

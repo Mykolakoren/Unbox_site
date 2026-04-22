@@ -4,8 +4,31 @@ import { BrowserRouter } from 'react-router-dom'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+import * as Sentry from '@sentry/react'
 import App from './App'
 import './index.css'
+
+// ── Sentry ──────────────────────────────────────────────────────────────────
+// Opt-in: only runs when VITE_SENTRY_DSN is set at build time. Local dev and
+// preview builds stay noise-free. On prod we catch uncaught exceptions +
+// unhandled promise rejections. No user PII is sent — we leave the default
+// beforeSend alone (no explicit user.email attached) and set sendDefaultPii=false.
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+if (SENTRY_DSN) {
+    Sentry.init({
+        dsn: SENTRY_DSN,
+        environment: import.meta.env.MODE,
+        release: import.meta.env.VITE_RELEASE as string | undefined,
+        sendDefaultPii: false,
+        tracesSampleRate: 0,  // no performance tracing for now — just errors
+        // Ignore noisy third-party errors we can't act on
+        ignoreErrors: [
+            'FedCM get() rejects',           // Google Sign-In (expected)
+            'ResizeObserver loop',            // benign browser quirk
+            'Failed to fetch dynamically imported module',  // we auto-reload in ModuleErrorBoundary
+        ],
+    });
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,6 +54,8 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
+    // Forward to Sentry when enabled (no-op if init was skipped)
+    Sentry.captureException(error, { extra: { componentStack: errorInfo.componentStack } });
   }
 
   render() {

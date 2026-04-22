@@ -28,6 +28,9 @@ class CashboxTransaction(CashboxTransactionBase, table=True):
     admin_name: str = Field(default="")
     shift_report_id: Optional[str] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=datetime.now)
+    # If set, this transaction credited the given user's balance at creation.
+    # Used by delete/update to reverse the credit automatically on rollback.
+    credited_user_id: Optional[str] = Field(default=None, index=True)
 
 
 class CashboxTransactionCreate(SQLModel):
@@ -41,6 +44,10 @@ class CashboxTransactionCreate(SQLModel):
     date: Optional[datetime] = None
     client_id: Optional[str] = None
     client_name: Optional[str] = None
+    # If True + type=income + client_id set, the client's User.balance
+    # is topped up by `amount` and `credited_user_id` is recorded so the
+    # credit can be reversed if the transaction is later deleted/edited.
+    credit_user_balance: bool = False
 
 
 class CashboxTransactionRead(CashboxTransactionBase):
@@ -50,3 +57,4 @@ class CashboxTransactionRead(CashboxTransactionBase):
     shift_report_id: Optional[str] = None
     created_at: datetime
     category_name: Optional[str] = None
+    credited_user_id: Optional[str] = None

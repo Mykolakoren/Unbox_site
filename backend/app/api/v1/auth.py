@@ -1,12 +1,14 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+import time
 from typing import Annotated, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from app.core import security
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.db.session import get_session
 from app.models.user import User, UserCreate, UserRead
 from app.api.deps import get_current_user
@@ -21,8 +23,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+WELCOME_BONUS_EXPIRY_DAYS = 15  # how long the new-user "free hour" stays redeemable
+
+
 def _create_welcome_bonus(session: Session, user: User) -> None:
-    """Create a 1-hour free booking bonus for a new user."""
+    """Create a 1-hour free booking bonus for a new user.
+
+    Stored as a regular Bonus row so it goes through the same FIFO redemption
+    pipeline as paid top-ups. Expires WELCOME_BONUS_EXPIRY_DAYS after signup —
+    short window is intentional, encourages the user to actually try the
+    space rather than collecting credits.
+    """
     try:
         from app.models.bonus import Bonus
         bonus = Bonus(
@@ -33,7 +44,7 @@ def _create_welcome_bonus(session: Session, user: User) -> None:
             description="Добро пожаловать в Unbox! 1 час аренды в подарок",
             granted_by_id="system",
             granted_by_name="Система",
-            expires_at=datetime.now() + timedelta(days=90),
+            expires_at=datetime.now() + timedelta(days=WELCOME_BONUS_EXPIRY_DAYS),
         )
         session.add(bonus)
         session.commit()
@@ -55,18 +66,27 @@ class TelegramLoginData(BaseModel):
     hash: str
 
 @router.post("/login", response_model=dict)
+@limiter.limit("10/minute")  # brute-force guard — real users need only a few tries
 def login_access_token(
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests
     """
     statement = select(User).where(User.email == form_data.username)
     user = session.exec(statement).first()
-    
+
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
+
+    # Excel #11 — archived users can't log in.
+    if user.archived_at is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Аккаунт архивирован. Свяжитесь с администратором для восстановления.",
+        )
     
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
@@ -199,8 +219,9 @@ def telegram_login(
     if hash_calc != login_data.hash:
         raise HTTPException(status_code=400, detail="Invalid Telegram authentication hash")
         
-    # Check Auth Date (Optional: expiration check)
-    # if time.time() - login_data.auth_date > 86400: ...
+    # Check Auth Date — reject stale auth data (> 24 hours old)
+    if time.time() - login_data.auth_date > 86400:
+        raise HTTPException(status_code=400, detail="Telegram auth data expired. Please try again.")
 
     telegram_id = str(login_data.id)
     
@@ -300,25 +321,63 @@ def telegram_login_callback(
         user_id, expires_delta=access_token_expires
     )
     
-    # Instead of redirecting (which happens inside the popup),
-    # return a small HTML page that saves the token to localStorage 
-    # and closes the popup. The parent window polls for the token.
+    # Full-page redirect flow (frontend now navigates the whole tab to
+    # oauth.telegram.org instead of opening a popup, see TelegramLoginButton).
+    # We respond with a tiny HTML page that:
+    #   1. Stores the token in localStorage (same origin as the SPA).
+    #   2. Replaces the URL with /dashboard so the SPA picks it up.
+    # Token is never in the address bar / URL params for security.
+    #
+    # `location.replace` is used instead of `location.href = …` so the
+    # browser's back button doesn't bring the user back to this page (and
+    # cause a duplicate auth attempt).
     from fastapi.responses import HTMLResponse
     html_content = f"""
     <!DOCTYPE html>
     <html>
-    <head><title>Authorizing...</title></head>
-    <body>
-        <p>Авторизация успешна! Это окно закроется автоматически...</p>
-        <script>
-            try {{
-                window.localStorage.setItem('token', '{access_token}');
-                window.close();
-            }} catch(e) {{
-                // If window.close() is blocked, redirect instead
-                window.location.href = '/dashboard?token={access_token}&source=telegram';
+    <head>
+        <title>Авторизация Unbox...</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                display: flex; align-items: center; justify-content: center;
+                height: 100vh; margin: 0; background: #FAFAF7; color: #0F0F10;
+                text-align: center; padding: 20px;
             }}
+            .ok {{ font-size: 18px; font-weight: 600; line-height: 1.5; }}
+            .small {{ font-size: 13px; color: #666; margin-top: 8px; }}
+            .spinner {{
+                width: 28px; height: 28px; margin: 0 auto 16px;
+                border: 3px solid #E5E5E5; border-top-color: #476D6B;
+                border-radius: 50%; animation: spin 0.8s linear infinite;
+            }}
+            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        </style>
+    </head>
+    <body>
+        <div>
+            <div class="spinner"></div>
+            <div class="ok">✓ Telegram авторизован</div>
+            <div class="small">Открываем ваш кабинет…</div>
+        </div>
+        <script>
+            (function() {{
+                var token = '{access_token}';
+                try {{
+                    window.localStorage.setItem('token', token);
+                }} catch (e) {{
+                    // Private mode / storage disabled — user will see login page,
+                    // they can retry from a normal session.
+                }}
+                // Hand off to the SPA. `replace` so back-button doesn't re-fire auth.
+                window.location.replace('/dashboard?source=telegram');
+            }})();
         </script>
+        <noscript>
+            <p><a href="/dashboard?source=telegram">Перейти в кабинет</a></p>
+        </noscript>
     </body>
     </html>
     """

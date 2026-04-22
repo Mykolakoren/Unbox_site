@@ -1,4 +1,5 @@
-import { Send } from 'lucide-react';
+import { useState } from 'react';
+import { Send, Loader2 } from 'lucide-react';
 
 interface TelegramLoginButtonProps {
     botName: string;
@@ -9,62 +10,74 @@ interface TelegramLoginButtonProps {
     usePic?: boolean;
 }
 
+/**
+ * Telegram OAuth login — full-page redirect flow (the standard).
+ *
+ * Why we left the popup approach:
+ *
+ * Modern browsers (Safari 16+, Chrome 109+, Firefox 117+) tightened
+ * cross-origin isolation rules. When a popup goes through a different
+ * origin and back to ours (oauth.telegram.org → unbox.com.ge), three
+ * things break in random combinations depending on the browser:
+ *
+ *   1. window.opener is severed (COOP defaults), so the popup can't
+ *      postMessage back to the parent.
+ *   2. localStorage is partitioned per top-level origin chain, so what
+ *      the popup writes might not be visible to the parent.
+ *   3. window.close() is silently blocked unless the script literally
+ *      opened that window in the same task — and Telegram's redirect
+ *      breaks that chain.
+ *
+ * Result: admin would auth in the bot, the popup would write the token
+ * to its own localStorage partition, then sit there forever — parent
+ * never sees anything, eventually times out.
+ *
+ * Full-page redirect (this implementation) is what Google, GitHub,
+ * Apple and every other major OAuth provider uses, for exactly the
+ * same reasons. Trade-off: user briefly sees Telegram's auth page,
+ * then a "✓ Авторизация" page, then their dashboard. No popups, no
+ * COOP fights, no localStorage races.
+ */
 export const TelegramLoginButton = ({
     botName,
 }: TelegramLoginButtonProps) => {
+    const [isLoading, setIsLoading] = useState(false);
 
     const handleClick = () => {
-        // Build the callback URL dynamically based on current origin
+        if (isLoading) return;
+        setIsLoading(true);
+
         const origin = window.location.origin;
         const callbackUrl = `${origin}/api/v1/auth/telegram/callback`;
+        const authUrl =
+            `https://oauth.telegram.org/auth?bot_id=${botName}` +
+            `&origin=${encodeURIComponent(origin)}` +
+            `&embed=0&request_access=write` +
+            `&return_to=${encodeURIComponent(callbackUrl)}`;
 
-        // Listen for the popup closing or receiving a message
-        const checkPopup = setInterval(() => {
-            // Check if token appeared in localStorage (set by the redirected page)
-            const token = localStorage.getItem('token');
-            if (token) {
-                clearInterval(checkPopup);
-                window.location.href = '/dashboard';
-            }
-        }, 500);
-
-        // Open Telegram OAuth in a popup window
-        const width = 550;
-        const height = 470;
-        const left = Math.round((window.screen.width / 2) - (width / 2));
-        const top = Math.round((window.screen.height / 2) - (height / 2));
-
-        const authUrl = `https://oauth.telegram.org/auth?bot_id=${botName}&origin=${encodeURIComponent(origin)}&embed=0&request_access=write&return_to=${encodeURIComponent(callbackUrl)}`;
-
-        const popup = window.open(
-            authUrl,
-            'telegram_auth',
-            `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=no,resizable=no`
-        );
-
-        // Also check if popup was closed
-        const checkClosed = setInterval(() => {
-            if (popup && popup.closed) {
-                clearInterval(checkClosed);
-                clearInterval(checkPopup);
-            }
-        }, 1000);
-
-        // Auto-cleanup after 5 minutes
-        setTimeout(() => {
-            clearInterval(checkPopup);
-            clearInterval(checkClosed);
-        }, 300000);
+        // Full-page navigation. After auth, Telegram redirects the SAME tab
+        // to our callback, which sets the token and redirects to /dashboard.
+        window.location.href = authUrl;
     };
 
     return (
         <button
             type="button"
             onClick={handleClick}
-            className="flex items-center gap-2 px-6 py-2.5 bg-[#54A9EB] hover:bg-[#4A96D2] text-white font-medium rounded-lg transition-all duration-200 hover:shadow-md active:scale-[0.98]"
+            disabled={isLoading}
+            className="flex items-center gap-2 px-6 py-2.5 bg-[#54A9EB] hover:bg-[#4A96D2] disabled:bg-[#54A9EB]/60 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-all duration-200 hover:shadow-md active:scale-[0.98]"
         >
-            <Send size={18} />
-            <span>Войти через Telegram</span>
+            {isLoading ? (
+                <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Переход в Telegram...</span>
+                </>
+            ) : (
+                <>
+                    <Send size={18} />
+                    <span>Войти через Telegram</span>
+                </>
+            )}
         </button>
     );
 };

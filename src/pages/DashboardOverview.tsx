@@ -2,16 +2,19 @@ import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import {
-    Wallet, Plus, AlertCircle, TrendingUp, Calendar,
+    Wallet, Plus, TrendingUp, Calendar,
     ArrowDownCircle, CreditCard, RotateCcw, Pencil, Receipt, Clock,
     GripVertical, Settings2, RotateCw, Check, Gift,
+    CalendarPlus, UserCheck,
 } from 'lucide-react';
+import { QuickActionsStrip } from '../components/ui/QuickActionsStrip';
 import { Button } from '../components/ui/Button';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
 import { RESOURCES } from '../utils/data';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { bonusesApi, type Bonus } from '../api/bonuses';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import {
     DndContext,
     closestCenter,
@@ -201,7 +204,7 @@ function saveSizes(sizes: Record<BlockId, BlockSize>) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function DashboardOverview() {
-    const { currentUser, bookings, getTransactionsByUser } = useUserStore();
+        const { currentUser, bookings, getTransactionsByUser } = useUserStore();
     const navigate = useNavigate();
     const [blockOrder, setBlockOrder] = useState<BlockId[]>(loadLayout);
     const [hiddenBlocks, setHiddenBlocks] = useState<Set<BlockId>>(loadHidden);
@@ -282,7 +285,13 @@ export function DashboardOverview() {
     const isNegative = currentUser.balance < 0;
     const creditLimit = currentUser.creditLimit || 0;
     const availableCredit = creditLimit + currentUser.balance;
-    const usagePercent = Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / creditLimit) * 100));
+    // Division-by-zero guard — most users have no credit limit, in which case
+    // dividing produces Infinity → Math.min/max passes it through → NaN width
+    // on the progress bar that React renders silently as 0 (not crash, but
+    // visually broken).
+    const usagePercent = creditLimit > 0
+        ? Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / creditLimit) * 100))
+        : 0;
 
     const recentBookings = bookings
         .filter(b => b.userId === currentUser.email || b.userId === currentUser.id)
@@ -436,14 +445,10 @@ export function DashboardOverview() {
                 return (
                     <div className="p-6 rounded-2xl flex flex-col justify-center gap-4" style={glassStyle}>
                         <h3 className="font-bold text-lg">Быстрые действия</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
                             <Button onClick={() => navigate('/dashboard/bookings')} className="w-full justify-start py-6" size="lg">
                                 <Plus className="mr-2" />
                                 Новое бронирование
-                            </Button>
-                            <Button onClick={() => navigate('/dashboard/bookings')} variant="outline" className="w-full justify-start py-6" size="lg">
-                                <AlertCircle className="mr-2" />
-                                Мои бронирования
                             </Button>
                         </div>
                     </div>
@@ -566,140 +571,217 @@ export function DashboardOverview() {
     // Visible block order for rendering
     const visibleOrder = isEditing ? blockOrder : blockOrder.filter(id => !hiddenBlocks.has(id));
 
+    // ── Grid House design flag — rollback-safe variant ──
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {isEditing && <style>{wiggleCSS}</style>}
 
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold mb-1">Обзор</h1>
-                    <p className="text-unbox-grey text-sm">Сводка вашего аккаунта и быстрые действия</p>
-                </div>
-                <button
-                    onClick={() => setIsEditing(!isEditing)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
-                        isEditing
-                            ? 'bg-unbox-green text-white border-unbox-green shadow-md'
-                            : 'text-unbox-grey hover:text-unbox-dark bg-white/60 hover:bg-white/80 border-white/60'
-                    }`}
-                >
-                    {isEditing ? <Check size={13} /> : <Settings2 size={13} />}
-                    {isEditing ? 'Готово' : 'Настроить'}
-                </button>
+        <GridHouseDashboardOverview
+            currentUser={currentUser}
+            isNegative={isNegative}
+            creditLimit={creditLimit}
+            availableCredit={availableCredit}
+            usagePercent={usagePercent}
+            activeBonuses={activeBonuses}
+            totalBonusHours={totalBonusHours}
+            recentBookings={recentBookings}
+            recentTransactions={recentTransactions}
+            statusConfig={statusConfig}
+            transactionTypeConfig={transactionTypeConfig}
+            formatBookingDate={formatBookingDate}
+            navigate={navigate}
+        />
+    );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Grid House — DashboardOverview
+   ═══════════════════════════════════════════════════════════════ */
+
+const ghdoMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghdoHairline = `1px solid ${GH.ink10}`;
+
+interface GridHouseDashboardOverviewProps {
+    currentUser: any;
+    isNegative: boolean;
+    creditLimit: number;
+    availableCredit: number;
+    usagePercent: number;
+    activeBonuses: Bonus[];
+    totalBonusHours: number;
+    recentBookings: any[];
+    recentTransactions: any[];
+    statusConfig: Record<string, { label: string; color: string }>;
+    transactionTypeConfig: Record<string, { label: string; icon: any; color: string }>;
+    formatBookingDate: (d: Date | string) => string;
+    navigate: ReturnType<typeof useNavigate>;
+}
+
+function useGHNarrow(bp = 768) {
+    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return n;
+}
+
+function GridHouseDashboardOverview({
+    currentUser, isNegative, creditLimit, availableCredit, usagePercent: _usagePercent,
+    activeBonuses, totalBonusHours, recentBookings, recentTransactions,
+    statusConfig, transactionTypeConfig, formatBookingDate, navigate,
+}: GridHouseDashboardOverviewProps) {
+    const narrow = useGHNarrow();
+    const ghStatusColor = (status: string) => {
+        const map: Record<string, string> = {
+            confirmed: GH.accent, completed: GH.ink60, cancelled: GH.danger,
+            no_show: '#B8862F', 're-rented': GH.ink30, rescheduled: GH.ink60,
+        };
+        return map[status] || GH.ink30;
+    };
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
+            {/* Header */}
+            <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
+                <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>МОЙ КАБИНЕТ</div>
+                <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
+                    Обзор
+                </h1>
+                <p style={{ fontSize: 14, color: GH.ink60, marginTop: 4 }}>
+                    Привет, {currentUser.name?.split(' ')[0] || 'пользователь'}
+                </p>
             </div>
 
-            {/* Inline settings toolbar — widget visibility + reset */}
-            {isEditing && (
-                <div className="flex flex-wrap items-center gap-2 px-4 py-3 rounded-2xl bg-white/60 border border-white/80 shadow-sm animate-in fade-in slide-in-from-top-2 duration-200"
-                     style={{ backdropFilter: 'blur(12px)' }}
+            {/* KPI strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 0, borderTop: ghdoHairline, marginBottom: 32 }}>
+                {/* Balance */}
+                <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 0', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
+                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БАЛАНС</div>
+                    <div style={{
+                        fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700,
+                        color: isNegative ? GH.danger : GH.ink, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                    }}>
+                        {currentUser.balance?.toLocaleString('ru-RU') || '0'} ₴
+                    </div>
+                    {creditLimit > 0 && (
+                        <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
+                            Кредит: {availableCredit.toLocaleString('ru-RU')} ₴ из {creditLimit.toLocaleString('ru-RU')} ₴
+                        </div>
+                    )}
+                </div>
+
+                {/* Bonuses */}
+                <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 20px', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
+                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БОНУСЫ</div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1, color: activeBonuses.length > 0 ? GH.accent : GH.ink30 }}>
+                        {totalBonusHours}
+                    </div>
+                    <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
+                        {activeBonuses.length > 0 ? 'часов бесплатной аренды' : 'нет активных бонусов'}
+                    </div>
+                </div>
+
+                {/* Discount */}
+                <div style={{ padding: narrow ? '16px 0' : '20px 0 20px 20px' }}>
+                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>СКИДКА</div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1 }}>
+                        {currentUser.discountPercent || 0}%
+                    </div>
+                    <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
+                        текущий уровень
+                    </div>
+                </div>
+            </div>
+
+            {/* Quick actions — Excel #20.
+                Desktop: visible strip of cards (QuickActionsStrip below).
+                Mobile: falls back to QuickActionsFab rendered by DashboardLayout.
+                We also keep the primary "Забронировать кабинет" ink button for
+                mobile where the strip is hidden. */}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+                <button
+                    onClick={() => navigate('/dashboard/bookings')}
+                    style={{
+                        padding: '10px 20px', background: GH.ink, color: GH.paper, fontWeight: 700,
+                        fontSize: 13, fontFamily: GH_SANS, border: 'none', cursor: 'pointer',
+                    }}
                 >
-                    <span className="text-xs font-semibold text-unbox-dark mr-1">Виджеты:</span>
-                    {ALL_BLOCKS.map(block => {
-                        const Icon = block.icon;
-                        const isVisible = !hiddenBlocks.has(block.id);
-                        return (
-                            <button
-                                key={block.id}
-                                onClick={() => toggleVisibility(block.id)}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                                    isVisible
-                                        ? 'bg-unbox-green/10 text-unbox-green border border-unbox-green/30'
-                                        : 'bg-gray-100 text-gray-400 border border-gray-200 line-through'
-                                }`}
-                            >
-                                <div className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
-                                    isVisible ? 'bg-unbox-green' : 'bg-gray-300'
-                                }`}>
-                                    {isVisible && <Check size={10} className="text-white" />}
-                                </div>
-                                <Icon size={13} />
-                                <span className="hidden sm:inline">{block.label}</span>
-                            </button>
-                        );
-                    })}
-                    <div className="flex-1" />
-                    <button
-                        onClick={resetLayout}
-                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-unbox-grey hover:text-unbox-dark bg-white/80 hover:bg-white rounded-lg border border-gray-200 transition-colors"
-                    >
-                        <RotateCw size={11} />
-                        Сброс
-                    </button>
-                    <div className="w-full mt-1 flex items-center gap-1.5 text-[11px] text-unbox-grey">
-                        <GripVertical size={12} className="text-unbox-green shrink-0" />
-                        Перетаскивай за зелёную ручку
-                        <span className="inline-flex w-4 h-4 bg-unbox-green rounded items-center justify-center">
-                            <GripVertical size={8} className="text-white" />
-                        </span>
-                        · Меняй размер кнопкой в правом нижнем углу
-                    </div>
+                    + Забронировать кабинет
+                </button>
+            </div>
+            <QuickActionsStrip
+                actions={[
+                    { label: 'Оформить абонемент', sub: 'Выгоднее почасовой аренды', path: '/subscriptions', icon: CalendarPlus },
+                    { label: 'Получить бонусы', sub: 'Приведи друга — бонус обоим', path: '/dashboard/bonuses', icon: Gift },
+                    { label: 'Стать специалистом', sub: 'Принимать клиентов в Unbox', path: '/crm/apply', icon: UserCheck },
+                ]}
+                heading="Что дальше"
+            />
+
+            {/* Two-column: bookings + payments */}
+            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: narrow ? 24 : 32 }}>
+                {/* Recent bookings */}
+                <div>
+                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>ПОСЛЕДНИЕ БРОНИРОВАНИЯ</div>
+                    {recentBookings.length === 0 ? (
+                        <div style={{ padding: 24, border: ghdoHairline, color: GH.ink30, fontSize: 13, textAlign: 'center' }}>
+                            Нет бронирований
+                        </div>
+                    ) : (
+                        <div style={{ border: ghdoHairline }}>
+                            {recentBookings.map((b, i) => {
+                                const sc = statusConfig[b.status] || statusConfig.confirmed;
+                                const resName = RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId;
+                                return (
+                                    <div key={i} style={{ padding: '14px 16px', borderBottom: i < recentBookings.length - 1 ? ghdoHairline : 'none' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                            <div style={{ fontSize: 14, fontWeight: 600 }}>{resName}</div>
+                                            <span style={{ ...ghdoMono, fontSize: 9, color: ghStatusColor(b.status), padding: '2px 8px', border: `1px solid ${ghStatusColor(b.status)}30`, flexShrink: 0 }}>
+                                                {sc.label.toUpperCase()}
+                                            </span>
+                                        </div>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+                                            {formatBookingDate(b.date)} · {b.startTime}–{b.endTime}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
-            )}
 
-            <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={e => setActiveId(String(e.active.id))}
-                onDragEnd={handleDragEnd}
-                onDragCancel={() => setActiveId(null)}
-            >
-                <SortableContext items={visibleOrder} strategy={rectSortingStrategy}>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {visibleOrder.map(blockId => {
-                            const size = blockSizes[blockId] || 'half';
-                            return (
-                                <SortableBlock
-                                    key={blockId}
-                                    id={blockId}
-                                    isEditing={isEditing}
-                                    blockSize={size}
-                                    onToggleSize={() => toggleBlockSize(blockId)}
-                                >
-                                    {renderBlock(blockId)}
-                                </SortableBlock>
-                            );
-                        })}
-                    </div>
-                </SortableContext>
-
-                <DragOverlay>
-                    {activeId ? (
-                        <div className="opacity-90 scale-105 rotate-2 shadow-2xl rounded-2xl">
-                            {renderBlock(activeId as BlockId)}
+                {/* Recent transactions */}
+                <div>
+                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>ПОСЛЕДНИЕ ПЛАТЕЖИ</div>
+                    {recentTransactions.length === 0 ? (
+                        <div style={{ padding: 24, border: ghdoHairline, color: GH.ink30, fontSize: 13, textAlign: 'center' }}>
+                            Нет транзакций
                         </div>
-                    ) : null}
-                </DragOverlay>
-            </DndContext>
-
-            {/* Welcome Bonus Popup */}
-            {showWelcome && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center space-y-5 animate-in zoom-in-95 duration-300">
-                        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
-                            <Gift size={32} className="text-amber-600" />
+                    ) : (
+                        <div style={{ border: ghdoHairline }}>
+                            {recentTransactions.map((t: any, i: number) => {
+                                const tc = transactionTypeConfig[t.type] || transactionTypeConfig.deposit;
+                                return (
+                                    <div key={i} style={{ padding: '12px 16px', borderBottom: i < recentTransactions.length - 1 ? ghdoHairline : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            <div style={{ fontSize: 13, fontWeight: 600 }}>{tc.label}</div>
+                                            <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30, marginTop: 2 }}>
+                                                {formatBookingDate(t.createdAt)}
+                                            </div>
+                                        </div>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, color: t.amount >= 0 ? GH.accent : GH.danger }}>
+                                            {t.amount >= 0 ? '+' : ''}{t.amount?.toLocaleString('ru-RU')} ₴
+                                        </span>
+                                    </div>
+                                );
+                            })}
                         </div>
-                        <h2 className="text-2xl font-bold text-unbox-dark">Добро пожаловать!</h2>
-                        <p className="text-unbox-grey">
-                            Мы дарим вам <span className="font-bold text-amber-600">1 час бесплатной аренды</span> любого кабинета.
-                            Используйте бонус при бронировании!
-                        </p>
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                            <div className="text-sm text-amber-700 font-medium">Ваш бонус</div>
-                            <div className="text-3xl font-bold text-amber-600 mt-1">1 час</div>
-                            <div className="text-xs text-amber-500 mt-1">Действителен 90 дней</div>
-                        </div>
-                        <button
-                            onClick={() => {
-                                setShowWelcome(false);
-                                localStorage.setItem('unbox_welcome_shown', '1');
-                            }}
-                            className="w-full py-3 bg-unbox-green text-white font-bold rounded-xl hover:bg-unbox-dark transition-colors cursor-pointer"
-                        >
-                            Отлично, спасибо!
-                        </button>
-                    </div>
+                    )}
                 </div>
-            )}
+            </div>
+
+            {/* Footer */}
+            <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ ...ghdoMono, color: GH.ink30 }}>UNBOX · 2026</span>
+                <span style={{ ...ghdoMono, color: GH.ink10 }}>GRID HOUSE</span>
+            </footer>
         </div>
     );
 }

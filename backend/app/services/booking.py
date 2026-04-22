@@ -1,5 +1,7 @@
+import hashlib
 from typing import List
 from sqlmodel import Session, select
+from sqlalchemy import text
 from datetime import datetime, timedelta
 from app.models.booking import Booking
 
@@ -15,6 +17,25 @@ def time_to_minutes(t_str: str) -> int:
         return -1
 
 
+def _acquire_slot_lock(session: Session, resource_id: str, date: datetime) -> None:
+    """Advisory lock scoped to (resource_id, YYYY-MM-DD).
+    Held until transaction commits/rolls back. Serialises parallel writers on
+    the same day+resource, preventing the phantom-row race that SELECT FOR
+    UPDATE cannot fix (no existing row to lock on an empty slot).
+
+    No-op on non-Postgres backends (dev SQLite has single-writer semantics
+    so the race doesn't apply there).
+    """
+    dialect = session.bind.dialect.name if session.bind else ""
+    if dialect != "postgresql":
+        return
+    key = f"{resource_id}:{date.strftime('%Y-%m-%d')}"
+    # 64-bit signed int from SHA-256 prefix — stable hash across processes
+    digest = hashlib.sha256(key.encode()).digest()
+    as_int = int.from_bytes(digest[:8], "big", signed=True)
+    session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": as_int})
+
+
 def check_availability(
     session: Session,
     resource_id: str,
@@ -22,12 +43,23 @@ def check_availability(
     start_time: str,
     duration: int,
     exclude_booking_id: str = None,
+    lock_rows: bool = False,
 ) -> tuple[bool, str | None]:
     """
     Check if a slot is available.
     Returns (True, None) if available, (False, reason) if overlapping.
     All confirmed bookings block the slot, including re-rent listed ones.
+
+    lock_rows=True: take a Postgres advisory lock on (resource_id, date) BEFORE
+    the read, so two parallel booking creations on the same slot serialise.
+    This fixes the phantom-row race where SELECT FOR UPDATE alone would let both
+    transactions see an empty slot and both insert.
     """
+    # Take the day-scope advisory lock FIRST — before any reads.
+    # This is what actually prevents the race (SELECT FOR UPDATE alone cannot).
+    if lock_rows:
+        _acquire_slot_lock(session, resource_id, date)
+
     day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
 

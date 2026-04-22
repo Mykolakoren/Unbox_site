@@ -2,10 +2,27 @@ import { api } from './client';
 import type { User } from '../store/types';
 
 export const usersApi = {
-    getUsers: async (skip = 0, limit = 100) => {
+    getUsers: async (skip = 0, limit = 100, includeArchived = false) => {
         const response = await api.get<User[]>('/users/', {
-            params: { skip, limit }
+            params: { skip, limit, include_archived: includeArchived }
         });
+        return response.data;
+    },
+
+    /** Soft-delete a user (Excel #11). Preserves all history; prevents login. */
+    archiveUser: async (id: string, reason?: string) => {
+        const response = await api.post<User>(
+            `/users/${encodeURIComponent(id)}/archive`,
+            { reason: reason || null },
+        );
+        return response.data;
+    },
+
+    /** Restore a previously archived user. */
+    unarchiveUser: async (id: string) => {
+        const response = await api.post<User>(
+            `/users/${encodeURIComponent(id)}/unarchive`,
+        );
         return response.data;
     },
 
@@ -30,6 +47,27 @@ export const usersApi = {
 
     updatePersonalDiscount: async (id: string, percent: number, reason: string) => {
         const response = await api.post<User>(`/users/${id}/discount`, { percent, reason });
+        return response.data;
+    },
+
+    /** Admin-only email change. Cascades to Booking/Waitlist/Cashbox refs
+     *  that store email as a soft foreign key. Returns the updated user. */
+    changeEmail: async (id: string, newEmail: string) => {
+        const response = await api.post<User>(
+            `/users/${encodeURIComponent(id)}/change-email`,
+            { new_email: newEmail },
+        );
+        return response.data;
+    },
+
+    /** Merge two user accounts: `source` is absorbed into `target` and
+     *  deleted. All FKs (booking/waitlist/cashbox/notifications) move to
+     *  the target, balances sum, subscription fallback, tags union. */
+    mergeUsers: async (sourceIdOrEmail: string, targetIdOrEmail: string) => {
+        const response = await api.post<User>('/users/merge', {
+            source: sourceIdOrEmail,
+            target: targetIdOrEmail,
+        });
         return response.data;
     },
 

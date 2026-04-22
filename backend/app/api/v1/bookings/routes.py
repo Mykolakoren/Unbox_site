@@ -3,15 +3,18 @@ import logging
 from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from app.core.rate_limit import limiter
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
 from app.api import deps
-from app.models.booking import Booking, BookingCreate, BookingRead
+from app.models.booking import Booking, BookingCreate, BookingRead, BookingPublicRead
 from app.models.user import User
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
 from app.services.booking import check_availability, find_re_rent_conflicts
+from app.services.email import email_service
+from app.services.telegram import telegram_service
 from app.core.permissions import ADMIN_ROLES
 
 logger = logging.getLogger(__name__)
@@ -142,32 +145,104 @@ def read_bookings(
     return [enrich_booking_status(b) for b in bookings]
 
 
-@router.get("/public", response_model=List[BookingRead])
+@router.get("/public", response_model=List[BookingPublicRead])
+@limiter.limit("60/minute")
 def read_public_bookings(
+    request: Request,
     session: Session = Depends(deps.get_session),
-    start_date: str = None,
-    end_date: str = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> Any:
-    """Retrieve ALL confirmed bookings for availability display (Public)."""
-    query = select(Booking).where(Booking.status == "confirmed")
+    """Retrieve confirmed bookings for availability display (Public).
+    Returns BookingPublicRead — no user PII (email/uuid) exposed.
 
-    if start_date:
-        try:
-            s_date = datetime.strptime(start_date, "%Y-%m-%d")
-            query = query.where(Booking.date >= s_date)
-        except ValueError:
-            pass
+    * A `start_date` is enforced (default: today) so the endpoint never
+      streams the full booking history to the internet.
+    * Window is capped to 60 days ahead — more than any real chessboard
+      needs, but prevents `start_date=2020-01-01` style pulls.
+    * Result is capped to 1000 rows defensively.
+    """
+    # Default start_date = today. This is the big one — without it the query
+    # used to return every booking ever created.
+    try:
+        s_date = datetime.strptime(start_date, "%Y-%m-%d") if start_date else datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    except ValueError:
+        s_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    if end_date:
-        try:
-            e_date = datetime.strptime(end_date, "%Y-%m-%d")
-            e_date = e_date.replace(hour=23, minute=59, second=59)
-            query = query.where(Booking.date <= e_date)
-        except ValueError:
-            pass
+    # end_date defaults to start + 60 days; any `end_date` further is clamped.
+    max_window_days = 60
+    default_end = s_date + timedelta(days=max_window_days)
+    try:
+        e_date = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if end_date else default_end
+    except ValueError:
+        e_date = default_end
+    if (e_date - s_date).days > max_window_days:
+        e_date = s_date + timedelta(days=max_window_days)
+
+    query = (
+        select(Booking)
+        .where(Booking.status == "confirmed")
+        .where(Booking.date >= s_date)
+        .where(Booking.date <= e_date)
+        .limit(1000)
+    )
 
     bookings = session.exec(query).all()
     return [enrich_booking_status(b) for b in bookings]
+
+
+# ─── External events from Google Calendar (Excel #15, #32, #38) ──────────────
+# Pull-side of the two-way GCal sync. The push side already runs: every
+# confirmed booking creates an event in the cabinet's Google Calendar.
+# This endpoint returns manual events a cleaner/phone-booking admin added
+# straight in GCal so the chessboard can render them as "busy".
+
+@router.get("/external-events")
+@limiter.limit("30/minute")  # guards the downstream Google Calendar API quota
+def read_external_events(
+    request: Request,
+    resource_id: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    session: Session = Depends(deps.get_session),
+) -> Any:
+    """Return Google Calendar events for a specific resource in a time window.
+    Public — no auth required so the checkout chessboard can see them."""
+    from datetime import timezone as _tz
+
+    # Default window: now → now + 14 days
+    try:
+        t_min = datetime.fromisoformat(date_from) if date_from else datetime.now()
+    except ValueError:
+        t_min = datetime.now()
+    try:
+        t_max = datetime.fromisoformat(date_to) if date_to else (t_min + timedelta(days=14))
+    except ValueError:
+        t_max = t_min + timedelta(days=14)
+
+    # RFC3339 for the Google API — pin to UTC if naive
+    def _rfc3339(d: datetime) -> str:
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_tz.utc)
+        return d.isoformat()
+
+    # Skip events that we created ourselves — those are Bookings, already
+    # sourced by /bookings/public. Keeping them would double-render slots.
+    our_event_ids = {
+        b.gcal_event_id for b in session.exec(
+            select(Booking)
+            .where(Booking.resource_id == resource_id)
+            .where(Booking.status == "confirmed")
+            .where(Booking.gcal_event_id.is_not(None))  # type: ignore
+        ).all() if b.gcal_event_id
+    }
+
+    events = gcal_service.list_events(
+        resource_id=resource_id,
+        time_min=_rfc3339(t_min),
+        time_max=_rfc3339(t_max),
+    )
+    return [e for e in events if e.get('id') not in our_event_ids]
 
 
 # ─── Availability check ──────────────────────────────────────────────────────
@@ -232,6 +307,7 @@ def create_booking(
     session: Session = Depends(deps.get_session),
     booking_in: BookingCreate,
     current_user: User = Depends(deps.get_current_user),
+    background_tasks: BackgroundTasks,
 ) -> Any:
     """Create new booking."""
     try:
@@ -255,6 +331,7 @@ def create_booking(
             date=booking_in.date,
             start_time=booking_in.start_time,
             duration=booking_in.duration,
+            lock_rows=True,  # SELECT FOR UPDATE: prevents race condition on double booking
         )
 
         if not is_available:
@@ -303,8 +380,11 @@ def create_booking(
                             re_rent_booking.gcal_event_id,
                             re_rent_booking.resource_id,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            f"[GCal Auto-cancel re-rent] delete_event failed for "
+                            f"booking={re_rent_booking.id} event={re_rent_booking.gcal_event_id}: {e}"
+                        )
                     re_rent_booking.gcal_event_id = None
 
                 # Audit log for auto-cancel with 50% refund details
@@ -394,7 +474,10 @@ def create_booking(
                     f"(баланс: {booking_owner.balance}₾, кредит: {booking_owner.credit_limit}₾). "
                     f"Пополните баланс перед бронированием.",
                 )
-            booking_owner.balance -= quote.final_price
+            # round(..., 2) — float arithmetic accumulates fractional cents
+            # over thousands of bookings; without rounding the displayed
+            # balance and audit total drift apart.
+            booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
 
         booking_in.final_price = quote.final_price
         booking_in.base_price = quote.base_price
@@ -403,17 +486,30 @@ def create_booking(
         booking_in.discount_percent = quote.discount_percent
         booking_in.hours_deducted = quote.hours_deducted
 
+        # Peak hours subscription debt: deduct from balance (goes negative = debt)
+        peak_debt = quote.subscription_peak_debt
+        if peak_debt > 0 and booking_in.payment_method == "subscription":
+            booking_owner.balance = round((booking_owner.balance or 0) - peak_debt, 2)
+
         # ── Hot Booking Approval Gate ──
         # If booking is within 12 hours AND user is NOT admin/owner → require admin approval
+        # No discount for hot bookings — only admin approval required
         HOT_BOOKING_THRESHOLD_HOURS = 12
         is_admin_or_above = current_user.role in ("admin", "senior_admin", "owner")
-        is_hot = quote.applied_rule == "HOT_BOOKING"
+        # Use UTC-aware comparison to avoid tz drift across server/client.
+        # If booking date is naive, assume UTC (server is Etc/UTC on prod per CLAUDE.md).
+        from datetime import datetime as _dt, timezone as _tz
+        _now = _dt.now(_tz.utc)
+        _start = start_dt if start_dt.tzinfo else start_dt.replace(tzinfo=_tz.utc)
+        _diff_hours = (_start - _now).total_seconds() / 3600.0
+        is_hot = 0 < _diff_hours <= HOT_BOOKING_THRESHOLD_HOURS
 
         if is_hot and not is_admin_or_above:
             # Don't deduct balance — set status to pending_approval
             # Revert balance deduction that happened above
             if booking_in.payment_method != "subscription":
-                booking_owner.balance += quote.final_price  # undo deduction
+                # undo deduction (rounded — see comment above)
+                booking_owner.balance = round((booking_owner.balance or 0) + quote.final_price, 2)
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
@@ -440,6 +536,37 @@ def create_booking(
         session.commit()
         session.refresh(booking)
 
+        # Peak hours subscription debt notification
+        if peak_debt > 0 and booking_in.payment_method == "subscription":
+            try:
+                from app.models.notification import Notification
+                resource_name = booking_in.resource_id
+                try:
+                    from app.models.resource import Resource as ResModel
+                    res_obj = session.get(ResModel, booking_in.resource_id)
+                    if res_obj:
+                        resource_name = res_obj.name or booking_in.resource_id
+                except Exception:
+                    pass
+                peak_hours_count = quote.peak_slot_count / 2.0
+                notif = Notification(
+                    type="peak_hours_debt",
+                    title="Доплата за пиковые часы",
+                    description=(
+                        f"Абонемент покрывает стандартные часы. "
+                        f"Бронь {resource_name} {booking.date.strftime('%d.%m')} {booking.start_time} включает "
+                        f"{peak_hours_count:.0f} ч. пиковых часов (9–10, 20–22) — "
+                        f"доплата {peak_debt:.0f} ₾ (5 ₾/ч) списана со счёта."
+                    ),
+                    recipient_id=str(booking_owner.id),
+                    icon="Clock",
+                    link="/bookings",
+                )
+                session.add(notif)
+                session.commit()
+            except Exception as e:
+                logger.warning(f"[Peak debt notification] Error: {e}")
+
         # Google Calendar Sync
         gcal_sync_ok = False
         try:
@@ -457,6 +584,49 @@ def create_booking(
         if not gcal_sync_ok:
             logger.info(f"Booking {booking.id} created without GCal sync")
 
+        # ── Booking confirmation notifications (fire-and-forget) ──
+        # Only for confirmed bookings — skip pending_approval (hot bookings)
+        if booking.status == "confirmed":
+            try:
+                from app.models.resource import Resource as ResModel
+                from app.models.location import Location as LocModel
+
+                res_obj = session.get(ResModel, booking.resource_id)
+                loc_obj = session.get(LocModel, booking.location_id)
+                common_ctx = dict(
+                    user_name=booking_owner.name,
+                    resource_name=(res_obj.name if res_obj else booking.resource_id),
+                    location_name=(loc_obj.name if loc_obj else booking.location_id),
+                    location_address=(loc_obj.address if loc_obj else None),
+                    date=booking.date,
+                    start_time=booking.start_time,
+                    duration_minutes=booking.duration,
+                    format_type=booking.format,
+                    final_price=booking.final_price,
+                    payment_method=booking.payment_method,
+                    booking_id=str(booking.id),
+                )
+
+                # Telegram (primary channel for our audience)
+                if booking_owner.telegram_id:
+                    background_tasks.add_task(
+                        telegram_service.send_booking_confirmation,
+                        chat_id=str(booking_owner.telegram_id),
+                        **common_ctx,
+                    )
+
+                # Email (fallback / secondary — disabled by default on prod)
+                if booking_owner.email and not booking_owner.email.endswith("@telegram.unbox"):
+                    background_tasks.add_task(
+                        email_service.send_booking_confirmation,
+                        to_email=booking_owner.email,
+                        to_name=booking_owner.name,
+                        **{k: v for k, v in common_ctx.items() if k != "user_name"},
+                    )
+            except Exception as e:
+                # Never block the booking flow on notification errors
+                logger.warning(f"[Booking notification] Non-blocking failure: {e}")
+
         return booking
 
     except HTTPException:
@@ -466,6 +636,553 @@ def create_booking(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ─── Multi-slot (same-day split-periods in one resource) ────────────────────
+# IMPORTANT: This must be registered BEFORE /{booking_id} routes so FastAPI
+# matches "/multi-slot" exactly instead of treating it as a booking_id.
+
+class MultiSlotItem(PydanticBaseModel):
+    resource_id: str
+    location_id: str = "unbox_one"
+    date: str          # "YYYY-MM-DD"
+    start_time: str    # "HH:MM"
+    duration: int = 60
+    format: str = "individual"
+
+
+class MultiSlotRequest(PydanticBaseModel):
+    slots: List[MultiSlotItem]
+    payment_method: str = "balance"
+    target_user_id: Optional[str] = None
+    crm_client_id: Optional[str] = None
+
+
+@router.post("/multi-slot")
+def create_multi_slot_booking(
+    *,
+    session: Session = Depends(deps.get_session),
+    data: MultiSlotRequest,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Excel #24 — book multiple non-contiguous periods in the same (or
+    different) cabinets in one operation. All slots share one
+    `recurring_group_id` so the admin can later cancel the whole series
+    with a single click.
+
+    Pricing: each slot is priced independently (duration discount applies
+    per slot, not across the whole series).
+
+    Atomicity: availability is checked for ALL slots first; if any clashes,
+    nothing is created. If pricing fails mid-way through the loop, any
+    already-created bookings are rolled back via the session.
+    """
+    from app.services.pricing import PricingService
+    from uuid import uuid4 as gen_uuid4
+
+    if not data.slots:
+        raise HTTPException(400, "At least one slot required")
+    if len(data.slots) > 20:
+        raise HTTPException(400, "Too many slots in one batch (max 20)")
+
+    # Resolve owner (admin can book for another user)
+    booking_owner = current_user
+    if current_user.role in ADMIN_ROLES and data.target_user_id:
+        target = None
+        try:
+            target = session.get(User, UUID(data.target_user_id))
+        except ValueError:
+            pass
+        if not target:
+            target = session.exec(
+                select(User).where(User.email == data.target_user_id)
+            ).first()
+        if target:
+            booking_owner = target
+
+    # Parse + validate dates
+    parsed_slots: List[tuple[MultiSlotItem, datetime]] = []
+    for s in data.slots:
+        try:
+            d = datetime.strptime(s.date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, f"Invalid date format for slot: {s.date}")
+        parsed_slots.append((s, d))
+
+    # Availability check for ALL slots before creating any.
+    # lock_rows=True takes a SELECT FOR UPDATE on overlapping rows so two
+    # concurrent multi-slot batches can't both pass the availability check
+    # and end up with conflicting bookings (audit found this race).
+    conflicts = []
+    for s, d in parsed_slots:
+        available, reason = check_availability(
+            session=session,
+            resource_id=s.resource_id,
+            date=d,
+            start_time=s.start_time,
+            duration=s.duration,
+            lock_rows=True,
+        )
+        if not available:
+            conflicts.append({
+                "resource_id": s.resource_id,
+                "date": s.date,
+                "start_time": s.start_time,
+                "reason": reason,
+            })
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"{len(conflicts)} of {len(parsed_slots)} slots not available",
+                "conflicts": conflicts,
+            },
+        )
+
+    # All available — create bookings under a single group id
+    group_id = str(gen_uuid4())
+    created_bookings = []
+    total_cost = 0.0
+    pricing_service = PricingService(session)
+
+    for s, d in parsed_slots:
+        try:
+            h, m = map(int, s.start_time.split(":"))
+            start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            start_dt = d
+
+        quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=s.resource_id,
+            start_time=start_dt,
+            duration_minutes=s.duration,
+            format_type=s.format,
+        )
+
+        # Payment (per slot)
+        if data.payment_method == "subscription":
+            if quote.applied_rule != "SUBSCRIPTION":
+                raise HTTPException(
+                    400,
+                    f"Subscription insufficient for slot {s.date} {s.start_time}",
+                )
+            if booking_owner.subscription:
+                new_sub = booking_owner.subscription.copy()
+                remaining = new_sub.get("remainingHours", 0) or 0
+                hours_deducted = quote.hours_deducted or 0
+                if remaining < hours_deducted:
+                    raise HTTPException(
+                        400,
+                        f"Not enough subscription hours for slot {s.date} {s.start_time}",
+                    )
+                new_sub["remainingHours"] = remaining - hours_deducted
+                booking_owner.subscription = new_sub
+        else:  # balance
+            available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
+            if available_funds < quote.final_price:
+                raise HTTPException(
+                    400,
+                    f"Insufficient balance for slot {s.date} {s.start_time}. "
+                    f"Need {quote.final_price}₾, have {available_funds}₾.",
+                )
+            booking_owner.balance = (booking_owner.balance or 0) - quote.final_price
+
+        total_cost += quote.final_price
+
+        booking = Booking(
+            resource_id=s.resource_id,
+            location_id=s.location_id,
+            date=d,
+            start_time=s.start_time,
+            duration=s.duration,
+            status="confirmed",
+            final_price=quote.final_price,
+            base_price=quote.base_price,
+            applied_rule=quote.applied_rule,
+            discount_amount=quote.discount_amount,
+            discount_percent=quote.discount_percent,
+            payment_method=data.payment_method,
+            payment_source=(
+                "subscription" if data.payment_method == "subscription" else "deposit"
+            ),
+            hours_deducted=quote.hours_deducted,
+            format=s.format,
+            user_id=booking_owner.email,
+            user_uuid=booking_owner.id,
+            recurring_group_id=group_id,
+            crm_client_id=data.crm_client_id,
+        )
+        session.add(booking)
+        created_bookings.append(booking)
+
+    session.add(booking_owner)
+    session.commit()
+    for b in created_bookings:
+        session.refresh(b)
+
+    # Excel #24 + R33 — Google Calendar sync for the whole batch.
+    # Same try/except policy as single-booking create: a GCal failure must
+    # NOT roll back the bookings — the source of truth is the DB. We log a
+    # warning per failed slot so admin can later use the resync tool.
+    gcal_synced = 0
+    gcal_failed = 0
+    for b in created_bookings:
+        try:
+            event_id = gcal_service.create_event(b, user_name=booking_owner.name)
+            if event_id:
+                b.gcal_event_id = event_id
+                session.add(b)
+                gcal_synced += 1
+            else:
+                gcal_failed += 1
+                logger.warning(
+                    f"[GCal Multi-slot] Booking {b.id} created without event_id (no error, just no id returned)"
+                )
+        except Exception as e:
+            gcal_failed += 1
+            logger.warning(f"[GCal Multi-slot] Sync failed for booking {b.id}: {e}")
+    if gcal_synced > 0:
+        session.commit()
+    logger.info(
+        f"[GCal Multi-slot] Synced {gcal_synced}/{len(created_bookings)} slots in group {group_id}"
+    )
+
+    # Audit log
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=group_id,
+        target_type="booking_series",
+        event_type="multi_slot_booking_created",
+        description=(
+            f"{len(created_bookings)} slots booked in one operation "
+            f"by {current_user.name} for {booking_owner.email}. Total: {total_cost}₾"
+        ),
+        metadata={
+            "group_id": group_id,
+            "slot_count": len(created_bookings),
+            "total_cost": total_cost,
+            "gcal_synced": gcal_synced,
+            "gcal_failed": gcal_failed,
+        },
+    )
+
+    return {
+        "ok": True,
+        "group_id": group_id,
+        "bookings": [enrich_booking_status(b) for b in created_bookings],
+        "total_cost": total_cost,
+        "gcal_synced": gcal_synced,
+        "gcal_failed": gcal_failed,
+    }
+
+
+# ─── Recurring bookings ──────────────────────────────────────────────────────
+# IMPORTANT: These must be registered BEFORE /{booking_id} routes so FastAPI
+# matches "/recurring" and "/recurring-groups" exactly instead of treating
+# them as a booking_id path parameter.
+
+class RecurringBookingRequest(PydanticBaseModel):
+    resource_id: str
+    location_id: str = "unbox_one"
+    start_time: str          # "HH:MM"
+    duration: int = 60       # minutes
+    format: str = "individual"
+    payment_method: str = "balance"
+    first_date: str          # "YYYY-MM-DD"
+    weeks: int = 12          # kept for backward compat; use occurrences instead
+    occurrences: Optional[int] = None   # number of repetitions (overrides weeks if set)
+    pattern: str = "weekly"  # "weekly" | "biweekly" | "monthly"
+    target_user_id: Optional[str] = None
+    crm_client_id: Optional[str] = None
+
+
+@router.post("/recurring")
+def create_recurring_booking(
+    *,
+    session: Session = Depends(deps.get_session),
+    data: RecurringBookingRequest,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Create recurring bookings (weekly/biweekly/monthly). Admin can book for another user."""
+    from app.services.pricing import PricingService
+    from uuid import uuid4 as gen_uuid4
+
+    # Determine booking owner
+    booking_owner = current_user
+    if current_user.role in ADMIN_ROLES and data.target_user_id:
+        target = None
+        try:
+            target = session.get(User, UUID(data.target_user_id))
+        except ValueError:
+            pass
+        if not target:
+            target = session.exec(select(User).where(User.email == data.target_user_id)).first()
+        if target:
+            booking_owner = target
+
+    # Generate dates
+    try:
+        first = datetime.strptime(data.first_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+
+    n = data.occurrences if data.occurrences is not None else data.weeks
+
+    pattern = data.pattern.lower()
+    if pattern == "biweekly":
+        dates = [first + timedelta(weeks=i * 2) for i in range(n)]
+    elif pattern == "monthly":
+        try:
+            from dateutil.relativedelta import relativedelta as rdelta
+            dates = [first + rdelta(months=i) for i in range(n)]
+        except ImportError:
+            dates = [first + timedelta(weeks=i * 4) for i in range(n)]
+    else:  # weekly (default)
+        dates = [first + timedelta(weeks=i) for i in range(n)]
+
+    # Check availability for ALL dates
+    conflicts = []
+    for d in dates:
+        available, reason = check_availability(
+            session=session,
+            resource_id=data.resource_id,
+            date=d,
+            start_time=data.start_time,
+            duration=data.duration,
+        )
+        if not available:
+            conflicts.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "day": d.strftime("%A"),
+                "reason": reason,
+            })
+
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Конфликт в {len(conflicts)} из {len(dates)} дат",
+                "conflicts": conflicts,
+            },
+        )
+
+    # All slots available — create bookings
+    recurring_group_id = str(gen_uuid4())
+    created_bookings = []
+    total_cost = 0.0
+
+    for d in dates:
+        try:
+            h, m = map(int, data.start_time.split(":"))
+            start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            start_dt = d
+
+        pricing_service = PricingService(session)
+        quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=data.resource_id,
+            start_time=start_dt,
+            duration_minutes=data.duration,
+            format_type=data.format,
+        )
+
+        # Deduct payment per booking
+        if data.payment_method == "subscription":
+            if quote.applied_rule != "SUBSCRIPTION":
+                raise HTTPException(
+                    400, f"Subscription insufficient for {d.strftime('%Y-%m-%d')}"
+                )
+            if booking_owner.subscription:
+                new_sub = booking_owner.subscription.copy()
+                rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
+                new_sub["remaining_hours"] = max(0, float(rem) - quote.hours_deducted)
+                used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
+                new_sub["used_hours"] = float(used) + quote.hours_deducted
+                if "remainingHours" in new_sub:
+                    del new_sub["remainingHours"]
+                if "usedHours" in new_sub:
+                    del new_sub["usedHours"]
+                booking_owner.subscription = new_sub
+        else:
+            available_funds = booking_owner.balance + booking_owner.credit_limit
+            if available_funds < quote.final_price:
+                raise HTTPException(
+                    400,
+                    f"Insufficient funds for {d.strftime('%Y-%m-%d')}. Required: {quote.final_price}, Available: {available_funds}",
+                )
+            booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
+
+        session.add(booking_owner)
+
+        booking = Booking(
+            resource_id=data.resource_id,
+            location_id=data.location_id,
+            date=d,
+            start_time=data.start_time,
+            duration=data.duration,
+            status="confirmed",
+            final_price=quote.final_price,
+            base_price=quote.base_price,
+            applied_rule=quote.applied_rule,
+            discount_amount=quote.discount_amount,
+            discount_percent=quote.discount_percent,
+            hours_deducted=quote.hours_deducted if data.payment_method == "subscription" else None,
+            payment_method=data.payment_method,
+            format=data.format,
+            extras=[],
+            user_id=booking_owner.email,
+            user_uuid=booking_owner.id,
+            crm_client_id=data.crm_client_id,
+            recurring_group_id=recurring_group_id,
+        )
+        session.add(booking)
+        session.flush()
+
+        # GCal sync
+        try:
+            event_id = gcal_service.create_event(booking, user_name=booking_owner.name)
+            if event_id:
+                booking.gcal_event_id = event_id
+                session.add(booking)
+        except Exception as e:
+            logger.warning(f"GCal sync failed for recurring {d}: {e}")
+
+        total_cost += quote.final_price
+        created_bookings.append(str(booking.id))
+
+    session.commit()
+
+    return {
+        "ok": True,
+        "recurring_group_id": recurring_group_id,
+        "created": len(created_bookings),
+        "total_cost": round(total_cost, 2),
+        "booking_ids": created_bookings,
+        "dates": [d.strftime("%Y-%m-%d") for d in dates],
+    }
+
+
+@router.get("/recurring-groups")
+def get_recurring_groups(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Return a summary of recurring series for the current user (or all if admin)."""
+    from collections import defaultdict
+
+    query = select(Booking).where(
+        Booking.recurring_group_id.is_not(None),
+        Booking.status == "confirmed",
+    )
+    if current_user.role not in ADMIN_ROLES:
+        query = query.where(
+            (Booking.user_uuid == current_user.id) | (Booking.user_id == current_user.email)
+        )
+    bookings = session.exec(query.order_by(Booking.date)).all()
+
+    now = datetime.now()
+    groups: dict[str, dict] = {}
+    group_dates: dict[str, list[datetime]] = defaultdict(list)
+
+    for b in bookings:
+        gid = b.recurring_group_id
+        group_dates[gid].append(b.date)
+        if gid not in groups:
+            groups[gid] = {
+                "recurring_group_id": gid,
+                "resource_id": b.resource_id,
+                "location_id": b.location_id,
+                "start_time": b.start_time,
+                "duration": b.duration,
+                "crm_client_id": b.crm_client_id,
+                "payment_method": b.payment_method,
+                "future_count": 0,
+                "total_count": 0,
+                "next_date": None,
+                "pattern": "weekly",
+            }
+        groups[gid]["total_count"] += 1
+        if b.date >= now:
+            groups[gid]["future_count"] += 1
+            if groups[gid]["next_date"] is None or b.date < groups[gid]["next_date"]:
+                groups[gid]["next_date"] = b.date
+
+    # Detect pattern from intervals between consecutive dates
+    for gid, g in groups.items():
+        dates_sorted = sorted(group_dates[gid])
+        if len(dates_sorted) >= 2:
+            delta = (dates_sorted[1] - dates_sorted[0]).days
+            if delta <= 8:
+                g["pattern"] = "weekly"
+            elif delta <= 16:
+                g["pattern"] = "biweekly"
+            else:
+                g["pattern"] = "monthly"
+        if g["next_date"]:
+            g["next_date"] = g["next_date"].strftime("%Y-%m-%d")
+
+    result = [g for g in groups.values() if g["future_count"] > 0]
+    result.sort(key=lambda g: g["next_date"] or "")
+    return result
+
+
+@router.delete("/recurring/{group_id}")
+def cancel_recurring_bookings(
+    group_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Cancel all future bookings in a recurring group."""
+    now = datetime.now()
+    bookings = session.exec(
+        select(Booking).where(
+            Booking.recurring_group_id == group_id,
+            Booking.status == "confirmed",
+            Booking.date >= now,
+        )
+    ).all()
+
+    if not bookings:
+        raise HTTPException(404, "No future bookings found in this group")
+
+    # Verify ownership or admin
+    first = bookings[0]
+    is_owner = (first.user_uuid and first.user_uuid == current_user.id) or (
+        first.user_id == current_user.email
+    )
+    if not is_owner and current_user.role not in ADMIN_ROLES:
+        raise HTTPException(403, "Not authorized")
+
+    cancelled = 0
+    for b in bookings:
+        # Refund via shared helper (handles balance + subscription)
+        booking_owner = _resolve_booking_owner(session, b)
+        if booking_owner:
+            _refund_booking_to_owner(session, b, booking_owner)
+
+        # GCal delete
+        if b.gcal_event_id:
+            try:
+                gcal_service.delete_event(b.gcal_event_id, b.resource_id)
+            except Exception as e:
+                logger.warning(
+                    f"[GCal Series cancel] delete_event failed for "
+                    f"booking={b.id} event={b.gcal_event_id}: {e}"
+                )
+
+        b.status = "cancelled"
+        b.cancellation_reason = "Series cancelled"
+        b.cancelled_by = current_user.email
+        session.add(b)
+        cancelled += 1
+
+    session.commit()
+
+    return {"ok": True, "cancelled": cancelled, "group_id": group_id}
+
+
 # ─── Cancel booking ──────────────────────────────────────────────────────────
 
 @router.delete("/{booking_id}", response_model=BookingRead)
@@ -473,6 +1190,12 @@ def cancel_booking(
     booking_id: str,
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user),
+    # Excel #66 — admin-only cancellation policy override.
+    # refund_percent: 1.0 (default, full refund), 0.5 (50% penalty), 0.0 (full penalty).
+    # reason: free-text audit trail for anything other than default.
+    # Non-admins ignore these params; they always get the time-based policy.
+    refund_percent: float = 1.0,
+    reason: str | None = None,
 ) -> Any:
     try:
         b_uuid = UUID(booking_id)
@@ -484,11 +1207,20 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     is_owner = _check_ownership(booking, current_user)
-    if not is_owner and not current_user.role in ADMIN_ROLES:
+    is_admin = current_user.role in ADMIN_ROLES
+    if not is_owner and not is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if booking.status == "cancelled":
         return booking
+
+    # Sanitize admin-provided refund_percent; clients never get this power.
+    if is_admin:
+        if refund_percent < 0 or refund_percent > 1:
+            raise HTTPException(status_code=400, detail="refund_percent must be between 0 and 1")
+        applied_refund = refund_percent
+    else:
+        applied_refund = 1.0  # client cancellation = always 100% refund when allowed
 
     # ── Past booking protection ──
     if _is_past(booking):
@@ -510,7 +1242,7 @@ def cancel_booking(
     hours_until_start = (booking_start - datetime.now()).total_seconds() / 3600
     is_late_cancellation = hours_until_start < 24
 
-    if is_late_cancellation and not _is_past(booking) and not current_user.role in ADMIN_ROLES:
+    if is_late_cancellation and not _is_past(booking) and not is_admin:
         raise HTTPException(
             status_code=400,
             detail=f"Cancellation is not allowed less than 24 hours before start. Time remaining: {hours_until_start:.1f}h",
@@ -520,8 +1252,11 @@ def cancel_booking(
     if booking.gcal_event_id:
         try:
             gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"[GCal Cancel] delete_event failed for "
+                f"booking={booking.id} event={booking.gcal_event_id}: {e}"
+            )
         booking.gcal_event_id = None
 
     # ── Refund to booking OWNER (not current_user!) ──
@@ -530,16 +1265,33 @@ def cancel_booking(
     if not booking_owner:
         logger.warning(f"Cannot refund: booking owner not found for booking {booking.id}")
         refund_meta = {"warning": "Booking owner not found, no refund issued"}
+    elif applied_refund > 0:
+        refund_meta = _refund_booking_to_owner(session, booking, booking_owner, refund_percent=applied_refund)
     else:
-        refund_meta = _refund_booking_to_owner(session, booking, booking_owner)
+        refund_meta = {"refund_percent": 0.0, "note": "Admin cancelled with no refund (full penalty)"}
+
+    # Build a cancellation reason that captures the admin's policy choice so it
+    # shows up in the audit trail and in the user-facing booking history.
+    if is_admin and (applied_refund != 1.0 or reason):
+        refund_label = f"{int(applied_refund * 100)}% возврат"
+        base_reason = reason.strip() if reason else "Отменено администратором"
+        booking.cancellation_reason = f"{base_reason} ({refund_label})"
+    else:
+        booking.cancellation_reason = reason.strip() if reason else "User cancelled"
 
     booking.status = "cancelled"
-    booking.cancellation_reason = "User cancelled"
     booking.cancelled_by = current_user.email
 
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # ── Waitlist: notify anyone waiting on this freed slot ──
+    try:
+        from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+        notify_waitlist_for_freed_slot(session, booking)
+    except Exception:
+        logger.exception("Failed to notify waitlist on cancellation")
 
     # ── Audit logging ──
     timeline_service.log_event(
@@ -549,13 +1301,46 @@ def cancel_booking(
         target_id=str(booking.id),
         target_type="booking",
         event_type="booking_cancelled",
-        description=f"Booking cancelled by {current_user.name} ({current_user.role}). Time to start: {hours_until_start:.1f}h",
+        description=f"Booking cancelled by {current_user.name} ({current_user.role}). Refund: {int(applied_refund * 100)}%. Time to start: {hours_until_start:.1f}h",
         metadata={
             "is_late_cancellation": is_late_cancellation,
             "hours_until_start": hours_until_start,
+            "refund_percent": applied_refund,
+            "admin_reason": reason,
             **refund_meta,
         },
     )
+
+    # ── Telegram notification to the booking owner (Excel #58) ──
+    # Non-blocking — failure here must never break the cancel flow.
+    try:
+        if booking_owner and booking_owner.telegram_id:
+            resource_name = booking.resource_id
+            location_name: Optional[str] = None
+            try:
+                from app.models.resource import Resource as ResModel
+                from app.models.location import Location as LocModel
+                res_obj = session.get(ResModel, booking.resource_id)
+                if res_obj:
+                    resource_name = res_obj.name or booking.resource_id
+                    if res_obj.location_id:
+                        loc_obj = session.get(LocModel, res_obj.location_id)
+                        if loc_obj:
+                            location_name = loc_obj.name
+            except Exception:
+                pass
+            telegram_service.send_booking_cancelled(
+                chat_id=str(booking_owner.telegram_id),
+                resource_name=resource_name,
+                location_name=location_name,
+                date=booking.date,
+                start_time=booking.start_time,
+                refund_percent=applied_refund,
+                reason=reason,
+                booking_id=str(booking.id),
+            )
+    except Exception as e:
+        logger.warning(f"[Booking cancelled] Telegram notification failed: {e}")
 
     return booking
 
@@ -692,11 +1477,11 @@ def reschedule_booking(
                     detail=f"Недостаточно средств для перерасчёта. "
                     f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
                 )
-            booking_owner.balance -= price_diff
+            booking_owner.balance = round((booking_owner.balance or 0) - price_diff, 2)
             session.add(booking_owner)
         elif price_diff < 0:
             # Price decreased — refund the difference
-            booking_owner.balance += abs(price_diff)
+            booking_owner.balance = round((booking_owner.balance or 0) + abs(price_diff), 2)
             session.add(booking_owner)
 
         # Update booking price fields
@@ -729,6 +1514,22 @@ def reschedule_booking(
     session.commit()
     session.refresh(booking)
 
+    # ── Waitlist: notify anyone waiting on the OLD (now freed) slot ──
+    # Skip if the slot didn't really move (same day + time + resource edge case).
+    slot_moved = (old_resource != new_resource) or (old_date != new_date) or (old_time != data.new_start_time)
+    if slot_moved:
+        try:
+            from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+            # Build a proxy booking representing the old (freed) slot
+            from copy import copy as _copy
+            freed = _copy(booking)
+            freed.resource_id = old_resource
+            freed.date = old_date
+            freed.start_time = old_time
+            notify_waitlist_for_freed_slot(session, freed)
+        except Exception:
+            logger.exception("Failed to notify waitlist on reschedule")
+
     timeline_service.log_event(
         session=session,
         actor_id=current_user.id,
@@ -750,6 +1551,37 @@ def reschedule_booking(
             "price_diff": price_diff if room_changed else None,
         },
     )
+
+    # ── Excel #58 — Telegram reschedule notification (non-blocking). ──
+    # Reset reminder_sent_at so the T-2h reminder fires for the NEW slot if
+    # that slot is still >2h away. If admin moves a booking into the next
+    # 2 hours, the scheduler will just skip it (window check).
+    booking.reminder_sent_at = None
+    session.add(booking)
+    session.commit()
+    try:
+        notify_owner = _resolve_booking_owner(session, booking)
+        if notify_owner and notify_owner.telegram_id:
+            resource_name = booking.resource_id
+            try:
+                from app.models.resource import Resource as ResModel
+                res_obj = session.get(ResModel, booking.resource_id)
+                if res_obj:
+                    resource_name = res_obj.name or booking.resource_id
+            except Exception:
+                pass
+            telegram_service.send_booking_rescheduled(
+                chat_id=str(notify_owner.telegram_id),
+                resource_name=resource_name,
+                old_date=old_date,
+                old_start_time=old_time,
+                new_date=booking.date,
+                new_start_time=booking.start_time,
+                duration_minutes=booking.duration,
+                booking_id=str(booking.id),
+            )
+    except Exception as e:
+        logger.warning(f"[Booking rescheduled] Telegram notification failed: {e}")
 
     return enrich_booking_status(booking)
 
@@ -835,12 +1667,22 @@ def toggle_re_rent(
             status_code=400, detail="Cannot re-rent a past booking"
         )
 
+    was_listed_before = booking.is_re_rent_listed
     booking.is_re_rent_listed = not booking.is_re_rent_listed
     booking.updated_at = datetime.now()
 
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # If the booking just became re-rentable, the slot is effectively free
+    # for other users — notify anyone on the waitlist for this slot.
+    if not was_listed_before and booking.is_re_rent_listed:
+        try:
+            from app.services.waitlist_notify import notify_waitlist_for_freed_slot
+            notify_waitlist_for_freed_slot(session, booking)
+        except Exception:
+            logger.exception("Failed to notify waitlist on re-rent listing")
 
     return enrich_booking_status(booking)
 
@@ -938,12 +1780,44 @@ def extend_booking(
                 select(User).where(User.email == booking.user_id)
             ).first()
         if target_user:
-            target_user.balance -= extra_price
+            target_user.balance = round((target_user.balance or 0) - extra_price, 2)
             session.add(target_user)
 
     session.add(booking)
     session.commit()
     session.refresh(booking)
+
+    # R33 fix — extend changes the booking duration so the Google Calendar
+    # event needs its endTime updated. We don't have an `update_event`
+    # method; cheapest correct path is delete-old + create-new. If either
+    # step fails, log and move on — the DB is the source of truth and an
+    # admin can use the resync tool to fix the GCal event later.
+    if booking.gcal_event_id:
+        old_event_id = booking.gcal_event_id
+        try:
+            gcal_service.delete_event(old_event_id, booking.resource_id)
+        except Exception as e:
+            logger.warning(f"[GCal Extend] delete_event failed for {old_event_id}: {e}")
+        booking.gcal_event_id = None
+    try:
+        # Resolve owner name for the new event title
+        owner_for_event = (
+            session.get(User, booking.user_uuid) if booking.user_uuid else None
+        )
+        if not owner_for_event and booking.user_id:
+            owner_for_event = session.exec(
+                select(User).where(User.email == booking.user_id)
+            ).first()
+        new_event_id = gcal_service.create_event(
+            booking,
+            user_name=(owner_for_event.name if owner_for_event else booking.user_id),
+        )
+        if new_event_id:
+            booking.gcal_event_id = new_event_id
+            session.add(booking)
+            session.commit()
+    except Exception as e:
+        logger.warning(f"[GCal Extend] create_event failed for booking {booking.id}: {e}")
 
     return enrich_booking_status(booking)
 

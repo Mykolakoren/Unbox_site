@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import { toast } from 'sonner';
 import type { UserStore, BookingSlice, BookingHistoryItem } from '../types';
 import { bookingsApi } from '../../api/bookings';
 
@@ -18,14 +19,10 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             if (myResult.status === 'fulfilled') {
                 myBookings = myResult.value;
-            } else {
-                console.error("Failed to fetch my bookings", myResult.reason);
             }
 
             if (publicResult.status === 'fulfilled') {
                 publicBookings = publicResult.value;
-            } else {
-                console.error("Failed to fetch public bookings", publicResult.reason);
             }
 
             // 3. Merge: prefer 'myBookings' (more details) over 'publicBookings'
@@ -34,7 +31,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             set({ bookings: [...myBookings, ...uniquePublic] });
         } catch (error) {
-            console.error("Failed to fetch bookings (Critical)", error);
+            toast.error('Не удалось загрузить бронирования');
         }
     },
 
@@ -43,7 +40,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             const bookings = await bookingsApi.getAllBookings();
             set({ bookings });
         } catch (error) {
-            console.error("Failed to fetch all bookings", error);
+            toast.error('Не удалось загрузить бронирования');
         }
     },
 
@@ -66,17 +63,58 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
 
             return newBooking;
 
-        } catch (error) {
-            console.error("Failed to create booking", error);
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            toast.error(detail || 'Не удалось создать бронирование');
             throw error;
         }
     },
 
-    // addBooking(s) batch is rarely used now, but we can keep it for data migration if needed
-    // or deprecate it. Leaving as no-op or mapping to loop for now.
+    // Excel #24 — when the user selected multiple non-contiguous blocks
+    // (multiple `cartDetails` entries for the same flow), we route through
+    // the batch endpoint so all slots land in one transaction with one
+    // `recurring_group_id` — failure is atomic, and the admin can cancel
+    // the whole series with a single click later.
+    //
+    // Single-slot calls still fall through to the old one-by-one path so
+    // we don't lose the existing error handling / rollback for those.
     addBookings: async (bookingsData) => {
-        for (const b of bookingsData) {
-            await get().addBooking(b);
+        if (bookingsData.length === 0) return;
+        if (bookingsData.length === 1) {
+            await get().addBooking(bookingsData[0]);
+            return;
+        }
+        // Multi-slot batch path
+        try {
+            const first = bookingsData[0] as any;
+            await bookingsApi.createMultiSlotBooking({
+                slots: bookingsData.map((b: any) => ({
+                    resourceId: b.resourceId,
+                    locationId: b.locationId || 'unbox_one',
+                    date: typeof b.date === 'string' ? b.date : new Date(b.date).toISOString().slice(0, 10),
+                    startTime: b.startTime,
+                    duration: b.duration,
+                    format: b.format || 'individual',
+                })),
+                paymentMethod: first.paymentMethod || 'balance',
+                targetUserId: first.targetUserId,
+                crmClientId: first.crmClientId,
+            });
+            // Refetch state so store matches server truth
+            await get().fetchCurrentUser();
+            const fetchAllBookings = (get() as any).fetchAllBookings;
+            if (typeof fetchAllBookings === 'function') {
+                await fetchAllBookings();
+            }
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            const message = typeof detail === 'string'
+                ? detail
+                : detail?.message
+                    ? `${detail.message}${detail.conflicts ? ' · ' + detail.conflicts.map((c: any) => c.date + ' ' + c.start_time).join(', ') : ''}`
+                    : 'Не удалось создать все периоды — попробуйте ещё раз';
+            toast.error(message);
+            throw error;
         }
     },
 
@@ -145,9 +183,9 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         };
     }),
 
-    cancelBooking: async (id, _isFreeReschedule = false, _reason, _adminUser) => {
+    cancelBooking: async (id, _isFreeReschedule = false, _reason, _adminUser, opts) => {
         try {
-            const cancelledBooking = await bookingsApi.cancelBooking(id);
+            const cancelledBooking = await bookingsApi.cancelBooking(id, opts);
             set((state) => ({
                 bookings: state.bookings.map(b =>
                     b.id === id ? cancelledBooking : b
@@ -161,9 +199,10 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             // Sync user balance/subscription
             await get().fetchCurrentUser();
 
-        } catch (error) {
-            console.error("Failed to cancel booking", error);
-            throw error; // Propagate error so UI knows it failed
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            toast.error(detail || 'Не удалось отменить бронирование');
+            throw error;
         }
     },
 
@@ -173,11 +212,23 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         )
     })),
 
-    listForReRent: (id) => set((state) => ({
-        bookings: state.bookings.map(b =>
-            b.id === id ? { ...b, isReRentListed: true } : b
-        )
-    })),
+    listForReRent: async (id) => {
+        try {
+            // Persist the re-rent toggle on the server. Without this, the local
+            // flip was overwritten the next time fetchAllBookings() ran, making
+            // the re-rent status "disappear" when switching views.
+            const updated = await bookingsApi.toggleReRent(id);
+            set((state) => ({
+                bookings: state.bookings.map(b =>
+                    b.id === id ? updated : b
+                )
+            }));
+        } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            toast.error(detail || 'Не удалось обновить статус переаренды');
+            throw error;
+        }
+    },
 
     setManualPrice: (bookingId, newPrice) => {
         const state = get();

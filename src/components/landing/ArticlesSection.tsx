@@ -33,7 +33,7 @@ const ARTICLES = [
 ];
 
 const glassCard: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.55)',
+    background: 'rgba(255,255,255,0.78)',
     backdropFilter: 'blur(20px) saturate(150%)',
     WebkitBackdropFilter: 'blur(20px) saturate(150%)',
     border: '1px solid rgba(255,255,255,0.65)',

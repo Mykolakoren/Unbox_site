@@ -1,20 +1,44 @@
+import os
+import secrets
+import logging
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Unbox Booking API"
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "changethis-generate-secure-key-in-prod"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8 # 8 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 3  # 3 days (reduced from 8)
 
     # OAuth — set via environment variables
     GOOGLE_CLIENT_ID: Optional[str] = None
     TELEGRAM_BOT_TOKEN: Optional[str] = None
+    TELEGRAM_BOT_USERNAME: str = "Unbox_Booking_G_Bot"  # without @, used for deep-link
+    TELEGRAM_WEBHOOK_SECRET: Optional[str] = None       # validated against X-Telegram-Bot-Api-Secret-Token
+    # Excel #58 — cron hits /telegram/send-reminders?secret=<TELEGRAM_REMINDER_SECRET>.
+    # If unset, the endpoint falls back to TELEGRAM_BOT_TOKEN (bot token is a
+    # secret anyway, so reusing it is safe). Set a dedicated value to rotate
+    # without having to rotate the bot token itself.
+    TELEGRAM_REMINDER_SECRET: Optional[str] = None
 
-    # First Superuser (for auto-creation on deploy)
+    # First Superuser (for auto-creation on deploy) — MUST be overridden via
+    # env vars in production. The literal "CHANGE_ME_ON_FIRST_DEPLOY" default
+    # trips the guard in db.init_data so the seed is skipped if it leaks through.
     FIRST_SUPERUSER: str = "admin@unbox.com"
-    FIRST_SUPERUSER_PASSWORD: str = "admin123"
+    FIRST_SUPERUSER_PASSWORD: str = "CHANGE_ME_ON_FIRST_DEPLOY"
+
+    # Comma-separated list of emails that should always hold `role=owner`.
+    # Evaluated at every app startup (init_data):
+    #   - If a user with that email exists but has a lower role → promoted.
+    #   - If no such user yet → skipped (they'll be created on first OAuth
+    #     login with role=owner auto-applied).
+    # Prevents the "Google OAuth silently creates a fresh user=role=user
+    # when the owner wasn't yet linked" trap — if the real owner's personal
+    # email is in this list, first login promotes automatically.
+    OWNER_EMAILS: str = ""  # e.g. "koren.nikolas@gmail.com,co-founder@gmail.com"
     
     # Database
     DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env
@@ -45,6 +69,26 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5175",
     ]
 
+    # Email (SMTP) — set via environment variables
+    EMAILS_ENABLED: bool = False  # Master switch; when False, emails are logged but not sent
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM: Optional[str] = None  # e.g. "Unbox <noreply@unbox.com.ge>"
+    SMTP_USE_TLS: bool = True
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra='ignore')
 
 settings = Settings()
+
+# Runtime safety check: warn if using default SECRET_KEY
+if settings.SECRET_KEY == "changethis-generate-secure-key-in-prod":
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        logger.critical(
+            "SECURITY: Using default SECRET_KEY in production! "
+            "Set SECRET_KEY env var immediately. Generating temporary random key."
+        )
+        settings.SECRET_KEY = secrets.token_urlsafe(64)
+    else:
+        logger.warning("Using default SECRET_KEY — acceptable for development only.")

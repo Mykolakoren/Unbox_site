@@ -26,6 +26,8 @@ import type { CrmClientCreate, CrmClient } from '../../api/crm';
 import { crmApi } from '../../api/crm';
 import { AccountSelect } from '../../components/crm/AccountSelect';
 import { toast } from 'sonner';
+import { CURRENCIES } from '../../utils/currency';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 type ViewMode = 'table' | 'cards';
 type SortField = 'name' | 'basePrice' | 'sessionCount' | 'unpaidSum' | 'totalPaid' | 'lastSessionDate';
@@ -34,7 +36,7 @@ type SortDir = 'asc' | 'desc';
 const VIEW_KEY = 'crm_clients_view';
 
 export function CrmClients() {
-    const { clients, fetchClients, createClient, updateClient, deleteClient, loading } =
+        const { clients, fetchClients, createClient, updateClient, deleteClient, loading } =
         useCrmStore();
     const { currentUser } = useUserStore();
     const navigate = useNavigate();
@@ -125,499 +127,74 @@ export function CrmClients() {
         localStorage.setItem(VIEW_KEY, mode);
     };
 
+    // ─── Grid House variant (behind feature flag) ────────────────────────
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold">Клиенты</h1>
-                    <p className="text-unbox-dark/60 text-sm">
-                        {clients.filter((c) => c.isActive).length} активных из{' '}
-                        {clients.length}
-                    </p>
-                </div>
-                <div className="flex items-center gap-2">
-                    {/* View toggle */}
-                    <div className="flex bg-gray-100 rounded-lg p-0.5">
-                        <button
-                            onClick={() => setView('table')}
-                            className={`p-1.5 rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-unbox-green' : 'text-gray-400 hover:text-gray-600'}`}
-                            title="Таблица"
-                        >
-                            <LayoutList size={18} />
-                        </button>
-                        <button
-                            onClick={() => setView('cards')}
-                            className={`p-1.5 rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-unbox-green' : 'text-gray-400 hover:text-gray-600'}`}
-                            title="Карточки"
-                        >
-                            <LayoutGrid size={18} />
-                        </button>
-                    </div>
-                    <button
-                        onClick={() => {
-                            if (mergeMode) {
-                                setMergeMode(false);
-                                setMergeSelected([]);
-                            } else {
-                                setMergeMode(true);
-                                setMergeSelected([]);
-                            }
-                        }}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-sm transition-colors ${
-                            mergeMode
-                                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                : 'bg-white border border-unbox-light text-unbox-grey hover:text-unbox-dark hover:border-unbox-green/30'
-                        }`}
-                    >
-                        <Merge className="w-4 h-4" />
-                        {mergeMode ? 'Отмена' : 'Объединить'}
-                    </button>
-                    <button
-                        onClick={() => setShowForm(true)}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-unbox-green text-white rounded-xl font-medium text-sm hover:bg-unbox-dark transition-colors shadow-md"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Добавить клиента
-                    </button>
-                </div>
-            </div>
 
-            {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-3">
-                <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-unbox-grey" />
-                    <input
-                        type="text"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Поиск по имени, телефону, email..."
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                    />
-                </div>
-                <label className="flex items-center gap-2 text-sm text-unbox-grey cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={showInactive}
-                        onChange={(e) => setShowInactive(e.target.checked)}
-                        className="rounded"
-                    />
-                    Неактивные
-                </label>
-            </div>
-
-            {/* New Client Form */}
-            {showForm && (
-                <ClientForm
-                    onSave={async (data) => {
-                        await createClient(data);
-                        setShowForm(false);
-                        toast.success('Клиент создан');
+            <GridHouseCrmClients
+                clients={clients}
+                filtered={filtered}
+                loading={loading}
+                search={search}
+                setSearch={setSearch}
+                showInactive={showInactive}
+                setShowInactive={setShowInactive}
+                sortField={sortField}
+                sortDir={sortDir}
+                toggleSort={toggleSort}
+                navigate={navigate}
+                mergeMode={mergeMode}
+                setMergeMode={setMergeMode}
+                mergeSelected={mergeSelected}
+                setMergeSelected={setMergeSelected}
+                showMergeDialog={showMergeDialog}
+                setShowMergeDialog={setShowMergeDialog}
+                showForm={showForm}
+                setShowForm={setShowForm}
+                editingClient={editingClient}
+                editingId={editingId}
+                setEditingId={setEditingId}
+                onCreate={async (data) => {
+                    await createClient(data);
+                    setShowForm(false);
+                    toast.success('Клиент создан');
+                    fetchClients(false, true);
+                }}
+                onUpdate={async (id, data) => {
+                    await updateClient(id, data);
+                    setEditingId(null);
+                    toast.success('Клиент обновлён');
+                    fetchClients(false, true);
+                }}
+                onToggleActive={handleToggleActive}
+                onPermanentDelete={async (client) => {
+                    if (!confirm(`Удалить клиента "${client.name}"? Все сессии, платежи и заметки будут удалены.`)) return;
+                    try {
+                        await deleteClient(client.id, true);
+                        toast.success(`${client.name} удалён`);
                         fetchClients(false, true);
-                    }}
-                    onCancel={() => setShowForm(false)}
-                />
-            )}
-
-            {/* Edit Client Form */}
-            {editingClient && (
-                <ClientForm
-                    isEdit
-                    initial={{
-                        name: editingClient.name,
-                        phone: editingClient.phone,
-                        email: editingClient.email,
-                        telegram: editingClient.telegram,
-                        aliasCode: editingClient.aliasCode,
-                        basePrice: editingClient.basePrice,
-                        currency: editingClient.currency,
-                        tags: editingClient.tags,
-                    }}
-                    onSave={async (data) => {
-                        await updateClient(editingClient.id, data);
-                        setEditingId(null);
-                        toast.success('Клиент обновлён');
+                    } catch (err: any) {
+                        toast.error(err?.response?.data?.detail || 'Ошибка удаления');
+                    }
+                }}
+                onMergeConfirm={async (targetId, overrides) => {
+                    const sourceIds = mergeSelected.filter(id => id !== targetId);
+                    try {
+                        const result = await crmApi.mergeClients({ targetId, sourceIds, ...overrides });
+                        toast.success(
+                            `Объединено ${result.mergedCount} клиентов. Перенесено: ${result.reassigned.sessions} сессий, ${result.reassigned.payments} платежей, ${result.reassigned.notes} заметок`
+                        );
+                        setShowMergeDialog(false);
+                        setMergeMode(false);
+                        setMergeSelected([]);
                         fetchClients(false, true);
-                    }}
-                    onCancel={() => setEditingId(null)}
-                />
-            )}
-
-            {/* Merge selection bar */}
-            {mergeMode && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
-                    <div className="flex items-center gap-3">
-                        <Merge className="w-5 h-5 text-amber-600" />
-                        <div>
-                            <p className="text-sm font-medium text-amber-800">
-                                Режим объединения
-                            </p>
-                            <p className="text-xs text-amber-600">
-                                Выберите 2+ клиентов для объединения. Все сессии, платежи и заметки будут перенесены в одну карточку.
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-amber-700">
-                            {mergeSelected.length} выбрано
-                        </span>
-                        <button
-                            disabled={mergeSelected.length < 2}
-                            onClick={() => setShowMergeDialog(true)}
-                            className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-xl hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                            Объединить
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Merge Dialog */}
-            {showMergeDialog && (
-                <MergeDialog
-                    clients={clients.filter(c => mergeSelected.includes(c.id))}
-                    onConfirm={async (targetId, overrides) => {
-                        const sourceIds = mergeSelected.filter(id => id !== targetId);
-                        try {
-                            const result = await crmApi.mergeClients({
-                                targetId,
-                                sourceIds,
-                                ...overrides,
-                            });
-                            toast.success(
-                                `Объединено ${result.mergedCount} клиентов. Перенесено: ${result.reassigned.sessions} сессий, ${result.reassigned.payments} платежей, ${result.reassigned.notes} заметок`
-                            );
-                            setShowMergeDialog(false);
-                            setMergeMode(false);
-                            setMergeSelected([]);
-                            fetchClients(false, true);
-                        } catch (err: any) {
-                            toast.error(err?.response?.data?.detail || 'Ошибка объединения');
-                        }
-                    }}
-                    onCancel={() => setShowMergeDialog(false)}
-                />
-            )}
-
-            {/* Client List */}
-            {loading && !clients.length ? (
-                <div className="flex items-center justify-center h-40">
-                    <Loader2 className="w-6 h-6 animate-spin text-unbox-grey" />
-                </div>
-            ) : filtered.length === 0 ? (
-                <div className="text-center py-12 text-unbox-grey">
-                    <UserCircle className="w-16 h-16 mx-auto mb-3 opacity-40" />
-                    <p className="font-medium text-lg">Нет клиентов</p>
-                    <p className="text-sm mt-1">
-                        {search ? 'Попробуйте изменить поисковый запрос' : 'Добавьте первого клиента'}
-                    </p>
-                </div>
-            ) : viewMode === 'table' ? (
-                /* ═══ TABLE VIEW (PsyCRM style) ═══ */
-                <div className="bg-white rounded-2xl border border-unbox-light shadow-sm overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left" style={{ tableLayout: 'auto' }}>
-                            <thead className="text-xs text-unbox-grey uppercase bg-gray-50/80 border-b border-gray-200">
-                                <tr>
-                                    {mergeMode && <th className="px-3 py-3.5 w-10"></th>}
-                                    <th className="px-3 py-3.5 w-8"></th>
-                                    <SortHeader field="name" current={sortField} dir={sortDir} onSort={toggleSort}>Имя</SortHeader>
-                                    <th className="px-4 py-3.5 font-medium hidden md:table-cell">Контакты</th>
-                                    <SortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</SortHeader>
-                                    <SortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort} className="hidden lg:table-cell">LTV</SortHeader>
-                                    <SortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</SortHeader>
-                                    <SortHeader field="lastSessionDate" current={sortField} dir={sortDir} onSort={toggleSort} className="hidden xl:table-cell">Посл. сессия</SortHeader>
-                                    <th className="px-4 py-3.5 font-medium text-right">Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filtered.map((client) => {
-                                    const c = client as any;
-                                    return (
-                                        <tr
-                                            key={client.id}
-                                            className={`border-b border-gray-50 hover:bg-unbox-light/20 transition-colors cursor-pointer ${!client.isActive ? 'opacity-50' : ''} ${mergeMode && mergeSelected.includes(client.id) ? 'bg-amber-50/50' : ''}`}
-                                            onClick={() => {
-                                                if (mergeMode) {
-                                                    setMergeSelected(prev =>
-                                                        prev.includes(client.id)
-                                                            ? prev.filter(id => id !== client.id)
-                                                            : [...prev, client.id]
-                                                    );
-                                                } else {
-                                                    navigate(`/crm/clients/${client.id}`);
-                                                }
-                                            }}
-                                        >
-                                            {/* Merge checkbox */}
-                                            {mergeMode && (
-                                                <td className="px-3 py-3.5 text-center">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={mergeSelected.includes(client.id)}
-                                                        onChange={() => {}}
-                                                        className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                                                    />
-                                                </td>
-                                            )}
-                                            {/* Active indicator */}
-                                            <td className="px-3 py-3.5 text-center" onClick={e => e.stopPropagation()}>
-                                                <button
-                                                    onClick={() => handleToggleActive(client)}
-                                                    className={`w-3 h-3 rounded-full transition-all hover:scale-125 ${
-                                                        client.isActive
-                                                            ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.5)]'
-                                                            : 'bg-gray-300'
-                                                    }`}
-                                                    title={client.isActive ? 'Деактивировать' : 'Активировать'}
-                                                />
-                                            </td>
-                                            {/* Name */}
-                                            <td className="px-4 py-3.5 font-medium text-unbox-dark whitespace-nowrap">
-                                                <div className="flex items-center gap-2.5">
-                                                    <span className="hover:text-unbox-green transition-colors">
-                                                        {client.name}
-                                                    </span>
-                                                    {client.aliasCode && (
-                                                        <span className="text-[10px] text-gray-400 font-normal">
-                                                            #{client.aliasCode}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            {/* Contacts */}
-                                            <td className="px-4 py-3.5 text-unbox-grey hidden md:table-cell">
-                                                <div className="flex flex-col gap-0.5 text-xs">
-                                                    {client.telegram && <span className="flex items-center gap-1"><Send className="w-3 h-3" />{client.telegram}</span>}
-                                                    {client.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{client.phone}</span>}
-                                                    {!client.telegram && !client.phone && <span className="text-gray-400">&mdash;</span>}
-                                                </div>
-                                            </td>
-                                            {/* Rate */}
-                                            <td className="px-4 py-3.5 text-unbox-dark">
-                                                {client.basePrice || 0} {client.currency}
-                                            </td>
-                                            {/* LTV */}
-                                            <td className="px-4 py-3.5 text-unbox-dark font-medium hidden lg:table-cell">
-                                                {c.sessionCount > 0
-                                                    ? <span>{(c.totalCost || 0).toLocaleString()} {client.currency}</span>
-                                                    : <span className="text-gray-400">0</span>
-                                                }
-                                            </td>
-                                            {/* Debt */}
-                                            <td className="px-4 py-3.5">
-                                                {(c.unpaidSum || 0) > 0 ? (
-                                                    <span className="inline-flex items-center px-2 py-0.5 bg-red-50 text-red-700 text-xs font-medium rounded-full">
-                                                        {(c.unpaidSum || 0).toLocaleString()} {client.currency}
-                                                    </span>
-                                                ) : (c.sessionCount || 0) > 0 ? (
-                                                    <span className="inline-flex items-center px-2 py-0.5 bg-green-50 text-green-700 text-xs font-medium rounded-full">
-                                                        Оплачено
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-gray-300">&mdash;</span>
-                                                )}
-                                            </td>
-                                            {/* Last session */}
-                                            <td className="px-4 py-3.5 text-unbox-grey text-xs hidden xl:table-cell">
-                                                {c.lastSessionDate
-                                                    ? new Date(c.lastSessionDate).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
-                                                    : <span className="text-gray-300">&mdash;</span>
-                                                }
-                                            </td>
-                                            {/* Actions */}
-                                            <td className="px-4 py-3.5 text-right" onClick={e => e.stopPropagation()}>
-                                                <div className="flex items-center justify-end gap-1">
-                                                    <button
-                                                        onClick={() => {
-                                                            setShowForm(false);
-                                                            setEditingId(editingId === client.id ? null : client.id);
-                                                        }}
-                                                        className="p-1.5 rounded-lg hover:bg-unbox-light/50 text-unbox-grey hover:text-unbox-green transition-colors"
-                                                        title="Редактировать"
-                                                    >
-                                                        <Pencil className="w-3.5 h-3.5" />
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (!confirm(`Удалить клиента "${client.name}"? Все сессии, платежи и заметки будут удалены.`)) return;
-                                                            try {
-                                                                await deleteClient(client.id, true);
-                                                                toast.success(`${client.name} удалён`);
-                                                                fetchClients(false, true);
-                                                            } catch (err: any) {
-                                                                toast.error(err?.response?.data?.detail || 'Ошибка удаления');
-                                                            }
-                                                        }}
-                                                        className="p-1.5 rounded-lg hover:bg-red-50 text-unbox-grey hover:text-red-500 transition-colors"
-                                                        title="Удалить"
-                                                    >
-                                                        <Trash2 className="w-3.5 h-3.5" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => navigate(`/crm/clients/${client.id}`)}
-                                                        className="text-xs font-medium text-unbox-green hover:text-unbox-dark transition-colors"
-                                                    >
-                                                        Открыть
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            ) : (
-                /* ═══ CARD VIEW ═══ */
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {filtered.map((client) => (
-                        <div
-                            key={client.id}
-                            className={`bg-white rounded-2xl border shadow-sm p-5 transition-all hover:shadow-md cursor-pointer ${
-                                !client.isActive
-                                    ? 'border-unbox-light opacity-60'
-                                    : mergeMode && mergeSelected.includes(client.id)
-                                    ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-200'
-                                    : 'border-unbox-light'
-                            }`}
-                            onClick={() => {
-                                if (mergeMode) {
-                                    setMergeSelected(prev =>
-                                        prev.includes(client.id)
-                                            ? prev.filter(id => id !== client.id)
-                                            : [...prev, client.id]
-                                    );
-                                } else {
-                                    navigate(`/crm/clients/${client.id}`);
-                                }
-                            }}
-                        >
-                            <div className="flex items-start justify-between mb-3">
-                                <div className="flex items-center gap-3">
-                                    <div className="relative">
-                                        {mergeMode && mergeSelected.includes(client.id) ? (
-                                            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-500 text-white">
-                                                <Check className="w-5 h-5" />
-                                            </div>
-                                        ) : (
-                                            <div
-                                                className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${
-                                                    client.isActive
-                                                        ? 'bg-gradient-to-br from-unbox-green to-unbox-dark'
-                                                        : 'bg-gray-300'
-                                                }`}
-                                            >
-                                                {client.name?.[0]?.toUpperCase() ?? '?'}
-                                            </div>
-                                        )}
-                                        {!mergeMode && (
-                                            <div
-                                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-                                                    client.isActive ? 'bg-green-400' : 'bg-gray-300'
-                                                }`}
-                                            />
-                                        )}
-                                    </div>
-                                    <div>
-                                        <div className="font-semibold text-unbox-dark">
-                                            {client.name}
-                                        </div>
-                                        {client.aliasCode && (
-                                            <div className="flex items-center gap-1 text-xs text-unbox-grey">
-                                                <Hash className="w-3 h-3" />
-                                                {client.aliasCode}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                    <button
-                                        onClick={() => {
-                                            setShowForm(false);
-                                            setEditingId(editingId === client.id ? null : client.id);
-                                        }}
-                                        className={`p-1.5 rounded-lg transition-colors ${
-                                            editingId === client.id
-                                                ? 'bg-unbox-light text-unbox-green'
-                                                : 'hover:bg-unbox-light/50 text-unbox-grey hover:text-unbox-green'
-                                        }`}
-                                        title="Редактировать"
-                                    >
-                                        <Pencil className="w-3.5 h-3.5" />
-                                    </button>
-                                    <ClientMenu
-                                        isActive={client.isActive}
-                                        onDelete={() => {
-                                            deleteClient(client.id);
-                                            toast.success('Клиент деактивирован');
-                                        }}
-                                        onRestore={() => {
-                                            updateClient(client.id, { isActive: true });
-                                            toast.success('Клиент восстановлен');
-                                        }}
-                                        onPermanentDelete={() => {
-                                            if (confirm(`Вы уверены, что хотите НАВСЕГДА удалить клиента "${client.name}"?\n\nВсе сессии, платежи и заметки будут удалены. Это действие необратимо.`)) {
-                                                deleteClient(client.id, true);
-                                                toast.success('Клиент удалён навсегда');
-                                            }
-                                        }}
-                                        canPermanentDelete={currentUser?.role === 'owner' || currentUser?.role === 'senior_admin'}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="space-y-1.5 text-sm">
-                                {client.phone && (
-                                    <div className="flex items-center gap-2 text-unbox-grey">
-                                        <Phone className="w-3.5 h-3.5" />
-                                        {client.phone}
-                                    </div>
-                                )}
-                                {client.telegram && (
-                                    <div className="flex items-center gap-2 text-unbox-grey">
-                                        <Send className="w-3.5 h-3.5" />
-                                        {client.telegram}
-                                    </div>
-                                )}
-                                {client.email && (
-                                    <div className="flex items-center gap-2 text-unbox-grey">
-                                        <Mail className="w-3.5 h-3.5" />
-                                        {client.email}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="mt-3 pt-3 border-t border-unbox-light flex items-center justify-between text-sm">
-                                <div className="text-unbox-grey">
-                                    {client.basePrice} {client.currency}
-                                </div>
-                                {client.tags?.length > 0 && (
-                                    <div className="flex gap-1 flex-wrap">
-                                        {client.tags.slice(0, 2).map((tag) => (
-                                            <span
-                                                key={tag}
-                                                className="px-2 py-0.5 text-xs rounded-full bg-unbox-light text-unbox-green"
-                                            >
-                                                {tag}
-                                            </span>
-                                        ))}
-                                        {client.tags.length > 2 && (
-                                            <span className="text-xs text-unbox-grey">
-                                                +{client.tags.length - 2}
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
+                    } catch (err: any) {
+                        toast.error(err?.response?.data?.detail || 'Ошибка объединения');
+                    }
+                }}
+            />
+        );
 }
+
 
 // ── Sort Header ──────────────────────────────────────────────────────────────
 
@@ -790,10 +367,9 @@ function ClientForm({
                         onChange={(e) => setCurrency(e.target.value)}
                         className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
                     >
-                        <option value="GEL">GEL ({'\u20BE'})</option>
-                        <option value="USD">USD ($)</option>
-                        <option value="EUR">EUR ({'\u20AC'})</option>
-                        <option value="RUB">RUB ({'\u20BD'})</option>
+                        {CURRENCIES.map(c => (
+                            <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
+                        ))}
                     </select>
                 </div>
                 <div>
@@ -1171,5 +747,649 @@ function MergeDialog({
                 </div>
             </div>
         </>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GRID HOUSE CRM CLIENTS — newspaper index variant
+// Rollback: delete this component + the early-return in CrmClients.
+// ─────────────────────────────────────────────────────────────────────────
+
+const GHC_HAIRLINE = `1px solid ${GH.ink10}`;
+const GHC_HAIRLINE_STRONG = `1px solid ${GH.ink}`;
+const GHC_MONO_LABEL: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.18em',
+    color: GH.ink60,
+};
+
+interface GridHouseCrmClientsProps {
+    clients: CrmClient[];
+    filtered: CrmClient[];
+    loading: boolean;
+    search: string;
+    setSearch: (v: string) => void;
+    showInactive: boolean;
+    setShowInactive: (v: boolean) => void;
+    sortField: SortField;
+    sortDir: SortDir;
+    toggleSort: (f: SortField) => void;
+    navigate: (p: string) => void;
+    mergeMode: boolean;
+    setMergeMode: (v: boolean) => void;
+    mergeSelected: string[];
+    setMergeSelected: React.Dispatch<React.SetStateAction<string[]>>;
+    showMergeDialog: boolean;
+    setShowMergeDialog: (v: boolean) => void;
+    showForm: boolean;
+    setShowForm: (v: boolean) => void;
+    editingClient: CrmClient | null;
+    editingId: string | null;
+    setEditingId: (v: string | null) => void;
+    onCreate: (data: CrmClientCreate) => Promise<void>;
+    onUpdate: (id: string, data: CrmClientCreate) => Promise<void>;
+    onToggleActive: (client: CrmClient) => Promise<void>;
+    onPermanentDelete: (client: CrmClient) => Promise<void>;
+    onMergeConfirm: (targetId: string, overrides: any) => Promise<void>;
+}
+
+function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
+    const {
+        clients, filtered, loading, search, setSearch, showInactive, setShowInactive,
+        sortField, sortDir, toggleSort, navigate, mergeMode, setMergeMode,
+        mergeSelected, setMergeSelected, showMergeDialog, setShowMergeDialog,
+        showForm, setShowForm, editingClient, editingId, setEditingId,
+        onCreate, onUpdate, onToggleActive, onPermanentDelete, onMergeConfirm,
+    } = props;
+
+    const activeCount = clients.filter(c => c.isActive).length;
+
+    return (
+        <div
+            style={{
+                fontFamily: GH_SANS,
+                color: GH.ink,
+                background: GH.paper,
+                maxWidth: 1280,
+            }}
+        >
+            {/* ── Header ── */}
+            <header
+                style={{
+                    borderBottom: GHC_HAIRLINE_STRONG,
+                    paddingBottom: 20,
+                    marginBottom: 24,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 16,
+                }}
+            >
+                <div>
+                    <div style={{ ...GHC_MONO_LABEL, marginBottom: 8 }}>Раздел · Клиенты</div>
+                    <h1
+                        style={{
+                            fontSize: 'clamp(36px, 4.5vw, 56px)',
+                            fontWeight: 800,
+                            lineHeight: 0.95,
+                            letterSpacing: '-0.025em',
+                            margin: 0,
+                        }}
+                    >
+                        Индекс клиентов.
+                    </h1>
+                    <div
+                        style={{
+                            ...GHC_MONO_LABEL,
+                            marginTop: 10,
+                            fontVariantNumeric: 'tabular-nums',
+                        }}
+                    >
+                        Активных: {String(activeCount).padStart(3, '0')} / Всего: {String(clients.length).padStart(3, '0')}
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                        onClick={() => {
+                            setMergeMode(!mergeMode);
+                            setMergeSelected([]);
+                        }}
+                        style={{
+                            background: mergeMode ? GH.danger : 'transparent',
+                            color: mergeMode ? GH.paper : GH.ink,
+                            border: `1px solid ${mergeMode ? GH.danger : GH.ink}`,
+                            padding: '12px 20px',
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.18em',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            transition: 'background 0.15s ease, color 0.15s ease',
+                        }}
+                    >
+                        <Merge size={13} />
+                        {mergeMode ? 'Отмена' : 'Слить'}
+                    </button>
+                    <button
+                        onClick={() => setShowForm(true)}
+                        style={{
+                            background: GH.ink,
+                            color: GH.paper,
+                            border: 'none',
+                            padding: '12px 20px',
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.18em',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                        }}
+                    >
+                        <Plus size={13} />
+                        Новый клиент
+                    </button>
+                </div>
+            </header>
+
+            {/* ── Filters ── */}
+            <div
+                style={{
+                    display: 'flex',
+                    gap: 24,
+                    alignItems: 'center',
+                    marginBottom: 24,
+                    flexWrap: 'wrap',
+                }}
+            >
+                <div
+                    style={{
+                        flex: '1 1 320px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        borderBottom: `1px solid ${GH.ink30}`,
+                        paddingBottom: 8,
+                    }}
+                >
+                    <Search size={14} color={GH.ink60} />
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Поиск по имени, телефону, email, алиасу…"
+                        style={{
+                            flex: 1,
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            fontFamily: GH_SANS,
+                            fontSize: 15,
+                            color: GH.ink,
+                            marginLeft: 12,
+                        }}
+                    />
+                    {search && (
+                        <button
+                            onClick={() => setSearch('')}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: GH.ink60, display: 'flex', padding: 0 }}
+                            aria-label="Очистить"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+
+                <label
+                    style={{
+                        ...GHC_MONO_LABEL,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                    }}
+                >
+                    <input
+                        type="checkbox"
+                        checked={showInactive}
+                        onChange={(e) => setShowInactive(e.target.checked)}
+                        style={{ accentColor: GH.ink, cursor: 'pointer', margin: 0 }}
+                    />
+                    Неактивные
+                </label>
+            </div>
+
+            {/* ── Merge info bar ── */}
+            {mergeMode && (
+                <div
+                    style={{
+                        border: `1px solid ${GH.danger}`,
+                        padding: '14px 20px',
+                        marginBottom: 20,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 12,
+                        background: GH.paper,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Merge size={16} color={GH.danger} />
+                        <div>
+                            <div style={{ ...GHC_MONO_LABEL, color: GH.danger, marginBottom: 2 }}>
+                                Режим объединения
+                            </div>
+                            <div style={{ fontSize: 13, color: GH.ink60 }}>
+                                Выберите 2+ клиентов. Все сессии, платежи и заметки будут перенесены в одну карточку.
+                            </div>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ ...GHC_MONO_LABEL, fontVariantNumeric: 'tabular-nums' }}>
+                            Выбрано: {String(mergeSelected.length).padStart(2, '0')}
+                        </div>
+                        <button
+                            disabled={mergeSelected.length < 2}
+                            onClick={() => setShowMergeDialog(true)}
+                            style={{
+                                background: mergeSelected.length < 2 ? GH.ink30 : GH.danger,
+                                color: GH.paper,
+                                border: 'none',
+                                padding: '10px 18px',
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.18em',
+                                fontWeight: 600,
+                                cursor: mergeSelected.length < 2 ? 'not-allowed' : 'pointer',
+                            }}
+                        >
+                            Объединить →
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── New / Edit Form (legacy modal, acceptable compromise) ── */}
+            {showForm && (
+                <div style={{ marginBottom: 20 }}>
+                    <ClientForm
+                        onSave={onCreate}
+                        onCancel={() => setShowForm(false)}
+                    />
+                </div>
+            )}
+
+            {editingClient && (
+                <div style={{ marginBottom: 20 }}>
+                    <ClientForm
+                        isEdit
+                        initial={{
+                            name: editingClient.name,
+                            phone: editingClient.phone,
+                            email: editingClient.email,
+                            telegram: editingClient.telegram,
+                            aliasCode: editingClient.aliasCode,
+                            basePrice: editingClient.basePrice,
+                            currency: editingClient.currency,
+                            tags: editingClient.tags,
+                        }}
+                        onSave={(data) => onUpdate(editingClient.id, data)}
+                        onCancel={() => setEditingId(null)}
+                    />
+                </div>
+            )}
+
+            {showMergeDialog && (
+                <MergeDialog
+                    clients={clients.filter(c => mergeSelected.includes(c.id))}
+                    onConfirm={onMergeConfirm}
+                    onCancel={() => setShowMergeDialog(false)}
+                />
+            )}
+
+            {/* ── Table ── */}
+            {loading && !clients.length ? (
+                <div
+                    style={{
+                        ...GHC_MONO_LABEL,
+                        textAlign: 'center',
+                        padding: '80px 0',
+                    }}
+                >
+                    Загрузка клиентов…
+                </div>
+            ) : filtered.length === 0 ? (
+                <div
+                    style={{
+                        border: GHC_HAIRLINE,
+                        padding: '64px 24px',
+                        textAlign: 'center',
+                    }}
+                >
+                    <div style={{ ...GHC_MONO_LABEL, marginBottom: 12 }}>Пусто</div>
+                    <div
+                        style={{
+                            fontSize: 'clamp(24px, 3vw, 36px)',
+                            fontWeight: 800,
+                            letterSpacing: '-0.02em',
+                            lineHeight: 1.05,
+                            marginBottom: 10,
+                        }}
+                    >
+                        {search ? 'Никто не найден.' : 'Клиентов ещё нет.'}
+                    </div>
+                    <div style={{ fontSize: 14, color: GH.ink60 }}>
+                        {search ? 'Попробуйте изменить запрос или снять фильтр.' : 'Добавьте первого клиента через кнопку «Новый клиент».'}
+                    </div>
+                </div>
+            ) : (
+                <div style={{ border: GHC_HAIRLINE, overflowX: 'auto' }}>
+                    {/* Table head */}
+                    <div
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: mergeMode
+                                ? '40px 32px 1.4fr 1.2fr 90px 110px 110px 110px 80px'
+                                : '32px 1.4fr 1.2fr 90px 110px 110px 110px 80px',
+                            gap: 0,
+                            borderBottom: GHC_HAIRLINE,
+                            padding: '12px 20px',
+                            minWidth: mergeMode ? 1040 : 1000,
+                            alignItems: 'center',
+                        }}
+                    >
+                        {mergeMode && <div />}
+                        <div style={GHC_MONO_LABEL}>#</div>
+                        <GHSortHeader field="name" current={sortField} dir={sortDir} onSort={toggleSort}>Имя</GHSortHeader>
+                        <div style={GHC_MONO_LABEL}>Контакты</div>
+                        <GHSortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</GHSortHeader>
+                        <GHSortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort}>LTV</GHSortHeader>
+                        <GHSortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</GHSortHeader>
+                        <GHSortHeader field="lastSessionDate" current={sortField} dir={sortDir} onSort={toggleSort}>Посл. сессия</GHSortHeader>
+                        <div style={{ ...GHC_MONO_LABEL, textAlign: 'right' }}>Действия</div>
+                    </div>
+
+                    {/* Rows */}
+                    {filtered.map((client, i) => {
+                        const c = client as any;
+                        const isSelected = mergeSelected.includes(client.id);
+                        const isInactive = !client.isActive;
+                        return (
+                            <div
+                                key={client.id}
+                                onClick={() => {
+                                    if (mergeMode) {
+                                        setMergeSelected(prev =>
+                                            prev.includes(client.id)
+                                                ? prev.filter(id => id !== client.id)
+                                                : [...prev, client.id]
+                                        );
+                                    } else {
+                                        navigate(`/crm/clients/${client.id}`);
+                                    }
+                                }}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: mergeMode
+                                        ? '40px 32px 1.4fr 1.2fr 90px 110px 110px 110px 80px'
+                                        : '32px 1.4fr 1.2fr 90px 110px 110px 110px 80px',
+                                    gap: 0,
+                                    padding: '16px 20px',
+                                    alignItems: 'center',
+                                    borderBottom: i === filtered.length - 1 ? 'none' : GHC_HAIRLINE,
+                                    cursor: 'pointer',
+                                    background: isSelected ? GH.ink5 : 'transparent',
+                                    opacity: isInactive ? 0.5 : 1,
+                                    transition: 'background 0.12s ease',
+                                    minWidth: mergeMode ? 1040 : 1000,
+                                    fontSize: 14,
+                                }}
+                                onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = GH.ink5; }}
+                                onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                                {mergeMode && (
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <div
+                                            style={{
+                                                width: 16,
+                                                height: 16,
+                                                border: `1px solid ${GH.ink}`,
+                                                background: isSelected ? GH.ink : GH.paper,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                            }}
+                                        >
+                                            {isSelected && <Check size={11} color={GH.paper} />}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* # + active dot */}
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        color: GH.ink60,
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <button
+                                        onClick={() => onToggleActive(client)}
+                                        title={client.isActive ? 'Деактивировать' : 'Активировать'}
+                                        style={{
+                                            width: 6,
+                                            height: 6,
+                                            borderRadius: '50%',
+                                            background: client.isActive ? GH.ink : GH.ink30,
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            padding: 0,
+                                        }}
+                                    />
+                                    <span>{String(i + 1).padStart(2, '0')}</span>
+                                </div>
+
+                                {/* Name */}
+                                <div style={{ paddingRight: 12 }}>
+                                    <div style={{ fontWeight: 600, color: GH.ink, marginBottom: 2 }}>
+                                        {client.name}
+                                    </div>
+                                    {client.aliasCode && (
+                                        <div
+                                            style={{
+                                                fontFamily: GH_MONO,
+                                                fontSize: 10,
+                                                color: GH.ink30,
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.1em',
+                                            }}
+                                        >
+                                            #{client.aliasCode}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Contacts */}
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        color: GH.ink60,
+                                        paddingRight: 12,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 2,
+                                    }}
+                                >
+                                    {client.telegram && <div>@{client.telegram.replace(/^@/, '')}</div>}
+                                    {client.phone && <div>{client.phone}</div>}
+                                    {!client.telegram && !client.phone && <div style={{ color: GH.ink30 }}>—</div>}
+                                </div>
+
+                                {/* Rate */}
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 13,
+                                        color: GH.ink,
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                >
+                                    {client.basePrice || 0} {client.currency}
+                                </div>
+
+                                {/* LTV */}
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 13,
+                                        color: c.sessionCount > 0 ? GH.ink : GH.ink30,
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                >
+                                    {c.sessionCount > 0 ? (c.totalCost || 0).toLocaleString() : '0'}
+                                </div>
+
+                                {/* Debt */}
+                                <div style={{ fontSize: 11 }}>
+                                    {(c.unpaidSum || 0) > 0 ? (
+                                        <span
+                                            style={{
+                                                fontFamily: GH_MONO,
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.08em',
+                                                color: GH.danger,
+                                                fontWeight: 600,
+                                                fontVariantNumeric: 'tabular-nums',
+                                            }}
+                                        >
+                                            {(c.unpaidSum || 0).toLocaleString()} {client.currency}
+                                        </span>
+                                    ) : (c.sessionCount || 0) > 0 ? (
+                                        <span style={{ ...GHC_MONO_LABEL, color: GH.accent }}>Оплачено</span>
+                                    ) : (
+                                        <span style={{ color: GH.ink30 }}>—</span>
+                                    )}
+                                </div>
+
+                                {/* Last session */}
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        color: GH.ink60,
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em',
+                                        fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                >
+                                    {c.lastSessionDate
+                                        ? new Date(c.lastSessionDate).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })
+                                        : <span style={{ color: GH.ink30 }}>—</span>}
+                                </div>
+
+                                {/* Actions */}
+                                <div
+                                    style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <button
+                                        onClick={() => {
+                                            setShowForm(false);
+                                            setEditingId(editingId === client.id ? null : client.id);
+                                        }}
+                                        title="Редактировать"
+                                        style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            padding: 6,
+                                            color: GH.ink60,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                        }}
+                                    >
+                                        <Pencil size={13} />
+                                    </button>
+                                    <button
+                                        onClick={() => onPermanentDelete(client)}
+                                        title="Удалить"
+                                        style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            padding: 6,
+                                            color: GH.ink60,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                        }}
+                                    >
+                                        <Trash2 size={13} />
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ── Grid House sort header ──
+function GHSortHeader({
+    field,
+    current,
+    dir,
+    onSort,
+    children,
+}: {
+    field: SortField;
+    current: SortField;
+    dir: SortDir;
+    onSort: (f: SortField) => void;
+    children: React.ReactNode;
+}) {
+    const active = current === field;
+    return (
+        <button
+            onClick={() => onSort(field)}
+            style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+                textAlign: 'left',
+                fontFamily: GH_MONO,
+                fontSize: 11,
+                textTransform: 'uppercase',
+                letterSpacing: '0.18em',
+                color: active ? GH.ink : GH.ink60,
+                fontWeight: active ? 600 : 400,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+            }}
+        >
+            {children}
+            {active && <span style={{ fontSize: 9 }}>{dir === 'asc' ? '↑' : '↓'}</span>}
+        </button>
     );
 }

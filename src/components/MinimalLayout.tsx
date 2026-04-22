@@ -2,6 +2,7 @@ import { ArrowLeft, LogIn, LayoutDashboard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 interface MinimalLayoutProps {
     children: React.ReactNode;
@@ -12,13 +13,11 @@ interface MinimalLayoutProps {
     glassMode?: boolean;
 }
 
-// ── iOS 26 Liquid Glass header style (mirrors ExplorePage) ──────────────────
+// ── Header style (post-Liquid Glass) ────────────────────────────────────────
 const glassHeader: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.10)',
-    backdropFilter: 'blur(24px) saturate(150%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-    border: '1px solid rgba(255,255,255,0.22)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.40)',
+    background: 'rgba(255,255,255,0.94)',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+    boxShadow: '0 1px 8px rgba(0,0,0,0.03)',
 };
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -39,22 +38,140 @@ export function MinimalLayout({
         else navigate(-1);
     };
 
+    // Grid House is the only design; glass header lives here.
+    if (glassMode) {
+        return (
+            <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
+                {/* GH Header */}
+                <header style={{
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 50,
+                    background: GH.paper,
+                    borderBottom: `1px solid ${GH.ink8}`,
+                }}>
+                    <div style={{
+                        maxWidth: fullWidth ? 1920 : 960,
+                        margin: '0 auto',
+                        padding: '14px 24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                    }}>
+                        {/* Left: back + logo */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            {showBackButton && (
+                                <button
+                                    onClick={handleBack}
+                                    style={{
+                                        width: 36, height: 36,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        border: `1px solid ${GH.ink10}`,
+                                        borderRadius: 8,
+                                        background: 'transparent',
+                                        color: GH.ink60,
+                                        cursor: 'pointer',
+                                    }}
+                                    aria-label="Go back"
+                                >
+                                    <ArrowLeft size={16} />
+                                </button>
+                            )}
+                            <Link
+                                to="/"
+                                onClick={resetBooking}
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 15,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.06em',
+                                    color: GH.ink,
+                                    textDecoration: 'none',
+                                    textTransform: 'uppercase',
+                                }}
+                            >
+                                Unbox
+                            </Link>
+                        </div>
+
+                        {/* Right: Auth */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {!currentUser ? (
+                                <Link
+                                    to="/login"
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 6,
+                                        padding: '8px 18px',
+                                        background: GH.accent,
+                                        color: '#fff',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        fontFamily: GH_SANS,
+                                        textDecoration: 'none',
+                                        letterSpacing: '0.01em',
+                                    }}
+                                >
+                                    <LogIn size={14} />
+                                    Войти
+                                </Link>
+                            ) : (
+                                <button
+                                    onClick={() => navigate('/dashboard')}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 10,
+                                        padding: '6px 14px',
+                                        background: GH.ink5,
+                                        border: `1px solid ${GH.ink8}`,
+                                        borderRadius: 8,
+                                        cursor: 'pointer',
+                                        fontFamily: GH_SANS,
+                                        fontSize: 13,
+                                        fontWeight: 500,
+                                        color: GH.ink,
+                                    }}
+                                >
+                                    <div style={{
+                                        width: 28, height: 28,
+                                        borderRadius: '50%',
+                                        background: GH.accent,
+                                        color: '#fff',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 12, fontWeight: 700,
+                                    }}>
+                                        {currentUser.name?.charAt(0).toUpperCase() ?? '·'}
+                                    </div>
+                                    <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {currentUser.name}
+                                    </span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </header>
+
+                {/* Main content */}
+                <main style={{
+                    minHeight: 'calc(100vh - 65px)',
+                    paddingTop: 24,
+                    paddingBottom: 40,
+                    ...(noPadding ? {} : { paddingLeft: fullWidth ? 24 : 16, paddingRight: fullWidth ? 24 : 16 }),
+                }}>
+                    {children}
+                </main>
+            </div>
+        );
+    }
+
     // ── GLASS MODE (photo bg + floating glass pill header) ──────────────────
     if (glassMode) {
         return (
             <div className="min-h-screen font-sans text-unbox-dark selection:bg-unbox-green selection:text-white">
 
-                {/* Full-page photo background */}
+                {/* Background — photo layer for glass mode */}
                 <div className="fixed inset-0 z-0">
-                    <img
-                        src="/hero-bg.jpg"
-                        alt=""
-                        className="w-full h-full object-cover object-[center_45%]"
-                    />
-                    <div
-                        className="absolute inset-0"
-                        style={{ background: 'rgba(255,255,255,0.52)' }}
-                    />
+                    <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
+                    <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
                 </div>
 
                 {/* Floating glass header pill */}
@@ -82,7 +199,7 @@ export function MinimalLayout({
                                 <img
                                     src="/unbox-logo.png"
                                     alt="Unbox"
-                                    className="h-[81px] object-contain drop-shadow-md group-hover:scale-[1.15] transition-transform duration-200"
+                                    className="h-[50px] sm:h-[81px] object-contain drop-shadow-md group-hover:scale-[1.15] transition-transform duration-200"
                                 />
                             </Link>
                         </div>
@@ -92,7 +209,7 @@ export function MinimalLayout({
                             {!currentUser ? (
                                 <Link
                                     to="/login"
-                                    className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all brand-gradient"
+                                    className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:-translate-y-0.5 transition-all bg-[#476D6B]"
                                 >
                                     <LogIn size={15} />
                                     Войти
@@ -103,7 +220,7 @@ export function MinimalLayout({
                                     className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/70 backdrop-blur-md border border-white/60 text-unbox-dark hover:bg-white transition-all text-sm font-medium shadow-md"
                                 >
                                     <div
-                                        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 brand-gradient"
+                                        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 bg-[#476D6B]"
                                     >
                                         {currentUser.name?.charAt(0).toUpperCase() ?? <LayoutDashboard size={12} />}
                                     </div>
@@ -151,7 +268,7 @@ export function MinimalLayout({
                             <img
                                 src="/unbox-logo.png"
                                 alt="Unbox"
-                                className="h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200 drop-shadow-sm"
+                                className="h-[50px] sm:h-[81px] object-contain cursor-pointer group-hover:scale-[1.15] transition-transform duration-200 drop-shadow-sm"
                             />
                         </Link>
                     </div>
@@ -161,7 +278,7 @@ export function MinimalLayout({
                         {!currentUser ? (
                             <Link
                                 to="/login"
-                                className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all brand-gradient"
+                                className="flex items-center gap-2 px-4 py-2 rounded-full text-white text-sm font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all bg-[#476D6B]"
                             >
                                 <LogIn size={15} />
                                 Войти
@@ -172,7 +289,7 @@ export function MinimalLayout({
                                 className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-white/50 text-unbox-dark hover:bg-white transition-all text-sm font-medium shadow-md hover:shadow-lg hover:-translate-y-0.5"
                             >
                                 <div
-                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm brand-gradient"
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm bg-[#476D6B]"
                                 >
                                     {currentUser.name?.charAt(0).toUpperCase() ?? <LayoutDashboard size={12} />}
                                 </div>

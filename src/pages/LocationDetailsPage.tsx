@@ -1,17 +1,32 @@
-import { useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
+import { useUserStore } from '../store/userStore';
 import { MinimalLayout } from '../components/MinimalLayout';
-import { ChessboardStep } from '../components/Wizard/ChessboardStep';
 import { CABINET_SERVICES } from '../utils/data';
-import { MapPin, Wifi, Coffee, Users, Shield, Calendar, Clock, CreditCard, Ruler, ChevronRight } from 'lucide-react';
+import { MapPin, Wifi, Coffee, Users, Shield, Ruler, ChevronRight, X, ChevronLeft, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
+import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { PRICING_CONFIG } from '../utils/pricingConfig';
+
+// Derive per-format display rate from space type + global config.
+// Falls back to resource.hourlyRate if something is missing.
+const deriveRate = (resource: { type: string; hourlyRate: number; groupRate?: number | null }, format: 'group' | 'intervision'): number => {
+    const spaceType = resource.type === 'capsule' ? 'CAP' : 'ROOM';
+    const code = format === 'group' ? 'GRP' : 'INTV';
+    // Prefer explicit resource.groupRate for 'group' when set (legacy override), else config
+    if (format === 'group' && typeof resource.groupRate === 'number' && resource.groupRate > 0) {
+        return resource.groupRate;
+    }
+    return PRICING_CONFIG.base_rates[spaceType][code] ?? resource.hourlyRate;
+};
 
 export function LocationDetailsPage() {
-    const { locationId: id } = useParams<{ locationId: string }>();
+        const { locationId: id } = useParams<{ locationId: string }>();
     const navigate = useNavigate();
-    const chessboardRef = useRef<HTMLDivElement>(null);
-    const { locations, resources, fetchLocations, fetchResources, setLocation, setStep, selectedSlots, date } = useBookingStore();
+    const { locations, resources, fetchLocations, fetchResources, setLocation, setStep, setHighlightedResourceId } = useBookingStore();
+    const [galleryOpen, setGalleryOpen] = useState(false);
+    const [galleryIndex, setGalleryIndex] = useState(0);
 
     useEffect(() => {
         if (locations.length === 0) fetchLocations();
@@ -24,10 +39,6 @@ export function LocationDetailsPage() {
         if (id) setLocation(id);
     }, [id, setLocation]);
 
-    useEffect(() => {
-        setStep(2);
-    }, [setStep]);
-
     if (!location) {
         return (
             <MinimalLayout>
@@ -39,316 +50,289 @@ export function LocationDetailsPage() {
     // Location resources (active only)
     const locationResources = resources.filter(r => r.locationId === id && r.isActive !== false);
 
-    // Gallery photos — collect from location resources
+    // Gallery photos — location image + all resource photos
+    const locationPhotos = location.image ? [location.image] : [];
     const allResourcePhotos = locationResources.flatMap(r => r.photos || []);
-    const photos = allResourcePhotos.length >= 3
-        ? allResourcePhotos.slice(0, 3)
-        : [
-            allResourcePhotos[0] || location.image || '/img/offices/miniature_cab_1_pal.jpg',
-            allResourcePhotos[1] || '/img/offices/cabinet_5_ira.jpg',
-            allResourcePhotos[2] || '/img/offices/cabinet_7_liza.webp',
-        ];
+    const allPhotos = [...locationPhotos, ...allResourcePhotos].length > 0
+        ? [...locationPhotos, ...allResourcePhotos]
+        : ['/img/offices/miniature_cab_1_pal.jpg', '/img/offices/cabinet_5_ira.jpg', '/img/offices/cabinet_7_liza.webp'];
+    // Show up to 5 for the hero grid
+    const heroPhotos = allPhotos.slice(0, 5);
 
-    const calculateTotal = () => {
-        let total = 0;
-        selectedSlots.forEach(() => { total += 10; });
-        return total;
+    const handleBookResource = (resourceId: string) => {
+        setHighlightedResourceId(resourceId);
+        setStep(2);
+        navigate('/checkout');
     };
 
-    const scrollToChessboard = () => {
-        chessboardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const openGallery = (index: number) => {
+        setGalleryIndex(index);
+        setGalleryOpen(true);
     };
 
     return (
-        <MinimalLayout>
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mb-20">
-                {/* Header */}
-                <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-                    <div>
-                        <h1 className="text-4xl font-black text-unbox-dark tracking-tight mb-2">{location.name}</h1>
-                        <div className="flex items-center text-unbox-grey font-medium">
-                            <MapPin className="w-4 h-4 mr-1.5 text-unbox-green" />
-                            {location.address}
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => navigate('/')}
-                        className="text-sm font-bold text-unbox-green hover:text-unbox-dark bg-unbox-light px-4 py-2 rounded-full transition-colors"
-                    >
-                        Сменить локацию
-                    </button>
-                </div>
 
-                {/* Hero Gallery */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 md:h-[400px] rounded-3xl overflow-hidden mb-12">
-                    <div className="md:col-span-3 h-64 md:h-full relative group cursor-pointer">
-                        <img src={photos[0]} alt="Main" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                        <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors duration-500" />
-                    </div>
-                    <div className="hidden md:flex flex-col gap-2 h-full">
-                        <div className="flex-1 relative group cursor-pointer overflow-hidden">
-                            <img src={photos[1]} alt="Side 1" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                            <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors duration-500" />
-                        </div>
-                        <div className="flex-1 relative group cursor-pointer overflow-hidden">
-                            <img src={photos[2]} alt="Side 2" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                            <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors duration-500" />
-                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                <span className="text-white font-bold bg-black/30 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
-                                    Все фото
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <GridHouseLocationDetails
+            location={location} locationResources={locationResources}
+            allPhotos={allPhotos} navigate={navigate}
+            handleBookResource={handleBookResource}
+            galleryOpen={galleryOpen} setGalleryOpen={setGalleryOpen}
+            galleryIndex={galleryIndex} setGalleryIndex={setGalleryIndex}
+        />
+    );
+}
 
-                <div className="flex flex-col lg:flex-row gap-12">
-                    {/* Left Column */}
-                    <div className="flex-1 min-w-0">
-                        {/* Location Features */}
-                        {location.features && location.features.length > 0 && (
-                            <div className="mb-12">
-                                <h2 className="text-2xl font-bold text-unbox-dark mb-6">Удобства локации</h2>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    {location.features.map((feature, i) => {
-                                        let Icon = Coffee;
-                                        if (feature.toLowerCase().includes('wifi') || feature.toLowerCase().includes('интернет')) Icon = Wifi;
-                                        if (feature.toLowerCase().includes('переговор')) Icon = Users;
-                                        if (feature.toLowerCase().includes('охран') || feature.toLowerCase().includes('доступ')) Icon = Shield;
-                                        return (
-                                            <div key={i} className="flex items-center gap-3 bg-unbox-light/30 p-4 rounded-2xl border border-unbox-light">
-                                                <div className="bg-white p-2 rounded-xl text-unbox-green shadow-sm border border-unbox-light">
-                                                    <Icon className="w-5 h-5" />
-                                                </div>
-                                                <span className="font-medium text-unbox-dark text-sm leading-tight">{feature}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
+
+/* ═══════════════════════════════════════════════════════════════
+   Grid House — LocationDetailsPage
+   ═══════════════════════════════════════════════════════════════ */
+
+const ghldMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghldHairline = `1px solid ${GH.ink10}`;
+
+interface GridHouseLocationDetailsProps {
+    location: any;
+    locationResources: any[];
+    allPhotos: string[];
+    navigate: ReturnType<typeof useNavigate>;
+    handleBookResource: (id: string) => void;
+    galleryOpen: boolean;
+    setGalleryOpen: (v: boolean) => void;
+    galleryIndex: number;
+    setGalleryIndex: (v: number | ((i: number) => number)) => void;
+}
+
+function GridHouseLocationDetails({
+    location, locationResources, allPhotos, navigate: nav, handleBookResource,
+    galleryOpen, setGalleryOpen, galleryIndex, setGalleryIndex,
+}: GridHouseLocationDetailsProps) {
+    const { currentUser, logout } = useUserStore();
+    const isAdmin = Boolean(currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
+    const ghNavMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' };
+
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 640);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', background: GH.paper }}>
+            {/* GH Header */}
+            <header style={{ borderBottom: ghldHairline, background: GH.paper, position: 'sticky', top: 0, zIndex: 40 }}>
+                <div style={{ maxWidth: 1200, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
+                        <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                        <button onClick={() => nav(-1)} style={{ ...ghNavMono, color: GH.ink60, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0' }}>← НАЗАД</button>
+                    </div>
+                    <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                        <Link to="/specialists" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>Специалисты</Link>
+                        <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                        <Link to="/#cabinets" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink, fontWeight: 700, textDecoration: 'none' }}>Кабинеты</Link>
+                        {isAdmin && (<><span style={{ ...ghNavMono, color: GH.ink30 }}>·</span><Link to="/admin" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>Админ</Link></>)}
+                        <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                        {currentUser ? (
+                            <><Link to="/dashboard" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>{currentUser.name ?? 'Кабинет'}</Link>
+                            <span style={{ ...ghNavMono, color: GH.ink30 }}>·</span>
+                            <button onClick={() => { logout(); nav('/'); }} style={{ ...ghNavMono, padding: '4px 12px', color: GH.danger, background: 'transparent', border: 'none', cursor: 'pointer' }}>Выйти</button></>
+                        ) : (
+                            <Link to="/login" style={{ ...ghNavMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none' }}>Войти</Link>
                         )}
+                    </nav>
+                </div>
+            </header>
 
-                        {/* ── Cabinet Cards Section ── */}
-                        {locationResources.length > 0 && (
-                            <div className="mb-12">
-                                <div className="flex items-end justify-between mb-6">
+            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px clamp(16px, 4vw, 24px) 80px', overflowX: 'hidden' }}>
+                {/* Location header */}
+                <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
+                    <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 8 }}>ЛОКАЦИЯ</div>
+                    <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
+                        {location.name}
+                    </h1>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: GH.ink60, fontSize: 14 }}>
+                        <MapPin size={14} style={{ color: GH.accent }} />
+                        {location.address}
+                    </div>
+                </div>
+
+                {/* KPI strip */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 0, borderTop: ghldHairline, borderBottom: ghldHairline, marginBottom: 32 }}>
+                    <div style={{ padding: '16px 16px 16px 0', borderRight: ghldHairline }}>
+                        <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 6 }}>КАБИНЕТОВ</div>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1 }}>
+                            {locationResources.length}
+                        </div>
+                    </div>
+                    {locationResources.length > 0 && (
+                        <div style={{ padding: '16px 16px 16px 16px' }}>
+                            <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 6 }}>ЦЕНА ОТ</div>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1, color: GH.accent }}>
+                                {Math.min(...locationResources.map(r => r.hourlyRate || 0))} ₾
+                            </div>
+                            <div style={{ fontSize: 12, color: GH.ink30, marginTop: 4 }}>в час</div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Photo gallery strip */}
+                {allPhotos.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 32, overflow: 'hidden' }}>
+                        {allPhotos.slice(0, 4).map((photo, i) => (
+                            <div
+                                key={i}
+                                onClick={() => { setGalleryIndex(i); setGalleryOpen(true); }}
+                                style={{ flex: i === 0 ? '2 1 0' : '1 1 0', height: 200, cursor: 'pointer', overflow: 'hidden', position: 'relative' }}
+                            >
+                                <img src={photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                {i === 3 && allPhotos.length > 4 && (
+                                    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <span style={{ ...ghldMono, color: '#fff', fontSize: 12 }}>+{allPhotos.length - 4} ФОТО</span>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Description */}
+                {location.description && (
+                    <div style={{ marginBottom: 32 }}>
+                        <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 12 }}>О ЛОКАЦИИ</div>
+                        <p style={{ fontSize: 15, color: GH.ink60, lineHeight: 1.7, maxWidth: 700 }}>
+                            {location.description}
+                        </p>
+                    </div>
+                )}
+
+                {/* Features */}
+                {location.features && location.features.length > 0 && (
+                    <div style={{ marginBottom: 32 }}>
+                        <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 12 }}>УДОБСТВА</div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {location.features.map((feat: string, i: number) => (
+                                <span key={i} style={{ ...ghldMono, fontSize: 10, color: GH.ink60, padding: '6px 12px', border: ghldHairline }}>
+                                    {feat.toUpperCase()}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Cabinets */}
+                {locationResources.length > 0 && (
+                    <div style={{ marginBottom: 48 }}>
+                        <div style={{ ...ghldMono, color: GH.ink30, marginBottom: 16 }}>КАБИНЕТЫ И ПРОСТРАНСТВА</div>
+                        <div style={{ border: ghldHairline }}>
+                            {locationResources.map((resource, i) => (
+                                <div
+                                    key={resource.id}
+                                    style={{
+                                        display: narrow ? 'flex' : 'grid',
+                                        flexDirection: narrow ? 'column' : undefined,
+                                        gridTemplateColumns: narrow ? undefined : '1fr auto auto',
+                                        gap: narrow ? 10 : 16,
+                                        alignItems: narrow ? 'stretch' : 'center',
+                                        padding: narrow ? '14px 16px' : '16px 20px',
+                                        borderBottom: i < locationResources.length - 1 ? ghldHairline : 'none',
+                                    }}
+                                >
                                     <div>
-                                        <h2 className="text-2xl font-bold text-unbox-dark">Кабинеты и пространства</h2>
-                                        <p className="text-unbox-grey text-sm mt-1">
-                                            {locationResources.length} {locationResources.length === 1 ? 'пространство доступно' : locationResources.length < 5 ? 'пространства доступны' : 'пространств доступно'} для аренды
-                                        </p>
+                                        <div style={{ fontWeight: 600, fontSize: 15 }}>{resource.name}</div>
+                                        <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+                                            <span style={{ ...ghldMono, color: GH.ink30, fontSize: 9 }}>
+                                                {resource.type === 'capsule' ? 'КАПСУЛА' : 'КАБИНЕТ'}
+                                            </span>
+                                            <span style={{ ...ghldMono, color: GH.ink30, fontSize: 9 }}>
+                                                ДО {resource.capacity} ЧЕЛ.
+                                            </span>
+                                            {resource.area && (
+                                                <span style={{ ...ghldMono, color: GH.ink30, fontSize: 9 }}>
+                                                    {resource.area} М²
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div style={{
+                                        textAlign: narrow ? 'left' : 'right',
+                                        whiteSpace: 'nowrap',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: narrow ? 'flex-start' : 'flex-end',
+                                        gap: 4,
+                                    }}>
+                                        {resource.formats?.includes('individual') !== false && (
+                                            <div style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 16 }}>
+                                                {resource.hourlyRate} ₾<span style={{ fontSize: 11, fontWeight: 500, color: GH.ink60 }}>/час</span>
+                                            </div>
+                                        )}
+                                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: narrow ? 'flex-start' : 'flex-end' }}>
+                                            {resource.formats?.includes('group') && (
+                                                <span style={{
+                                                    fontFamily: GH_MONO, fontSize: 11, color: GH.accent, fontWeight: 600,
+                                                    background: `${GH.accent}10`, padding: '2px 8px', borderRadius: 4,
+                                                }}>
+                                                    группа: {deriveRate(resource, 'group')} ₾/час
+                                                </span>
+                                            )}
+                                            {resource.formats?.includes('intervision') && (
+                                                <span style={{
+                                                    fontFamily: GH_MONO, fontSize: 11, color: '#6D28D9', fontWeight: 600,
+                                                    background: 'rgba(109,40,217,0.08)', padding: '2px 8px', borderRadius: 4,
+                                                }}>
+                                                    интервизия: {deriveRate(resource, 'intervision')} ₾/час
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     <button
-                                        onClick={scrollToChessboard}
-                                        className="flex items-center gap-1 text-sm font-medium text-unbox-green hover:text-unbox-dark transition-colors"
+                                        onClick={() => handleBookResource(resource.id)}
+                                        style={{
+                                            padding: narrow ? '12px 20px' : '8px 20px',
+                                            background: GH.ink, color: GH.paper,
+                                            fontWeight: 700, fontSize: 12, fontFamily: GH_SANS, border: 'none', cursor: 'pointer',
+                                            width: narrow ? '100%' : undefined,
+                                            marginTop: narrow ? 4 : 0,
+                                        }}
                                     >
-                                        Выбрать время <ChevronRight size={16} />
+                                        Забронировать →
                                     </button>
                                 </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                    {locationResources.map(resource => {
-                                        const coverPhoto = resource.photos?.[0];
-                                        const resourceServices = (resource.services || [])
-                                            .map(sid => CABINET_SERVICES.find(s => s.id === sid))
-                                            .filter(Boolean);
-
-                                        return (
-                                            <div
-                                                key={resource.id}
-                                                className="group bg-white rounded-3xl overflow-hidden border border-unbox-light shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col"
-                                            >
-                                                {/* Photo */}
-                                                <div className="relative h-52 bg-gradient-to-br from-unbox-light to-gray-100 overflow-hidden">
-                                                    {coverPhoto ? (
-                                                        <img
-                                                            src={coverPhoto}
-                                                            alt={resource.name}
-                                                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                                        />
-                                                    ) : (
-                                                        <div className="w-full h-full flex items-center justify-center">
-                                                            <div className="text-center text-gray-300">
-                                                                <div className="text-5xl mb-2">🏠</div>
-                                                                <div className="text-sm font-medium text-gray-400">{resource.name}</div>
-                                                            </div>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Type badge */}
-                                                    <div className="absolute top-3 left-3">
-                                                        <span className={clsx(
-                                                            'px-2.5 py-1 rounded-full text-xs font-bold uppercase backdrop-blur-sm',
-                                                            resource.type === 'capsule'
-                                                                ? 'bg-purple-500/90 text-white'
-                                                                : 'bg-white/90 text-unbox-green'
-                                                        )}>
-                                                            {resource.type === 'capsule' ? 'Капсула' : 'Кабинет'}
-                                                        </span>
-                                                    </div>
-
-                                                    {/* Price */}
-                                                    <div className="absolute bottom-3 right-3">
-                                                        <span className="bg-unbox-dark/80 backdrop-blur-sm text-white px-3 py-1.5 rounded-full text-sm font-bold">
-                                                            {resource.hourlyRate} ₾/час
-                                                        </span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Content */}
-                                                <div className="p-5 flex flex-col gap-3 flex-1">
-                                                    <div>
-                                                        <h3 className="text-lg font-bold text-unbox-dark">{resource.name}</h3>
-                                                        <div className="flex items-center gap-3 mt-1 text-sm text-unbox-grey">
-                                                            <span className="flex items-center gap-1">
-                                                                <Users size={13} /> до {resource.capacity} чел.
-                                                            </span>
-                                                            {resource.area && (
-                                                                <span className="flex items-center gap-1">
-                                                                    <Ruler size={13} /> {resource.area} м²
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {resource.description && (
-                                                        <p className="text-sm text-gray-500 leading-relaxed line-clamp-3">
-                                                            {resource.description}
-                                                        </p>
-                                                    )}
-
-                                                    {/* Services */}
-                                                    {resourceServices.length > 0 && (
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {resourceServices.slice(0, 5).map(svc => svc && (
-                                                                <span
-                                                                    key={svc.id}
-                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-unbox-light/70 rounded-full text-xs text-gray-600 border border-unbox-light"
-                                                                >
-                                                                    <span>{svc.emoji}</span>
-                                                                    <span>{svc.label}</span>
-                                                                </span>
-                                                            ))}
-                                                            {resourceServices.length > 5 && (
-                                                                <span className="px-2.5 py-1 bg-unbox-light/70 rounded-full text-xs text-unbox-grey border border-unbox-light">
-                                                                    +{resourceServices.length - 5}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    )}
-
-                                                    {/* CTA button */}
-                                                    <button
-                                                        onClick={scrollToChessboard}
-                                                        className="mt-auto w-full py-3 rounded-2xl font-semibold text-sm bg-unbox-light/50 text-unbox-dark border border-unbox-light hover:bg-unbox-green hover:text-white hover:border-unbox-green transition-all duration-200"
-                                                    >
-                                                        Выбрать время →
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        <hr className="border-unbox-light my-10" />
-
-                        {/* Chessboard Section */}
-                        <div id="booking-section" ref={chessboardRef}>
-                            <div className="mb-6">
-                                <h2 className="text-2xl font-bold text-unbox-dark mb-2">Доступные пространства</h2>
-                                <p className="text-unbox-grey">Выберите подходящий кабинет и выделите желаемое время.</p>
-                            </div>
-                            <div className="bg-white p-1 rounded-3xl">
-                                <ChessboardStep />
-                            </div>
+                            ))}
                         </div>
                     </div>
+                )}
 
-                    {/* Right Column: Sticky Booking Widget */}
-                    <div className="w-full lg:w-[380px] shrink-0">
-                        <div className="sticky top-8 bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-unbox-light">
-                            <div className="mb-6">
-                                <div className="text-2xl font-black text-unbox-dark mb-1">
-                                    <span className="text-unbox-green">от 10 ₾</span> <span className="text-base font-medium text-unbox-grey">/ 30 мин</span>
-                                </div>
-                                <div className="flex items-center gap-1 text-sm font-medium text-amber-500">
-                                    ★ 4.9 <span className="text-unbox-grey underline decoration-dotted ml-1">(128 отзывов)</span>
-                                </div>
-                            </div>
+                {/* Footer */}
+                <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ ...ghldMono, color: GH.ink30 }}>UNBOX · 2026</span>
+                    <span style={{ ...ghldMono, color: GH.ink10 }}>GRID HOUSE</span>
+                </footer>
+            </div>
 
-                            <div className="space-y-3 mb-6">
-                                <div className="flex items-center justify-between p-4 rounded-2xl border border-unbox-light bg-unbox-light/30">
-                                    <div className="flex items-center gap-3">
-                                        <Calendar className="w-5 h-5 text-unbox-grey" />
-                                        <div>
-                                            <div className="text-xs font-bold text-unbox-grey uppercase tracking-wider">Дата</div>
-                                            <div className="text-sm font-medium text-unbox-dark">{date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between p-4 rounded-2xl border border-unbox-light bg-unbox-light/30">
-                                    <div className="flex items-center gap-3">
-                                        <Clock className="w-5 h-5 text-unbox-grey" />
-                                        <div>
-                                            <div className="text-xs font-bold text-unbox-grey uppercase tracking-wider">Выбрано слотов</div>
-                                            <div className="text-sm font-medium text-unbox-dark">
-                                                {selectedSlots.length > 0 ? `${selectedSlots.length} (по 30 мин)` : 'Не выбрано'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="pt-4 border-t border-unbox-light mb-6">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-unbox-grey font-medium text-sm">Всего</span>
-                                    <span className="text-xl font-bold text-unbox-dark">{calculateTotal()} ₾</span>
-                                </div>
-                                <div className="text-xs text-unbox-grey text-right">Включая налоги</div>
-                            </div>
-
-                            <button
-                                disabled={selectedSlots.length === 0}
-                                onClick={() => navigate('/checkout')}
-                                className={clsx(
-                                    "w-full py-4 rounded-2xl font-bold text-lg flex items-center justify-center gap-2 transition-all duration-300",
-                                    selectedSlots.length > 0
-                                        ? "bg-unbox-green hover:bg-unbox-dark text-white shadow-xl shadow-unbox-green/30 hover:-translate-y-1 active:scale-95"
-                                        : "bg-unbox-light/50 text-unbox-grey cursor-not-allowed"
-                                )}
-                            >
-                                <CreditCard className="w-5 h-5" />
-                                {selectedSlots.length > 0 ? 'Забронировать' : 'Выберите время'}
+            {/* Gallery modal — reuse existing */}
+            {galleryOpen && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.95)', display: 'flex', flexDirection: 'column' }} onClick={() => setGalleryOpen(false)}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 24px', color: '#fff' }}>
+                        <span style={{ ...ghldMono, color: '#fff', fontSize: 11 }}>{galleryIndex + 1} / {allPhotos.length}</span>
+                        <button onClick={() => setGalleryOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}><X size={24} /></button>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 64px', position: 'relative' }} onClick={e => e.stopPropagation()}>
+                        <img src={allPhotos[galleryIndex]} alt="" style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }} />
+                        {galleryIndex > 0 && (
+                            <button onClick={() => setGalleryIndex(i => i - 1)} style={{ position: 'absolute', left: 16, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: 12, cursor: 'pointer' }}>
+                                <ChevronLeft size={24} />
                             </button>
-
-                            <div className="mt-4 text-center text-xs text-unbox-grey flex flex-col items-center gap-1">
-                                <span>Деньги пока не будут списаны</span>
-                                <span className="flex items-center gap-1 text-unbox-green bg-unbox-light px-2 py-0.5 rounded text-[10px] font-bold">
-                                    <Shield className="w-3 h-3" /> Безопасная оплата
-                                </span>
-                            </div>
-
-                            {/* Quick cabinet list */}
-                            {locationResources.length > 0 && (
-                                <div className="mt-5 pt-4 border-t border-unbox-light">
-                                    <p className="text-[10px] font-semibold text-unbox-grey uppercase tracking-wider mb-2">Кабинеты</p>
-                                    <div className="space-y-1.5">
-                                        {locationResources.slice(0, 5).map(r => (
-                                            <div key={r.id} className="flex items-center justify-between text-xs">
-                                                <span className="text-unbox-dark font-medium">{r.name}</span>
-                                                <span className="text-unbox-grey">{r.hourlyRate} ₾/ч</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                        )}
+                        {galleryIndex < allPhotos.length - 1 && (
+                            <button onClick={() => setGalleryIndex(i => i + 1)} style={{ position: 'absolute', right: 16, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: 12, cursor: 'pointer' }}>
+                                <ChevronRight size={24} />
+                            </button>
+                        )}
                     </div>
                 </div>
-            </div>
-        </MinimalLayout>
+            )}
+        </div>
     );
 }

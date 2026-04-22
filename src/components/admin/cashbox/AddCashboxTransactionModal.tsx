@@ -1,20 +1,37 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
+import { formatBatumi } from '../../../utils/dateUtils';
 
 interface Props {
     isOpen: boolean;
     onClose: () => void;
 }
 
+// Excel #64 — admins were confused by the difference between methods.
+// Tooltip strings are shown as native `title` on each button.
 const PAYMENT_METHODS = [
-    { id: 'cash', label: 'Наличные', icon: '💵' },
-    { id: 'card_tbc', label: 'Карта TBC', icon: '💳' },
-    { id: 'card_bog', label: 'Карта BOG', icon: '🏛️' },
+    {
+        id: 'cash',
+        label: 'Наличные',
+        icon: '💵',
+        hint: 'Кэш в кассу. Бумажные деньги на руках у админа.',
+    },
+    {
+        id: 'card_tbc',
+        label: 'Карта TBC',
+        icon: '💳',
+        hint: 'Терминал TBC. Оплата банковской картой на месте — зачисляется на счёт TBC.',
+    },
+    {
+        id: 'card_bog',
+        label: 'Карта BOG',
+        icon: '🏛️',
+        hint: 'Терминал Bank of Georgia. Оплата картой на месте — зачисляется на счёт BOG.',
+    },
 ] as const;
 
 const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
@@ -59,10 +76,15 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [selectedPlan, setSelectedPlan] = useState('');
     const [description, setDescription] = useState('');
     const [branch, setBranch] = useState('');
-    const [txDate, setTxDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+    const [txDate, setTxDate] = useState(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
     const [transferTo, setTransferTo] = useState('card_tbc');
     const [clientId, setClientId] = useState('');
+    const [clientSearch, setClientSearch] = useState('');
+    const [showClientDropdown, setShowClientDropdown] = useState(false);
+    const clientInputRef = useRef<HTMLInputElement>(null);
     const [bookingUsers, setBookingUsers] = useState<{id: string; name: string; email: string}[]>([]);
+    // Topping up client balance (Excel #43) — default on for income with a selected client
+    const [creditUserBalance, setCreditUserBalance] = useState(true);
 
     // Fetch booking Users (not CRM clients — those are specialist-only)
     useEffect(() => {
@@ -126,6 +148,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     date: dateValue,
                     client_id: (type === 'income' && clientId) ? clientId : undefined,
                     client_name: (type === 'income' && clientId) ? bookingUsers.find(c => c.id === clientId)?.name : undefined,
+                    credit_user_balance: (type === 'income' && !!clientId && creditUserBalance),
                 } as any);
                 toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
             }
@@ -133,7 +156,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             setDescription('');
             setCategoryId('');
             setBranch('');
-            setTxDate(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+            setTxDate(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
             onClose();
         } catch {
             toast.error('Ошибка при сохранении');
@@ -235,6 +258,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                     key={pm.id}
                                     type="button"
                                     onClick={() => setPaymentMethod(pm.id)}
+                                    title={pm.hint}
                                     className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
                                         paymentMethod === pm.id
                                             ? 'border-unbox-green bg-gray-50 text-unbox-dark font-medium'
@@ -246,6 +270,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                 </button>
                             ))}
                         </div>
+                        <p className="mt-2 text-[11px] text-gray-400 leading-snug">
+                            Наличные — кэш в кассу. TBC / BOG — оплата картой на терминале.
+                        </p>
                     </div>
 
                     {/* Transfer target account */}
@@ -258,6 +285,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                         key={pm.id}
                                         type="button"
                                         onClick={() => setTransferTo(pm.id)}
+                                        title={pm.hint}
                                         className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
                                             transferTo === pm.id
                                                 ? 'border-blue-400 bg-blue-50 text-blue-800 font-medium'
@@ -330,25 +358,90 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         );
                     })()}
 
-                    {/* Client (income only) */}
-                    {type === 'income' && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
-                            <select
-                                value={clientId}
-                                onChange={e => setClientId(e.target.value)}
-                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
-                            >
-                                <option value="">— Без привязки к клиенту —</option>
-                                {bookingUsers.map(c => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.name} ({c.email})
-                                        </option>
-                                    ))
-                                }
-                            </select>
-                        </div>
-                    )}
+                    {/* Client (income only) — searchable autocomplete */}
+                    {type === 'income' && (() => {
+                        const sorted = [...bookingUsers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+                        const filtered = clientSearch.trim()
+                            ? sorted.filter(c => {
+                                const q = clientSearch.toLowerCase();
+                                return c.name?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q);
+                            })
+                            : sorted;
+                        const selectedUser = bookingUsers.find(c => c.id === clientId);
+
+                        return (
+                            <div className="relative">
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Клиент (необязательно)</label>
+                                <input
+                                    ref={clientInputRef}
+                                    type="text"
+                                    placeholder="Начните вводить имя или email..."
+                                    value={clientSearch || (selectedUser ? `${selectedUser.name} (${selectedUser.email})` : '')}
+                                    onChange={e => {
+                                        setClientSearch(e.target.value);
+                                        setClientId('');
+                                        setShowClientDropdown(true);
+                                    }}
+                                    onFocus={() => setShowClientDropdown(true)}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm"
+                                />
+                                {clientId && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setClientId(''); setClientSearch(''); }}
+                                        className="absolute right-3 top-[38px] text-gray-400 hover:text-gray-600"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                                {/* Credit-to-balance toggle (Excel #43) */}
+                                {clientId && (
+                                    <label className="mt-2 flex items-start gap-2 cursor-pointer select-none text-xs">
+                                        <input
+                                            type="checkbox"
+                                            checked={creditUserBalance}
+                                            onChange={e => setCreditUserBalance(e.target.checked)}
+                                            className="mt-0.5 accent-unbox-green cursor-pointer"
+                                        />
+                                        <span className={creditUserBalance ? 'text-emerald-700' : 'text-gray-500'}>
+                                            {creditUserBalance
+                                                ? 'Зачислить сумму на баланс клиента (рекомендуется для пополнений)'
+                                                : 'Не зачислять на баланс — это прочий приход (напр., штраф, компенсация)'}
+                                        </span>
+                                    </label>
+                                )}
+                                {showClientDropdown && !clientId && (
+                                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                        <button
+                                            type="button"
+                                            onClick={() => { setClientId(''); setClientSearch(''); setShowClientDropdown(false); }}
+                                            className="w-full text-left px-4 py-2 text-sm text-gray-400 hover:bg-gray-50"
+                                        >
+                                            — Без привязки к клиенту —
+                                        </button>
+                                        {filtered.map(c => (
+                                            <button
+                                                type="button"
+                                                key={c.id}
+                                                onClick={() => {
+                                                    setClientId(c.id);
+                                                    setClientSearch('');
+                                                    setShowClientDropdown(false);
+                                                }}
+                                                className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/50 transition-colors"
+                                            >
+                                                <span className="font-medium">{c.name}</span>
+                                                <span className="text-gray-400 ml-1.5">({c.email})</span>
+                                            </button>
+                                        ))}
+                                        {filtered.length === 0 && (
+                                            <div className="px-4 py-2 text-sm text-gray-400">Не найдено</div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
 
                     {/* Branch */}
                     <div>

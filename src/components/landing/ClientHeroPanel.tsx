@@ -21,11 +21,11 @@ interface Props {
 }
 
 const glassCard: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.66)',
-    backdropFilter: 'blur(28px) saturate(170%)',
-    WebkitBackdropFilter: 'blur(28px) saturate(170%)',
-    border: '1px solid rgba(255,255,255,0.72)',
-    boxShadow: '0 12px 40px rgba(0,0,0,0.10)',
+    background: 'rgba(255,255,255,0.80)',
+    backdropFilter: 'blur(28px) saturate(150%)',
+    WebkitBackdropFilter: 'blur(28px) saturate(150%)',
+    border: '1px solid rgba(255,255,255,0.60)',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04)',
 };
 
 export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSpecialists }: Props) {
@@ -101,7 +101,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
             {/* CTA */}
             <button
                 onClick={onScrollToSpecialists}
-                className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl font-bold text-sm text-white bg-unbox-green hover:bg-unbox-dark transition-all hover:-translate-y-0.5 shadow-lg shadow-unbox-green/20"
+                className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl font-bold text-sm text-white bg-[#476D6B] hover:bg-unbox-dark transition-all active:scale-[0.98] shadow-lg shadow-unbox-green/20 cursor-pointer"
             >
                 Смотреть специалистов
                 <ArrowRight size={15} />

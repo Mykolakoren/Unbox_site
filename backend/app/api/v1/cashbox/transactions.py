@@ -1,6 +1,6 @@
 """Cashbox — transactions: balance, list, create, delete."""
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select, func, col, desc
 from app.db.session import get_session
@@ -130,6 +130,24 @@ def create_transaction(
         if client:
             client_name = client.name
 
+    # ── Optionally credit user balance (Excel #43) ──
+    # Only for income transactions with a client selected. We try to resolve
+    # the client_id as either a User UUID or an email and top up User.balance.
+    credited_user_id: Optional[str] = None
+    target_user: Optional[User] = None
+    if payload.credit_user_balance and payload.type == "income" and payload.client_id:
+        target_user = _resolve_user_from_client_id(session, payload.client_id)
+        if not target_user:
+            raise HTTPException(
+                400,
+                "Клиент не найден среди пользователей — нельзя зачислить на баланс. "
+                "Выберите клиента из списка зарегистрированных пользователей.",
+            )
+        credited_user_id = str(target_user.id)
+        # Prefer the user's canonical name for the cash-box record
+        if not client_name and target_user.name:
+            client_name = target_user.name
+
     tx = CashboxTransaction(
         type=payload.type,
         amount=payload.amount,
@@ -143,14 +161,36 @@ def create_transaction(
         admin_name=current_user.name or "",
         client_id=payload.client_id,
         client_name=client_name,
+        credited_user_id=credited_user_id,
     )
     session.add(tx)
+
+    if target_user is not None:
+        target_user.balance = float(target_user.balance or 0) + float(payload.amount)
+        session.add(target_user)
+
     session.commit()
     session.refresh(tx)
 
     result = CashboxTransactionRead.model_validate(tx)
     result.category_name = cat_name
     return result
+
+
+def _resolve_user_from_client_id(session: Session, client_id: str) -> Optional[User]:
+    """Treat client_id as either a User.id (UUID) or a User.email and fetch."""
+    if not client_id:
+        return None
+    # Try UUID path first
+    try:
+        from uuid import UUID as _UUID
+        u = session.get(User, _UUID(client_id))
+        if u:
+            return u
+    except (ValueError, AttributeError):
+        pass
+    # Fallback: email
+    return session.exec(select(User).where(User.email == client_id)).first()
 
 
 @router.delete("/transactions/{transaction_id}")
@@ -171,9 +211,106 @@ def delete_transaction(
     if current_user.role not in ("owner", "senior_admin") and not is_today:
         raise HTTPException(403, "Удаление прошлых транзакций требует подтверждения старшего администратора")
 
+    # If this transaction credited a user balance, reverse the credit.
+    if tx.credited_user_id:
+        try:
+            from uuid import UUID as _UUID
+            target = session.get(User, _UUID(tx.credited_user_id))
+        except (ValueError, AttributeError):
+            target = None
+        if target:
+            target.balance = float(target.balance or 0) - float(tx.amount)
+            session.add(target)
+
     session.delete(tx)
     session.commit()
     return {"ok": True}
+
+
+@router.patch("/transactions/{transaction_id}", response_model=CashboxTransactionRead)
+def update_transaction(
+    transaction_id: str,
+    payload: dict,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_cashbox),
+):
+    """Edit an existing transaction. Permission rules mirror delete:
+    owner/senior_admin — any transaction; admin — today and yesterday only."""
+    tx = session.get(CashboxTransaction, transaction_id)
+    if not tx:
+        raise HTTPException(404, "Транзакция не найдена")
+
+    tx_date = tx.date.date() if isinstance(tx.date, datetime) else tx.date
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    is_recent = tx_date >= yesterday
+
+    if current_user.role not in ("owner", "senior_admin") and not is_recent:
+        raise HTTPException(403, "Редактирование прошлых транзакций требует подтверждения старшего администратора")
+
+    # Allowed fields
+    allowed = {"type", "amount", "currency", "payment_method", "category_id",
+               "description", "branch", "date", "client_id", "client_name"}
+
+    # Snapshot pre-change state to rebalance a credited user afterwards.
+    old_amount = float(tx.amount or 0)
+    old_type = tx.type
+    old_credited_user_id = tx.credited_user_id
+
+    for key, value in payload.items():
+        if key in allowed:
+            if key == "date" and value:
+                value = datetime.fromisoformat(str(value))
+            if key == "type" and value not in ("income", "expense"):
+                raise HTTPException(400, "type должен быть 'income' или 'expense'")
+            if key == "amount" and (value is None or float(value) <= 0):
+                raise HTTPException(400, "amount должен быть больше 0")
+            setattr(tx, key, value)
+
+    # Resolve client name from client_id if not provided
+    if "client_id" in payload and payload["client_id"] and "client_name" not in payload:
+        from app.models.therapist_client import TherapistClient
+        client = session.get(TherapistClient, payload["client_id"])
+        if client:
+            tx.client_name = client.name
+
+    # If this transaction previously credited a user, and the amount/type has
+    # changed, compensate the user balance accordingly. We don't support moving
+    # a credit between users via edit — changing client_id on a credited tx
+    # keeps the original credit pinned to the original user; admins should
+    # delete + recreate to reassign.
+    if old_credited_user_id:
+        try:
+            from uuid import UUID as _UUID
+            target = session.get(User, _UUID(old_credited_user_id))
+        except (ValueError, AttributeError):
+            target = None
+        if target:
+            # If the type flipped off income, reverse the old credit entirely.
+            # Otherwise apply the delta (new_amount − old_amount).
+            if tx.type != "income":
+                delta = -old_amount
+                tx.credited_user_id = None  # credit no longer applies
+            else:
+                delta = float(tx.amount or 0) - old_amount
+            if delta != 0:
+                target.balance = float(target.balance or 0) + delta
+                session.add(target)
+
+    # Resolve category name for response
+    cat_name = None
+    if tx.category_id:
+        cat = session.get(ExpenseCategory, tx.category_id)
+        if cat:
+            cat_name = cat.name
+
+    session.add(tx)
+    session.commit()
+    session.refresh(tx)
+
+    result = CashboxTransactionRead.model_validate(tx)
+    result.category_name = cat_name
+    return result
 
 
 @router.post("/balance-correction")
@@ -190,36 +327,40 @@ def create_balance_correction(
     payment_method = payload.get("payment_method", "cash")
     new_balance = payload.get("new_balance")
     reason = payload.get("reason", "Корректировка остатков")
+    branch = payload.get("branch")  # optional branch filter
 
     if new_balance is None:
         raise HTTPException(400, "new_balance обязателен")
 
-    # Calculate current balance for this payment method
-    income = session.exec(
-        select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
-            CashboxTransaction.type == "income",
-            CashboxTransaction.payment_method == payment_method,
-        )
-    ).one()
-    expense = session.exec(
-        select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
-            CashboxTransaction.type == "expense",
-            CashboxTransaction.payment_method == payment_method,
-        )
-    ).one()
+    # Calculate current balance for this payment method (optionally filtered by branch)
+    inc_q = select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
+        CashboxTransaction.type == "income",
+        CashboxTransaction.payment_method == payment_method,
+    )
+    exp_q = select(func.coalesce(func.sum(CashboxTransaction.amount), 0)).where(
+        CashboxTransaction.type == "expense",
+        CashboxTransaction.payment_method == payment_method,
+    )
+    if branch:
+        inc_q = inc_q.where(CashboxTransaction.branch == branch)
+        exp_q = exp_q.where(CashboxTransaction.branch == branch)
+
+    income = session.exec(inc_q).one()
+    expense = session.exec(exp_q).one()
     current_balance = float(income) - float(expense)
     diff = float(new_balance) - current_balance
 
     if abs(diff) < 0.01:
         return {"ok": True, "message": "Баланс уже соответствует", "diff": 0}
 
-    # Create correction transaction
+    # Create correction transaction (with branch if specified)
     tx = CashboxTransaction(
         type="income" if diff > 0 else "expense",
         amount=abs(diff),
         currency="GEL",
         payment_method=payment_method,
-        description=f"[КОРРЕКЦИЯ] {reason} (было: {current_balance:.2f}, стало: {new_balance:.2f})",
+        branch=branch or None,
+        description=f"[КОРРЕКЦИЯ{' · ' + branch if branch else ''}] {reason} (было: {current_balance:.2f}, стало: {new_balance:.2f})",
         date=datetime.now(),
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",

@@ -3,6 +3,21 @@ import { differenceInMinutes } from 'date-fns';
 import type { Format, PricingResult, ExtraOption, BookingState } from '../types';
 import { PRICING_CONFIG } from './pricingConfig';
 
+/** Check if a "HH:mm" time string falls into a peak-hour range */
+export function isPeakTime(time: string): boolean {
+    const mins = timeToMinutes(time);
+    return PRICING_CONFIG.peak_hours.ranges.some(r => {
+        const s = timeToMinutes(r.start);
+        const e = timeToMinutes(r.end);
+        return mins >= s && mins < e;
+    });
+}
+
+function timeToMinutes(t: string): number {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+}
+
 export interface PricingParams {
     format: Format;
     startTime: Date;
@@ -66,7 +81,9 @@ const getBaseRate = (resourceId: string, format: Format): number => {
     const spaceType = isCapsule ? 'CAP' : 'ROOM';
 
     // Determine Format Code
-    const formatCode = format === 'group' ? 'GRP' : 'IND';
+    const formatCode: 'IND' | 'GRP' | 'INTV' =
+        format === 'group' ? 'GRP' :
+        format === 'intervision' ? 'INTV' : 'IND';
 
     // Lookup Rate
     return PRICING_CONFIG.base_rates[spaceType][formatCode];
@@ -75,19 +92,46 @@ const getBaseRate = (resourceId: string, format: Format): number => {
 export const calculatePrice = (params: PricingParams): PricingResult => {
     let totalBasePrice = 0;
     let totalMinutes = 0;
+    let peakSurcharge = 0;
+    let peakSlotCount = 0;
 
-    // 1. Base Price
+    const surchargePercent = PRICING_CONFIG.peak_hours.surcharge_percent;
+
+    // 1. Base Price (with peak hours surcharge)
     if (params.selectedSlots && params.selectedSlots.length > 0) {
         params.selectedSlots.forEach(slot => {
-            const [rId] = slot.split('|');
+            const [rId, time] = slot.split('|');
             const rate = getBaseRate(rId, params.format);
-            totalBasePrice += (rate / 2); // 30 min slot
+            const slotBase = rate / 2; // 30 min slot
+            if (isPeakTime(time)) {
+                const surcharge = slotBase * (surchargePercent / 100);
+                peakSurcharge += surcharge;
+                peakSlotCount++;
+                totalBasePrice += slotBase + surcharge;
+            } else {
+                totalBasePrice += slotBase;
+            }
             totalMinutes += 30;
         });
     } else if (params.resourceId) {
         const rate = getBaseRate(params.resourceId, params.format);
         totalMinutes = differenceInMinutes(params.endTime, params.startTime);
-        totalBasePrice = (rate / 60) * totalMinutes;
+        // Check each 30-min slot within the range for peak hours
+        const startMins = params.startTime.getHours() * 60 + params.startTime.getMinutes();
+        for (let m = startMins; m < startMins + totalMinutes; m += 30) {
+            const h = Math.floor(m / 60);
+            const mm = m % 60;
+            const timeStr = `${h.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
+            const slotBase = rate / 2;
+            if (isPeakTime(timeStr)) {
+                const surcharge = slotBase * (surchargePercent / 100);
+                peakSurcharge += surcharge;
+                peakSlotCount++;
+                totalBasePrice += slotBase + surcharge;
+            } else {
+                totalBasePrice += slotBase;
+            }
+        }
     }
 
     // 2. Extras
@@ -120,16 +164,10 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
         const matchDuration = durationTiers.find(t => hours >= t.min && hours < t.max);
         if (matchDuration) durationPercent = matchDuration.percent;
 
-        // Hot Booking
-        let hotPercent = 0;
-        const now = new Date();
-        const diffHours = differenceInMinutes(params.startTime, now) / 60;
-        if (diffHours >= 0 && diffHours <= PRICING_CONFIG.discounts.hot_booking.hours_before) {
-            hotPercent = PRICING_CONFIG.discounts.hot_booking.percent;
-        }
+        // Hot Booking: no discount, only admin approval (handled server-side)
 
         // Apply BEST discount (max of all — no stacking)
-        const maxPercent = Math.max(personalPercent, weeklyPercent, durationPercent, hotPercent);
+        const maxPercent = Math.max(personalPercent, weeklyPercent, durationPercent);
 
         if (maxPercent > 0) {
             discountAmount = totalBasePrice * (maxPercent / 100);
@@ -138,17 +176,26 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
             if (maxPercent === personalPercent && personalPercent > 0) discountType = 'personal';
             else if (maxPercent === durationPercent) discountType = 'duration';
             else if (maxPercent === weeklyPercent) discountType = 'loyalty';
-            else discountType = 'hot';
         }
     }
 
     const finalPrice = Math.max(0, totalBasePrice + extrasPrice - discountAmount);
+
+    // Subscription + peak hours → debt for surcharge
+    let subscriptionPeakDebt = 0;
+    if (isSubscription && peakSlotCount > 0) {
+        const peakHours = peakSlotCount / 2; // 30-min slots → hours
+        subscriptionPeakDebt = peakHours * PRICING_CONFIG.peak_hours.subscription_surcharge_gel;
+    }
 
     return {
         basePrice: totalBasePrice,
         extrasPrice,
         discountAmount,
         discountType,
-        finalPrice,
+        finalPrice: isSubscription ? subscriptionPeakDebt : finalPrice,
+        peakSurcharge,
+        peakSlotCount,
+        subscriptionPeakDebt,
     };
 };

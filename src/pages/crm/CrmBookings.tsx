@@ -18,10 +18,15 @@ import {
     Link2,
     LayoutList,
     LayoutGrid,
+    Repeat2,
+    Trash2,
+    AlertTriangle,
 } from 'lucide-react';
+import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import clsx from 'clsx';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 // ─── Безопасное извлечение даты из брони ─────────────────────────────────────
 function getSafeBookingDate(booking: BookingHistoryItem): { dateStr: string; dateObj: Date | null } {
@@ -557,15 +562,19 @@ function BookingCard({ booking, linkedClient, linkedSessionId, linkedSessions, c
 
 // ─── Главная страница ─────────────────────────────────────────────────────────
 export function CrmBookings() {
-    const { currentUser, bookings: allBookings } = useUserStore();
+        const { currentUser, bookings: allBookings } = useUserStore();
     const { clients, sessions, fetchClients, fetchSessions } = useCrmStore();
 
-    const [viewMode, setViewMode] = useState<'list' | 'chess'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'chess' | 'series'>('list');
     const [filter, setFilter] = useState<FilterType>('upcoming');
     const [modalBooking, setModalBooking] = useState<BookingHistoryItem | null>(null);
     const [modalExistingSessionId, setModalExistingSessionId] = useState<string | undefined>();
     const [modalExistingClientId, setModalExistingClientId] = useState<string | undefined>();
     const [loadingClients, setLoadingClients] = useState(false);
+    const [recurringGroups, setRecurringGroups] = useState<Awaited<ReturnType<typeof bookingsApi.getRecurringGroups>>>([]);
+    const [loadingGroups, setLoadingGroups] = useState(false);
+    const [cancellingGroupId, setCancellingGroupId] = useState<string | null>(null);
+    const [confirmCancelGroupId, setConfirmCancelGroupId] = useState<string | null>(null);
 
     // Load clients and sessions on mount
     useEffect(() => {
@@ -575,6 +584,31 @@ export function CrmBookings() {
         }
         fetchSessions();
     }, []);
+
+    // Load recurring groups when series tab opens
+    useEffect(() => {
+        if (viewMode === 'series') {
+            setLoadingGroups(true);
+            bookingsApi.getRecurringGroups()
+                .then(setRecurringGroups)
+                .catch(() => {})
+                .finally(() => setLoadingGroups(false));
+        }
+    }, [viewMode]);
+
+    const handleCancelSeries = async (groupId: string) => {
+        setCancellingGroupId(groupId);
+        try {
+            const res = await bookingsApi.cancelRecurringSeries(groupId);
+            toast.success(`Серия отменена: ${res.cancelled} бронирований`);
+            setRecurringGroups(prev => prev.filter(g => g.recurringGroupId !== groupId));
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Ошибка при отмене серии');
+        } finally {
+            setCancellingGroupId(null);
+            setConfirmCancelGroupId(null);
+        }
+    };
 
     // Filter bookings by specialist email
     const myBookings = useMemo(() =>
@@ -707,135 +741,230 @@ export function CrmBookings() {
     ];
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Мои бронирования</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        {viewMode === 'chess'
-                            ? 'Шахматка кабинетов — выдели слот и забронируй с привязкой клиента'
-                            : 'Слоты в Unbox — привяжи клиента, чтобы создать сессию в CRM'}
-                    </p>
-                </div>
 
-                {/* View mode toggle */}
-                <div className="flex gap-1 bg-gray-100 rounded-xl p-1 shrink-0">
-                    <button
-                        onClick={() => setViewMode('list')}
-                        className={clsx(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                            viewMode === 'list'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700'
-                        )}
-                    >
-                        <LayoutList size={15} />
-                        Список
-                    </button>
-                    <button
-                        onClick={() => setViewMode('chess')}
-                        className={clsx(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                            viewMode === 'chess'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700'
-                        )}
-                    >
-                        <LayoutGrid size={15} />
-                        Шахматка
-                    </button>
+        <GridHouseCrmBookings
+            viewMode={viewMode} setViewMode={setViewMode}
+            filter={filter} setFilter={setFilter}
+            stats={stats} filteredBookings={filteredBookings}
+            loadingClients={loadingClients} loadingGroups={loadingGroups}
+            recurringGroups={recurringGroups}
+            confirmCancelGroupId={confirmCancelGroupId} setConfirmCancelGroupId={setConfirmCancelGroupId}
+            cancellingGroupId={cancellingGroupId} handleCancelSeries={handleCancelSeries}
+            handleOpenModal={handleOpenModal}
+            sessionsByBookingId={sessionsByBookingId} clientById={clientById}
+            clients={clients}
+            modalBooking={modalBooking} setModalBooking={setModalBooking}
+            modalExistingClientId={modalExistingClientId}
+            setModalExistingSessionId={setModalExistingSessionId}
+            setModalExistingClientId={setModalExistingClientId}
+            handleLinkSession={handleLinkSession}
+        />
+    );
+}
+
+
+// ─── Grid House: CrmBookings ─────────────────────────────────────────────────
+
+interface GHCrmBookingsProps {
+    viewMode: 'list' | 'chess' | 'series';
+    setViewMode: (v: 'list' | 'chess' | 'series') => void;
+    filter: FilterType;
+    setFilter: (f: FilterType) => void;
+    stats: { total: number; upcoming: number; linked: number; unlinked: number };
+    filteredBookings: BookingHistoryItem[];
+    loadingClients: boolean;
+    loadingGroups: boolean;
+    recurringGroups: any[];
+    confirmCancelGroupId: string | null;
+    setConfirmCancelGroupId: (id: string | null) => void;
+    cancellingGroupId: string | null;
+    handleCancelSeries: (groupId: string) => Promise<void>;
+    handleOpenModal: (booking: BookingHistoryItem, existingSessionId?: string, existingClientId?: string) => void;
+    sessionsByBookingId: Map<string, any[]>;
+    clientById: Map<string, CrmClient>;
+    clients: CrmClient[];
+    modalBooking: BookingHistoryItem | null;
+    setModalBooking: (b: BookingHistoryItem | null) => void;
+    modalExistingClientId?: string;
+    setModalExistingSessionId: (id: string | undefined) => void;
+    setModalExistingClientId: (id: string | undefined) => void;
+    handleLinkSession: (clientId: string, price: number, notes: string, slotDuration?: number) => Promise<void>;
+}
+
+const ghMono = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const, color: GH.ink60 };
+const ghHairline = `1px solid ${GH.ink10}`;
+
+function GridHouseCrmBookings(props: GHCrmBookingsProps) {
+    const {
+        viewMode, setViewMode, filter, setFilter, stats, filteredBookings,
+        loadingClients, loadingGroups, recurringGroups,
+        confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries,
+        handleOpenModal, sessionsByBookingId, clientById, clients,
+        modalBooking, setModalBooking, modalExistingClientId,
+        setModalExistingSessionId, setModalExistingClientId, handleLinkSession,
+    } = props;
+
+    const VIEW_MODES: { key: typeof viewMode; label: string }[] = [
+        { key: 'list', label: 'Список' },
+        { key: 'chess', label: 'Шахматка' },
+        { key: 'series', label: 'Серии' },
+    ];
+
+    const GH_FILTERS: { key: FilterType; label: string; count?: number }[] = [
+        { key: 'upcoming', label: 'Предстоящие', count: stats.upcoming },
+        { key: 'unlinked', label: 'Без клиента', count: stats.unlinked },
+        { key: 'linked', label: 'С клиентом', count: stats.linked },
+        { key: 'past', label: 'Прошедшие' },
+        { key: 'all', label: 'Все', count: stats.total },
+    ];
+
+    return (
+        <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
+            {/* ── Head ── */}
+            <div style={{ padding: '48px 32px 0' }}>
+                <div style={ghMono}>CRM · Бронирования</div>
+                <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: '8px 0 0' }}>
+                    Мои бронирования.
+                </h1>
+            </div>
+
+            {/* ── Anchor KPI + secondary ── */}
+            <div style={{
+                display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+                padding: '32px 32px 24px', flexWrap: 'wrap', gap: 24,
+            }}>
+                <div>
+                    <div style={{ fontSize: 'clamp(48px, 5vw, 72px)', fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                        {stats.upcoming}
+                    </div>
+                    <div style={{ ...ghMono, marginTop: 4 }}>предстоит</div>
+                </div>
+                <div style={{ display: 'flex', gap: 24 }}>
+                    {[
+                        { label: 'Всего', value: stats.total },
+                        { label: 'С клиентом', value: stats.linked, color: GH.accent },
+                        { label: 'Без клиента', value: stats.unlinked, color: stats.unlinked > 0 ? GH.danger : undefined },
+                    ].map(kpi => (
+                        <div key={kpi.label} style={{ textAlign: 'right' as const }}>
+                            <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink }}>
+                                {kpi.value}
+                            </div>
+                            <div style={{ ...ghMono, fontSize: 9 }}>{kpi.label}</div>
+                        </div>
+                    ))}
                 </div>
             </div>
 
-            {/* ── Chessboard view ── */}
-            {viewMode === 'chess' ? (
-                <CrmChessboardView />
-            ) : (
-                <>
-                    {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {[
-                            { label: 'Всего броней', value: stats.total, color: 'text-gray-700' },
-                            { label: 'Предстоит', value: stats.upcoming, color: 'text-blue-600' },
-                            { label: 'С клиентом', value: stats.linked, color: 'text-unbox-green' },
-                            { label: 'Без клиента', value: stats.unlinked, color: 'text-amber-600' },
-                        ].map(s => (
-                            <div key={s.label} className="bg-white rounded-xl border border-gray-100 p-4 text-center">
-                                <div className={clsx('text-2xl font-bold', s.color)}>{s.value}</div>
-                                <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+            {/* ── View mode tabs ── */}
+            <div style={{ display: 'flex', margin: '0 32px', borderBottom: `2px solid ${GH.ink}` }}>
+                {VIEW_MODES.map(v => (
+                    <button
+                        key={v.key}
+                        onClick={() => setViewMode(v.key)}
+                        style={{
+                            fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                            padding: '10px 20px',
+                            background: viewMode === v.key ? GH.ink : 'transparent',
+                            color: viewMode === v.key ? GH.paper : GH.ink60,
+                            border: 'none', cursor: 'pointer',
+                            marginBottom: -2,
+                            borderBottom: viewMode === v.key ? `2px solid ${GH.ink}` : '2px solid transparent',
+                            transition: 'all 120ms',
+                        }}
+                    >
+                        {v.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* ── Content ── */}
+            <div style={{ padding: '0 32px 64px' }}>
+                {viewMode === 'chess' ? (
+                    <div style={{ marginTop: 24 }}><CrmChessboardView /></div>
+                ) : viewMode === 'series' ? (
+                    <GHSeriesView
+                        loadingGroups={loadingGroups} recurringGroups={recurringGroups}
+                        confirmCancelGroupId={confirmCancelGroupId} setConfirmCancelGroupId={setConfirmCancelGroupId}
+                        cancellingGroupId={cancellingGroupId} handleCancelSeries={handleCancelSeries}
+                    />
+                ) : (
+                    <>
+                        {/* Filter row */}
+                        <div style={{ display: 'flex', gap: 0, borderBottom: ghHairline, marginTop: 24 }}>
+                            {GH_FILTERS.map(f => (
+                                <button
+                                    key={f.key}
+                                    onClick={() => setFilter(f.key)}
+                                    style={{
+                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                        padding: '10px 16px', background: 'transparent',
+                                        color: filter === f.key ? GH.ink : GH.ink60,
+                                        border: 'none',
+                                        borderBottom: filter === f.key ? `2px solid ${GH.ink}` : '2px solid transparent',
+                                        marginBottom: -1, cursor: 'pointer', transition: 'color 120ms',
+                                    }}
+                                >
+                                    {f.label}{f.count !== undefined ? ` ${f.count}` : ''}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Table header */}
+                        {!loadingClients && filteredBookings.length > 0 && (
+                            <div style={{
+                                display: 'grid', gridTemplateColumns: '48px 120px 1fr 140px 100px',
+                                padding: '8px 0', borderBottom: ghHairline,
+                            }}>
+                                {['№', 'Дата', 'Клиент', 'Кабинет', 'Статус'].map(h => (
+                                    <div key={h} style={{ ...ghMono, fontSize: 9 }}>{h}</div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
+                        )}
 
-                    {/* Filter tabs */}
-                    <div className="flex gap-1 flex-wrap">
-                        {FILTERS.map(f => (
-                            <button
-                                key={f.key}
-                                onClick={() => setFilter(f.key)}
-                                className={clsx(
-                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors',
-                                    filter === f.key
-                                        ? 'bg-unbox-green text-white'
-                                        : 'bg-white border border-gray-200 text-gray-600 hover:border-unbox-green hover:text-unbox-green'
-                                )}
-                            >
-                                {f.label}
-                                {f.count !== undefined && (
-                                    <span className={clsx(
-                                        'px-1.5 py-0.5 rounded-full text-[10px] font-bold',
-                                        filter === f.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
-                                    )}>
-                                        {f.count}
-                                    </span>
-                                )}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Content */}
-                    {loadingClients ? (
-                        <div className="flex items-center justify-center py-16">
-                            <Loader2 className="animate-spin text-unbox-green" size={28} />
-                        </div>
-                    ) : filteredBookings.length === 0 ? (
-                        <div className="text-center py-16">
-                            <Calendar size={40} className="mx-auto text-gray-200 mb-3" />
-                            <div className="text-gray-400 text-sm">
-                                {filter === 'upcoming' ? 'Нет предстоящих бронирований' :
-                                 filter === 'unlinked' ? 'Все активные брони уже привязаны к клиентам' :
-                                 filter === 'linked' ? 'Нет броней с привязанными клиентами' :
-                                 'Бронирований нет'}
+                        {/* Rows */}
+                        {loadingClients ? (
+                            <div style={{ padding: '80px 0', textAlign: 'center' }}>
+                                <div style={ghMono}>Загрузка...</div>
                             </div>
-                            {filter === 'unlinked' && stats.total > 0 && (
-                                <p className="text-xs text-gray-400 mt-1">Отлично!</p>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                            {filteredBookings.map(booking => {
-                                const allLinked = sessionsByBookingId.get(booking.id) || [];
-                                const linkedSession = allLinked[0];
-                                const linkedClient = linkedSession ? clientById.get(linkedSession.clientId) : undefined;
-                                return (
-                                    <BookingCard
-                                        key={booking.id}
-                                        booking={booking}
-                                        linkedClient={linkedClient}
-                                        linkedSessionId={linkedSession?.id}
-                                        linkedSessions={allLinked}
-                                        clientById={clientById}
-                                        onLink={handleOpenModal}
-                                    />
-                                );
-                            })}
-                        </div>
-                    )}
-                </>
-            )}
+                        ) : filteredBookings.length === 0 ? (
+                            <div style={{ padding: '80px 0', textAlign: 'center' }}>
+                                <h2 style={{ fontFamily: GH_SANS, fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', color: GH.ink30 }}>
+                                    {filter === 'upcoming' ? 'Нет предстоящих.' :
+                                     filter === 'unlinked' ? 'Все привязаны.' :
+                                     filter === 'linked' ? 'Нет привязанных.' :
+                                     'Бронирований нет.'}
+                                </h2>
+                            </div>
+                        ) : (
+                            <div>
+                                {filteredBookings.map((booking, idx) => {
+                                    const allLinked = sessionsByBookingId.get(booking.id) || [];
+                                    const linkedSession = allLinked[0];
+                                    const linkedClient = linkedSession ? clientById.get(linkedSession.clientId) : undefined;
+                                    return (
+                                        <GHBookingRow
+                                            key={booking.id}
+                                            booking={booking} index={idx}
+                                            linkedClient={linkedClient}
+                                            linkedSessionId={linkedSession?.id}
+                                            linkedSessions={allLinked}
+                                            clientById={clientById}
+                                            onLink={handleOpenModal}
+                                        />
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
 
-            {/* Link session modal */}
+            {/* Footer */}
+            <div style={{ borderTop: ghHairline, padding: '16px 32px', textAlign: 'center' }}>
+                <span style={ghMono}>Unbox · CRM · Бронирования · {new Date().getFullYear()}</span>
+            </div>
+
+            {/* Legacy modal */}
             {modalBooking && (
                 <LinkSessionModal
                     booking={modalBooking}
@@ -849,6 +978,182 @@ export function CrmBookings() {
                     onConfirm={handleLinkSession}
                 />
             )}
+        </div>
+    );
+}
+
+// ─── GH: Строка бронирования ─────────────────────────────────────────────────
+
+function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSessions, clientById, onLink }: {
+    booking: BookingHistoryItem; index: number;
+    linkedClient?: CrmClient; linkedSessionId?: string; linkedSessions?: any[];
+    clientById: Map<string, CrmClient>;
+    onLink: (b: BookingHistoryItem, sid?: string, cid?: string) => void;
+}) {
+    const resource = RESOURCES.find(r => r.id === booking.resourceId);
+    const { dateObj } = getSafeBookingDate(booking);
+    const isActive = booking.status === 'confirmed' || booking.status === 'completed';
+    const hasMultiple = (linkedSessions?.length || 0) > 1;
+
+    return (
+        <div
+            style={{
+                display: 'grid', gridTemplateColumns: '48px 120px 1fr 140px 100px',
+                alignItems: 'center', padding: '12px 0', borderBottom: ghHairline,
+                opacity: isActive ? 1 : 0.4, transition: 'background 120ms',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        >
+            {/* № */}
+            <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, letterSpacing: '0.14em' }}>
+                {String(index + 1).padStart(2, '0')}
+            </div>
+
+            {/* Дата + время */}
+            <div>
+                <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                    {safeFormat(dateObj, 'd MMM', { locale: ru })}
+                </div>
+                <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+                    {booking.startTime || '—'}{booking.duration ? ` · ${booking.duration}\u2032` : ''}
+                </div>
+            </div>
+
+            {/* Клиент */}
+            <div>
+                {hasMultiple ? (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {linkedSessions!.map((sess, idx) => {
+                            const cl = clientById.get(sess.clientId);
+                            return (
+                                <span key={sess.id} style={{ fontSize: 13, fontWeight: 500 }}>
+                                    {cl?.name || '—'}{idx < linkedSessions!.length - 1 ? ' \u00b7' : ''}
+                                </span>
+                            );
+                        })}
+                        {isActive && (
+                            <button onClick={() => onLink(booking, linkedSessionId, linkedClient?.id)}
+                                style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                                Изм.
+                            </button>
+                        )}
+                    </div>
+                ) : linkedClient ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{linkedClient.name}</span>
+                        {linkedClient.aliasCode && (
+                            <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30 }}>{linkedClient.aliasCode}</span>
+                        )}
+                        {isActive && (
+                            <button onClick={() => onLink(booking, linkedSessionId, linkedClient.id)}
+                                style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                                Изм.
+                            </button>
+                        )}
+                    </div>
+                ) : isActive ? (
+                    <button onClick={() => onLink(booking)}
+                        style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.accent, background: 'none', border: `1px solid ${GH.accent}`, padding: '4px 12px', cursor: 'pointer' }}>
+                        + Привязать
+                    </button>
+                ) : (
+                    <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.ink30 }}>Неактивна</span>
+                )}
+            </div>
+
+            {/* Кабинет */}
+            <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>
+                {resource?.name || booking.resourceId}
+            </div>
+
+            {/* Статус */}
+            <div style={{
+                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                color: booking.status === 'cancelled' || booking.status === 'no_show' ? GH.danger : GH.ink60,
+            }}>
+                {BOOKING_STATUS_LABELS[booking.status] || booking.status}
+            </div>
+        </div>
+    );
+}
+
+// ─── GH: Вид серий ───────────────────────────────────────────────────────────
+
+function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries }: {
+    loadingGroups: boolean; recurringGroups: any[];
+    confirmCancelGroupId: string | null; setConfirmCancelGroupId: (id: string | null) => void;
+    cancellingGroupId: string | null; handleCancelSeries: (groupId: string) => Promise<void>;
+}) {
+    if (loadingGroups) {
+        return <div style={{ padding: '80px 0', textAlign: 'center' }}><div style={ghMono}>Загрузка...</div></div>;
+    }
+    if (recurringGroups.length === 0) {
+        return (
+            <div style={{ padding: '80px 0', textAlign: 'center' }}>
+                <h2 style={{ fontFamily: GH_SANS, fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', color: GH.ink30 }}>Серий нет.</h2>
+                <div style={{ ...ghMono, marginTop: 8 }}>Создайте через шахматку</div>
+            </div>
+        );
+    }
+    return (
+        <div style={{ marginTop: 24 }}>
+            {/* Table header */}
+            <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 110px 80px 80px 140px',
+                padding: '8px 0', borderBottom: ghHairline,
+            }}>
+                {['Кабинет', 'Паттерн', 'Осталось', 'След.', ''].map(h => (
+                    <div key={h || 'empty'} style={{ ...ghMono, fontSize: 9 }}>{h}</div>
+                ))}
+            </div>
+            {recurringGroups.map(g => {
+                const resource = RESOURCES.find((r: any) => r.id === g.resourceId);
+                const patternLabel = g.pattern === 'monthly' ? 'Ежемес.' : g.pattern === 'biweekly' ? '2 нед.' : 'Еженед.';
+                const isConfirming = confirmCancelGroupId === g.recurringGroupId;
+                const isCancelling = cancellingGroupId === g.recurringGroupId;
+                return (
+                    <div key={g.recurringGroupId}
+                        style={{
+                            display: 'grid', gridTemplateColumns: '1fr 110px 80px 80px 140px',
+                            alignItems: 'center', padding: '14px 0', borderBottom: ghHairline, transition: 'background 120ms',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                        <div>
+                            <div style={{ fontSize: 14, fontWeight: 600 }}>{resource?.name || g.resourceId}</div>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase', marginTop: 2 }}>
+                                {g.startTime} · {g.duration}\u2032
+                            </div>
+                        </div>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase' }}>{patternLabel}</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{g.futureCount}</div>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>
+                            {g.nextDate ? format(new Date(g.nextDate + 'T00:00:00'), 'd MMM', { locale: ru }) : '—'}
+                        </div>
+                        <div>
+                            {isConfirming ? (
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                    <button onClick={() => setConfirmCancelGroupId(null)}
+                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: ghHairline, cursor: 'pointer', color: GH.ink60 }}>
+                                        Нет
+                                    </button>
+                                    <button onClick={() => handleCancelSeries(g.recurringGroupId)} disabled={isCancelling}
+                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: GH.danger, color: GH.paper, border: 'none', cursor: 'pointer', opacity: isCancelling ? 0.5 : 1 }}>
+                                        {isCancelling ? '...' : 'Да'}
+                                    </button>
+                                </div>
+                            ) : (
+                                <button onClick={() => setConfirmCancelGroupId(g.recurringGroupId)}
+                                    style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer' }}>
+                                    Отменить
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }

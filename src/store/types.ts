@@ -13,6 +13,9 @@ export interface PriceBreakdown {
     finalPrice: number;
     isNonRefundable: boolean;
     isNonReschedulable: boolean;
+    peakSurcharge?: number;
+    peakSlotCount?: number;
+    subscriptionPeakDebt?: number;
 }
 
 export interface Subscription {
@@ -77,6 +80,11 @@ export interface User {
     attractedByAdminId?: string | null;
     profession?: string;
     targetAudience?: string[];
+
+    // Excel #11 — soft delete. If set, the user is archived.
+    archivedAt?: string | null;
+    archivedById?: string | null;
+    archivedReason?: string | null;
 }
 
 export interface Task {
@@ -148,10 +156,18 @@ export interface BookingSlice {
     fetchAllBookings: () => Promise<void>; // Admin only
     addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<BookingHistoryItem | null>;
     addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<void>;
-    cancelBooking: (id: string, isFreeReschedule?: boolean, reason?: string, adminUser?: User) => void;
+    /** Cancel a booking. Excel #66 — `opts` lets admins override the
+     *  default full-refund (e.g. 50% penalty). Ignored for non-admins. */
+    cancelBooking: (
+        id: string,
+        isFreeReschedule?: boolean,
+        reason?: string,
+        adminUser?: User,
+        opts?: { refundPercent?: number; reason?: string },
+    ) => Promise<void> | void;
     rescheduleBooking: (oldId: string, newBooking: Omit<BookingHistoryItem, 'userId' | 'status'>) => void;
     updateBooking: (booking: BookingHistoryItem) => void;
-    listForReRent: (id: string) => void;
+    listForReRent: (id: string) => Promise<void>;
     setManualPrice: (bookingId: string, newPrice: number) => void;
 }
 

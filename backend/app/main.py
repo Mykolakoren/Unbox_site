@@ -1,9 +1,12 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 from .db.session import init_db
 from .db.init_data import init_data
 from .core.config import settings
+from .core.rate_limit import limiter
 from .api.v1 import api_router
 
 @asynccontextmanager
@@ -19,6 +22,11 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+# Rate limiting — wire the shared limiter + default 429 handler. Individual
+# endpoints opt-in via @limiter.limit("...") decorators in their router files.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 from fastapi.staticfiles import StaticFiles
 import os

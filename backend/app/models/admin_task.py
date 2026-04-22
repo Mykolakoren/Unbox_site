@@ -18,6 +18,7 @@ class AdminTaskBase(SQLModel):
     start_date: Optional[datetime] = Field(default=None)
     labels: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     checklist: List[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    attachments: List[dict] = Field(default_factory=list, sa_column=Column(JSON))  # [{id, type, name, url, size?, createdAt}]
     sort_order: int = Field(default=0)
 
 
@@ -43,6 +44,7 @@ class AdminTaskCreate(SQLModel):
     start_date: Optional[datetime] = None
     labels: List[str] = []
     checklist: List[dict] = []
+    attachments: List[dict] = []
     sort_order: int = 0
 
 
@@ -58,6 +60,7 @@ class AdminTaskUpdate(SQLModel):
     start_date: Optional[datetime] = None
     labels: Optional[List[str]] = None
     checklist: Optional[List[dict]] = None
+    attachments: Optional[List[dict]] = None
     sort_order: Optional[int] = None
 
 

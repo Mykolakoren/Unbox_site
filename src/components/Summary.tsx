@@ -2,7 +2,7 @@ import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
 import type { PricingResult } from '../types';
 
-import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck } from 'lucide-react';
+import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck, Sunrise, Plus } from 'lucide-react';
 import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
 import { EXTRAS, RESOURCES } from '../utils/data';
@@ -16,6 +16,7 @@ const DISCOUNT_INFO: Record<PricingResult['discountType'], { label: string; Icon
     loyalty:  { label: 'Накопительная (за неделю)', Icon: TrendingUp },
     personal: { label: 'Персональная скидка', Icon: UserCheck },
 };
+
 
 export function Summary() {
     const state = useBookingStore();
@@ -61,6 +62,8 @@ export function Summary() {
         let totalExtras = 0;
         let totalDiscount = 0;
         let totalFinal = 0;
+        let totalPeakSurcharge = 0;
+        let totalSubPeakDebt = 0;
 
         const details = bookingsList.map(b => {
             const selectedExtras = EXTRAS.filter(e => state.extras.includes(e.id));
@@ -88,6 +91,8 @@ export function Summary() {
             totalExtras += p.extrasPrice;
             totalDiscount += p.discountAmount;
             totalFinal += p.finalPrice;
+            totalPeakSurcharge += p.peakSurcharge;
+            totalSubPeakDebt += p.subscriptionPeakDebt;
 
             return { ...b, price: p };
         });
@@ -98,7 +103,9 @@ export function Summary() {
                 basePrice: totalBase,
                 extrasPrice: totalExtras,
                 discountAmount: totalDiscount,
-                finalPrice: totalFinal
+                finalPrice: totalFinal,
+                peakSurcharge: totalPeakSurcharge,
+                subscriptionPeakDebt: totalSubPeakDebt,
             }
         };
 
@@ -120,36 +127,60 @@ export function Summary() {
                 {cartBookings.length === 0 ? (
                     <div className="text-gray-400 text-sm text-center py-4">Выберите время в расписании</div>
                 ) : (
-                    cartBookings.map((b, idx) => (
-                        <div key={idx} className="rounded-xl p-3 text-sm relative group"
-                            style={{
-                                background: 'rgba(255,255,255,0.35)',
-                                backdropFilter: 'blur(20px) saturate(150%)',
-                                WebkitBackdropFilter: 'blur(20px) saturate(150%)',
-                                border: '1px solid rgba(255,255,255,0.55)',
-                                boxShadow: '0 4px 12px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.60)',
-                            }}>
-                            <div className="flex justify-between font-medium">
-                                <span>{RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}</span>
-                                <span>{b.price.finalPrice} ₾</span>
+                    cartBookings.map((b, idx) => {
+                        // Excel #24 — show "+ Ещё период" only once per resource (on the
+                        // last cart entry for that resource), and only when not
+                        // already in add-mode for this resource.
+                        const isLastForResource = !cartBookings
+                            .slice(idx + 1)
+                            .some(next => next.resourceId === b.resourceId);
+                        const resourceLabel = RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId;
+                        return (
+                            <div key={idx} className="rounded-xl p-3 text-sm relative group"
+                                style={{
+                                    background: 'rgba(255,255,255,0.35)',
+                                    backdropFilter: 'blur(20px) saturate(150%)',
+                                    WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+                                    border: '1px solid rgba(255,255,255,0.55)',
+                                    boxShadow: '0 4px 12px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.60)',
+                                }}>
+                                <div className="flex justify-between font-medium">
+                                    <span>{resourceLabel}</span>
+                                    <span>{b.price.finalPrice} ₾</span>
+                                </div>
+                                <div className="text-gray-500 flex gap-1 items-center">
+                                    <Clock size={12} />
+                                    {b.startTime} - {b.endTime} ({b.duration / 60} ч)
+                                </div>
+                                {b.price.discountAmount > 0 && (() => {
+                                    const info = DISCOUNT_INFO[b.price.discountType];
+                                    const pct = Math.round(b.price.discountAmount / b.price.basePrice * 100);
+                                    return (
+                                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-unbox-green bg-unbox-light/60 rounded-md px-2 py-0.5 w-fit">
+                                            {info && <info.Icon size={10} />}
+                                            Скидка {pct}% · -{b.price.discountAmount.toFixed(1)} ₾
+                                            {info && <span className="text-unbox-grey/80 font-normal">({info.label})</span>}
+                                        </div>
+                                    );
+                                })()}
+                                {/* Excel #24 — "+ Ещё период в этом же кабинете" */}
+                                {isLastForResource && state.step !== 2 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            state.startAddMoreSlots(b.resourceId);
+                                            state.setStep(2);
+                                        }}
+                                        className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-unbox-green hover:text-unbox-dark transition-colors"
+                                        title={`Добавить второй период в ${resourceLabel}`}
+                                    >
+                                        <Plus size={12} />
+                                        Ещё период в этом кабинете
+                                    </button>
+                                )}
                             </div>
-                            <div className="text-gray-500 flex gap-1 items-center">
-                                <Clock size={12} />
-                                {b.startTime} - {b.endTime} ({b.duration / 60} ч)
-                            </div>
-                            {b.price.discountAmount > 0 && (() => {
-                                const info = DISCOUNT_INFO[b.price.discountType];
-                                const pct = Math.round(b.price.discountAmount / b.price.basePrice * 100);
-                                return (
-                                    <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-unbox-green bg-unbox-light/60 rounded-md px-2 py-0.5 w-fit">
-                                        {info && <info.Icon size={10} />}
-                                        Скидка {pct}% · -{b.price.discountAmount.toFixed(1)} ₾
-                                        {info && <span className="text-unbox-grey/80 font-normal">({info.label})</span>}
-                                    </div>
-                                );
-                            })()}
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </div>
 
@@ -167,7 +198,10 @@ export function Summary() {
                         <div className="text-gray-400"><Users size={16} /></div>
                         <div>
                             <div className="text-gray-500">Формат</div>
-                            <div>{state.format === 'individual' ? 'Индивидуальный' : 'Групповой'}</div>
+                            <div>{
+                                state.format === 'individual' ? 'Индивидуальный' :
+                                state.format === 'intervision' ? 'Интервизия' : 'Групповой'
+                            }</div>
                         </div>
                     </div>
 
@@ -222,8 +256,35 @@ export function Summary() {
             <div className="border-t border-gray-100 my-4 pt-4 space-y-2">
                 <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Базовая стоимость</span>
-                    <span>{total.basePrice} ₾</span>
+                    <span>{total.basePrice.toFixed(1)} ₾</span>
                 </div>
+                {(total.peakSurcharge ?? 0) > 0 && (
+                    <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 flex items-center gap-1">
+                            <Sunrise size={12} className="text-amber-500" />
+                            Пиковые часы (+25%)
+                        </span>
+                        <span className="text-amber-600">вкл. {(total.peakSurcharge ?? 0).toFixed(1)} ₾</span>
+                    </div>
+                )}
+                {(total.subscriptionPeakDebt ?? 0) > 0 && (
+                    <div className="rounded-lg px-3 py-2"
+                        style={{
+                            background: 'rgba(251,191,36,0.10)',
+                            border: '1px solid rgba(251,191,36,0.30)',
+                        }}>
+                        <div className="flex justify-between text-sm font-medium text-amber-700">
+                            <span className="flex items-center gap-1">
+                                <Sunrise size={12} />
+                                Доплата за пиковые часы
+                            </span>
+                            <span>+{(total.subscriptionPeakDebt ?? 0).toFixed(1)} ₾</span>
+                        </div>
+                        <div className="text-[11px] text-amber-600/80 mt-0.5">
+                            Абонемент покрывает стандартные часы. Пиковые часы (9–10, 20–22) — доплата 5 ₾/ч, записывается в счёт.
+                        </div>
+                    </div>
+                )}
                 {total.extrasPrice > 0 && (
                     <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Доп. опции</span>

@@ -1,5 +1,14 @@
 import { api } from './client';
 
+export interface TaskAttachment {
+    id: string;
+    type: 'link' | 'file';
+    name: string;
+    url: string;
+    size?: number;
+    createdAt: string;
+}
+
 export interface AdminTask {
     id: string;
     title: string;
@@ -13,6 +22,7 @@ export interface AdminTask {
     startDate?: string;
     labels: string[];
     checklist: ChecklistItem[];
+    attachments: TaskAttachment[];
     sortOrder: number;
     createdBy: string;
     createdByName: string;
@@ -47,6 +57,7 @@ export interface CreateTaskPayload {
     startDate?: string;
     labels?: string[];
     checklist?: ChecklistItem[];
+    attachments?: TaskAttachment[];
     sortOrder?: number;
 }
 
@@ -62,6 +73,7 @@ export interface UpdateTaskPayload {
     startDate?: string | null;
     labels?: string[];
     checklist?: ChecklistItem[];
+    attachments?: TaskAttachment[];
     sortOrder?: number;
 }
 
@@ -102,6 +114,16 @@ export const adminTasksApi = {
 
     addComment: async (taskId: string, text: string): Promise<AdminTaskComment> => {
         const response = await api.post(`/admin/tasks/${taskId}/comments`, { text });
+        return response.data;
+    },
+
+    // File upload for task attachments
+    uploadFile: async (file: File): Promise<{ url: string; name: string; size: string }> => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await api.post('/upload/task-file', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
         return response.data;
     },
 };

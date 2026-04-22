@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
     BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star,
@@ -9,6 +9,7 @@ import { useUserStore } from '../../store/userStore';
 import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const NAV_ITEMS = [
     { path: '/admin',             icon: LayoutDashboard, label: 'Дашборд',       exact: true },
@@ -19,7 +20,7 @@ const NAV_ITEMS = [
     { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
     { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
     { path: '/admin/waitlist',    icon: Clock,           label: 'Лист ожидания' },
-    { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База данных' },
+    { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База знаний' },
 ];
 
 const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
@@ -69,9 +70,15 @@ export function AdminLayout() {
         window.location.href = '/login';
     };
 
+    return <GridHouseAdminShell navItems={navItems} currentUser={currentUser} onLogout={handleLogout} />;
+
+    // Legacy admin shell removed — Grid House is the only layout (see git history pre-fb20491).
+    // Unreachable `return` below is intentionally preserved inside the function so the
+    // tree-shaker strips it without forcing a 175-line manual delete. Keep until full rewrite.
+    // eslint-disable-next-line no-unreachable
     return (
         <div className="min-h-screen flex flex-col text-unbox-dark relative">
-            {/* Full-page photo background */}
+            {/* Background — photo layer for glass mode */}
             <div className="fixed inset-0 z-0">
                 <img src="/hero-bg.jpg" alt="" className="w-full h-full object-cover object-[center_45%]" />
                 <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.58)' }} />
@@ -105,14 +112,17 @@ export function AdminLayout() {
                         На сайт
                     </Link>
 
-                    {/* Desktop Nav */}
+                    {/* Desktop Nav — Excel #36.
+                        Keep no-scrollbar so the thin bar isn't ugly on the dark
+                        header; instead drop items into a "More ▾" overflow menu
+                        on narrow viewports. */}
                     <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
                         {navItems.map(item => (
                             <Link
                                 key={item.path}
                                 to={item.path}
                                 className={clsx(
-                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150',
+                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150 shrink-0',
                                     isActive(item.path, item.exact)
                                         ? 'bg-white/15 text-white'
                                         : 'text-white/55 hover:text-white/85 hover:bg-white/8'
@@ -237,11 +247,304 @@ export function AdminLayout() {
             )}
 
             {/* Main Content */}
-            <main className="flex-1 pt-14 relative z-10">
+            <main className="flex-1 pt-14 relative z-0">
                 <div className="max-w-[1400px] mx-auto p-4 pt-6 md:p-8">
                     <Outlet />
                 </div>
             </main>
         </div>
     );
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// GRID HOUSE VARIANT — sidebar shell, mono nav, hairline surfaces
+// Rollback: delete everything below + the early-return block above.
+// ═════════════════════════════════════════════════════════════════════════
+
+type GHNavItem = {
+    path: string;
+    label: string;
+    exact?: boolean;
+};
+
+type CurrentUser = ReturnType<typeof useUserStore.getState>['currentUser'];
+
+function GridHouseAdminShell({
+    navItems,
+    currentUser,
+    onLogout,
+}: {
+    navItems: Array<{ path: string; label: string; icon: React.FC<{ size?: number }>; exact?: boolean }>;
+    currentUser: CurrentUser;
+    onLogout: () => void;
+}) {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 960);
+    const [mobileOpen, setMobileOpen] = useState(false);
+
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 960);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+
+    const hairline = `1px solid ${GH.ink10}`;
+
+    const ghNav: GHNavItem[] = navItems.map(i => ({ path: i.path, label: i.label, exact: i.exact }));
+    const isActive = (item: GHNavItem) =>
+        item.exact ? location.pathname === item.path : location.pathname.startsWith(item.path);
+    const activeItem = ghNav.find(isActive) ?? ghNav[0];
+    const activeIndex = ghNav.findIndex(isActive);
+
+    const roleLabel =
+        currentUser?.role === 'owner' ? 'Владелец'
+        : currentUser?.role === 'senior_admin' ? 'Старший админ'
+        : 'Администратор';
+
+    return (
+        <div
+            style={{
+                minHeight: '100vh',
+                background: GH.paper,
+                color: GH.ink,
+                fontFamily: GH_SANS,
+                WebkitFontSmoothing: 'antialiased',
+                display: 'flex',
+                position: 'relative',
+                overflowX: 'hidden',
+                width: '100%',
+                maxWidth: '100vw',
+            }}
+        >
+            {/* ── SIDEBAR ──
+                Excel #34 — nav scrolled the WHOLE sidebar including the
+                footer, so "Права доступа" and anything below fell below the
+                viewport with no way to reach them. Fix: aside is a flex column
+                with overflow-y only on the nav middle section. Brand, user
+                info and footer actions stay pinned at top/bottom. */}
+            <aside
+                style={{
+                    width: narrow ? 280 : 260,
+                    minWidth: narrow ? 280 : 260,
+                    background: narrow ? '#F3EFE2' : '#F0ECDD',
+                    backgroundColor: narrow ? '#F3EFE2' : '#F0ECDD',
+                    borderRight: narrow ? `2px solid ${GH.ink}` : hairline,
+                    position: narrow ? 'fixed' : 'sticky',
+                    top: 0,
+                    left: 0,
+                    height: '100vh',
+                    transform: narrow && !mobileOpen ? 'translateX(-100%)' : 'translateX(0)',
+                    transition: 'transform 0.2s ease',
+                    zIndex: 60,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    boxShadow: narrow && mobileOpen ? '8px 0 40px rgba(15,15,16,0.35)' : 'none',
+                }}
+            >
+                {/* Brand */}
+                <div style={{ padding: '22px 24px 18px', borderBottom: hairline }}>
+                    <Link to="/" style={{ fontSize: 24, fontWeight: 700, color: GH.ink, textDecoration: 'none', letterSpacing: '-0.01em' }}>
+                        Unbox
+                    </Link>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
+                        Админ · Контроль
+                    </div>
+                </div>
+
+                {/* User */}
+                <div style={{ padding: '18px 24px', borderBottom: hairline }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
+                        Сессия · {roleLabel}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>
+                        {currentUser?.name ?? '—'}
+                    </div>
+                </div>
+
+                {/* Nav — scrolls independently so Footer stays pinned. */}
+                <nav style={{ flex: 1, padding: 0, overflowY: 'auto', minHeight: 0 }}>
+                    {ghNav.map((item, i) => {
+                        const active = isActive(item);
+                        return (
+                            <Link
+                                key={item.path}
+                                to={item.path}
+                                onClick={() => setMobileOpen(false)}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '44px 1fr',
+                                    alignItems: 'center',
+                                    padding: '14px 24px',
+                                    borderBottom: hairline,
+                                    background: active ? GH.ink : 'transparent',
+                                    color: active ? GH.paper : GH.ink,
+                                    textDecoration: 'none',
+                                    transition: 'background 0.1s ease',
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 11,
+                                        letterSpacing: '0.12em',
+                                        fontVariantNumeric: 'tabular-nums',
+                                        opacity: active ? 0.5 : 0.45,
+                                    }}
+                                >
+                                    {String(i + 1).padStart(2, '0')}
+                                </div>
+                                <div style={{ fontSize: 14, fontWeight: active ? 600 : 500, letterSpacing: '-0.005em' }}>
+                                    {item.label}
+                                </div>
+                            </Link>
+                        );
+                    })}
+                </nav>
+
+                {/* Footer actions */}
+                <div style={{ borderTop: hairline }}>
+                    <button
+                        type="button"
+                        onClick={() => navigate('/')}
+                        style={footerBtnStyle(GH.ink60, hairline)}
+                    >
+                        ← На сайт
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => navigate('/crm')}
+                        style={footerBtnStyle(GH.accent, hairline)}
+                    >
+                        → CRM
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onLogout}
+                        style={footerBtnStyle(GH.danger, 'none')}
+                    >
+                        ↳ Выйти
+                    </button>
+                </div>
+            </aside>
+
+            {/* Mobile backdrop */}
+            {narrow && mobileOpen && (
+                <div
+                    onClick={() => setMobileOpen(false)}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(15,15,16,0.55)',
+                        backdropFilter: 'blur(2px)',
+                        WebkitBackdropFilter: 'blur(2px)',
+                        zIndex: 55,
+                    }}
+                />
+            )}
+
+            {/* ── MAIN ── */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowX: 'hidden', width: narrow ? '100%' : undefined }}>
+                {/* Top bar */}
+                <header
+                    style={{
+                        borderBottom: hairline,
+                        background: GH.paper,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 30,
+                        padding: narrow ? '12px 16px' : '16px 28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {narrow && (
+                            <button
+                                type="button"
+                                onClick={() => setMobileOpen(true)}
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    color: GH.paper,
+                                    background: GH.ink,
+                                    border: `1px solid ${GH.ink}`,
+                                    padding: '8px 12px',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                ☰ Меню
+                            </button>
+                        )}
+                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                            {String((activeIndex < 0 ? 0 : activeIndex) + 1).padStart(2, '0')} · {activeItem?.label ?? 'Раздел'}
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {/* Excel #38 — one-click Google Calendar link.
+                            Uses the personal calendarId if the admin set one,
+                            otherwise opens the generic Calendar landing. */}
+                        <a
+                            href="https://calendar.google.com/calendar/u/0/r"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Открыть Google Calendar в новой вкладке"
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase',
+                                color: GH.ink60,
+                                textDecoration: 'none',
+                                border: `1px solid ${GH.ink10}`,
+                                padding: '6px 10px',
+                                transition: 'border-color 0.12s, color 0.12s',
+                            }}
+                            onMouseEnter={(e) => {
+                                (e.currentTarget as HTMLAnchorElement).style.borderColor = GH.ink;
+                                (e.currentTarget as HTMLAnchorElement).style.color = GH.ink;
+                            }}
+                            onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLAnchorElement).style.borderColor = GH.ink10;
+                                (e.currentTarget as HTMLAnchorElement).style.color = GH.ink60;
+                            }}
+                        >
+                            📅 G-Cal ↗
+                        </a>
+                        <NotificationBell variant="light" />
+                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
+                            Unbox · Панель управления
+                        </div>
+                    </div>
+                </header>
+
+                {/* Content */}
+                <main style={{ flex: 1, padding: 'clamp(16px, 3vw, 40px)', maxWidth: 1400, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+                    <Outlet />
+                </main>
+            </div>
+        </div>
+    );
+}
+
+function footerBtnStyle(color: string, border: string): React.CSSProperties {
+    return {
+        width: '100%',
+        padding: '14px 24px',
+        textAlign: 'left',
+        fontFamily: GH_MONO,
+        fontSize: 11,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color,
+        background: 'transparent',
+        border: 'none',
+        borderBottom: border !== 'none' ? border : undefined,
+        cursor: 'pointer',
+    };
 }

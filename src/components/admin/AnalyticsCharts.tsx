@@ -38,19 +38,22 @@ export function AnalyticsCharts({ bookings }: AnalyticsChartsProps) {
   const formatData = useMemo(() => {
     const formats = {
       individual: 0,
-      group: 0
+      group: 0,
+      intervision: 0
     };
-    
+
     bookings.forEach(b => {
       if (b.status === 'confirmed' || b.status === 're-rented') {
         if (b.format === 'individual') formats.individual += 1;
         if (b.format === 'group') formats.group += 1;
+        if (b.format === 'intervision') formats.intervision += 1;
       }
     });
-    
+
     return [
       { name: 'Индивидуальные', value: formats.individual, color: '#476D6B' }, // unbox-green
-      { name: 'Групповые', value: formats.group, color: '#2C3240' } // unbox-dark
+      { name: 'Групповые', value: formats.group, color: '#2C3240' }, // unbox-dark
+      { name: 'Интервизия', value: formats.intervision, color: '#8B9A97' } // lighter green
     ];
   }, [bookings]);
 

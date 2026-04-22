@@ -57,6 +57,8 @@ export interface CrmSession {
     durationMinutes: number;
     status: 'PLANNED' | 'COMPLETED' | 'CANCELLED_CLIENT' | 'CANCELLED_THERAPIST';
     price?: number;
+    currency?: string;   // Frozen at payment time; null → use client.currency
+    account?: string;    // Frozen at payment time; null → use client.defaultAccount
     isPaid: boolean;
     isBooked: boolean;
     notes?: string;
@@ -93,6 +95,7 @@ export interface CrmSessionUpdate {
 export interface CrmSettings {
     calendarId: string | null;
     calendarSyncEnabled: boolean;
+    googleCalendarSourceOfTruth: boolean;
 }
 
 export interface CrmSyncResult {
@@ -246,8 +249,10 @@ export const crmApi = {
         return response.data;
     },
 
-    updateClient: async (id: string, data: CrmClientUpdate): Promise<CrmClient> => {
-        const response = await api.patch(`/crm/clients/${id}`, data);
+    updateClient: async (id: string, data: CrmClientUpdate, applyPriceTo?: 'all_unpaid' | 'future_only'): Promise<CrmClient> => {
+        const response = await api.patch(`/crm/clients/${id}`, data, {
+            params: applyPriceTo ? { apply_price_to: applyPriceTo } : {},
+        });
         return response.data;
     },
 
@@ -383,8 +388,11 @@ export const crmApi = {
         return response.data;
     },
 
-    updateSettings: async (calendarId: string | null): Promise<{ ok: boolean; calendarId: string | null }> => {
-        const response = await api.patch('/crm/settings', { calendar_id: calendarId });
+    updateSettings: async (data: { calendarId?: string | null; googleCalendarSourceOfTruth?: boolean }): Promise<{ ok: boolean }> => {
+        const body: Record<string, any> = {};
+        if (data.calendarId !== undefined) body.calendar_id = data.calendarId;
+        if (data.googleCalendarSourceOfTruth !== undefined) body.google_calendar_source_of_truth = data.googleCalendarSourceOfTruth;
+        const response = await api.patch('/crm/settings', body);
         return response.data;
     },
 

@@ -9,6 +9,7 @@ import { ru } from 'date-fns/locale';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { RESOURCES, SUBSCRIPTION_PLANS } from '../../utils/data';
 import { UserTags } from '../../components/admin/UserTags';
 import { UserTasks } from '../../components/admin/UserTasks';
@@ -28,6 +29,10 @@ import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLi
 import { api } from '../../api/client';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 
+const ghudMono: React.CSSProperties = {
+    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+};
+
 export function AdminUserDetails() {
     const { email } = useParams<{ email: string }>();
     const navigate = useNavigate();
@@ -46,6 +51,8 @@ export function AdminUserDetails() {
 
     // Subscription topup form state
     const [isTopupOpen, setIsTopupOpen] = useState(false);
+    const [isEditingExpiry, setIsEditingExpiry] = useState(false);
+    const [editExpiryDate, setEditExpiryDate] = useState('');
     const [topupForm, setTopupForm] = useState({ hours: '', amount: '', payment_method: 'cash', note: '' });
     const [topupSaving, setTopupSaving] = useState(false);
 
@@ -209,8 +216,10 @@ export function AdminUserDetails() {
         }
     };
 
+    // Excel #59 — jump to the chessboard with this booking pre-selected
+    // and scrolled into view, so the admin can drag it to the new time.
     const handleRescheduleBooking = (id: string) => {
-        navigate(`/admin/bookings?reschedule=${id}`);
+        navigate(`/admin/bookings?view=grid&highlight=${id}`);
     };
 
     const handleTopup = async () => {
@@ -269,7 +278,8 @@ export function AdminUserDetails() {
     const currentStatusConfig = STATUS_CONFIG[clientStatus] || STATUS_CONFIG.new;
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+        <div className=''
+             style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* ... Modals ... */}
             <AddFundsModal
                 isOpen={isAddFundsOpen}
@@ -291,167 +301,63 @@ export function AdminUserDetails() {
             />
 
             {/* Header */}
-            <div className="flex items-center gap-4">
-                <button
-                    onClick={() => navigate('/admin/users')}
-                    className="p-2 hover:bg-unbox-light/50 rounded-lg transition-colors"
-                >
-                    <ArrowLeft size={20} />
-                </button>
-                <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-2xl font-bold flex items-center gap-2">
-                            {user.name}
-
-                            {/* Role Badge / Selector */}
-                            {(() => {
-                                const isOwner = currentUser?.role === 'owner';
-                                const isSeniorAdmin = currentUser?.role === 'senior_admin';
-                                const canEditRole = isOwner || (isSeniorAdmin && user.role !== 'owner' && user.role !== 'senior_admin');
-                                const availableRoles = isOwner
-                                    ? ['user', 'specialist', 'admin', 'senior_admin', 'owner']
-                                    : isSeniorAdmin ? ['user', 'specialist', 'admin'] : [];
-                                const ROLE_LABELS: Record<string, string> = {
-                                    user: 'Пользователь', specialist: 'Специалист',
-                                    admin: 'Админ', senior_admin: 'Ст. Админ', owner: 'Владелец',
-                                };
-                                const ROLE_COLORS: Record<string, string> = {
-                                    owner: 'bg-purple-100 text-purple-700',
-                                    senior_admin: 'bg-blue-100 text-blue-700',
-                                    admin: 'bg-green-100 text-green-700',
-                                    specialist: 'bg-amber-100 text-amber-700',
-                                    user: 'bg-gray-100 text-gray-600',
-                                };
-                                const currentRole = user.role || 'user';
-                                return (
-                                    <div className="relative">
-                                        <button
-                                            onClick={() => canEditRole && setIsRoleDropdownOpen(v => !v)}
-                                            title={canEditRole ? 'Изменить роль' : 'Нет прав для изменения'}
-                                            className={clsx(
-                                                'flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold uppercase transition-all',
-                                                ROLE_COLORS[currentRole] ?? 'bg-gray-100 text-gray-600',
-                                                canEditRole && 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-current'
-                                            )}
-                                        >
-                                            <Shield size={13} />
-                                            {ROLE_LABELS[currentRole] ?? currentRole}
-                                        </button>
-                                        {isRoleDropdownOpen && canEditRole && (
-                                            <>
-                                                <div className="fixed inset-0 z-10" onClick={() => setIsRoleDropdownOpen(false)} />
-                                                <div className="absolute top-full left-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-unbox-light overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-150">
-                                                    <div className="p-2 text-[10px] font-bold text-unbox-grey uppercase tracking-wider border-b border-unbox-light">
-                                                        Изменить роль
-                                                    </div>
-                                                    {availableRoles.map(role => (
-                                                        <button
-                                                            key={role}
-                                                            onClick={async () => {
-                                                                setIsRoleDropdownOpen(false);
-                                                                await updateUserById(user.email, { role: role as any });
-                                                                toast.success(`Роль изменена: ${ROLE_LABELS[role]}`);
-                                                            }}
-                                                            className={clsx(
-                                                                'w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-unbox-light/50 transition-colors',
-                                                                currentRole === role && 'font-semibold bg-unbox-light/30'
-                                                            )}
-                                                        >
-                                                            <span className={clsx('w-2 h-2 rounded-full', {
-                                                                'bg-purple-500': role === 'owner',
-                                                                'bg-blue-500': role === 'senior_admin',
-                                                                'bg-green-500': role === 'admin',
-                                                                'bg-amber-500': role === 'specialist',
-                                                                'bg-gray-400': role === 'user',
-                                                            })} />
-                                                            {ROLE_LABELS[role]}
-                                                            {currentRole === role && <span className="ml-auto text-[10px] text-unbox-grey">текущая</span>}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-                        </h1>
-                        <div className="relative">
-                            <button
-                                onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
-                                className={clsx("px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider cursor-pointer border border-transparent hover:border-black/10 transition-colors focus:outline-none flex items-center gap-1", currentStatusConfig.bg, currentStatusConfig.color)}
-                            >
-                                {currentStatusConfig.label}
-                                <ChevronDown size={12} className={clsx("transition-transform", isStatusDropdownOpen ? "rotate-180" : "")} />
-                            </button>
-
-                            {/* Status Dropdown */}
-                            {isStatusDropdownOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-10" onClick={() => setIsStatusDropdownOpen(false)} />
-                                    <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-unbox-light overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
-                                        <div className="p-2 text-xs font-bold text-unbox-grey uppercase tracking-wider">Изменить статус</div>
-                                        <button
-                                            onClick={() => {
-                                                updateUserById(user.email, { manualStatus: undefined });
-                                                setIsStatusDropdownOpen(false);
-                                            }}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/30 flex items-center justify-between group/item"
-                                        >
-                                            <span>Автоматически</span>
-                                            {!user.manualStatus && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
-                                        </button>
-                                        <div className="h-px bg-unbox-light/50 my-1" />
-                                        {['vip', 'partner', 'bad_client'].map(status => (
-                                            <button
-                                                key={status}
-                                                onClick={() => {
-                                                    updateUserById(user.email, { manualStatus: status as any });
-                                                    setIsStatusDropdownOpen(false);
-                                                }}
-                                                className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/30 flex items-center justify-between"
-                                            >
-                                                <span className={STATUS_CONFIG[status].color}>{STATUS_CONFIG[status].label}</span>
-                                                {user.manualStatus === status && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
+            {
+                <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 28 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                        <button onClick={() => navigate('/admin/users')}
+                            style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30, marginTop: 4 }}>
+                            <ArrowLeft size={18} />
+                        </button>
+                        <div style={{ flex: 1 }}>
+                            <p style={{ ...ghudMono, color: GH.ink30, marginBottom: 6 }}>CLIENT PROFILE</p>
+                            <h1 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0, marginBottom: 8 }}>
+                                {user.name}
+                            </h1>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px', background: GH.ink5, color: GH.ink60 }}>
+                                    {(user.role || 'user').toUpperCase()}
+                                </span>
+                                <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px',
+                                    background: clientStatus === 'active' ? 'rgba(71,109,107,0.12)' : clientStatus === 'vip' ? 'rgba(147,51,234,0.12)' : GH.ink5,
+                                    color: clientStatus === 'active' ? GH.accent : clientStatus === 'vip' ? '#9333ea' : GH.ink30,
+                                }}>
+                                    {currentStatusConfig.label.toUpperCase()}
+                                </span>
+                                {user.email && <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>{user.email}</span>}
+                                {user.registrationDate && (
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+                                        с {format(new Date(user.registrationDate), 'd.MM.yyyy')}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
-                    <div className="text-sm text-gray-500">
-                        Участник с {user.registrationDate ? format(new Date(user.registrationDate), 'd MMMM yyyy', { locale: ru }) : 'неизвестной даты'}
-                    </div>
                 </div>
-            </div>
+            }
 
             {/* Tabs */}
-            <div className="flex gap-1 border-b border-unbox-light">
-                <button
-                    onClick={() => setActiveTab('overview')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'overview' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    Обзор
-                </button>
-                <button
-                    onClick={() => setActiveTab('bookings')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'bookings' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    Бронирования
-                </button>
-                <button
-                    onClick={() => setActiveTab('finance')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'finance' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    Финансы
-                </button>
-                <button
-                    onClick={() => setActiveTab('timeline')}
-                    className={clsx("px-4 py-2 text-sm font-medium border-b-2 transition-colors", activeTab === 'timeline' ? "border-unbox-green text-unbox-dark" : "border-transparent text-unbox-grey hover:text-unbox-dark")}
-                >
-                    История событий
-                </button>
-            </div>
+            {
+                <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 24 }}>
+                    {([
+                        ['overview', 'ОБЗОР'],
+                        ['bookings', 'БРОНИРОВАНИЯ'],
+                        ['finance', 'ФИНАНСЫ'],
+                        ['timeline', 'ИСТОРИЯ'],
+                    ] as const).map(([key, label]) => (
+                        <button key={key} onClick={() => setActiveTab(key as any)}
+                            style={{
+                                padding: '10px 18px', border: 'none', cursor: 'pointer',
+                                fontFamily: GH_SANS, fontSize: 12, fontWeight: 600,
+                                background: 'transparent',
+                                color: activeTab === key ? GH.ink : GH.ink30,
+                                borderBottom: activeTab === key ? `2px solid ${GH.ink}` : '2px solid transparent',
+                                marginBottom: -1, letterSpacing: '0.04em',
+                            }}>
+                            {label}
+                        </button>
+                    ))}
+                </div>
+            }
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left Column: Profile & Info */}
@@ -604,7 +510,18 @@ export function AdminUserDetails() {
                                 <div className="text-xs font-semibold text-unbox-grey uppercase tracking-wider mb-3">Безопасность</div>
                                 <button
                                     onClick={async () => {
-                                        const newPassword = prompt('Введите новый пароль (мин. 6 символов):');
+                                        // Excel #46 — renamed to "Сбросить пароль" to distinguish
+                                        // this admin action from a user's self-change (which requires
+                                        // the old password). Added a confirm step so admin knows
+                                        // they're overriding someone else's credentials.
+                                        const ok = window.confirm(
+                                            `Сбросить пароль пользователя ${user.email}?\n\n` +
+                                            'Вы устанавливаете новый пароль ОТ ЕГО ИМЕНИ, без подтверждения старого.\n' +
+                                            'Действие будет записано в журнал аудита.\n\n' +
+                                            'Продолжить?',
+                                        );
+                                        if (!ok) return;
+                                        const newPassword = prompt('Новый пароль (мин. 6 символов):');
                                         if (!newPassword) return;
                                         if (newPassword.length < 6) {
                                             toast.error('Пароль должен быть не менее 6 символов');
@@ -617,9 +534,9 @@ export function AdminUserDetails() {
                                         }
                                         try {
                                             await api.post(`/users/${user.id}/change-password`, { new_password: newPassword });
-                                            toast.success('Пароль успешно изменён');
+                                            toast.success('Пароль сброшен · запись в журнале аудита');
                                         } catch (err: any) {
-                                            toast.error(err.response?.data?.detail || 'Ошибка смены пароля');
+                                            toast.error(err.response?.data?.detail || 'Ошибка сброса пароля');
                                         }
                                     }}
                                     className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
@@ -628,10 +545,153 @@ export function AdminUserDetails() {
                                         <Shield size={14} />
                                     </div>
                                     <div className="flex-1">
-                                        <div className="text-sm font-medium text-unbox-dark">Сменить пароль</div>
-                                        <div className="text-[10px] text-unbox-grey">Установить новый пароль для пользователя</div>
+                                        <div className="text-sm font-medium text-unbox-dark">Сбросить пароль</div>
+                                        <div className="text-[10px] text-unbox-grey">Админ-override без старого пароля. Записывается в журнал.</div>
                                     </div>
                                 </button>
+
+                                {/* Change email (Excel #47) — senior_admin/owner only */}
+                                {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
+                                    <button
+                                        onClick={async () => {
+                                            const next = prompt(
+                                                `Текущий email: ${user.email}\n\nВведите новый email:`,
+                                                user.email || '',
+                                            );
+                                            if (!next) return;
+                                            const trimmed = next.trim().toLowerCase();
+                                            if (trimmed === (user.email || '').toLowerCase()) {
+                                                toast.error('Этот email уже установлен');
+                                                return;
+                                            }
+                                            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+                                                toast.error('Неверный формат email');
+                                                return;
+                                            }
+                                            const ok = window.confirm(
+                                                `Изменить email пользователя?\n\n${user.email} → ${trimmed}\n\n` +
+                                                'Все связанные записи (брони, waitlist, транзакции) будут обновлены автоматически.\n\n' +
+                                                'Продолжить?',
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.changeEmail(user.id, trimmed);
+                                                toast.success(`Email изменён на ${trimmed}. Обновите страницу для актуализации.`);
+                                                // Navigate to the new canonical URL
+                                                navigate(`/admin/users/${encodeURIComponent(trimmed)}`, { replace: true });
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Ошибка смены email');
+                                            }
+                                        }}
+                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-purple-50 border border-dashed border-purple-200 transition-colors text-left"
+                                    >
+                                        <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
+                                            <Shield size={14} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="text-sm font-medium text-unbox-dark">Изменить email</div>
+                                            <div className="text-[10px] text-unbox-grey">Каскадно обновляет брони, waitlist и транзакции</div>
+                                        </div>
+                                    </button>
+                                )}
+
+                                {/* Archive / Unarchive — Excel #11 soft delete.
+                                    Available to any admin role; the backend
+                                    enforces hierarchy (admins can't archive
+                                    each other, nobody can archive owner). */}
+                                <button
+                                    onClick={async () => {
+                                        const isArchived = !!user.archivedAt;
+                                        if (isArchived) {
+                                            const ok = window.confirm(
+                                                `Восстановить пользователя ${user.email} из архива?\n\n` +
+                                                'Сможет снова входить на сайт и будет видим в обычных списках.',
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.unarchiveUser(user.id);
+                                                toast.success('Пользователь восстановлен');
+                                                await useUserStore.getState().fetchUsers();
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Не удалось восстановить');
+                                            }
+                                        } else {
+                                            const reason = prompt(
+                                                `Архивировать пользователя ${user.email}?\n\n` +
+                                                'Не сможет входить на сайт. Вся история (брони, оплаты, бонусы) сохраняется.\n' +
+                                                'Можно восстановить в любой момент.\n\n' +
+                                                'Опционально: укажите причину (для аудита):',
+                                                '',
+                                            );
+                                            if (reason === null) return; // cancelled
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.archiveUser(user.id, reason.trim() || undefined);
+                                                toast.success('Пользователь отправлен в архив');
+                                                await useUserStore.getState().fetchUsers();
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Не удалось архивировать');
+                                            }
+                                        }
+                                    }}
+                                    className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
+                                >
+                                    <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                                        <Shield size={14} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-unbox-dark">
+                                            {user.archivedAt ? 'Восстановить из архива' : 'Архивировать пользователя'}
+                                        </div>
+                                        <div className="text-[10px] text-unbox-grey">
+                                            {user.archivedAt
+                                                ? `В архиве с ${new Date(user.archivedAt).toLocaleDateString('ru-RU')}`
+                                                : 'Заблокирует вход, сохранит всю историю. Обратимо.'}
+                                        </div>
+                                    </div>
+                                </button>
+
+                                {/* Merge two accounts — senior_admin/owner only */}
+                                {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
+                                    <button
+                                        onClick={async () => {
+                                            const source = prompt(
+                                                `Слить другой аккаунт В этот (${user.email})?\n\n` +
+                                                'Введите email или UUID поглощаемого аккаунта.\n' +
+                                                'Его брони, waitlist, транзакции и баланс перейдут сюда.\n' +
+                                                'Поглощённый аккаунт будет удалён.',
+                                            );
+                                            if (!source) return;
+                                            const trimmed = source.trim();
+                                            if (!trimmed) return;
+                                            const ok = window.confirm(
+                                                `Слить аккаунт?\n\n` +
+                                                `Поглощаемый: ${trimmed}\n` +
+                                                `Оставить:    ${user.email}\n\n` +
+                                                'Действие необратимо. Продолжить?',
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.mergeUsers(trimmed, user.id);
+                                                toast.success(`Аккаунт ${trimmed} слит в текущий. Обновите страницу.`);
+                                            } catch (err: any) {
+                                                toast.error(err.response?.data?.detail || 'Ошибка слияния');
+                                            }
+                                        }}
+                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-indigo-50 border border-dashed border-indigo-200 transition-colors text-left"
+                                    >
+                                        <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                                            <Shield size={14} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="text-sm font-medium text-unbox-dark">Слить с аккаунтом</div>
+                                            <div className="text-[10px] text-unbox-grey">Объединить дубликаты (TG-placeholder + сайт)</div>
+                                        </div>
+                                    </button>
+                                )}
                             </div>
                         )}
                     </Card>
@@ -924,7 +984,44 @@ export function AdminUserDetails() {
                                                         {user.subscription.isFrozen ? 'Заморожен' : 'Активен'}
                                                     </div>
                                                     <div className="text-xs text-purple-600">
-                                                        до {format(new Date(user.subscription.expiryDate), 'd.MM.yyyy')}
+                                                        {isEditingExpiry ? (
+                                                            <div className="flex items-center gap-1.5 mt-1">
+                                                                <input
+                                                                    type="date"
+                                                                    value={editExpiryDate}
+                                                                    onChange={e => setEditExpiryDate(e.target.value)}
+                                                                    className="rounded border border-purple-300 px-1.5 py-0.5 text-xs focus:outline-none focus:border-purple-500"
+                                                                />
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (!editExpiryDate) return;
+                                                                        const updated = { ...user.subscription!, expiryDate: new Date(editExpiryDate).toISOString() };
+                                                                        updateUserById(user.email, { subscription: updated as any });
+                                                                        toast.success('Дата абонемента обновлена');
+                                                                        setIsEditingExpiry(false);
+                                                                    }}
+                                                                    className="text-green-700 hover:text-green-900 font-bold text-xs"
+                                                                >
+                                                                    ✓
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setIsEditingExpiry(false)}
+                                                                    className="text-gray-400 hover:text-gray-600 text-xs"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditExpiryDate(format(new Date(user.subscription!.expiryDate), 'yyyy-MM-dd'));
+                                                                    setIsEditingExpiry(true);
+                                                                }}
+                                                                className="hover:text-purple-900 underline decoration-dotted"
+                                                            >
+                                                                до {format(new Date(user.subscription.expiryDate), 'd.MM.yyyy')}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                     <button
                                                         onClick={toggleFreeze}

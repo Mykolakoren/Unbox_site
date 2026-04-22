@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
-import { User, Video, MapPin, Tent } from 'lucide-react';
-import { Card } from '../ui/Card';
+import { User, Video, MapPin, Tent, ArrowRight } from 'lucide-react';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 export interface Specialist {
     id: string;
@@ -22,82 +22,104 @@ export function SpecialistCard({ specialist }: SpecialistCardProps) {
     const hasOnline = specialist.formats.includes('ONLINE');
     const hasOfflineRoom = specialist.formats.includes('OFFLINE_ROOM');
     const hasOfflineCapsule = specialist.formats.includes('OFFLINE_CAPSULE');
+    const hasOffline = hasOfflineRoom || hasOfflineCapsule;
 
+    return <GHCard specialist={specialist} hasOnline={hasOnline} hasOffline={hasOffline} hasOfflineRoom={hasOfflineRoom} hasOfflineCapsule={hasOfflineCapsule} />;
+}
+
+/* ═══ Grid House Card ═══ */
+
+function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineCapsule }: {
+    specialist: Specialist; hasOnline: boolean; hasOffline: boolean; hasOfflineRoom: boolean; hasOfflineCapsule: boolean;
+}) {
     return (
-        <Card className="h-full flex flex-col hover:shadow-lg transition-all duration-300 border border-unbox-light/50 group overflow-hidden">
-            {/* Image Section */}
-            <div className="relative aspect-[3/4] overflow-hidden bg-gradient-to-br from-unbox-light to-white">
-                {specialist.photoUrl ? (
-                    <img
-                        src={specialist.photoUrl}
-                        alt={`${specialist.firstName} ${specialist.lastName}`}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center text-unbox-grey group-hover:scale-105 transition-transform duration-500">
-                        <User size={64} strokeWidth={1.5} />
+        <Link to={`/specialists/${specialist.id}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block', height: '100%' }}>
+            <div style={{
+                height: '100%', display: 'flex', flexDirection: 'column',
+                border: `1px solid ${GH.ink10}`, background: GH.paper,
+                transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = GH.ink; e.currentTarget.style.boxShadow = `4px 4px 0 ${GH.ink10}`; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = GH.ink10; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+                {/* Photo */}
+                <div style={{ position: 'relative', aspectRatio: '3/4', overflow: 'hidden', background: GH.ink5 }}>
+                    {specialist.photoUrl ? (
+                        <img src={specialist.photoUrl} alt={`${specialist.firstName} ${specialist.lastName}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: GH.ink10 }}>
+                            <User size={48} strokeWidth={1} />
+                        </div>
+                    )}
+                    {/* Price */}
+                    <div style={{
+                        position: 'absolute', top: 0, right: 0,
+                        fontFamily: GH_MONO, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
+                        padding: '6px 10px', background: GH.paper, color: GH.ink,
+                        borderLeft: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`,
+                    }}>
+                        от {specialist.basePriceGel} ₾
                     </div>
-                )}
-
-                {/* Price Badge */}
-                <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-sm font-bold text-unbox-dark border border-white/50">
-                    от {specialist.basePriceGel} ₾
-                </div>
-            </div>
-
-            {/* Content Section */}
-            <div className="p-5 flex-1 flex flex-col">
-                <h3 className="text-xl font-bold text-unbox-dark leading-tight mb-1">
-                    {specialist.firstName} {specialist.lastName}
-                </h3>
-
-                <p className="text-sm border-l-2 border-unbox-green/30 pl-3 py-0.5 text-unbox-grey mb-4 line-clamp-2">
-                    {specialist.tagline}
-                </p>
-
-                {/* Formats */}
-                <div className="flex flex-wrap gap-2 mb-4">
-                    {hasOnline && (
-                        <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-unbox-light text-unbox-green rounded-md">
-                            <Video size={12} />
-                            Онлайн
-                        </span>
-                    )}
-                    {(hasOfflineRoom || hasOfflineCapsule) && (
-                        <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-unbox-light text-unbox-dark rounded-md">
-                            {hasOfflineRoom ? <MapPin size={12} /> : <Tent size={12} />}
-                            {hasOfflineRoom && hasOfflineCapsule ? 'Офлайн (все форматы)' : hasOfflineRoom ? 'Кабинет' : 'Капсула'}
-                        </span>
-                    )}
-                </div>
-
-                {/* Tags Section */}
-                <div className="mb-6 flex-1">
-                    <div className="flex flex-wrap gap-1.5 line-clamp-2">
-                        {specialist.specializations.slice(0, 3).map((tag, idx) => (
-                            <span
-                                key={idx}
-                                className="text-[11px] px-2 py-1 bg-unbox-light/50 text-unbox-grey rounded-full border border-unbox-light"
-                            >
-                                {tag}
+                    {/* Format badges */}
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, display: 'flex', gap: 0 }}>
+                        {hasOnline && (
+                            <span style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                padding: '5px 8px', background: GH.accent, color: GH.paper,
+                                display: 'flex', alignItems: 'center', gap: 4,
+                            }}>
+                                <Video size={9} /> Онлайн
                             </span>
-                        ))}
-                        {specialist.specializations.length > 3 && (
-                            <span className="text-[11px] px-2 py-1 bg-unbox-light/50 text-unbox-grey rounded-full border border-unbox-light">
-                                +{specialist.specializations.length - 3}
+                        )}
+                        {hasOffline && (
+                            <span style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                padding: '5px 8px', background: GH.ink, color: GH.paper,
+                                display: 'flex', alignItems: 'center', gap: 4,
+                            }}>
+                                {hasOfflineRoom ? <MapPin size={9} /> : <Tent size={9} />}
+                                {hasOfflineRoom && hasOfflineCapsule ? 'Каб + Капс' : hasOfflineRoom ? 'Кабинет' : 'Капсула'}
                             </span>
                         )}
                     </div>
                 </div>
 
-                {/* Action Button */}
-                <Link
-                    to={`/specialists/${specialist.id}`}
-                    className="w-full block text-center py-2.5 px-4 bg-unbox-light/50 hover:bg-unbox-dark text-unbox-dark hover:text-white text-sm font-semibold rounded-xl transition-colors duration-200"
-                >
-                    Подробнее
-                </Link>
+                {/* Content */}
+                <div style={{ padding: '14px 16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontFamily: GH_SANS, fontSize: 16, fontWeight: 700, lineHeight: 1.2, marginBottom: 6 }}>
+                        {specialist.firstName} {specialist.lastName}
+                    </div>
+                    <div style={{ fontSize: 12, lineHeight: 1.5, color: GH.ink60, marginBottom: 12, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {specialist.tagline}
+                    </div>
+                    {/* Tags */}
+                    <div style={{ marginBottom: 14, flex: 1, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {specialist.specializations.slice(0, 3).map((tag, i) => (
+                            <span key={i} style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase',
+                                padding: '3px 8px', border: `1px solid ${GH.ink10}`, color: GH.ink60,
+                            }}>
+                                {tag}
+                            </span>
+                        ))}
+                        {specialist.specializations.length > 3 && (
+                            <span style={{
+                                fontFamily: GH_MONO, fontSize: 9, padding: '3px 8px', color: GH.ink30,
+                            }}>
+                                +{specialist.specializations.length - 3}
+                            </span>
+                        )}
+                    </div>
+                    {/* CTA */}
+                    <div style={{ borderTop: `1px solid ${GH.ink10}`, paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.accent }}>
+                            Подробнее
+                        </span>
+                        <ArrowRight size={14} style={{ color: GH.ink30 }} />
+                    </div>
+                </div>
             </div>
-        </Card>
+        </Link>
     );
 }

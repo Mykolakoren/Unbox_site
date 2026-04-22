@@ -1,10 +1,11 @@
-export type Format = 'individual' | 'group';
+export type Format = 'individual' | 'group' | 'intervision';
 export type GroupSize = '4-8' | '8-14' | '14-20' | '20-30' | '30+';
 
 export interface Location {
     id: string;
     name: string;
     address: string;
+    description?: string;
     image?: string;
     features?: string[];
     lat?: number;
@@ -17,6 +18,7 @@ export interface Resource {
     name: string;
     type: 'cabinet' | 'capsule' | 'cabinet-uni';
     hourlyRate: number;
+    groupRate?: number;
     capacity: number;
     locationId?: string; // Optional for backward compatibility
     // New fields
@@ -64,6 +66,9 @@ export interface PricingResult {
     discountAmount: number;
     discountType: 'none' | 'duration' | 'hot' | 'loyalty' | 'personal';
     finalPrice: number;
+    peakSurcharge: number; // extra amount from peak hours (included in basePrice)
+    peakSlotCount: number; // how many 30-min slots fell in peak hours
+    subscriptionPeakDebt: number; // GEL debt when subscription covers peak hours
 }
 
 export const EXTRAS: ExtraOption[] = [
