@@ -321,31 +321,24 @@ def telegram_login_callback(
         user_id, expires_delta=access_token_expires
     )
     
-    # Return a small HTML page that saves the token to localStorage and closes
-    # the popup. The parent window polls for the token.
+    # Full-page redirect flow (frontend now navigates the whole tab to
+    # oauth.telegram.org instead of opening a popup, see TelegramLoginButton).
+    # We respond with a tiny HTML page that:
+    #   1. Stores the token in localStorage (same origin as the SPA).
+    #   2. Replaces the URL with /dashboard so the SPA picks it up.
+    # Token is never in the address bar / URL params for security.
     #
-    # Why so much defensive code: Chromium and Safari sometimes silently refuse
-    # window.close() when the popup wasn't opened by a user gesture in *that*
-    # window (e.g. when Telegram redirected through their oauth.telegram.org
-    # domain — which is a different origin). We layer fallbacks so the user
-    # always ends up logged in:
-    #   1. Write token to BOTH localStorage AND sessionStorage of the popup —
-    #      parent polls localStorage. (sessionStorage is per-window, so it's
-    #      really just a backup for debugging.)
-    #   2. Try window.close() — works in most browsers when popup was opened
-    #      by the parent (which is our case).
-    #   3. If we're still here after 1.5s, redirect this window to /dashboard.
-    #      Parent's polling will pick up the token and also navigate; if parent
-    #      is dead, at least the user lands somewhere logged-in.
-    #
-    # SECURITY: Token never appears in URL parameters or the address bar.
+    # `location.replace` is used instead of `location.href = …` so the
+    # browser's back button doesn't bring the user back to this page (and
+    # cause a duplicate auth attempt).
     from fastapi.responses import HTMLResponse
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Авторизация...</title>
+        <title>Авторизация Unbox...</title>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body {{
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -353,14 +346,21 @@ def telegram_login_callback(
                 height: 100vh; margin: 0; background: #FAFAF7; color: #0F0F10;
                 text-align: center; padding: 20px;
             }}
-            .ok {{ font-size: 16px; line-height: 1.5; }}
-            .small {{ font-size: 13px; color: #666; margin-top: 12px; }}
+            .ok {{ font-size: 18px; font-weight: 600; line-height: 1.5; }}
+            .small {{ font-size: 13px; color: #666; margin-top: 8px; }}
+            .spinner {{
+                width: 28px; height: 28px; margin: 0 auto 16px;
+                border: 3px solid #E5E5E5; border-top-color: #476D6B;
+                border-radius: 50%; animation: spin 0.8s linear infinite;
+            }}
+            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
         </style>
     </head>
     <body>
         <div>
-            <div class="ok">✓ Авторизация успешна</div>
-            <div class="small">Это окно закроется автоматически...</div>
+            <div class="spinner"></div>
+            <div class="ok">✓ Telegram авторизован</div>
+            <div class="small">Открываем ваш кабинет…</div>
         </div>
         <script>
             (function() {{
@@ -368,34 +368,16 @@ def telegram_login_callback(
                 try {{
                     window.localStorage.setItem('token', token);
                 }} catch (e) {{
-                    // localStorage might be unavailable (private mode, etc.)
-                    // Fall through to redirect.
+                    // Private mode / storage disabled — user will see login page,
+                    // they can retry from a normal session.
                 }}
-
-                // Try to notify the parent window directly — most reliable when
-                // the popup is same-origin to the parent (which it is here).
-                try {{
-                    if (window.opener && !window.opener.closed) {{
-                        window.opener.postMessage(
-                            {{ type: 'telegram-auth-success', token: token }},
-                            window.location.origin
-                        );
-                    }}
-                }} catch (e) {{ /* ignore */ }}
-
-                // Try to close the popup. May silently fail in some browsers.
-                try {{ window.close(); }} catch (e) {{ /* ignore */ }}
-
-                // Belt-and-braces: if we're still here in 1.5s, the close was
-                // blocked. Redirect this tab so the user isn't stuck.
-                setTimeout(function() {{
-                    try {{ window.close(); }} catch (e) {{}}
-                    if (!window.closed) {{
-                        window.location.href = '/dashboard?source=telegram';
-                    }}
-                }}, 1500);
+                // Hand off to the SPA. `replace` so back-button doesn't re-fire auth.
+                window.location.replace('/dashboard?source=telegram');
             }})();
         </script>
+        <noscript>
+            <p><a href="/dashboard?source=telegram">Перейти в кабинет</a></p>
+        </noscript>
     </body>
     </html>
     """
