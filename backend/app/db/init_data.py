@@ -393,6 +393,10 @@ def auto_backfill_gcal_alias_codes():
                     continue
                 if entry.get("is_recurring"):
                     continue
+                # Cancelled events can't be patched (Google rejects) and
+                # rewriting their summary is pointless anyway.
+                if entry.get("is_cancelled"):
+                    continue
                 if not entry.get("suggested_summary"):
                     continue
                 try:
