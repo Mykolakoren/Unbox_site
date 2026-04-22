@@ -224,6 +224,11 @@ def sync_from_calendar(
                 continue
             if entry.get("is_recurring"):
                 continue
+            # Google rejects PATCH on cancelled/declined events — and even if
+            # it didn't, rewriting the summary of a cancelled slot is
+            # meaningless noise. Skip.
+            if entry.get("is_cancelled"):
+                continue
             new_summary = entry.get("suggested_summary")
             if not new_summary:
                 continue
@@ -297,12 +302,16 @@ def backfill_alias_codes(
     already_coded = 0
     recurring_skipped = 0
 
+    cancelled_skipped = 0
     for entry in result["matched"]:
         if entry.get("has_alias_code"):
             already_coded += 1
             continue
         if entry.get("is_recurring"):
             recurring_skipped += 1
+            continue
+        if entry.get("is_cancelled"):
+            cancelled_skipped += 1
             continue
         if not entry.get("suggested_summary"):
             continue
@@ -331,6 +340,7 @@ def backfill_alias_codes(
         "total_events": result["total"],
         "already_had_codes": already_coded,
         "recurring_skipped": recurring_skipped,
+        "cancelled_skipped": cancelled_skipped,
         "would_patch": len(would_patch),
         "patched": patched,
         "failed": len(failed),
