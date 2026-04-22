@@ -251,8 +251,89 @@ def migrate_add_columns():
                 conn.rollback()
 
 
+# ── One-time Psy-CRM data rescues ────────────────────────────────────────────
+# When a user's Telegram/Google binding drifts onto a sibling account and is
+# then corrected by hand, the `therapist_*` rows keep the *old* user_id as
+# `specialist_id` and become invisible to the CRM. The regular /users/merge
+# endpoint can't rescue them because the source UUID isn't a user anymore —
+# it's a bare value in the CRM tables.
+#
+# Each entry here is (source_specialist_id, target_user_id, why). On every
+# backend boot we check: if the source still has rows, move them. If the
+# count is zero, the migration is a no-op. Fully idempotent, so leaving the
+# list in the code after the fact is safe.
+#
+# Add a row to RESCUES when a specific user reports "my CRM is empty after
+# an account mix-up", you've confirmed the orphaned specialist_id in the DB,
+# and you want the fix to land on the next backend boot without a bespoke
+# API call.
+_CRM_RESCUES: list[tuple[str, str, str]] = [
+    (
+        "350d00e4-42fd-4a1c-b6ae-019f94630e41",
+        "9357b575-f6a2-433f-bede-02d7e6cc13db",
+        "koren.nikolas@gmail.com — Telegram bind drifted, CRM data orphaned",
+    ),
+]
+
+
+def rescue_orphaned_crm():
+    """Move orphaned therapist_* rows onto their real owner. Idempotent."""
+    from sqlalchemy import text as _text
+
+    CRM_TABLES = (
+        "therapist_clients",
+        "therapy_sessions",
+        "therapist_payments",
+        "therapist_notes",
+    )
+
+    for src_id, tgt_id, note in _CRM_RESCUES:
+        # Fast exit: if the source has no rows anywhere, we already migrated.
+        probe_sql = " UNION ALL ".join(
+            f"SELECT COUNT(*) FROM {t} WHERE specialist_id = :sid" for t in CRM_TABLES
+        )
+        with engine.connect() as conn:
+            try:
+                rows = conn.execute(_text(probe_sql), {"sid": src_id}).fetchall()
+                total = sum(int(r[0]) for r in rows)
+            except Exception as e:
+                logger.warning(f"[CRM rescue] probe failed for {src_id}: {e}")
+                continue
+
+        if total == 0:
+            logger.debug(f"[CRM rescue] {src_id} → {tgt_id}: already migrated")
+            continue
+
+        logger.warning(
+            f"[CRM rescue] Moving {total} orphaned rows from {src_id} → {tgt_id} ({note})"
+        )
+
+        moved = {}
+        for table in CRM_TABLES:
+            # Each UPDATE gets its own connection so a failure on one table
+            # doesn't poison the others.
+            with engine.connect() as conn:
+                try:
+                    res = conn.execute(
+                        _text(
+                            f"UPDATE {table} SET specialist_id = :tgt "
+                            f"WHERE specialist_id = :src"
+                        ),
+                        {"src": src_id, "tgt": tgt_id},
+                    )
+                    moved[table] = int(getattr(res, "rowcount", 0) or 0)
+                    conn.commit()
+                except Exception as e:
+                    logger.error(f"[CRM rescue] {table} update failed: {e}")
+                    conn.rollback()
+                    moved[table] = -1  # signal failure, don't mask
+
+        logger.warning(f"[CRM rescue] {src_id} → {tgt_id}: moved {moved}")
+
+
 def init_data():
     migrate_add_columns()
+    rescue_orphaned_crm()
     with Session(engine) as session:
         
         # Init User — guarded: skip the seed if the operator left the default
