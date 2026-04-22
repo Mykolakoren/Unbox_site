@@ -182,7 +182,12 @@ def sync_from_calendar(
                 updated += 1
             continue
 
-        # Also check by client_id + date to prevent duplicates
+        # Also check by client_id + date to prevent duplicates.
+        # Edge case: a recurring series instance was cancelled (status=
+        # CANCELLED_CLIENT), then the user recreated a one-off event at the
+        # same slot. The old cancelled row would block the new one here —
+        # instead, adopt the new Google event onto the cancelled row and
+        # flip the status.
         existing_by_date = session.exec(
             select(TherapySession).where(
                 TherapySession.client_id == entry["client_id"],
@@ -191,6 +196,14 @@ def sync_from_calendar(
             )
         ).first()
         if existing_by_date:
+            if existing_by_date.status in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST") \
+               and existing_by_date.google_event_id != entry["google_event_id"]:
+                existing_by_date.google_event_id = entry["google_event_id"]
+                existing_by_date.status = entry["status"]
+                existing_by_date.duration_minutes = entry["duration_minutes"]
+                existing_by_date.updated_at = datetime.now()
+                session.add(existing_by_date)
+                updated += 1
             continue
 
         ts = TherapySession(
