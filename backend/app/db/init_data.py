@@ -233,6 +233,19 @@ def migrate_add_columns():
         except Exception:
             conn.rollback()
 
+    # app_settings: updated_by_user_id was added after the table shipped in
+    # an earlier experiment. SQLModel.create_all() only creates missing
+    # tables, not missing columns, so this ALTER catches legacy DBs.
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR"))
+            else:
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN updated_by_user_id VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     # resource table: convert services from TEXT to JSONB if needed (Postgres only)
     if dialect == 'postgresql':
         with engine.connect() as conn:
