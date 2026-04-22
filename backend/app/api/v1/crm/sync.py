@@ -72,6 +72,8 @@ def sync_from_calendar(
 
     # ── Auto-create clients from unmatched events ─────────────────────────
     auto_created_clients = 0
+    renamed_clients = 0
+
     if auto_create_clients and not dry_run and result["unmatched"]:
         existing_codes = {c.alias_code for c in clients if c.alias_code}
         name_to_client: dict = {}
@@ -132,6 +134,43 @@ def sync_from_calendar(
             else:
                 still_unmatched.append(ev)
         result["unmatched"] = still_unmatched
+
+    # ── Update client name when calendar has a richer version ─────────────
+    # When alias match links an event to a client whose name is a word-wise
+    # prefix of the event's summary (e.g. client "Максим" with alias #ABCD,
+    # calendar renamed event to "Максим Дюссельдорф #ABCD"), propagate the
+    # richer name back to CRM so the session no longer displays the old stub.
+    if not dry_run:
+        clients_by_id = {c.id: c for c in clients}
+        taken_names = {_normalize_name(c.name): c.id for c in clients}
+        for entry in result["matched"]:
+            client = clients_by_id.get(entry.get("client_id"))
+            if not client:
+                continue
+            event_name = _clean_client_name(entry.get("summary", ""))
+            if not event_name:
+                continue
+            event_norm = _normalize_name(event_name)
+            client_norm = _normalize_name(client.name)
+            if event_norm == client_norm:
+                continue
+            event_words = event_norm.split()
+            client_words = client_norm.split()
+            # Skip if another client already owns the richer name — avoids
+            # creating duplicates when a calendar event's alias points to the
+            # wrong client of a pair like "Максим" / "Максим Дюссельдорф".
+            if taken_names.get(event_norm, client.id) != client.id:
+                continue
+            if (
+                len(event_words) > len(client_words)
+                and event_words[: len(client_words)] == client_words
+            ):
+                client.name = event_name
+                client.updated_at = datetime.now()
+                session.add(client)
+                taken_names.pop(client_norm, None)
+                taken_names[event_norm] = client.id
+                renamed_clients += 1
 
     # ── Dry Run preview ───────────────────────────────────────────────────
     if dry_run:
@@ -213,6 +252,7 @@ def sync_from_calendar(
         "created": created,
         "updated": updated,
         "auto_created_clients": auto_created_clients,
+        "renamed_clients": renamed_clients,
         "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],
     }
 
