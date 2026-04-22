@@ -307,6 +307,21 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                     }}>
                         {currentUser.name}
                     </div>
+                    {/* Show email so a stale/misbound session is visible at
+                        a glance — avoids the "зашёл под своим, а это чужой
+                        аккаунт" trap where a cached name from localStorage
+                        survives a token change. */}
+                    <div style={{
+                        fontFamily: GH_MONO,
+                        fontSize: '10px',
+                        marginTop: '2px',
+                        color: GH.ink60,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                    }}>
+                        {currentUser.email}
+                    </div>
                 </div>
             )}
 
