@@ -681,6 +681,27 @@ def merge_users(
         'UPDATE notifications SET recipient_id = :t WHERE recipient_id = :s',
         "notifications.recipient_id", {"s": str(src.id), "t": str(tgt.id)},
     )
+    # Psy-CRM data (therapist_* tables use specialist_id == user.id).
+    # Without these, a merge leaves clients/sessions/payments/notes
+    # orphaned under the absorbed UUID and they vanish from CRM. Was
+    # exactly the trap that bit koren.nikolas when his Telegram got
+    # mis-bound to a sibling account.
+    _bulk(
+        'UPDATE therapist_clients SET specialist_id = :t WHERE specialist_id = :s',
+        "therapist_clients.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE therapy_sessions SET specialist_id = :t WHERE specialist_id = :s',
+        "therapy_sessions.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE therapist_payments SET specialist_id = :t WHERE specialist_id = :s',
+        "therapist_payments.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
+    _bulk(
+        'UPDATE therapist_notes SET specialist_id = :t WHERE specialist_id = :s',
+        "therapist_notes.specialist_id", {"s": str(src.id), "t": str(tgt.id)},
+    )
     # User self-refs (responsible / attracted admin links by email)
     _bulk(
         f'UPDATE {user_table} SET responsible_admin_id = :t_email WHERE responsible_admin_id = :s_email',
@@ -751,3 +772,93 @@ def merge_users(
     session.commit()
     session.refresh(tgt)
     return tgt
+
+
+# ── Restore orphaned Psy-CRM data ────────────────────────────────────────────
+# When a user gets re-created (e.g. Telegram linked to the wrong sibling
+# account, then corrected), their therapist_* rows keep the *old* user_id
+# as specialist_id and fall out of reach — the CRM filters by the new
+# user_id and finds nothing. `merge` can't rescue it because the source
+# isn't a user anymore, it's a bare UUID in the CRM tables.
+#
+# This endpoint re-points all CRM rows from a raw specialist_id to the
+# current user. Owner-only, reversible by calling it again with the
+# arguments swapped.
+
+class _RestoreCrmRequest(_Pyd):
+    """source_specialist_id: the orphaned UUID (no matching user row).
+       target_user_id: the live user whose CRM this data should appear in."""
+    source_specialist_id: str
+    target_user_id: str
+
+
+@router.post("/restore-crm-data")
+def restore_orphaned_crm(
+    *,
+    session: Session = Depends(get_session),
+    payload: _RestoreCrmRequest,
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    if current_user.role not in ("owner", "senior_admin"):
+        raise HTTPException(403, "Только старший администратор или владелец")
+
+    # Validate UUIDs and target user
+    try:
+        src_id = str(UUID(payload.source_specialist_id))
+        tgt_id = str(UUID(payload.target_user_id))
+    except ValueError:
+        raise HTTPException(400, "Некорректный UUID")
+
+    if src_id == tgt_id:
+        raise HTTPException(400, "source и target совпадают")
+
+    tgt = session.get(User, UUID(tgt_id))
+    if not tgt:
+        raise HTTPException(404, f"Целевой пользователь не найден: {tgt_id}")
+
+    from sqlalchemy import text
+    moved: dict[str, int] = {}
+
+    def _bulk(sql: str, label: str) -> None:
+        res = session.execute(text(sql), {"s": src_id, "t": tgt_id})
+        moved[label] = int(getattr(res, "rowcount", 0) or 0)
+
+    _bulk(
+        "UPDATE therapist_clients  SET specialist_id = :t WHERE specialist_id = :s",
+        "therapist_clients",
+    )
+    _bulk(
+        "UPDATE therapy_sessions   SET specialist_id = :t WHERE specialist_id = :s",
+        "therapy_sessions",
+    )
+    _bulk(
+        "UPDATE therapist_payments SET specialist_id = :t WHERE specialist_id = :s",
+        "therapist_payments",
+    )
+    _bulk(
+        "UPDATE therapist_notes    SET specialist_id = :t WHERE specialist_id = :s",
+        "therapist_notes",
+    )
+
+    # Audit the operation on the recipient.
+    audit = (tgt.comment_history or []).copy()
+    audit.append({
+        "text": f"Восстановление CRM: перенесены записи от specialist_id={src_id}",
+        "author_id": str(current_user.id),
+        "author_name": current_user.name or current_user.email,
+        "created_at": datetime.now().isoformat(),
+        "type": "crm_restore",
+        "source_specialist_id": src_id,
+        "moved": moved,
+    })
+    tgt.comment_history = audit
+    tgt.updated_at = datetime.now()
+    session.add(tgt)
+    session.commit()
+
+    return {
+        "ok": True,
+        "source_specialist_id": src_id,
+        "target_user_id": tgt_id,
+        "moved": moved,
+    }
