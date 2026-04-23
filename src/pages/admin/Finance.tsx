@@ -340,14 +340,34 @@ function GridHouseAdminFinance(p: GHAFProps) {
                             </button>
                         )}
 
-                        {/* Shift control — three segments share borders, read as one unit.
-                            Excel #68: branch picker sits between open/close so scope
-                            is chosen before either action. */}
-                        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+                        {/* Shift control — three segments share one crisp 1px ink
+                            border and 1px ink dividers. Reads as a single panel,
+                            the select doesn't look orphaned anymore. Branch picker
+                            sits between open/close so scope is chosen before
+                            either action (Excel #68). */}
+                        <div
+                            style={{
+                                display: 'flex',
+                                alignItems: 'stretch',
+                                border: `1px solid ${GH.ink}`,
+                                background: GH.paper,
+                            }}
+                        >
                             <button
                                 onClick={() => p.setShowOpenShift(true)}
                                 title="Зафиксировать начало рабочей смены"
-                                style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10, borderRight: 'none' }}
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 10,
+                                    letterSpacing: '0.16em',
+                                    textTransform: 'uppercase',
+                                    background: 'transparent',
+                                    color: GH.ink,
+                                    border: 'none',
+                                    borderRight: `1px solid ${GH.ink}`,
+                                    padding: '10px 14px',
+                                    cursor: 'pointer',
+                                }}
                             >
                                 <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                                 Открыть
@@ -362,10 +382,9 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                     fontFamily: GH_MONO,
                                     letterSpacing: '0.14em',
                                     textTransform: 'uppercase',
-                                    border: `1px solid ${GH.ink10}`,
-                                    borderLeft: 'none',
-                                    borderRight: 'none',
-                                    background: GH.paper,
+                                    border: 'none',
+                                    borderRight: `1px solid ${GH.ink}`,
+                                    background: 'transparent',
                                     color: GH.ink,
                                     cursor: 'pointer',
                                     appearance: 'none',
@@ -382,7 +401,17 @@ function GridHouseAdminFinance(p: GHAFProps) {
                             </select>
                             <button
                                 onClick={() => p.setShowCloseChecklist(true)}
-                                style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 10,
+                                    letterSpacing: '0.16em',
+                                    textTransform: 'uppercase',
+                                    background: 'transparent',
+                                    color: GH.ink,
+                                    border: 'none',
+                                    padding: '10px 14px',
+                                    cursor: 'pointer',
+                                }}
                             >
                                 <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                                 Закрыть
