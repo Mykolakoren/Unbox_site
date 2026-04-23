@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, Settings2, X, Sun } from 'lucide-react';
+import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, X, Sun } from 'lucide-react';
 import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth,
     startOfDay, endOfDay, addDays, addWeeks, addMonths, format,
@@ -255,11 +255,6 @@ function GridHouseAdminFinance(p: GHAFProps) {
         padding: '12px 20px',
         cursor: 'pointer',
     };
-    const dangerBtn: React.CSSProperties = {
-        ...outlineBtn,
-        color: GH.danger,
-        borderColor: GH.danger,
-    };
     const hairlineInput: React.CSSProperties = {
         fontFamily: GH_SANS,
         fontSize: 14,
@@ -304,77 +299,76 @@ function GridHouseAdminFinance(p: GHAFProps) {
                             Касса и поток средств.
                         </h1>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        {p.canCorrectBalance && (
-                            <button onClick={() => { p.setCorrBranch(p.selectedBranch); p.setShowCorrection(true); }} style={{ ...dangerBtn, padding: '10px 14px', fontSize: 10 }}>
-                                <Settings2 size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Корректировка
-                            </button>
-                        )}
-                        {/* Yesterday shift status (Excel #61) — clickable when missed,
-                            to open the close-shift checklist in one step. */}
+                    {/* Action bar — three zones:
+                        • left: shift status (text marker) + shift control panel
+                        • right: correction (secondary link) + primary "+ Новая операция"
+                        Visual hierarchy collapses six look-alike buttons into one
+                        primary + one grouped tri-control + one text marker + one link. */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                        {/* Yesterday shift — marker when healthy, urgent button when missed */}
                         {p.yesterdayShiftStatus === 'closed' ? (
-                            <div
+                            <span
                                 title="Вчерашняя смена была закрыта."
                                 style={{
-                                    padding: '10px 12px',
-                                    fontSize: 10,
                                     fontFamily: GH_MONO,
-                                    letterSpacing: '0.14em',
+                                    fontSize: 10,
+                                    letterSpacing: '0.18em',
                                     textTransform: 'uppercase',
-                                    border: `1px solid ${GH.ink}`,
-                                    background: GH.paper,
-                                    color: GH.ink,
-                                    alignSelf: 'center',
+                                    color: GH.ink60,
+                                    whiteSpace: 'nowrap',
                                 }}
                             >
                                 ✓ Вчера закрыта
-                            </div>
+                            </span>
                         ) : (
                             <button
                                 onClick={() => p.setShowCloseChecklist(true)}
                                 title="Вчерашняя смена не была закрыта. Нажмите, чтобы закрыть."
                                 style={{
-                                    padding: '10px 12px',
-                                    fontSize: 10,
                                     fontFamily: GH_MONO,
+                                    fontSize: 10,
                                     letterSpacing: '0.14em',
                                     textTransform: 'uppercase',
-                                    border: `1px solid ${GH.ink}`,
                                     background: GH.ink,
                                     color: GH.paper,
-                                    alignSelf: 'center',
+                                    border: `1px solid ${GH.ink}`,
+                                    padding: '10px 14px',
                                     cursor: 'pointer',
                                 }}
                             >
                                 ⚠ Вчера не закрыта · закрыть →
                             </button>
                         )}
-                        <button onClick={() => p.setShowOpenShift(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }} title="Зафиксировать начало рабочей смены">
-                            <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                            Открыть смену
-                        </button>
-                        {/* Excel #68 — branch picker sits RIGHT before "Закрыть смену"
-                            so the admin picks the scope first. Bound to the same
-                            selectedBranch as the period filter to avoid split state. */}
+
+                        {/* Shift control — three segments share borders, read as one unit.
+                            Excel #68: branch picker sits between open/close so scope
+                            is chosen before either action. */}
                         <div style={{ display: 'flex', alignItems: 'stretch' }}>
+                            <button
+                                onClick={() => p.setShowOpenShift(true)}
+                                title="Зафиксировать начало рабочей смены"
+                                style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10, borderRight: 'none' }}
+                            >
+                                <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                Открыть
+                            </button>
                             <select
                                 value={p.selectedBranch}
                                 onChange={e => p.setSelectedBranch(e.target.value)}
                                 title="Филиал для закрытия смены"
                                 style={{
-                                    padding: '10px 14px',
+                                    padding: '10px 28px 10px 14px',
                                     fontSize: 10,
                                     fontFamily: GH_MONO,
                                     letterSpacing: '0.14em',
                                     textTransform: 'uppercase',
-                                    border: `1px solid ${GH.ink}`,
+                                    border: `1px solid ${GH.ink10}`,
+                                    borderLeft: 'none',
                                     borderRight: 'none',
                                     background: GH.paper,
                                     color: GH.ink,
                                     cursor: 'pointer',
                                     appearance: 'none',
-                                    paddingRight: 28,
                                     backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(-45deg, transparent 50%, currentColor 50%)',
                                     backgroundPosition: 'calc(100% - 14px) 50%, calc(100% - 9px) 50%',
                                     backgroundSize: '5px 5px',
@@ -386,12 +380,45 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 <option value="Unbox One">Unbox One</option>
                                 <option value="Neo School">Neo School</option>
                             </select>
-                            <button onClick={() => p.setShowCloseChecklist(true)} style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}>
+                            <button
+                                onClick={() => p.setShowCloseChecklist(true)}
+                                style={{ ...outlineBtn, padding: '10px 14px', fontSize: 10 }}
+                            >
                                 <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Закрыть смену
+                                Закрыть
                             </button>
                         </div>
-                        <button onClick={() => p.setShowAddTx(true)} style={{ ...inkBtn, padding: '10px 14px', fontSize: 10 }}>
+
+                        {/* Pushes the primary action to the right edge */}
+                        <div style={{ flex: 1 }} />
+
+                        {/* Correction — rare, demoted to a quiet text link */}
+                        {p.canCorrectBalance && (
+                            <button
+                                onClick={() => { p.setCorrBranch(p.selectedBranch); p.setShowCorrection(true); }}
+                                title="Корректировка остатка на счёте"
+                                style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 10,
+                                    letterSpacing: '0.14em',
+                                    textTransform: 'uppercase',
+                                    background: 'transparent',
+                                    color: GH.ink60,
+                                    border: 'none',
+                                    padding: '10px 4px',
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline',
+                                    textUnderlineOffset: 4,
+                                }}
+                            >
+                                Корректировка
+                            </button>
+                        )}
+
+                        <button
+                            onClick={() => p.setShowAddTx(true)}
+                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 11 }}
+                        >
                             <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Новая операция
                         </button>
