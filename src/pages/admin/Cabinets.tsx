@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { LOCATIONS, CABINET_SERVICES } from '../../utils/data';
 import { useBookingStore } from '../../store/bookingStore';
-import { MapPin, Users, Ruler, Settings, ImageOff } from 'lucide-react';
+import { MapPin, Users, Ruler, Settings, ImageOff, Eye, EyeOff } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'sonner';
 import { ResourceModal } from '../../components/admin/ResourceModal';
+import { locationsApi } from '../../api/locations';
 import type { Resource } from '../../types';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
@@ -27,16 +29,32 @@ const ghcH1: React.CSSProperties = {
 };
 
 export function AdminCabinets() {
-        const { resources, fetchResources } = useBookingStore();
+    const { resources, fetchResources } = useBookingStore();
     const [filterLocation, setFilterLocation] = useState<string | 'all'>('all');
 
     // Edit State
     const [editingResource, setEditingResource] = useState<Resource | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
+    // Location activity map (branch → isActive). Hidden branches still appear
+    // in this admin view so owner can toggle them back on — clients only see
+    // the backend-filtered list.
+    const [locationActive, setLocationActive] = useState<Record<string, boolean>>({});
+    const [togglingLocation, setTogglingLocation] = useState<string | null>(null);
+
+    const loadLocationStatus = useCallback(async () => {
+        try {
+            const all = await locationsApi.getAllLocations();
+            setLocationActive(Object.fromEntries(all.map(l => [l.id, l.isActive !== false])));
+        } catch {
+            // Non-fatal — tab toggles just won't appear until loaded.
+        }
+    }, []);
+
     useEffect(() => {
         fetchResources();
-    }, [fetchResources]);
+        loadLocationStatus();
+    }, [fetchResources, loadLocationStatus]);
 
     const filteredResources = filterLocation === 'all'
         ? resources
@@ -45,6 +63,31 @@ export function AdminCabinets() {
     const handleEdit = (resource: Resource) => {
         setEditingResource(resource);
         setIsModalOpen(true);
+    };
+
+    const handleToggleLocation = async (locationId: string) => {
+        const current = locationActive[locationId] ?? true;
+        const next = !current;
+        const locName = LOCATIONS.find(l => l.id === locationId)?.name ?? locationId;
+        const verb = next ? 'активировать' : 'скрыть';
+        if (!window.confirm(
+            `Точно ${verb} локацию «${locName}»?\n\n` +
+            (next
+                ? 'Клиенты снова увидят её в списке и смогут бронировать.'
+                : 'Клиенты перестанут видеть эту локацию и её кабинеты — ни на сайте, ни в wizard-е бронирования. Уже созданные брони остаются в силе.')
+        )) return;
+        setTogglingLocation(locationId);
+        try {
+            await locationsApi.setActive(locationId, next);
+            setLocationActive(prev => ({ ...prev, [locationId]: next }));
+            // Cabinets list needs a refetch — hidden branch now excluded/included.
+            await fetchResources();
+            toast.success(next ? `«${locName}» снова видна клиентам` : `«${locName}» скрыта от клиентов`);
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Не удалось переключить');
+        } finally {
+            setTogglingLocation(null);
+        }
     };
 
     return (
@@ -57,6 +100,9 @@ export function AdminCabinets() {
             editingResource={editingResource}
             isModalOpen={isModalOpen}
             setIsModalOpen={setIsModalOpen}
+            locationActive={locationActive}
+            togglingLocation={togglingLocation}
+            onToggleLocation={handleToggleLocation}
         />
     );
 }
@@ -74,6 +120,9 @@ interface GridHouseCabinetsProps {
     editingResource: Resource | null;
     isModalOpen: boolean;
     setIsModalOpen: (v: boolean) => void;
+    locationActive: Record<string, boolean>;
+    togglingLocation: string | null;
+    onToggleLocation: (id: string) => void;
 }
 
 function GridHouseCabinets({
@@ -84,6 +133,9 @@ function GridHouseCabinets({
     editingResource,
     isModalOpen,
     setIsModalOpen,
+    locationActive,
+    togglingLocation,
+    onToggleLocation,
 }: GridHouseCabinetsProps) {
     const total = String(filteredResources.length).padStart(3, '0');
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -147,6 +199,64 @@ function GridHouseCabinets({
                     );
                 })}
             </div>
+
+            {/* ── Location visibility toggle — shown only when a specific
+                branch is selected. Lets owner hide/unhide the whole branch
+                from clients (wizard, public catalog, filters). ── */}
+            {filterLocation !== 'all' && (() => {
+                const loc = LOCATIONS.find(l => l.id === filterLocation);
+                if (!loc) return null;
+                const isActive = locationActive[filterLocation] ?? true;
+                const busy = togglingLocation === filterLocation;
+                return (
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 16,
+                            padding: narrow ? '12px 0' : '16px 0',
+                            marginBottom: narrow ? 16 : 24,
+                            borderBottom: ghcHairline,
+                            flexWrap: 'wrap',
+                        }}
+                    >
+                        <div>
+                            <div style={{ ...ghcMono, marginBottom: 4 }}>
+                                Видимость локации · {loc.name}
+                            </div>
+                            <div style={{ fontFamily: GH_SANS, fontSize: 13, color: GH.ink60 }}>
+                                {isActive
+                                    ? 'Клиенты видят локацию и её кабинеты в каталоге и при бронировании.'
+                                    : 'Скрыта от клиентов. Админ по-прежнему видит всё здесь.'}
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => onToggleLocation(filterLocation)}
+                            disabled={busy}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                letterSpacing: '0.18em',
+                                textTransform: 'uppercase',
+                                padding: '10px 16px',
+                                border: `1px solid ${isActive ? GH.ink : GH.ink10}`,
+                                background: isActive ? 'transparent' : GH.ink,
+                                color: isActive ? GH.ink : GH.paper,
+                                cursor: busy ? 'wait' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                opacity: busy ? 0.6 : 1,
+                            }}
+                        >
+                            {isActive ? <EyeOff size={12} /> : <Eye size={12} />}
+                            {isActive ? 'Скрыть локацию' : 'Показать клиентам'}
+                        </button>
+                    </div>
+                );
+            })()}
 
             {/* ── Grid / Empty state ── */}
             {filteredResources.length === 0 ? (

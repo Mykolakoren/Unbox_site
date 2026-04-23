@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from app.db.session import get_session
 from app.models.location import Location, LocationRead, LocationCreate, LocationUpdate
@@ -12,9 +12,18 @@ router = APIRouter()
 def read_locations(
     skip: int = 0,
     limit: int = 100,
+    include_inactive: bool = Query(
+        False,
+        description="Admins pass true to see locations marked as hidden/inactive "
+        "(is_active=False). Client/public requests should leave this default — "
+        "so a deactivated branch disappears from booking catalogs and filters.",
+    ),
     session: Session = Depends(get_session)
 ):
-    locations = session.exec(select(Location).offset(skip).limit(limit)).all()
+    stmt = select(Location)
+    if not include_inactive:
+        stmt = stmt.where(Location.is_active == True)  # noqa: E712
+    locations = session.exec(stmt.offset(skip).limit(limit)).all()
     return locations
 
 @router.get("/{location_id}", response_model=LocationRead)
