@@ -1076,7 +1076,11 @@ function BookingsChessboard({
                         </tr>
                     </thead>
                     <tbody>
-                        {resources.map(r => {
+                        {/* Excel #82 — filter chessboard rows by the selected
+                            branch. The filter tabs at the top set
+                            mobileLocFilter, but desktop tbody used unfiltered
+                            `resources` and silently ignored the choice. */}
+                        {mobileFilteredResources.map(r => {
                             const cells: React.ReactNode[] = [];
                             let skipUntilIdx = -1;
 
