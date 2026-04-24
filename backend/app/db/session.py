@@ -7,11 +7,12 @@ sqlite_url = f"sqlite:///{sqlite_file_name}"
 
 import os
 
-# Use DATABASE_URL or POSTGRES_URL if set (Production), otherwise SQLite (Local)
-# Vercel Postgres usually sets POSTGRES_URL
+# Prod: Postgres on the DigitalOcean Droplet (localhost:5432/unboxdb).
+# Dev : fall back to a local SQLite file if no DATABASE_URL is set.
 connection_url = settings.DATABASE_URL or os.environ.get("POSTGRES_URL") or sqlite_url
 
-# Fix for Vercel/Neon: "postgres://" -> "postgresql://"
+# Some Postgres providers emit the old "postgres://" scheme; SQLAlchemy 2.x
+# wants the canonical "postgresql://" form. Normalise it.
 if connection_url and connection_url.startswith("postgres://"):
     connection_url = connection_url.replace("postgres://", "postgresql://", 1)
 

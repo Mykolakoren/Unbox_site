@@ -39,17 +39,31 @@ VITE_API_URL=http://127.0.0.1:8000/api/v1
 ```
 
 ## 5. База данных
-По умолчанию локальный бэкенд создаст пустую базу `database.db` (SQLite).
-Если вы хотите работать с **реальной базой** (Neon) локально:
-1.  Скопируйте `DATABASE_URL` из настроек Render.
-2.  Создайте файл `backend/.env` и вставьте туда:
-    ```env
-    DATABASE_URL=postgres://... (ваша ссылка)
-    ```
-    *Осторожно: вы будете менять реальные данные!*
+По умолчанию локальный бэкенд создаст пустую базу `database.db` (SQLite) в папке `backend/`.
+
+Если хотите работать с **продовой** базой локально — можно подключиться к Postgres на Droplet через SSH-туннель:
+
+```bash
+ssh -L 5432:localhost:5432 root@138.68.111.248 -i ~/.ssh/unbox_droplet_ed25519
+# в другом терминале:
+# DATABASE_URL=postgresql://unbox:PASSWORD@localhost:5432/unboxdb
+```
+
+*Осторожно: вы будете менять реальные данные клиентов.*
 
 ## Workflow (Рабочий процесс)
-1.  Пишете код в VS Code.
-2.  Смотрите результат в браузере `localhost:5173`.
-3.  Если всё нравится -> `git add .`, `git commit`, `git push`.
-4.  Деплой на Render/Vercel пойдет автоматически.
+1.  Пишете код, смотрите результат в браузере на `localhost:5173`.
+2.  `git add .`, `git commit`, `git push` в `feature/grid-house` или `main`.
+3.  Деплой на прод — вручную, **скриптом `scripts/deploy.sh`** (см. [DEPLOY.md](./docs/DEPLOY.md)).
+
+## Деплой — коротко
+Продакшн живёт на **DigitalOcean Droplet** `138.68.111.248` (IP — постоянный).
+Автоматического CI нет — деплой через SSH.
+
+```bash
+./scripts/deploy.sh         # фронт + бэк
+./scripts/deploy.sh front   # только фронт
+./scripts/deploy.sh back    # только бэк
+```
+
+Полные детали (пути, сервис, бэкапы, откат) — в [`docs/DEPLOY.md`](./docs/DEPLOY.md).

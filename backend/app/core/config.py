@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     # email is in this list, first login promotes automatically.
     OWNER_EMAILS: str = ""  # e.g. "koren.nikolas@gmail.com,co-founder@gmail.com"
     
-    # Database
-    DATABASE_URL: Optional[str] = None # Will be auto-populated by Vercel Postgres or manual env
+    # Database — set via backend/.env on the Droplet (postgres on localhost).
+    DATABASE_URL: Optional[str] = None
     
     # Google Calendar
     GOOGLE_SERVICE_ACCOUNT_FILE: Optional[str] = None
@@ -56,11 +56,12 @@ class Settings(BaseSettings):
     CALENDAR_ID_CAPSULE_1: Optional[str] = None
     CALENDAR_ID_CAPSULE_2: Optional[str] = None
 
-    # CORS — разрешённые домены (добавьте через env BACKEND_CORS_ORIGINS='["..."]')
+    # CORS — разрешённые домены. Прод — unbox.com.ge (DigitalOcean Droplet).
+    # Локалка — Vite dev-сервер на 5173/5174/5175.
+    # Дополнить можно через env BACKEND_CORS_ORIGINS='["..."]'.
     BACKEND_CORS_ORIGINS: List[str] = [
         "https://unbox.com.ge",
         "https://www.unbox.com.ge",
-        "https://unboxcrm.vercel.app",
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
