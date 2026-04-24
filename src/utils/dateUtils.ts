@@ -33,3 +33,31 @@ export function formatBatumi(d: string | Date, fmt: string, locale?: Locale): st
     const date = typeof d === 'string' ? parseUTC(d) : d;
     return formatInTimeZone(date, BATUMI_TZ, fmt, locale ? { locale } : undefined);
 }
+
+/**
+ * Format a date only if the input is present and valid. Returns fallback
+ * otherwise — never throws "Invalid time value".
+ *
+ * Shipping data (merged users, imported bookings, CRM sessions from old
+ * exports) regularly has null / undefined / empty-string date fields.
+ * Calling `format(new Date(undefined), …)` throws RangeError and takes the
+ * whole admin page down with an ErrorBoundary. Use this instead:
+ *
+ *   safeFormat(user.registrationDate, 'd.MM.yyyy')  // '' if missing
+ *   safeFormat(booking.date, 'd MMM yyyy', ru, '—') // '—' if missing
+ */
+export function safeFormat(
+    d: string | Date | null | undefined,
+    fmt: string,
+    locale?: Locale,
+    fallback: string = '',
+): string {
+    if (d === null || d === undefined || d === '') return fallback;
+    try {
+        const date = typeof d === 'string' ? new Date(d) : d;
+        if (isNaN(date.getTime())) return fallback;
+        return formatInTimeZone(date, BATUMI_TZ, fmt, locale ? { locale } : undefined);
+    } catch {
+        return fallback;
+    }
+}
