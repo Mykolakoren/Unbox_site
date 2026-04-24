@@ -265,6 +265,21 @@ async def telegram_webhook(
     if first_word == "/start":
         return _handle_start(session, chat_id, text, username)
 
+    # ── /chatid — debug helper, replies with the chat's numeric id.
+    # Works in DMs, groups, and supergroups. Used when setting up the
+    # admin alert channel (we paste this id into TELEGRAM_ADMIN_CHAT_ID).
+    if first_word in ("/chatid", "/getid", "/id"):
+        chat_type = chat.get("type", "?")
+        chat_title = chat.get("title") or chat.get("first_name") or ""
+        body = (
+            f"<b>Chat ID:</b> <code>{chat_id}</code>\n"
+            f"type: <code>{chat_type}</code>"
+        )
+        if chat_title:
+            body += f"\ntitle: <code>{escape(str(chat_title))}</code>"
+        _send(chat_id, body, parse_mode="HTML")
+        return {"ok": True}
+
     # ── Other commands — require a bound user ─────────────────────────────
     user = session.exec(
         select(User).where(User.telegram_id == str(chat_id))
