@@ -259,6 +259,108 @@ def telegram_login(
 from fastapi.responses import RedirectResponse
 from fastapi import Request
 
+
+# Fallback page served when /auth/telegram/callback is hit without a `hash`
+# query parameter. Two scenarios:
+#
+#   1. Telegram returned the payload in the URL fragment (`#tgAuthResult=…`
+#      or `#id=…&hash=…`) rather than query string. Fragments never reach
+#      the server, so we parse them in the browser and repost.
+#   2. The user arrived at the callback URL directly (stale history, new
+#      tab on an old bookmark). No payload anywhere — we just route them
+#      to /login with a gentle note.
+_TG_CALLBACK_FALLBACK_HTML = """<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>Telegram авторизация…</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#FAFAF7;color:#0F0F10;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:20px}
+  .spinner{width:28px;height:28px;margin:0 auto 16px;border:3px solid #E5E5E5;border-top-color:#476D6B;border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .small{font-size:13px;color:#666;margin-top:8px}
+</style></head>
+<body>
+  <div>
+    <div class="spinner"></div>
+    <div id="msg">Завершаем вход через Telegram…</div>
+    <div class="small">Если ничего не происходит — <a href="/login">откройте страницу входа</a>.</div>
+  </div>
+<script>
+(async function() {
+  // 1) Pull params from either fragment or query. Telegram prefers
+  //    fragment when returning from oauth.telegram.org, so prefer it.
+  var frag = window.location.hash || '';
+  var search = window.location.search || '';
+  var payload = null;
+
+  function parseKV(str) {
+    str = str.replace(/^[?#]/, '');
+    var out = {};
+    str.split('&').forEach(function(p) {
+      if (!p) return;
+      var i = p.indexOf('=');
+      var k = decodeURIComponent(i < 0 ? p : p.slice(0, i));
+      var v = decodeURIComponent(i < 0 ? '' : p.slice(i + 1));
+      if (k) out[k] = v;
+    });
+    return out;
+  }
+
+  // Telegram's new flow wraps params into tgAuthResult=<base64>.
+  function tryTgAuthResult(str) {
+    var m = str.match(/[#&?]tgAuthResult=([^&#]+)/);
+    if (!m) return null;
+    try {
+      // Telegram uses base64url — normalise to base64 for atob.
+      var b = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b.length % 4) b += '=';
+      return JSON.parse(atob(b));
+    } catch (e) { return null; }
+  }
+
+  payload = tryTgAuthResult(frag) || tryTgAuthResult(search);
+  if (!payload) {
+    var kv = Object.assign({}, parseKV(search), parseKV(frag));
+    if (kv.hash) payload = kv;
+  }
+
+  if (!payload || !payload.hash) {
+    document.getElementById('msg').textContent =
+      'Ссылка авторизации просрочена. Нажмите «Войти через Telegram» ещё раз.';
+    setTimeout(function(){ window.location.replace('/login'); }, 2500);
+    return;
+  }
+
+  // 2) Hand off to the POST endpoint which re-verifies HMAC.
+  try {
+    var resp = await fetch('/api/v1/auth/telegram', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    var data = await resp.json();
+    if (!resp.ok) {
+      document.getElementById('msg').textContent =
+        data.detail || 'Не удалось войти через Telegram.';
+      setTimeout(function(){ window.location.replace('/login'); }, 2500);
+      return;
+    }
+    var token = data.access_token || (data.accessToken);
+    if (!token) throw new Error('no token');
+    try { window.localStorage.setItem('token', token); } catch (e) {}
+    window.location.replace('/dashboard?source=telegram');
+  } catch (err) {
+    document.getElementById('msg').textContent =
+      'Сбой при авторизации. Попробуйте ещё раз.';
+    setTimeout(function(){ window.location.replace('/login'); }, 2500);
+  }
+})();
+</script>
+<noscript><p>Включите JavaScript или <a href="/login">войдите через форму</a>.</p></noscript>
+</body></html>"""
+
+
 @router.get("/telegram/callback")
 def telegram_login_callback(
     request: Request,
@@ -273,9 +375,18 @@ def telegram_login_callback(
     # Get all query params
     params = dict(request.query_params)
     hash_val = params.pop("hash", None)
-    
+
     if not hash_val:
-        raise HTTPException(status_code=400, detail="Missing hash parameter")
+        # Fallback — Telegram sometimes returns the auth payload in the URL
+        # fragment (#tgAuthResult=base64 / #hash=...) instead of query. Frag-
+        # ments don't reach the server, so we respond with a tiny HTML page
+        # that reads the fragment in the browser, reposts it to POST
+        # /auth/telegram, stores the token, and redirects into the SPA.
+        # Also covers "user opened the callback URL directly" (stale history
+        # tab) — they'll be cleanly bounced to /login with a friendly message
+        # instead of seeing a JSON 400.
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=_TG_CALLBACK_FALLBACK_HTML)
     
     # Sort keys alphabetically and prepare string
     data_check_arr = []
