@@ -199,6 +199,154 @@ def send_reminders_endpoint(
     }
 
 
+# ── POST /telegram/daily-summary ──────────────────────────────────────────────
+# Runs once a day (cron at 09:00 Tbilisi = 05:00 UTC) to post the previous
+# day's totals to the admin group:
+#   • bookings: created / cancelled / by branch
+#   • cashbox : income / expense / balances by payment method
+# Same secret as /send-reminders so ops can cron it without new keys.
+
+@router.post("/daily-summary")
+def daily_summary_endpoint(
+    secret: Optional[str] = None,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None) or settings.TELEGRAM_BOT_TOKEN
+    if not expected:
+        raise HTTPException(status_code=503, detail="Telegram not configured")
+    if secret != expected:
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.models.cashbox_transaction import CashboxTransaction
+
+    # "Yesterday" is the full Tbilisi (UTC+4) calendar day ending at the most
+    # recent midnight Tbilisi time. Convert that window back to naive UTC to
+    # match what the DB stores.
+    TBS = _td(hours=4)
+    now_utc = _dt.utcnow()
+    now_tbs = now_utc + TBS
+    today_tbs_midnight_utc = (now_tbs.replace(hour=0, minute=0, second=0, microsecond=0) - TBS)
+    yesterday_start = today_tbs_midnight_utc - _td(days=1)
+    yesterday_end = today_tbs_midnight_utc
+    date_label = (yesterday_start + TBS).strftime("%d.%m.%Y")
+
+    # ── Bookings summary ──
+    bookings = session.exec(
+        select(Booking).where(
+            Booking.created_at >= yesterday_start,
+            Booking.created_at < yesterday_end,
+        )
+    ).all()
+    total_bookings = len(bookings)
+    cancelled = [b for b in bookings if b.status == "cancelled"]
+
+    # Locations resolved once
+    loc_names: dict = {}
+    for loc in session.exec(select(Location)).all():
+        loc_names[loc.id] = loc.name
+
+    by_loc: dict = {}
+    by_loc_revenue: dict = {}
+    for b in bookings:
+        if b.status == "cancelled":
+            continue
+        name = loc_names.get(b.location_id, b.location_id or "—")
+        by_loc[name] = by_loc.get(name, 0) + 1
+        by_loc_revenue[name] = by_loc_revenue.get(name, 0.0) + float(b.final_price or 0)
+
+    # ── Cashbox summary ──
+    txs = session.exec(
+        select(CashboxTransaction).where(
+            CashboxTransaction.date >= yesterday_start,
+            CashboxTransaction.date < yesterday_end,
+        )
+    ).all()
+    income_by_method: dict = {}
+    expense_by_method: dict = {}
+    income_by_branch: dict = {}
+    for t in txs:
+        amt = float(t.amount or 0)
+        method = t.payment_method or "—"
+        if t.type == "income":
+            income_by_method[method] = income_by_method.get(method, 0.0) + amt
+            br = t.branch or "—"
+            income_by_branch[br] = income_by_branch.get(br, 0.0) + amt
+        elif t.type == "expense":
+            expense_by_method[method] = expense_by_method.get(method, 0.0) + amt
+
+    total_income = sum(income_by_method.values())
+    total_expense = sum(expense_by_method.values())
+
+    # Running balance by method — all-time sum (income − expense) up to end of
+    # yesterday. Gives the "состояние на утро" number admins actually care about.
+    all_tx = session.exec(
+        select(CashboxTransaction).where(CashboxTransaction.date < yesterday_end)
+    ).all()
+    balance_by_method: dict = {}
+    for t in all_tx:
+        method = t.payment_method or "—"
+        amt = float(t.amount or 0)
+        if t.type == "income":
+            balance_by_method[method] = balance_by_method.get(method, 0.0) + amt
+        elif t.type == "expense":
+            balance_by_method[method] = balance_by_method.get(method, 0.0) - amt
+
+    # ── Compose message ──
+    method_label = {
+        "cash": "наличные",
+        "card_tbc": "TBC",
+        "card_bog": "BOG",
+        "bonus": "бонусы",
+        "balance": "баланс клиента",
+    }
+
+    def _fmt_money_dict(d: dict) -> str:
+        if not d:
+            return "—"
+        parts = [f"{method_label.get(k, k)}: <b>{v:g}</b> ₾" for k, v in sorted(d.items(), key=lambda x: -x[1])]
+        return " · ".join(parts)
+
+    def _fmt_count_dict(d: dict) -> str:
+        if not d:
+            return "—"
+        return " · ".join(f"{k}: <b>{v}</b>" for k, v in sorted(d.items(), key=lambda x: -x[1]))
+
+    lines = [
+        f"📊 <b>Сводка за {date_label}</b>",
+        "",
+        "<b>Бронирования</b>",
+        f"• Всего создано: <b>{total_bookings}</b> (из них отмен: <b>{len(cancelled)}</b>)",
+    ]
+    if by_loc:
+        lines.append(f"• По филиалам: {_fmt_count_dict(by_loc)}")
+    if by_loc_revenue:
+        loc_rev = " · ".join(f"{k}: <b>{v:g}</b> ₾" for k, v in sorted(by_loc_revenue.items(), key=lambda x: -x[1]))
+        lines.append(f"• Выручка (по броням): {loc_rev}")
+
+    lines.append("")
+    lines.append("<b>Касса</b>")
+    lines.append(f"• Приход: <b>{total_income:g}</b> ₾ — {_fmt_money_dict(income_by_method)}")
+    lines.append(f"• Расход: <b>{total_expense:g}</b> ₾ — {_fmt_money_dict(expense_by_method)}")
+    if income_by_branch:
+        br_line = " · ".join(f"{k}: <b>{v:g}</b> ₾" for k, v in sorted(income_by_branch.items(), key=lambda x: -x[1]))
+        lines.append(f"• Приход по филиалам: {br_line}")
+
+    lines.append("")
+    lines.append("<b>Остатки на утро</b>")
+    lines.append(f"• {_fmt_money_dict({k: round(v, 2) for k, v in balance_by_method.items()})}")
+
+    sent = telegram_service.send_admin_alert("\n".join(lines))
+    return {
+        "sent": sent,
+        "date": date_label,
+        "bookings": total_bookings,
+        "cancelled": len(cancelled),
+        "income": total_income,
+        "expense": total_expense,
+    }
+
+
 # ── POST /telegram/link-token ─────────────────────────────────────────────────
 
 @router.post("/link-token")
