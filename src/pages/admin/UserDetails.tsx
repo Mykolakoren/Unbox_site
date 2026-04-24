@@ -3,7 +3,7 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
@@ -54,6 +54,12 @@ export function AdminUserDetails() {
     const [isTopupOpen, setIsTopupOpen] = useState(false);
     const [isEditingExpiry, setIsEditingExpiry] = useState(false);
     const [editExpiryDate, setEditExpiryDate] = useState('');
+    // Excel #84 — inline display-name editing. Used when the backend-derived
+    // name ("Галина") is too short to tell clients apart in schedules, and
+    // admins want to extend it ("Галина Иващенко").
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editName, setEditName] = useState('');
+    const [savingName, setSavingName] = useState(false);
     const [topupForm, setTopupForm] = useState({ hours: '', amount: '', payment_method: 'cash', note: '' });
     const [topupSaving, setTopupSaving] = useState(false);
 
@@ -311,9 +317,75 @@ export function AdminUserDetails() {
                         </button>
                         <div style={{ flex: 1 }}>
                             <p style={{ ...ghudMono, color: GH.ink30, marginBottom: 6 }}>CLIENT PROFILE</p>
-                            <h1 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0, marginBottom: 8 }}>
-                                {user.name}
-                            </h1>
+                            {isEditingName ? (
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                                    <input
+                                        autoFocus
+                                        value={editName}
+                                        onChange={(e) => setEditName(e.target.value)}
+                                        onKeyDown={async (e) => {
+                                            if (e.key === 'Escape') { setIsEditingName(false); return; }
+                                            if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                                        }}
+                                        placeholder="Имя для расписания (например: Галина Иващенко)"
+                                        style={{
+                                            flex: 1,
+                                            fontSize: 'clamp(20px, 2.6vw, 30px)',
+                                            fontWeight: 700,
+                                            letterSpacing: '-0.02em',
+                                            padding: '4px 8px',
+                                            border: `1px solid ${GH.ink}`,
+                                            background: GH.paper,
+                                            fontFamily: GH_SANS,
+                                            outline: 'none',
+                                        }}
+                                    />
+                                    <button
+                                        onClick={async () => {
+                                            const trimmed = editName.trim();
+                                            if (!trimmed || trimmed === user.name || savingName) {
+                                                setIsEditingName(false);
+                                                return;
+                                            }
+                                            setSavingName(true);
+                                            try {
+                                                const { usersApi } = await import('../../api/users');
+                                                await usersApi.updateUser(user.id, { name: trimmed });
+                                                toast.success('Имя обновлено');
+                                                await useUserStore.getState().fetchUsers();
+                                                setIsEditingName(false);
+                                            } catch (err: any) {
+                                                toast.error(err?.response?.data?.detail || 'Не удалось сохранить');
+                                            } finally {
+                                                setSavingName(false);
+                                            }
+                                        }}
+                                        disabled={savingName}
+                                        title="Сохранить"
+                                        style={{ padding: 8, background: GH.ink, color: GH.paper, border: 'none', cursor: savingName ? 'wait' : 'pointer' }}
+                                    >
+                                        {savingName ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                                    </button>
+                                    <button
+                                        onClick={() => setIsEditingName(false)}
+                                        title="Отмена"
+                                        style={{ padding: 8, background: 'transparent', color: GH.ink60, border: `1px solid ${GH.ink10}`, cursor: 'pointer' }}
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <h1 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0, marginBottom: 8, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                                    <span>{user.name || '(без имени)'}</span>
+                                    <button
+                                        onClick={() => { setEditName(user.name || ''); setIsEditingName(true); }}
+                                        title="Изменить отображаемое имя (для расписания)"
+                                        style={{ padding: 4, background: 'transparent', border: 'none', color: GH.ink30, cursor: 'pointer', display: 'inline-flex' }}
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                </h1>
+                            )}
                             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                                 <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px', background: GH.ink5, color: GH.ink60 }}>
                                     {(user.role || 'user').toUpperCase()}
