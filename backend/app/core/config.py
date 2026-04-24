@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # without having to rotate the bot token itself.
     TELEGRAM_REMINDER_SECRET: Optional[str] = None
 
+    # Private group where admin alerts land (new booking via bot, /help
+    # requests from clients, fallback "bot didn't understand", daily
+    # summary). Create the group, add @Unbox_Booking_G_Bot as admin,
+    # /chatid in the group → paste the number here (e.g. -1001234567890).
+    TELEGRAM_ADMIN_CHAT_ID: Optional[str] = None
+
     # First Superuser (for auto-creation on deploy) — MUST be overridden via
     # env vars in production. The literal "CHANGE_ME_ON_FIRST_DEPLOY" default
     # trips the guard in db.init_data so the seed is skipped if it leaks through.
