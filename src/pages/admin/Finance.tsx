@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, X, Sun } from 'lucide-react';
 import {
@@ -132,6 +132,23 @@ export function AdminFinance() {
         fetchAnalytics();
     }, [fetchBalance, fetchCategories, fetchShiftReports, fetchAnalytics, selectedBranch]);
 
+    // Excel #81 — disable "Открыть смену" when a shift is already open in
+    // the selected branch (or anywhere if "Все филиалы"). Without this,
+    // an active button when the shift is already open looks like "did
+    // nothing happen? let me click again" — which then spawns duplicate
+    // open events.
+    const [currentOpenShift, setCurrentOpenShift] = useState<any | null>(null);
+    const refetchShiftState = useCallback(async () => {
+        try {
+            const { cashboxApi } = await import('../../api/cashbox');
+            const open = await cashboxApi.getCurrentOpenShift(selectedBranch || undefined);
+            setCurrentOpenShift(open);
+        } catch {
+            setCurrentOpenShift(null);
+        }
+    }, [selectedBranch]);
+    useEffect(() => { refetchShiftState(); }, [refetchShiftState]);
+
     const refetchTransactions = () => {
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
         const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
@@ -185,6 +202,8 @@ export function AdminFinance() {
                 fetchBalance={fetchBalance}
                 fetchTransactions={fetchTransactions}
                 yesterdayShiftStatus={yesterdayShiftStatus}
+                currentOpenShift={currentOpenShift}
+                refetchShiftState={refetchShiftState}
             />
         );
 }
@@ -217,6 +236,8 @@ type GHAFProps = {
     fetchBalance: (branch?: string) => void;
     fetchTransactions: (params?: any) => void;
     yesterdayShiftStatus: 'closed' | 'missed';
+    currentOpenShift: any | null;
+    refetchShiftState: () => void;
 };
 
 function GHFSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
@@ -353,25 +374,41 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 background: GH.paper,
                             }}
                         >
-                            <button
-                                onClick={() => p.setShowOpenShift(true)}
-                                title="Зафиксировать начало рабочей смены"
-                                style={{
-                                    fontFamily: GH_MONO,
-                                    fontSize: 10,
-                                    letterSpacing: '0.16em',
-                                    textTransform: 'uppercase',
-                                    background: 'transparent',
-                                    color: GH.ink,
-                                    border: 'none',
-                                    borderRight: `1px solid ${GH.ink}`,
-                                    padding: '10px 14px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                Открыть
-                            </button>
+                            {(() => {
+                                // Excel #81 — disable when a shift is already
+                                // open for the selected scope. Visually: faded
+                                // label + "cursor: not-allowed" so админ
+                                // видит что кнопка не «ничего не делает»,
+                                // а «уже нечего делать».
+                                const shiftOpen = !!p.currentOpenShift;
+                                return (
+                                    <button
+                                        onClick={() => { if (!shiftOpen) p.setShowOpenShift(true); }}
+                                        disabled={shiftOpen}
+                                        title={
+                                            shiftOpen
+                                                ? 'Смена уже открыта — кнопка заблокирована'
+                                                : 'Зафиксировать начало рабочей смены'
+                                        }
+                                        style={{
+                                            fontFamily: GH_MONO,
+                                            fontSize: 10,
+                                            letterSpacing: '0.16em',
+                                            textTransform: 'uppercase',
+                                            background: 'transparent',
+                                            color: shiftOpen ? GH.ink30 : GH.ink,
+                                            border: 'none',
+                                            borderRight: `1px solid ${GH.ink}`,
+                                            padding: '10px 14px',
+                                            cursor: shiftOpen ? 'not-allowed' : 'pointer',
+                                            opacity: shiftOpen ? 0.55 : 1,
+                                        }}
+                                    >
+                                        <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                        {shiftOpen ? 'Открыта' : 'Открыть'}
+                                    </button>
+                                );
+                            })()}
                             <select
                                 value={p.selectedBranch}
                                 onChange={e => p.setSelectedBranch(e.target.value)}

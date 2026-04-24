@@ -171,7 +171,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                         <span className="text-gray-600 text-sm truncate max-w-[220px] block">{tx.description || '—'}</span>
                                     </td>
                                     <td className="py-3 px-3 align-top whitespace-nowrap">
-                                        <span className="text-xs text-gray-400">{tx.adminName}</span>
+                                        <span className="text-xs text-gray-600">{tx.adminName || '—'}</span>
                                     </td>
                                     <td className="py-3 pr-2 pl-3 align-top text-right">
                                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
@@ -279,9 +279,15 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                 </div>
                             )}
 
-                            {/* Admin name — subtle */}
+                            {/* Admin name — legible on mobile too (Excel #78 —
+                                "исчез столбец кто проводил операцию"). On
+                                desktop this lives in its own column; on
+                                mobile it's a dedicated row with a label. */}
                             {tx.adminName && (
-                                <div className="text-[10px] text-gray-300 mt-1">{tx.adminName}</div>
+                                <div className="text-[11px] text-gray-500 mt-1.5 flex items-center gap-1">
+                                    <span className="text-gray-400">Провёл:</span>
+                                    <span className="font-medium text-gray-700">{tx.adminName}</span>
+                                </div>
                             )}
                         </div>
                     );
