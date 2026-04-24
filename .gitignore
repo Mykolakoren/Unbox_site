@@ -55,6 +55,9 @@ dist/
 credentials.json
 service_account*.json
 *secret*.json
+.secrets.md
+.secrets/
+.agent-secrets*
 
 # ─── Logs ────────────────────────────────────────────────────────────────────
 *.log
