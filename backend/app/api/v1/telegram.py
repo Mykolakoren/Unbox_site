@@ -113,9 +113,17 @@ def send_reminders_endpoint(
     from datetime import datetime as _dt, timedelta as _td
 
     # Scan window: bookings starting in 2h ± 10 minutes that haven't been
-    # reminded yet. Window half-width = 10m keeps us aligned with a 15-minute
-    # cron cadence (so a slot can't slip through between two runs).
-    now = _dt.now()
+    # reminded yet. Window half-width = 10m keeps us aligned with the
+    # every-10-minute cron cadence (so a slot can't slip through two runs).
+    #
+    # Timezone: booking.date + start_time are stored naive as "Tbilisi wall
+    # clock" (clients enter 10:00 meaning 10:00 local). The Droplet runs in
+    # UTC, so datetime.now() returns naive UTC — comparing those two produces
+    # a 4h skew (Asia/Tbilisi = UTC+4, no DST). Explicitly shift "now" into
+    # Tbilisi wall-clock so both sides of the comparison are in the same
+    # frame of reference.
+    TBS_OFFSET = _td(hours=4)
+    now = _dt.utcnow() + TBS_OFFSET
     target_lower = now + _td(hours=1, minutes=50)
     target_upper = now + _td(hours=2, minutes=10)
 
@@ -182,7 +190,8 @@ def send_reminders_endpoint(
             booking_id=str(booking.id),
         )
         if ok:
-            booking.reminder_sent_at = _dt.now()
+            # Stored in Tbilisi wall-clock to match booking.date/start_time.
+            booking.reminder_sent_at = now
             session.add(booking)
             sent += 1
 
