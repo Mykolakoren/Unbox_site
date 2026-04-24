@@ -269,6 +269,21 @@ class TelegramService:
             logger.error("[tg:network-error] chat_id=%s err=%r", chat_id, e)
             return False
 
+    # ─── Admin alerts (TELEGRAM_ADMIN_CHAT_ID group) ─────────────────────────
+
+    def send_admin_alert(self, text: str, parse_mode: str = "HTML") -> bool:
+        """Post to the private admin group (TELEGRAM_ADMIN_CHAT_ID).
+
+        Used for: new bookings via bot, /help escalations, bot fallbacks,
+        daily summaries. Silently no-ops if the chat id is unset so dev
+        environments don't crash — only prod should have it configured.
+        """
+        chat_id = settings.TELEGRAM_ADMIN_CHAT_ID
+        if not chat_id:
+            logger.debug("[tg:admin-alert] TELEGRAM_ADMIN_CHAT_ID unset, skipping")
+            return False
+        return self._send_message(chat_id=str(chat_id), text=text, parse_mode=parse_mode)
+
     # ─── Excel #58 — cancel / reschedule / reminder ──────────────────────────
 
     def send_booking_cancelled(

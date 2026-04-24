@@ -48,6 +48,7 @@ from app.models.booking import Booking, BookingCreate
 from app.models.location import Location
 from app.models.resource import Resource
 from app.models.user import User
+from app.services.telegram import telegram_service
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +318,21 @@ async def telegram_webhook(
               "Привет! Я бот уведомлений Unbox. "
               "Чтобы получать подтверждения и напоминания, "
               "подключите аккаунт в профиле: https://unbox.com.ge/profile")
+
+    # Admin visibility: unknown input is a signal that either the client
+    # is confused, or they actually want something our bot doesn't do yet.
+    # Useful for discovering what to automate next.
+    try:
+        who = escape(user.name or user.email) if user else "anonymous"
+        preview = escape(text[:200] + ("…" if len(text) > 200 else ""))
+        telegram_service.send_admin_alert(
+            f"⚠️ Бот не понял сообщение\n\n"
+            f"👤 {who} (tg chat_id: <code>{chat_id}</code>)\n"
+            f"💬 <i>{preview}</i>"
+        )
+    except Exception as _e:
+        logger.warning("[tg:admin-alert] fallback alert failed: %r", _e)
+
     return {"ok": True}
 
 
@@ -550,6 +566,18 @@ def _handle_help(chat_id: int, user: Optional[User]) -> dict:
     else:
         body += "Чтобы получать уведомления и пользоваться командами, подключитесь в профиле: https://unbox.com.ge/profile"
     _send(chat_id, body, parse_mode="HTML")
+
+    # Escalate to admin group so someone can proactively reach out.
+    try:
+        who = escape(user.name or user.email) if user else "anonymous"
+        telegram_service.send_admin_alert(
+            f"🆘 /help от клиента\n\n"
+            f"👤 {who} (tg chat_id: <code>{chat_id}</code>)\n"
+            f"→ клиент нажал /help или попросил администратора"
+        )
+    except Exception as _e:
+        logger.warning("[tg:admin-alert] /help alert failed: %r", _e)
+
     return {"ok": True}
 
 
@@ -1241,6 +1269,25 @@ def _book_do_confirm(
         parse_mode="HTML",
     )
     _answer_callback(callback_id, "Готово!")
+
+    # ── Admin alert: new booking through bot ──
+    try:
+        who = escape(user.name or user.email or "—")
+        badge = "⏳ На согласовании" if status == "pending_approval" else "🆕 Новая бронь"
+        price_line = (
+            f"\n💸 {final_price:g} ₾" if final_price is not None and applied_rule != "SUBSCRIPTION"
+            else "\n🎫 Абонемент" if applied_rule == "SUBSCRIPTION" else ""
+        )
+        telegram_service.send_admin_alert(
+            f"{badge} — через TG-бот\n\n"
+            f"👤 {who}\n"
+            f"🏢 {escape(location.name)} · {escape(resource.name)}\n"
+            f"📅 {day_label}  ⏰ {time_str}–{end_label}"
+            f"{price_line}"
+        )
+    except Exception as _e:
+        logger.warning("[tg:admin-alert] booking alert failed: %r", _e)
+
     return {"ok": True}
 
 
