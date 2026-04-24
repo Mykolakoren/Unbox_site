@@ -6,6 +6,7 @@ import { Card } from '../../components/ui/Card';
 import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { safeFormat } from '../../utils/dateUtils';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
@@ -324,11 +325,18 @@ export function AdminUserDetails() {
                                     {currentStatusConfig.label.toUpperCase()}
                                 </span>
                                 {user.email && <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>{user.email}</span>}
-                                {user.registrationDate && (
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
-                                        с {format(new Date(user.registrationDate), 'd.MM.yyyy')}
-                                    </span>
-                                )}
+                                {user.registrationDate && (() => {
+                                    // Defensive: after /users/merge the target user may
+                                    // carry over a malformed registrationDate from the
+                                    // absorbed account — don't let it crash the page.
+                                    const formatted = safeFormat(user.registrationDate, 'd.MM.yyyy');
+                                    if (!formatted) return null;
+                                    return (
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+                                            с {formatted}
+                                        </span>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>
@@ -448,13 +456,13 @@ export function AdminUserDetails() {
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-unbox-grey">Первый визит</span>
                                 <span className="font-medium text-unbox-dark">
-                                    {firstBookingDate ? format(new Date(firstBookingDate), 'd MMM yyyy', { locale: ru }) : '—'}
+                                    {safeFormat(firstBookingDate, 'd MMM yyyy', ru, '—')}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-unbox-grey">Последний визит</span>
                                 <span className="font-medium text-unbox-dark">
-                                    {lastVisitDate ? format(new Date(lastVisitDate), 'd MMM yyyy', { locale: ru }) : '—'}
+                                    {safeFormat(lastVisitDate, 'd MMM yyyy', ru, '—')}
                                 </span>
                             </div>
                         </div>
@@ -647,7 +655,7 @@ export function AdminUserDetails() {
                                         </div>
                                         <div className="text-[10px] text-unbox-grey">
                                             {user.archivedAt
-                                                ? `В архиве с ${new Date(user.archivedAt).toLocaleDateString('ru-RU')}`
+                                                ? `В архиве с ${safeFormat(user.archivedAt, 'd.MM.yyyy', undefined, '—')}`
                                                 : 'Заблокирует вход, сохранит всю историю. Обратимо.'}
                                         </div>
                                     </div>
@@ -841,7 +849,7 @@ export function AdminUserDetails() {
                                         )}
                                         {crmAccess.submittedAt && (
                                             <div className="text-xs text-unbox-grey">
-                                                Подано: {format(new Date(crmAccess.submittedAt), 'd MMMM yyyy, HH:mm', { locale: ru })}
+                                                Подано: {safeFormat(crmAccess.submittedAt, 'd MMMM yyyy, HH:mm', ru, '—')}
                                             </div>
                                         )}
                                         <div className="flex flex-wrap gap-2 pt-2">
@@ -1014,12 +1022,13 @@ export function AdminUserDetails() {
                                                         ) : (
                                                             <button
                                                                 onClick={() => {
-                                                                    setEditExpiryDate(format(new Date(user.subscription!.expiryDate), 'yyyy-MM-dd'));
+                                                                    const iso = safeFormat(user.subscription!.expiryDate, 'yyyy-MM-dd');
+                                                                    if (iso) setEditExpiryDate(iso);
                                                                     setIsEditingExpiry(true);
                                                                 }}
                                                                 className="hover:text-purple-900 underline decoration-dotted"
                                                             >
-                                                                до {format(new Date(user.subscription.expiryDate), 'd.MM.yyyy')}
+                                                                до {safeFormat(user.subscription.expiryDate, 'd.MM.yyyy', undefined, '—')}
                                                             </button>
                                                         )}
                                                     </div>
@@ -1141,7 +1150,7 @@ export function AdminUserDetails() {
                                                 <CalendarClock size={14} className="text-green-600" />
                                                 <span className="text-green-800">
                                                     Действует до{' '}
-                                                    <b>{format(new Date(crmAccess.expiresAt), 'd MMMM yyyy', { locale: ru })}</b>
+                                                    <b>{safeFormat(crmAccess.expiresAt, 'd MMMM yyyy', ru, '—')}</b>
                                                     {crmAccess.daysRemaining !== null && (
                                                         <span className="text-green-600 ml-1">({crmAccess.daysRemaining} дн.)</span>
                                                     )}
@@ -1190,7 +1199,7 @@ export function AdminUserDetails() {
                                                         {RESOURCES.find(r => r.id === item.resourceId)?.name || 'Кабинет'}
                                                     </div>
                                                     <div className="text-xs text-unbox-grey">
-                                                        {format(new Date(item.date), 'd MMM yyyy', { locale: ru })} · {item.startTime}
+                                                        {safeFormat(item.date, 'd MMM yyyy', ru, '—')} · {item.startTime}
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
