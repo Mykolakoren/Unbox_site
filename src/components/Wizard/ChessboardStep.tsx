@@ -269,22 +269,36 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
     const isSelected = (resId: string, timeStr: string) => selectedSlots.includes(`${resId}|${timeStr}`);
 
-    // Build per-resource block info (supports multiple blocks across different resources)
+    // Build CONTIGUOUS chunks per resource so each independent period in the
+    // same resource (e.g. cab8: 12:30-13:30 AND 14:30-15:30) is its own
+    // block — separate × button, separate resize handles, no cross-talk.
     const selectedBlocks = useMemo(() => {
         const byResource: Record<string, number[]> = {};
         for (const slot of selectedSlots) {
             const [resId, timeStr] = slot.split('|');
             const idx = timeSlots.indexOf(timeStr);
             if (idx === -1) continue;
-            if (!byResource[resId]) byResource[resId] = [];
-            byResource[resId].push(idx);
+            (byResource[resId] ||= []).push(idx);
         }
-        return Object.entries(byResource).map(([resId, indices]) => {
-            const sorted = [...indices].sort((a, b) => a - b);
-            return { resId, start: sorted[0], end: sorted[sorted.length - 1] };
-        });
+        const blocks: { resId: string; start: number; end: number }[] = [];
+        for (const [resId, raw] of Object.entries(byResource)) {
+            const sorted = [...raw].sort((a, b) => a - b);
+            let cur: number[] = [];
+            for (const i of sorted) {
+                if (cur.length === 0 || i === cur[cur.length - 1] + 1) cur.push(i);
+                else { blocks.push({ resId, start: cur[0], end: cur[cur.length - 1] }); cur = [i]; }
+            }
+            if (cur.length) blocks.push({ resId, start: cur[0], end: cur[cur.length - 1] });
+        }
+        return blocks;
     }, [selectedSlots, timeSlots]);
 
+    /** Find the chunk for a (resource, time-index) pair. Used by the cell
+     *  renderer to know "is this slot the start/end of its block?" */
+    const getBlockAt = (resId: string, idx: number) =>
+        selectedBlocks.find(b => b.resId === resId && idx >= b.start && idx <= b.end) ?? null;
+    /** Legacy helper — first block of a resource. Only safe for resize ops
+     *  that should target the chunk containing the dragged slot. */
     const getBlockForResource = (resId: string) => selectedBlocks.find(b => b.resId === resId) ?? null;
 
     // Overlap detection: two blocks overlap if any time slot appears in both
@@ -344,8 +358,12 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 store.addSlotRange(resId, [timeStr]);
             }
         } else {
-            // For move/resize, find the block for exactly this resource
-            const block = getBlockForResource(resId);
+            // For move/resize, find the chunk that actually contains the
+            // dragged slot — not just the first chunk in this resource.
+            // Otherwise a resize on the second period would silently
+            // reshape the first one.
+            const idx = timeSlots.indexOf(timeStr);
+            const block = getBlockAt(resId, idx) ?? getBlockForResource(resId);
             if (block) dragInitialBlockRef.current = block;
         }
         forceDragUpdate();
@@ -419,7 +437,18 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 if (isSlotBlocked(resId, timeSlots[i])) { hasBlocked = true; break; }
                 newSlots.push(timeSlots[i]);
             }
-            if (!hasBlocked) setSlotRange(resId, newSlots);
+            // Replace ONLY the resized chunk's slots — keep other periods in
+            // the same resource intact. Without this, resizing the second
+            // period in cab8 would silently delete the first.
+            if (!hasBlocked) {
+                const oldChunkIds = new Set<string>();
+                for (let i = dragInitialBlock.start; i <= dragInitialBlock.end; i++) {
+                    oldChunkIds.add(`${resId}|${timeSlots[i]}`);
+                }
+                const survivors = useBookingStore.getState().selectedSlots.filter(s => !oldChunkIds.has(s));
+                const newIds = newSlots.map(t => `${resId}|${t}`);
+                useBookingStore.getState().replaceSlots([...survivors, ...newIds]);
+            }
         }
         else if (dragMode === 'resize-start' && dragInitialBlock) {
             if (dragInitialBlock.resId !== resId) return;
@@ -432,7 +461,15 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 if (isSlotBlocked(resId, timeSlots[i])) { hasBlocked = true; break; }
                 newSlots.push(timeSlots[i]);
             }
-            if (!hasBlocked) setSlotRange(resId, newSlots);
+            if (!hasBlocked) {
+                const oldChunkIds = new Set<string>();
+                for (let i = dragInitialBlock.start; i <= dragInitialBlock.end; i++) {
+                    oldChunkIds.add(`${resId}|${timeSlots[i]}`);
+                }
+                const survivors = useBookingStore.getState().selectedSlots.filter(s => !oldChunkIds.has(s));
+                const newIds = newSlots.map(t => `${resId}|${t}`);
+                useBookingStore.getState().replaceSlots([...survivors, ...newIds]);
+            }
         }
         else if (dragMode === 'move' && dragInitialBlock) {
             const offset = currentIdx - startIdx;
@@ -1235,11 +1272,15 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     const selected = isSelected(r.id, time);
                                     const isHovered = hoverSlot?.resId === r.id && hoverSlot?.timeStr === time;
 
-                                    // Use per-resource block info
-                                    const blockInfo = getBlockForResource(r.id);
-                                    const blockForThisCell = blockInfo && selected ? blockInfo : null;
-                                    const isBlockStart = blockForThisCell && timeSlots.indexOf(time) === blockForThisCell.start;
-                                    const isBlockEnd = blockForThisCell && timeSlots.indexOf(time) === blockForThisCell.end;
+                                    // Look up the chunk containing THIS specific
+                                    // slot, not just the first/biggest in the
+                                    // resource. Required so multiple periods in
+                                    // the same cabinet each get their own
+                                    // start/end markers + delete button.
+                                    const timeIdx = timeSlots.indexOf(time);
+                                    const blockForThisCell = selected ? getBlockAt(r.id, timeIdx) : null;
+                                    const isBlockStart = !!blockForThisCell && timeIdx === blockForThisCell.start;
+                                    const isBlockEnd = !!blockForThisCell && timeIdx === blockForThisCell.end;
                                     const isSingleBlock = isBlockStart && isBlockEnd;
 
                                     // Handlers for resizing
@@ -1316,13 +1357,25 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                             {isBlockEnd && !isSingleBlock && <ResizeHandle type="end" />}
                                                         </div>
 
-                                                        {/* ✕ Delete button — anchored to TOP-RIGHT corner of the end cell */}
-                                                        {isBlockEnd && (
+                                                        {/* ✕ Delete button — anchored to TOP-RIGHT corner of THIS chunk's
+                                                            end cell. Removes only this period, leaving other periods
+                                                            in the same resource (and other resources) untouched. */}
+                                                        {isBlockEnd && blockForThisCell && (
                                                             <button
-                                                                onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); useBookingStore.getState().setSlotRange(r.id, []); }}
-                                                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); useBookingStore.getState().setSlotRange(r.id, []); }}
+                                                                onPointerDown={(e) => {
+                                                                    e.stopPropagation(); e.preventDefault();
+                                                                    const blk = blockForThisCell;
+                                                                    const idsToRemove = new Set<string>();
+                                                                    for (let i = blk.start; i <= blk.end; i++) {
+                                                                        idsToRemove.add(`${r.id}|${timeSlots[i]}`);
+                                                                    }
+                                                                    useBookingStore.getState().replaceSlots(
+                                                                        useBookingStore.getState().selectedSlots.filter(s => !idsToRemove.has(s))
+                                                                    );
+                                                                }}
+                                                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
                                                                 className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:bg-red-600 hover:scale-110 transition-all z-50"
-                                                                title="Удалить"
+                                                                title="Убрать этот период"
                                                             >
                                                                 <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                                                             </button>
