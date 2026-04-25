@@ -7,7 +7,7 @@ import { ru } from 'date-fns/locale';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import { Button } from '../ui/Button';
-import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Clock, X } from 'lucide-react';
 import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 import { isPeakTime } from '../../utils/pricing';
@@ -333,9 +333,16 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         dragInitialSlotsRef.current = [...useBookingStore.getState().selectedSlots];
 
         if (mode === 'new') {
-            // Add/replace slots for THIS resource only — other resources keep their blocks
-            const setSlotRange = useBookingStore.getState().setSlotRange;
-            setSlotRange(resId, [timeStr]);
+            // Excel #24 — toggle behaviour for single clicks. Clicking on a
+            // slot already in the cart removes it; clicking on a free slot
+            // adds it. Drag-extends still adds via handlePointerEnter.
+            const slotId = `${resId}|${timeStr}`;
+            const store = useBookingStore.getState();
+            if (store.selectedSlots.includes(slotId)) {
+                store.replaceSlots(store.selectedSlots.filter(s => s !== slotId));
+            } else {
+                store.addSlotRange(resId, [timeStr]);
+            }
         } else {
             // For move/resize, find the block for exactly this resource
             const block = getBlockForResource(resId);
@@ -375,24 +382,29 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             }
 
             if (!hasBlocked) {
-                // Excel #24 — if user clicked "+ Ещё период" for this resource,
-                // merge the new drag range with the preserved earlier range
-                // instead of replacing it. setSlotRange always overwrites the
-                // resource, so we rebuild the combined list here.
+                // Excel #24 — multi-period in one resource works natively now.
+                // Every drag adds to the cart instead of replacing the
+                // resource's selection. Effects:
+                //   • Drag 10:00-12:00 in cab 5 → выделено
+                //   • Drag 15:00-16:00 in cab 5 → ДОБАВЛЕНО (raньше сбрасывало)
+                //   • Drag 14:00-15:00 in cab 7 → ДОБАВЛЕНО (multi-resource)
+                // Removal: click on a selected slot toggles it off (handled
+                // separately below in handleSlotClick).
+                const addSlotRange = useBookingStore.getState().addSlotRange;
                 const storeState = useBookingStore.getState();
                 if (
                     storeState.pendingAddResourceId === resId &&
                     storeState.preservedResourceSlots.length > 0
                 ) {
+                    // Legacy "+ Ещё период" path from Summary — still supported,
+                    // merges the preserved earlier range with the new drag.
                     const preservedTimes = storeState.preservedResourceSlots
                         .map(s => s.split('|')[1])
                         .filter(Boolean);
-                    const dragTimes = newSlots;
-                    // Drop accidental overlap between preserved and drag; Set de-dupes.
-                    const merged = Array.from(new Set<string>([...preservedTimes, ...dragTimes]));
+                    const merged = Array.from(new Set<string>([...preservedTimes, ...newSlots]));
                     setSlotRange(resId, merged);
                 } else {
-                    setSlotRange(resId, newSlots);
+                    addSlotRange(resId, newSlots);
                 }
             }
         }
@@ -1369,15 +1381,92 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 }}
                 className={isGH ? '' : "rounded-2xl p-4 flex justify-center"}
             >
-                <div style={isGH ? { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } : undefined}
-                     className={isGH ? '' : "w-full flex justify-between items-center"}>
-                    <div style={isGH ? { fontSize: 14, fontWeight: 500, color: GH.ink, fontFamily: GH_SANS } : undefined}
-                         className={isGH ? '' : "text-sm font-medium text-unbox-dark"}>
-                        Выбрано: <span style={isGH ? { fontWeight: 700, color: GH.accent } : undefined}
-                                       className={isGH ? '' : "font-bold text-unbox-green"}>{selectedSlots.length}</span> слотов
-                        {selectedBlocks.length > 1 && <span style={isGH ? { marginLeft: 8, color: GH.ink30 } : undefined}
-                                                             className={isGH ? '' : "ml-2 text-unbox-grey"}>({selectedBlocks.length} кабинета)</span>}
+                <div style={isGH ? { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' } : undefined}
+                     className={isGH ? '' : "w-full flex justify-between items-center gap-4 flex-wrap"}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: 1, minWidth: 0 }}>
+                        {(() => {
+                            // Excel #24 — break the cart into contiguous chips
+                            // per resource so each independent period shows
+                            // separately with its own × remove button.
+                            // E.g. cab5: [10,10:30,15,15:30] → "10:00–11:00"
+                            //                                  "15:00–16:00"
+                            type Chunk = { resId: string; idxs: number[] };
+                            const byRes: Record<string, number[]> = {};
+                            for (const s of selectedSlots) {
+                                const [r, t] = s.split('|');
+                                const i = timeSlots.indexOf(t);
+                                if (i < 0) continue;
+                                (byRes[r] ||= []).push(i);
+                            }
+                            const chunks: Chunk[] = [];
+                            for (const [resId, raw] of Object.entries(byRes)) {
+                                const sorted = [...raw].sort((a, b) => a - b);
+                                let cur: number[] = [];
+                                for (const i of sorted) {
+                                    if (cur.length === 0 || i === cur[cur.length - 1] + 1) {
+                                        cur.push(i);
+                                    } else {
+                                        chunks.push({ resId, idxs: cur });
+                                        cur = [i];
+                                    }
+                                }
+                                if (cur.length) chunks.push({ resId, idxs: cur });
+                            }
+                            if (chunks.length === 0) {
+                                return <span style={{ color: GH.ink30, fontFamily: GH_SANS, fontSize: 14 }}>Выберите слоты — можно несколько в разных кабинетах или несколько периодов в одном</span>;
+                            }
+                            return chunks.map((ch, i) => {
+                                const res = resources.find(r => r.id === ch.resId);
+                                const startT = timeSlots[ch.idxs[0]];
+                                const endIdx = ch.idxs[ch.idxs.length - 1];
+                                const endT = endIdx + 1 < timeSlots.length ? timeSlots[endIdx + 1] : '21:00';
+                                const mins = ch.idxs.length * 30;
+                                return (
+                                    <div key={`${ch.resId}-${i}`}
+                                         style={{
+                                             display: 'inline-flex', alignItems: 'center', gap: 6,
+                                             padding: '6px 8px 6px 12px', borderRadius: 6,
+                                             background: GH.ink5, fontFamily: GH_MONO, fontSize: 11,
+                                             letterSpacing: '0.04em',
+                                         }}>
+                                        <span style={{ color: GH.ink60 }}>{res?.name || ch.resId}</span>
+                                        <span style={{ fontWeight: 700, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>{startT}–{endT}</span>
+                                        <span style={{ color: GH.ink30 }}>· {mins >= 60 ? `${(mins/60).toString().replace(/\.0$/,'')}ч` : `${mins}м`}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const idsToRemove = new Set(ch.idxs.map(j => `${ch.resId}|${timeSlots[j]}`));
+                                                useBookingStore.getState().replaceSlots(
+                                                    selectedSlots.filter(s => !idsToRemove.has(s))
+                                                );
+                                            }}
+                                            title="Убрать этот период"
+                                            style={{
+                                                width: 18, height: 18, borderRadius: '50%', border: 'none',
+                                                background: GH.ink10, color: GH.ink60, cursor: 'pointer',
+                                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                            }}
+                                        >
+                                            <X size={11} />
+                                        </button>
+                                    </div>
+                                );
+                            });
+                        })()}
                     </div>
+                    {selectedSlots.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => useBookingStore.getState().clearCart()}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.1em',
+                                background: 'none', border: 'none', color: GH.ink30,
+                                cursor: 'pointer', textDecoration: 'underline',
+                            }}
+                        >
+                            Очистить
+                        </button>
+                    )}
                     {isGH ? (
                         <button
                             disabled={selectedSlots.length === 0}
@@ -1388,7 +1477,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 color: selectedSlots.length === 0 ? GH.ink30 : '#fff',
                                 fontFamily: GH_SANS, fontSize: 15, fontWeight: 600,
                                 cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
-                                display: 'flex', alignItems: 'center', gap: 8,
+                                display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
                             }}
                         >
                             Далее <ArrowRight size={16} />

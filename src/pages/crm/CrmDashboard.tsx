@@ -23,6 +23,9 @@ import { format, addMonths, subMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { crmApi } from '../../api/crm';
 import { parseUTC } from '../../utils/dateUtils';
+import { useUserStore } from '../../store/userStore';
+import { RESOURCES } from '../../utils/data';
+import { isAfter, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
@@ -142,6 +145,22 @@ interface GHDashProps {
 }
 
 function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMonth, navigate, calendarIdSaved }: GHDashProps) {
+    // Excel #33 — show specialist's own coworking bookings (the cabinets
+    // they've reserved as a renter) on the CRM dashboard alongside their
+    // therapy sessions. Two separate worlds, but admins want one screen
+    // to plan their week.
+    const { bookings, fetchBookings } = useUserStore();
+    useEffect(() => { fetchBookings(); }, [fetchBookings]);
+    const upcomingMyBookings = (() => {
+        const now = new Date();
+        const horizon = addDays(now, 7);
+        return (bookings || [])
+            .filter(b => b.status === 'confirmed' || b.status === 'completed')
+            .map(b => ({ ...b, _dt: parseUTC(b.date) }))
+            .filter(b => isAfter(b._dt, now) && b._dt < horizon)
+            .sort((a, b) => a._dt.getTime() - b._dt.getTime())
+            .slice(0, 8);
+    })();
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
         fontSize: '10px',
@@ -645,6 +664,83 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                 )}
             </section>
 
+            {/* ── My coworking bookings (Excel #33) ── */}
+            <section style={{ marginBottom: '40px' }}>
+                <div style={{
+                    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                    borderBottom: `1px solid ${GH.ink}`, paddingBottom: '14px', flexWrap: 'wrap', gap: 16,
+                }}>
+                    <h2 style={sectionHead}>Мои бронирования кабинетов</h2>
+                    <button
+                        onClick={() => navigate('/dashboard/bookings')}
+                        style={{ ...monoLabel, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: GH.ink }}
+                    >
+                        ВСЕ БРОНИ →
+                    </button>
+                </div>
+                {upcomingMyBookings.length === 0 ? (
+                    <div style={{ padding: '32px 24px', textAlign: 'center', borderBottom: `1px solid ${GH.ink10}` }}>
+                        <div style={monoLabel}>НЕТ ПРЕДСТОЯЩИХ БРОНЕЙ</div>
+                        <div style={{ fontFamily: GH_SANS, fontSize: '14px', color: GH.ink60, marginTop: '8px' }}>
+                            На ближайшие 7 дней вы не арендовали ни одного кабинета.{' '}
+                            <button
+                                onClick={() => navigate('/dashboard/bookings')}
+                                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: GH.ink, textDecoration: 'underline' }}
+                            >
+                                Забронировать
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div>
+                        <div style={{
+                            display: 'grid', gridTemplateColumns: '80px 110px 1fr 100px',
+                            gap: '20px', padding: '14px 4px', borderBottom: `1px solid ${GH.ink10}`,
+                            ...monoLabel,
+                        }}>
+                            <span>ДАТА</span>
+                            <span>ВРЕМЯ</span>
+                            <span>КАБИНЕТ</span>
+                            <span style={{ textAlign: 'right' }}>ЦЕНА</span>
+                        </div>
+                        {upcomingMyBookings.map(b => {
+                            const res = RESOURCES.find(r => r.id === b.resourceId);
+                            const startT = b.startTime || '';
+                            const dur = b.duration || 60;
+                            const [hh, mm] = startT.split(':').map(Number);
+                            const endMins = (hh || 0) * 60 + (mm || 0) + dur;
+                            const endStr = `${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}`;
+                            return (
+                                <div
+                                    key={b.id}
+                                    onClick={() => navigate('/dashboard/bookings')}
+                                    style={{
+                                        display: 'grid', gridTemplateColumns: '80px 110px 1fr 100px',
+                                        gap: '20px', alignItems: 'baseline',
+                                        padding: '16px 4px', borderBottom: `1px solid ${GH.ink10}`,
+                                        cursor: 'pointer', transition: 'background 0.12s',
+                                    }}
+                                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
+                                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                                >
+                                    <div>
+                                        <div style={{ ...monoLabel, color: GH.ink30 }}>{format(b._dt, 'EEE', { locale: ru }).toUpperCase()}</div>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 600 }}>{format(b._dt, 'd MMM', { locale: ru })}</div>
+                                    </div>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                        {startT}–{endStr}
+                                    </div>
+                                    <div style={{ fontFamily: GH_SANS, fontSize: 14 }}>{res?.name || b.resourceId}</div>
+                                    <div style={{ textAlign: 'right', fontFamily: GH_MONO, fontSize: 13, fontWeight: 600 }}>
+                                        {b.finalPrice ? `${b.finalPrice} ₾` : '—'}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </section>
+
             {/* ── Debts table ── */}
             {dashboard?.debtByClient && dashboard.debtByClient.length > 0 && (
                 <section>
@@ -827,6 +923,10 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         { label: 'Добавить клиента', sub: 'Создать новую карточку', path: '/crm/clients' },
                         { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions' },
                         { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard/bookings' },
+                        // Excel #19 — кнопка "Купить абонемент" внутри CRM
+                        // (специалисты часто хотят оформить себе абонемент
+                        // прямо отсюда, не уходя в клиентский кабинет).
+                        { label: 'Купить абонемент', sub: 'Скидка 10–20% на аренду', path: '/subscriptions' },
                         {
                             label: 'Открыть Google Calendar',
                             sub: calendarIdSaved ? 'Ваш личный календарь' : 'Google Calendar',
