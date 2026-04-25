@@ -55,11 +55,12 @@ export function TimelineStep() {
         return () => { cancelled = true; };
     }, [resourceId, date]);
 
-    // Generate slots 09:00 to 21:00 (last slot starts at 20:30)
+    // Generate slots 09:00 to 22:00 (last slot starts at 21:30).
+    // Evening 21:00–22:00 → peak surcharge.
     const slots = useMemo(() => {
         const result = [];
         let time = setMinutes(setHours(startOfToday(), 9), 0);
-        const end = setMinutes(setHours(startOfToday(), 21), 0);
+        const end = setMinutes(setHours(startOfToday(), 22), 0);
 
         while (isBefore(time, end)) {
             result.push(format(time, 'HH:mm'));

@@ -17,11 +17,14 @@ import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 
-// ─── Time Slots: 09:00 – 20:30 (30-min steps) ───────────────────────────────
+// ─── Time Slots: 09:00 – 21:30 (30-min steps) ───────────────────────────────
+// Last bookable slot starts at 21:30 → ends 22:00. Slots 21:00 and 21:30
+// fall into the evening surcharge band (PRICING_CONFIG.peak_hours 20:00–22:00),
+// so they automatically cost +25% — no extra UI logic needed.
 const TIME_SLOTS: string[] = (() => {
     const slots: string[] = [];
     let t = setMinutes(setHours(startOfToday(), 9), 0);
-    const end = setMinutes(setHours(startOfToday(), 21), 0);
+    const end = setMinutes(setHours(startOfToday(), 22), 0);
     while (isBefore(t, end)) {
         slots.push(format(t, 'HH:mm'));
         t = addMinutes(t, 30);

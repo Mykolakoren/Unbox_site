@@ -23,11 +23,11 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
         resources.filter(r => r.locationId === locationId || r.id.startsWith(locationId)),
         [resources, locationId]);
 
-    // Generate timeslots from 09:00 to 21:00
+    // Generate timeslots from 09:00 to 22:00 (evening surcharge applies 21:00+).
     const timeSlots = useMemo(() => {
         const slots = [];
         let time = setMinutes(setHours(startOfToday(), 9), 0);
-        const end = setMinutes(setHours(startOfToday(), 21), 0);
+        const end = setMinutes(setHours(startOfToday(), 22), 0);
         while (isBefore(time, end)) {
             slots.push(format(time, 'HH:mm'));
             time = addMinutes(time, 30);

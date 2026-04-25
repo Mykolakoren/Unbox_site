@@ -149,11 +149,13 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         return () => { cancelled = true; };
     }, [resources, date]);
 
-    // 3. Generate Time Slots (09:00 - 21:00)
+    // 3. Generate Time Slots (09:00 – 22:00).
+    // Evening 21:00–22:00 carries the peak-hour surcharge automatically
+    // via PRICING_CONFIG.peak_hours, no extra wiring needed.
     const timeSlots = useMemo(() => {
         const slots = [];
         let time = setMinutes(setHours(startOfToday(), 9), 0);
-        const end = setMinutes(setHours(startOfToday(), 21), 0);
+        const end = setMinutes(setHours(startOfToday(), 22), 0);
 
         while (isBefore(time, end)) {
             slots.push(format(time, 'HH:mm'));
