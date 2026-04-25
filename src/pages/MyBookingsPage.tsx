@@ -2438,6 +2438,53 @@ function GridHouseMyBookings({
                     )}
                 </div>
 
+                {/* Excel #19 — quick actions strip on the bookings page (the
+                    /dashboard hub for clients). Three shortcuts: subscriptions,
+                    bonuses/discounts info, become a specialist. Sticks below
+                    the header on desktop, scrolls into view on mobile. */}
+                <div style={{
+                    display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16,
+                    padding: '10px 12px', background: GH.ink5,
+                    borderRadius: 8,
+                }}>
+                    <button
+                        onClick={() => navigate('/subscriptions')}
+                        style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '8px 14px', borderRadius: 6,
+                            border: `1px solid ${GH.ink10}`, background: GH.paper,
+                            fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        🎫 Оформить абонемент
+                    </button>
+                    <button
+                        onClick={() => navigate('/dashboard/bonuses')}
+                        style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '8px 14px', borderRadius: 6,
+                            border: `1px solid ${GH.ink10}`, background: GH.paper,
+                            fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        🎁 Скидки и бонусы
+                    </button>
+                    <button
+                        onClick={() => navigate('/crm/apply')}
+                        style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '8px 14px', borderRadius: 6,
+                            border: `1px solid ${GH.ink10}`, background: GH.paper,
+                            fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        ✨ Стать специалистом Unbox
+                    </button>
+                </div>
+
                 {/* View toggle tabs */}
                 <div style={{ display: 'flex', gap: 0, borderBottom: `2px solid ${GH.ink}`, marginBottom: 0 }}>
                     <button
