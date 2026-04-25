@@ -10,6 +10,11 @@ interface Props {
     /** How many pixels one click shifts the viewport. Defaults to ~4 slots. */
     stepPx?: number;
     className?: string;
+    /** Override the default scroll-container styling. Pass this when the
+     *  host page (e.g. dashboard/bookings with its glass card look) needs
+     *  a different background/border than the default admin card style.
+     *  The scrollbar-visible class is added on top automatically. */
+    scrollClassName?: string;
 }
 
 /**
@@ -41,6 +46,7 @@ export function ChessboardScroller({
     minGridWidth,
     stepPx = 176,  // ~4 × 44px slot columns
     className = '',
+    scrollClassName,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -114,7 +120,9 @@ export function ChessboardScroller({
                 ref={scrollRef}
                 onKeyDown={handleKeyDown}
                 tabIndex={0}
-                className="overflow-x-auto scrollbar-visible rounded-xl border border-unbox-light shadow-sm bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-unbox-green/40"
+                className={scrollClassName
+                    ? `${scrollClassName} scrollbar-visible focus:outline-none focus-visible:ring-2 focus-visible:ring-unbox-green/40`
+                    : 'overflow-x-auto scrollbar-visible rounded-xl border border-unbox-light shadow-sm bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-unbox-green/40'}
             >
                 {children}
             </div>

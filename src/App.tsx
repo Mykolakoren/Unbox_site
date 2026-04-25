@@ -18,6 +18,7 @@ import { LocationDetailsPage } from './pages/LocationDetailsPage';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardLayout } from './components/DashboardLayout';
 import { MyBookingsPage } from './pages/MyBookingsPage';
+import { BonusesInfoPage } from './pages/BonusesInfoPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { DashboardOverview } from './pages/DashboardOverview';
 import { TestPage } from './pages/TestPage';
@@ -268,6 +269,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<DashboardOverview />} />
           <Route path="bookings" element={<MyBookingsPage />} />
+          <Route path="bonuses" element={<BonusesInfoPage />} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
 

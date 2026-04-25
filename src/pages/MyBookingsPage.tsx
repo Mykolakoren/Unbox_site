@@ -25,6 +25,8 @@ import { ConfirmationModal } from '../components/ui/ConfirmationModal';
 import type { BookingHistoryItem } from '../store/types';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { EmptyState } from '../components/ui/EmptyState';
+import { ChessboardScroller } from '../components/ui/ChessboardScroller';
+import { waitlistApi } from '../api/waitlist';
 
 // Parse backend UTC date string (no 'Z' suffix) correctly
 const parseUTC = (d: string | Date) => {
@@ -141,17 +143,26 @@ function BookingsChessboard({
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // 30-min time slots 09:00–21:00
+    // 30-min time slots 09:00–22:00. Slots from 21:00 onward are billed
+    // at the evening surcharge rate (see isEveningSurcharge) — admins asked
+    // to make after-hours bookings reachable without filing a request.
     const timeSlots = useMemo(() => {
         const slots: string[] = [];
         let t = setMinutes(setHours(startOfToday(), 9), 0);
-        const end = setMinutes(setHours(startOfToday(), 21), 0);
+        const end = setMinutes(setHours(startOfToday(), 22), 0);
         while (isBefore(t, end)) {
             slots.push(format(t, 'HH:mm'));
             t = addMinutes(t, 30);
         }
         return slots;
     }, []);
+
+    // Everything at or after 21:00 is "вечерняя надбавка" — marked visually
+    // on the chessboard header so the admin / client sees it's premium.
+    const isEveningSurcharge = (slot: string) => {
+        const [h] = slot.split(':').map(Number);
+        return h >= 21;
+    };
 
     const resources = RESOURCES;
 
@@ -1054,8 +1065,15 @@ function BookingsChessboard({
                 </button>
             </div>
 
-            {/* Grid */}
-            <div ref={tableRef} className="border border-white/30 rounded-2xl overflow-x-auto bg-white/70 backdrop-blur-md shadow-sm select-none">
+            {/* Grid. Excel #9/#77 — wrapped in ChessboardScroller for the
+                always-visible bar AND the floating ←/→ chevron buttons. Glass
+                styling preserved through scrollClassName so the dashboard
+                look stays. */}
+            <ChessboardScroller
+                minGridWidth={144 + timeSlots.length * 56}
+                scrollClassName="overflow-x-scroll border border-white/30 rounded-2xl bg-white/70 backdrop-blur-md shadow-sm select-none"
+            >
+            <div ref={tableRef}>
                 <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
                     <thead className="text-unbox-dark font-medium border-b border-unbox-light/60"
                         style={{ background: 'rgba(212,226,225,0.45)' }}>
@@ -1067,8 +1085,12 @@ function BookingsChessboard({
                             {timeSlots.map(t => (
                                 <th key={t} className={clsx(
                                     "p-2 text-center min-w-[56px] border-r border-unbox-light/40 text-[10px] uppercase font-bold",
-                                    isPeakTime(t) ? "text-amber-600 bg-amber-50/40" : "text-unbox-dark/60"
-                                )}>
+                                    isEveningSurcharge(t)
+                                        ? "text-violet-600 bg-violet-50/60"
+                                        : isPeakTime(t) ? "text-amber-600 bg-amber-50/40" : "text-unbox-dark/60"
+                                )}
+                                title={isEveningSurcharge(t) ? 'Вечерний тариф — повышенная ставка' : undefined}
+                                >
                                     {t}
                                 </th>
                             ))}
@@ -1182,6 +1204,37 @@ function BookingsChessboard({
                                     if (isPubStart) {
                                         const pubSpan = Math.max(1, Math.round(pubB.duration / 30));
                                         skipUntilIdx = idx + pubSpan - 1;
+                                        // Excel #14 — "поставить слот на отслеживание".
+                                        // Click on a busy slot opens a confirm dialog, then
+                                        // POSTs /waitlist with this resource+date+time.
+                                        // When the booking is cancelled / rescheduled,
+                                        // backend's notify_waitlist_for_freed_slot pings
+                                        // the subscriber via in-app + Telegram (if linked).
+                                        const handleWaitlistClick = async () => {
+                                            if (isReRentAvailable) {
+                                                toast.info('Слот доступен для переаренды — выберите его внизу шахматки.');
+                                                return;
+                                            }
+                                            const endTimeStr = minsToTime(timeToMins(pubB.startTime!) + pubB.duration);
+                                            const dayLabel = format(selectedDate, 'd MMMM', { locale: ru });
+                                            const ok = window.confirm(
+                                                `Подписаться на этот слот?\n\n` +
+                                                `${r.name} · ${dayLabel}, ${pubB.startTime}–${endTimeStr}\n\n` +
+                                                `Если бронь отменят, пришлём уведомление, чтобы успели занять.`
+                                            );
+                                            if (!ok) return;
+                                            try {
+                                                await waitlistApi.addToWaitlist({
+                                                    resourceId: r.id,
+                                                    date: format(selectedDate, "yyyy-MM-dd'T'00:00:00"),
+                                                    startTime: pubB.startTime!,
+                                                    endTime: endTimeStr,
+                                                });
+                                                toast.success('Подписка оформлена. Сообщим, как только освободится.');
+                                            } catch (err: any) {
+                                                toast.error(err?.response?.data?.detail || 'Не удалось подписаться');
+                                            }
+                                        };
                                         cells.push(
                                             <td
                                                 key={`${r.id}-${time}`}
@@ -1190,14 +1243,15 @@ function BookingsChessboard({
                                             >
                                                 <div
                                                     className={clsx(
-                                                        "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5",
+                                                        "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5 cursor-pointer transition-colors group",
                                                         isReRentAvailable
-                                                            ? "bg-amber-50 border border-dashed border-amber-400 text-amber-800 cursor-pointer hover:bg-amber-100"
-                                                            : "bg-gray-300/90 text-gray-600"
+                                                            ? "bg-amber-50 border border-dashed border-amber-400 text-amber-800 hover:bg-amber-100"
+                                                            : "bg-gray-300/90 text-gray-600 hover:bg-gray-400/90"
                                                     )}
-                                                    onClick={isReRentAvailable ? () => {
-                                                        toast.info('Слот доступен для переаренды.');
-                                                    } : undefined}
+                                                    title={isReRentAvailable
+                                                        ? 'Доступно для переаренды'
+                                                        : 'Нажмите чтобы получить уведомление, когда слот освободится'}
+                                                    onClick={handleWaitlistClick}
                                                 >
                                                     <span className="text-[10px] font-bold leading-none">
                                                         {pubB.startTime} · {pubB.duration / 60}ч
@@ -1206,6 +1260,11 @@ function BookingsChessboard({
                                                         Занято
                                                     </span>
                                                     {isReRentAvailable && <span className="text-[8px] font-medium leading-none">♻️ переаренда</span>}
+                                                    {!isReRentAvailable && (
+                                                        <span className="text-[8px] opacity-0 group-hover:opacity-90 leading-none transition-opacity">
+                                                            🔔 подписаться
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
                                         );
@@ -1312,6 +1371,7 @@ function BookingsChessboard({
                     </tbody>
                 </table>
             </div>
+            </ChessboardScroller>
 
             {/* Legend */}
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-unbox-dark/80 bg-white/70 backdrop-blur-md rounded-xl px-4 py-2.5 shadow-sm">
