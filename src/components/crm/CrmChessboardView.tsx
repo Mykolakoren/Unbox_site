@@ -18,11 +18,12 @@ import type { BookingHistoryItem } from '../../store/types';
 import type { CrmClient } from '../../api/crm';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 
-// ─── Time Slots: 09:00 – 21:00 (30-min steps) ───────────────────────────────
+// ─── Time Slots: 09:00 – 21:30 (30-min steps, last block ends 22:00) ─────
+// Evening 21:00–22:00 carries the peak-hour surcharge automatically.
 const TIME_SLOTS: string[] = (() => {
     const slots: string[] = [];
     let t = setMinutes(setHours(startOfToday(), 9), 0);
-    const end = setMinutes(setHours(startOfToday(), 21), 0);
+    const end = setMinutes(setHours(startOfToday(), 22), 0);
     while (isBefore(t, end)) {
         slots.push(format(t, 'HH:mm'));
         t = addMinutes(t, 30);
