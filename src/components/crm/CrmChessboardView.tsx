@@ -18,6 +18,7 @@ import type { BookingHistoryItem } from '../../store/types';
 import type { CrmClient } from '../../api/crm';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { parseUTC } from '../../utils/dateUtils';
+import { apiErrorMessage } from '../../utils/errors';
 
 // ─── Time Slots: 09:00 – 21:30 (30-min steps, last block ends 22:00) ─────
 // Evening 21:00–22:00 carries the peak-hour surcharge automatically.
@@ -941,7 +942,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 toast.success('Бронь перенесена');
                 await fetchBookings();
             }).catch((err) => {
-                toast.error(err?.response?.data?.detail || 'Не удалось перенести бронь');
+                toast.error(apiErrorMessage(err, 'Не удалось перенести бронь'));
             }).finally(() => setReschedSaving(false));
             return;
         }
@@ -1117,7 +1118,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     });
                     recurringBookings = res.created || 0;
                 } catch (e: any) {
-                    toast.error(e?.response?.data?.detail || 'Не удалось создать серию броней');
+                    toast.error(apiErrorMessage(e, 'Не удалось создать серию броней'));
                 }
             }
         }
@@ -1140,7 +1141,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             await fetchSessions();
             setLinkBooking(null);
         } catch (err: any) {
-            toast.error(err?.response?.data?.detail || 'Не удалось удалить бронь');
+            toast.error(apiErrorMessage(err, 'Не удалось удалить бронь'));
             throw err;
         }
     };

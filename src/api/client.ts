@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../utils/errors';
 
 // API URL:
 // In development, use VITE_API_URL or fallback to relative path (proxied by Vite)
@@ -54,11 +55,12 @@ api.interceptors.response.use(
         if (status && status >= 500) {
             toast.error('Ошибка сервера. Попробуйте позже.');
         } else if (status === 422 && detail) {
-            // Validation errors from backend — show detail
-            const msg = typeof detail === 'string' ? detail : 'Ошибка валидации данных';
-            toast.error(msg);
+            // Use shared helper so we never end up trying to render an
+            // {message, conflicts} object as a React child (Minified
+            // React error #31).
+            toast.error(apiErrorMessage(error, 'Ошибка валидации данных'));
         } else if (status === 409 && detail) {
-            toast.error(typeof detail === 'string' ? detail : 'Конфликт данных');
+            toast.error(apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
         } else if (!error.response && error.code === 'ECONNABORTED') {
             toast.error('Превышено время ожидания. Проверьте соединение.');
         } else if (!error.response && error.message === 'Network Error') {
