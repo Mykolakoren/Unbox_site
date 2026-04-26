@@ -1105,8 +1105,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 // the cabinet's Google Calendar.
                 try {
                     const res = await bookingsApi.createRecurringBooking({
-                        resourceId: booking.resourceId,
-                        locationId: (booking as any).locationId || booking.resourceId,
+                        resourceId: booking.resourceId || '',
+                        locationId: (booking as any).locationId || booking.resourceId || '',
                         startTime: booking.startTime || '00:00',
                         duration: booking.duration || 60,
                         format: (booking as any).format || 'individual',
