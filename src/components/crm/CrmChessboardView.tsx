@@ -622,11 +622,12 @@ function LinkBookingModal({
                     )}
                 </div>
 
-                {/* Recurring options — same pattern as the new-booking modal:
-                    weekly / biweekly / monthly × N. When enabled, save will
-                    additionally create N future CRM sessions for each linked
-                    client at the same wall-clock time. */}
-                {assignedCount > 0 && (
+                {/* Recurring options — visible always, even when no client
+                    is linked. With a client → spawn future CRM sessions
+                    (with pushToCalendar=true so they land in the specialist's
+                    Google Calendar). Without a client → just clone the
+                    cabinet booking via createRecurringBooking. */}
+                {true && (
                     <div className="px-5 pb-3 pt-0">
                         <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Повторять</div>
                         <div className="flex flex-wrap gap-1.5 mb-2">
@@ -681,11 +682,15 @@ function LinkBookingModal({
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={saving || assignedCount === 0}
+                        disabled={saving || (assignedCount === 0 && !recurringPattern)}
                         className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        Сохранить ({assignedCount}/{numSlots}){recurringPattern && ` × ${recurringOccurrences}`}
+                        {assignedCount > 0
+                            ? `Сохранить (${assignedCount}/${numSlots})${recurringPattern ? ` × ${recurringOccurrences}` : ''}`
+                            : recurringPattern
+                                ? `Повторить бронь × ${recurringOccurrences}`
+                                : 'Сохранить'}
                     </button>
                 </div>
             </div>
@@ -1046,54 +1051,84 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             }
         }
 
-        // Recurring sessions: spawn N-1 future copies for each linked client
-        // at the same wall-clock time. NB: we create CRM sessions only,
-        // not cabinet bookings — admin must book the cabinet separately
-        // (or use the recurring-booking flow when creating the next series).
+        // Recurring strategy:
+        //   • If at least one slot has a linked client → spawn future CRM
+        //     sessions (with pushToCalendar=true so they appear in the
+        //     specialist's Google Calendar — that's the user-visible side).
+        //   • If NO clients are linked → user just wants to repeat the
+        //     cabinet booking on the same weekday. Use createRecurringBooking
+        //     which clones the booking N times and writes GCal events from
+        //     the booking-side sync (each cabinet has its own Google
+        //     Calendar that shows the rental).
         let recurringCreated = 0;
+        let recurringBookings = 0;
         if (opts?.recurringPattern && opts.occurrences && opts.occurrences > 1) {
-            const baseDate = new Date(`${dateStr}T00:00:00`);
-            for (let n = 1; n < opts.occurrences; n++) {
-                let nextDate: Date;
-                if (opts.recurringPattern === 'weekly') {
-                    nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 7 * n);
-                } else if (opts.recurringPattern === 'biweekly') {
-                    nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 14 * n);
-                } else { // monthly
-                    nextDate = new Date(baseDate); nextDate.setMonth(nextDate.getMonth() + n);
-                }
-                const nextDateStr = format(nextDate, 'yyyy-MM-dd');
-                for (const slot of slotAssignments) {
-                    if (!slot.clientId) continue;
-                    const h = Math.floor(slot.hour / 60);
-                    const m = slot.hour % 60;
-                    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-                    try {
-                        await createSession({
-                            clientId: slot.clientId,
-                            date: `${nextDateStr}T${timeStr}:00`,
-                            durationMinutes: 60,
-                            price: slot.price || undefined,
-                            // No bookingId — these sessions live without a
-                            // cabinet booking until the specialist either
-                            // creates a recurring booking for the same slot
-                            // or links them manually.
-                            isBooked: false,
-                        });
-                        recurringCreated++;
-                    } catch (e) {
-                        // Continue on failure — most likely a duplicate or backend constraint
+            const hasClients = slotAssignments.some(s => s.clientId);
+            if (hasClients) {
+                const baseDate = new Date(`${dateStr}T00:00:00`);
+                for (let n = 1; n < opts.occurrences; n++) {
+                    let nextDate: Date;
+                    if (opts.recurringPattern === 'weekly') {
+                        nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 7 * n);
+                    } else if (opts.recurringPattern === 'biweekly') {
+                        nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 14 * n);
+                    } else { // monthly
+                        nextDate = new Date(baseDate); nextDate.setMonth(nextDate.getMonth() + n);
                     }
+                    const nextDateStr = format(nextDate, 'yyyy-MM-dd');
+                    for (const slot of slotAssignments) {
+                        if (!slot.clientId) continue;
+                        const h = Math.floor(slot.hour / 60);
+                        const m = slot.hour % 60;
+                        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                        try {
+                            await createSession({
+                                clientId: slot.clientId,
+                                date: `${nextDateStr}T${timeStr}:00`,
+                                durationMinutes: 60,
+                                price: slot.price || undefined,
+                                // pushToCalendar=true so each future session
+                                // shows up in the specialist's Google Calendar
+                                // (calendar_id from /crm/settings).
+                                pushToCalendar: true,
+                                isBooked: false,
+                            });
+                            recurringCreated++;
+                        } catch (e) {
+                            // continue on failure (likely a duplicate)
+                        }
+                    }
+                }
+            } else {
+                // No clients → recurring CABINET booking. Bot the back-end
+                // creates one bookings per occurrence and syncs each into
+                // the cabinet's Google Calendar.
+                try {
+                    const res = await bookingsApi.createRecurringBooking({
+                        resourceId: booking.resourceId,
+                        locationId: (booking as any).locationId || booking.resourceId,
+                        startTime: booking.startTime || '00:00',
+                        duration: booking.duration || 60,
+                        format: (booking as any).format || 'individual',
+                        paymentMethod: (booking as any).paymentMethod || 'balance',
+                        firstDate: dateStr,
+                        occurrences: opts.occurrences,
+                        pattern: opts.recurringPattern,
+                    });
+                    recurringBookings = res.created || 0;
+                } catch (e: any) {
+                    toast.error(e?.response?.data?.detail || 'Не удалось создать серию броней');
                 }
             }
         }
 
-        toast.success(
-            recurringCreated > 0
-                ? `Сессии сохранены · +${recurringCreated} в будущих повторах`
-                : 'Сессии сохранены'
-        );
+        const partsMsg: string[] = [];
+        if (slotAssignments.some(s => s.clientId || s.existingSessionId)) partsMsg.push('сессии сохранены');
+        if (recurringCreated > 0) partsMsg.push(`+${recurringCreated} будущих сессий в Google Calendar`);
+        if (recurringBookings > 0) partsMsg.push(`+${recurringBookings} будущих броней кабинета`);
+        toast.success(partsMsg.length ? partsMsg.join(' · ') : 'Сохранено');
         await fetchSessions();
+        if (recurringBookings > 0) await fetchBookings();
         setLinkBooking(null);
     };
 
