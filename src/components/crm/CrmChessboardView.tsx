@@ -365,7 +365,14 @@ function LinkBookingModal({
     crmClients: CrmClient[];
     existingSessions: { id: string; clientId: string; date: string | Date; durationMinutes?: number }[];
     onClose: () => void;
-    onSaveMulti: (assignments: SlotAssignment[], opts?: { recurringPattern?: 'weekly' | 'biweekly' | 'monthly' | ''; occurrences?: number }) => Promise<void>;
+    /**
+     * Persist the slot assignments. Resolve to `false` when the save was
+     * partial / aborted (e.g. recurring series rejected because of a
+     * cabinet-booking conflict) — the modal will stay open so the user can
+     * tweak inputs without losing context. Resolve to anything else (true /
+     * void / undefined) for a fully-successful save and the modal closes.
+     */
+    onSaveMulti: (assignments: SlotAssignment[], opts?: { recurringPattern?: 'weekly' | 'biweekly' | 'monthly' | ''; occurrences?: number }) => Promise<boolean | void>;
     onDeleteBooking: (booking: BookingHistoryItem) => Promise<void>;
 }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
@@ -435,13 +442,24 @@ function LinkBookingModal({
         ));
     };
 
+    // Ref guard against double-clicks — `disabled` propagates one render
+    // tick after setSaving, so a fast double-click can sneak two requests
+    // through (which is exactly how we got two identical conflict toasts).
+    const savingRef = useRef(false);
     const handleSave = async () => {
+        if (savingRef.current) return;
+        savingRef.current = true;
         setSaving(true);
         try {
-            await onSaveMulti(slots, recurringPattern ? { recurringPattern, occurrences: recurringOccurrences } : undefined);
-            onClose();
+            const result = await onSaveMulti(slots, recurringPattern ? { recurringPattern, occurrences: recurringOccurrences } : undefined);
+            // onSaveMulti returns `true` only when the save fully landed.
+            // Recurring conflicts return `false` so we keep the modal open
+            // and the specialist can adjust the start date or occurrence
+            // count without re-opening from the chessboard.
+            if (result !== false) onClose();
         } catch {
         } finally {
+            savingRef.current = false;
             setSaving(false);
         }
     };
@@ -1063,6 +1081,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         //     Calendar that shows the rental).
         let recurringCreated = 0;
         let recurringBookings = 0;
+        // Set when the cabinet recurring call returned a 4xx (atomic fail).
+        // Used below to suppress the misleading green "Сохранено" toast.
+        let recurringFailed = false;
         if (opts?.recurringPattern && opts.occurrences && opts.occurrences > 1) {
             const hasClients = slotAssignments.some(s => s.clientId);
             if (hasClients) {
@@ -1134,18 +1155,40 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     recurringBookings = res.created || 0;
                 } catch (e: any) {
                     toast.error(apiErrorMessage(e, 'Не удалось создать серию броней'));
+                    // Atomic backend: nothing was created. Mark the failure so
+                    // we don't follow up with a misleading "Сохранено" toast.
+                    recurringFailed = true;
                 }
             }
         }
 
+        // Toast logic — distinguish "everything saved", "partial save", and
+        // "nothing saved". Earlier we always closed with toast.success which
+        // showed a green "Сохранено" right next to a red conflict toast and
+        // confused the user.
+        const savedSomething =
+            slotAssignments.some(s => s.clientId || s.existingSessionId) ||
+            recurringCreated > 0 ||
+            recurringBookings > 0;
         const partsMsg: string[] = [];
         if (slotAssignments.some(s => s.clientId || s.existingSessionId)) partsMsg.push('сессии сохранены');
         if (recurringCreated > 0) partsMsg.push(`+${recurringCreated} будущих сессий в Google Calendar`);
         if (recurringBookings > 0) partsMsg.push(`+${recurringBookings} будущих броней кабинета`);
-        toast.success(partsMsg.length ? partsMsg.join(' · ') : 'Сохранено');
+        if (savedSomething) {
+            toast.success(partsMsg.length ? partsMsg.join(' · ') : 'Сохранено');
+        }
+        // If only the recurring failed, stay quiet — the red conflict toast
+        // already explains everything; a green companion would lie.
         await fetchSessions();
         if (recurringBookings > 0) await fetchBookings();
+        // Keep the modal open after a failed series so the specialist can
+        // tweak (e.g. shift start date by a week) without re-opening from
+        // the chessboard. Modal closes itself when this returns truthy.
+        if (recurringFailed && !savedSomething) {
+            return false;
+        }
         setLinkBooking(null);
+        return true;
     };
 
     const handleDeleteBooking = async (booking: BookingHistoryItem) => {
