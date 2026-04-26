@@ -17,6 +17,7 @@ import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { CrmClient } from '../../api/crm';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
+import { parseUTC } from '../../utils/dateUtils';
 
 // ─── Time Slots: 09:00 – 21:30 (30-min steps, last block ends 22:00) ─────
 // Evening 21:00–22:00 carries the peak-hour surcharge automatically.
