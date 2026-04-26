@@ -358,12 +358,14 @@ function LinkBookingModal({
     existingSessions,
     onClose,
     onSaveMulti,
+    onDeleteBooking,
 }: {
     booking: BookingHistoryItem;
     crmClients: CrmClient[];
     existingSessions: { id: string; clientId: string; date: string | Date; durationMinutes?: number }[];
     onClose: () => void;
-    onSaveMulti: (assignments: SlotAssignment[]) => Promise<void>;
+    onSaveMulti: (assignments: SlotAssignment[], opts?: { recurringPattern?: 'weekly' | 'biweekly' | 'monthly' | ''; occurrences?: number }) => Promise<void>;
+    onDeleteBooking: (booking: BookingHistoryItem) => Promise<void>;
 }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const duration = booking.duration || 60;
@@ -404,6 +406,15 @@ function LinkBookingModal({
     const [activeSlotIdx, setActiveSlotIdx] = useState(0);
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    // Recurring options for the linked sessions — repeats the client→slot
+    // assignment N times into the future (matches the booking-recurrence
+    // pattern used elsewhere). Future CRM sessions are created with the
+    // same client; if the cabinet isn't booked yet, the specialist will
+    // see them as "сессия без брони" and can add the cabinet booking
+    // separately (or через recurring booking flow).
+    const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
+    const [recurringOccurrences, setRecurringOccurrences] = useState(8);
 
     const activeSlot = slots[activeSlotIdx];
     const activeClient = crmClients.find(c => c.id === activeSlot?.clientId);
@@ -426,11 +437,27 @@ function LinkBookingModal({
     const handleSave = async () => {
         setSaving(true);
         try {
-            await onSaveMulti(slots);
+            await onSaveMulti(slots, recurringPattern ? { recurringPattern, occurrences: recurringOccurrences } : undefined);
             onClose();
         } catch {
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!window.confirm(
+            `Удалить эту бронь?\n\n` +
+            `${resource?.name || 'Кабинет'} · ${bookingDateStr} · ${duration} мин\n\n` +
+            `Все привязанные сессии (${assignedCount}) останутся в CRM, но потеряют связь с этой бронью кабинета.`
+        )) return;
+        setDeleting(true);
+        try {
+            await onDeleteBooking(booking);
+            onClose();
+        } catch {
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -462,9 +489,21 @@ function LinkBookingModal({
                             {resource?.name || 'Кабинет'} · {bookingDateStr} · {duration} мин ({numSlots} {numSlots === 1 ? 'сессия' : numSlots < 5 ? 'сессии' : 'сессий'})
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
-                        <X size={18} className="text-gray-500" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={handleDelete}
+                            disabled={deleting || saving}
+                            title="Удалить эту бронь"
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 hover:text-red-600 disabled:opacity-50 transition-colors"
+                        >
+                            {deleting ? <Loader2 size={16} className="animate-spin" /> : (
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                            )}
+                        </button>
+                        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
+                            <X size={18} className="text-gray-500" />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="p-5 space-y-4">
@@ -583,6 +622,58 @@ function LinkBookingModal({
                     )}
                 </div>
 
+                {/* Recurring options — same pattern as the new-booking modal:
+                    weekly / biweekly / monthly × N. When enabled, save will
+                    additionally create N future CRM sessions for each linked
+                    client at the same wall-clock time. */}
+                {assignedCount > 0 && (
+                    <div className="px-5 pb-3 pt-0">
+                        <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Повторять</div>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                            {([
+                                { id: '', label: 'Не повторять' },
+                                { id: 'weekly', label: 'Каждую неделю' },
+                                { id: 'biweekly', label: 'Раз в 2 недели' },
+                                { id: 'monthly', label: 'Раз в месяц' },
+                            ] as const).map(p => (
+                                <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => setRecurringPattern(p.id as any)}
+                                    className={clsx(
+                                        'px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors',
+                                        recurringPattern === p.id
+                                            ? 'bg-unbox-green text-white border-unbox-green'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green/50'
+                                    )}
+                                >
+                                    {p.label}
+                                </button>
+                            ))}
+                        </div>
+                        {recurringPattern && (
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                                <span>Сколько раз:</span>
+                                <input
+                                    type="number"
+                                    min={2}
+                                    max={recurringPattern === 'monthly' ? 24 : 52}
+                                    value={recurringOccurrences}
+                                    onChange={(e) => {
+                                        const max = recurringPattern === 'monthly' ? 24 : 52;
+                                        const v = Math.max(2, Math.min(max, parseInt(e.target.value) || 8));
+                                        setRecurringOccurrences(v);
+                                    }}
+                                    className="w-16 px-2 py-1 rounded border border-gray-200 text-center"
+                                />
+                                <span className="text-gray-400">
+                                    (включая текущую)
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Footer */}
                 <div className="flex gap-3 p-5 pt-0">
                     <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
@@ -594,7 +685,7 @@ function LinkBookingModal({
                         className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        Сохранить ({assignedCount}/{numSlots})
+                        Сохранить ({assignedCount}/{numSlots}){recurringPattern && ` × ${recurringOccurrences}`}
                     </button>
                 </div>
             </div>
@@ -916,7 +1007,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     // Handle saving multi-slot client assignments for a booking
     const handleMultiSlotSave = async (
         booking: BookingHistoryItem,
-        slotAssignments: { hour: number; clientId: string | null; price: number; existingSessionId?: string }[]
+        slotAssignments: { hour: number; clientId: string | null; price: number; existingSessionId?: string }[],
+        opts?: { recurringPattern?: 'weekly' | 'biweekly' | 'monthly' | ''; occurrences?: number }
     ) => {
         const rawDate = booking.date as any;
         let dateStr: string;
@@ -954,9 +1046,68 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             }
         }
 
-        toast.success('Сессии сохранены');
+        // Recurring sessions: spawn N-1 future copies for each linked client
+        // at the same wall-clock time. NB: we create CRM sessions only,
+        // not cabinet bookings — admin must book the cabinet separately
+        // (or use the recurring-booking flow when creating the next series).
+        let recurringCreated = 0;
+        if (opts?.recurringPattern && opts.occurrences && opts.occurrences > 1) {
+            const baseDate = new Date(`${dateStr}T00:00:00`);
+            for (let n = 1; n < opts.occurrences; n++) {
+                let nextDate: Date;
+                if (opts.recurringPattern === 'weekly') {
+                    nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 7 * n);
+                } else if (opts.recurringPattern === 'biweekly') {
+                    nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 14 * n);
+                } else { // monthly
+                    nextDate = new Date(baseDate); nextDate.setMonth(nextDate.getMonth() + n);
+                }
+                const nextDateStr = format(nextDate, 'yyyy-MM-dd');
+                for (const slot of slotAssignments) {
+                    if (!slot.clientId) continue;
+                    const h = Math.floor(slot.hour / 60);
+                    const m = slot.hour % 60;
+                    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                    try {
+                        await createSession({
+                            clientId: slot.clientId,
+                            date: `${nextDateStr}T${timeStr}:00`,
+                            durationMinutes: 60,
+                            price: slot.price || undefined,
+                            // No bookingId — these sessions live without a
+                            // cabinet booking until the specialist either
+                            // creates a recurring booking for the same slot
+                            // or links them manually.
+                            isBooked: false,
+                        });
+                        recurringCreated++;
+                    } catch (e) {
+                        // Continue on failure — most likely a duplicate or backend constraint
+                    }
+                }
+            }
+        }
+
+        toast.success(
+            recurringCreated > 0
+                ? `Сессии сохранены · +${recurringCreated} в будущих повторах`
+                : 'Сессии сохранены'
+        );
         await fetchSessions();
         setLinkBooking(null);
+    };
+
+    const handleDeleteBooking = async (booking: BookingHistoryItem) => {
+        try {
+            await bookingsApi.cancelBooking(booking.id);
+            toast.success('Бронь удалена');
+            await fetchBookings();
+            await fetchSessions();
+            setLinkBooking(null);
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Не удалось удалить бронь');
+            throw err;
+        }
     };
 
     const SLOT_W = 48; // px per 30-min slot
@@ -1224,7 +1375,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         crmClients={clients}
                         existingSessions={sessionsByBookingId.get(linkBooking.id)?.map(s => ({ id: s.id, clientId: s.clientId, date: s.date, durationMinutes: s.durationMinutes })) || []}
                         onClose={() => setLinkBooking(null)}
-                        onSaveMulti={(assignments) => handleMultiSlotSave(linkBooking, assignments)}
+                        onSaveMulti={(assignments, recOpts) => handleMultiSlotSave(linkBooking, assignments, recOpts)}
+                        onDeleteBooking={handleDeleteBooking}
                     />
                 )}
             </div>
@@ -1469,7 +1621,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     crmClients={clients.filter(c => c.isActive)}
                     existingSessions={sessionsByBookingId.get(linkBooking.id) || []}
                     onClose={() => setLinkBooking(null)}
-                    onSaveMulti={(assignments) => handleMultiSlotSave(linkBooking, assignments)}
+                    onSaveMulti={(assignments, recOpts) => handleMultiSlotSave(linkBooking, assignments, recOpts)}
+                    onDeleteBooking={handleDeleteBooking}
                 />
             )}
         </div>
