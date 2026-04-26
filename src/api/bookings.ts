@@ -51,7 +51,12 @@ const mapToBackend = (b: Partial<BookingHistoryItem>): any => ({
 });
 
 export const bookingsApi = {
-    getMyBookings: async (skip = 0, limit = 100) => {
+    getMyBookings: async (skip = 0, limit = 2000) => {
+        // Default raised from 100 → 2000. With 100, heavy users (Mykola
+        // had 106 bookings) silently lost their newest rows from the
+        // result; the chessboard then fell back to the public anonymous
+        // copy and rendered each missing booking as "Занято" because
+        // userId was empty. Backend caps at 2000 too.
         const response = await api.get<any[]>('/bookings/me', {
             params: { skip, limit }
         });

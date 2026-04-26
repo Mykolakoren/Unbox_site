@@ -1347,7 +1347,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 const { booking, isMine, colspan } = bookingCell;
                 const linkedSessions = sessionsByBookingId.get(booking.id) || [];
                 const firstSession = linkedSessions[0];
-                const linkedClient = firstSession ? clientById.get(firstSession.clientId) : undefined;
+                // Same fallback as desktop: if no TherapySession is linked, fall
+                // back to the booking's own crm_client_id (recurring bookings).
+                const linkedClient = firstSession
+                    ? clientById.get(firstSession.clientId)
+                    : (booking.crmClientId ? clientById.get(booking.crmClientId) : undefined);
                 const endSlotIdx = TIME_SLOTS.indexOf(slot) + colspan;
                 const endTime = endSlotIdx < TIME_SLOTS.length ? TIME_SLOTS[endSlotIdx] : '21:00';
                 // For multi-slot bookings that span to the next column, we'll handle via colspan spanning
@@ -1544,7 +1548,14 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                             const linkedSessions = sessionsByBookingId.get(booking.id) || [];
                                             // For single-hour bookings, show the first linked client; for multi-hour, show count
                                             const firstSession = linkedSessions[0];
-                                            const linkedClient = firstSession ? clientById.get(firstSession.clientId) : undefined;
+                                            // Prefer the explicit TherapySession link, but fall back to the
+                                            // booking's own crm_client_id — recurring cabinet bookings created
+                                            // with a linked client carry crmClientId on the booking itself
+                                            // and the matching session sometimes lags (sync race) or doesn't
+                                            // exist at all on legacy rows.
+                                            const linkedClient = firstSession
+                                                ? clientById.get(firstSession.clientId)
+                                                : (booking.crmClientId ? clientById.get(booking.crmClientId) : undefined);
 
                                             // Multi-client split view
                                             const SEGMENT_COLORS = [
