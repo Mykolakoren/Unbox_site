@@ -1255,16 +1255,19 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     {client.basePrice || 0} {client.currency}
                                 </div>
 
-                                {/* LTV */}
+                                {/* LTV — sum of REAL payments (was totalCost
+                                    = sessionCount × price, which gave 270k
+                                    for Petrov when only 35k actually came in). */}
                                 <div
                                     style={{
                                         fontFamily: GH_MONO,
                                         fontSize: 13,
-                                        color: c.sessionCount > 0 ? GH.ink : GH.ink30,
+                                        color: (c.totalPaid || 0) > 0 ? GH.ink : GH.ink30,
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
+                                    title="LTV — сумма всех реально полученных платежей"
                                 >
-                                    {c.sessionCount > 0 ? (c.totalCost || 0).toLocaleString() : '0'}
+                                    {((c as any).totalPaid || 0).toLocaleString()}
                                 </div>
 
                                 {/* Debt */}
