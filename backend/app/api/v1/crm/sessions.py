@@ -143,23 +143,71 @@ def update_session(
 @router.delete("/sessions/{session_id}")
 def delete_session(
     session_id: str,
+    scope: str = Query("this", regex="^(this|future)$"),
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
 ):
+    """Delete a single CRM session, optionally extending to "this and all
+    future occurrences in the same recurring series" — same UX Google
+    Calendar offers when you delete one event from a recurring rule.
+
+    Always cleans up the GCal event(s) associated with the deleted rows so
+    the specialist's personal calendar stays in sync.
+
+    Args:
+        scope: "this" (default) deletes only this row.
+               "future" deletes this row and every later sibling sharing
+                       the same recurring_group_id.
+    """
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
         raise HTTPException(404, "Session not found")
 
-    # Delete related payments first (foreign key constraint)
+    # Build the list of session rows to delete.
+    targets: list[TherapySession] = [ts]
+    if scope == "future":
+        if not ts.recurring_group_id:
+            raise HTTPException(
+                400,
+                "Cannot delete future occurrences — this session is not part of a recurring series",
+            )
+        siblings = session.exec(
+            select(TherapySession).where(
+                TherapySession.specialist_id == str(current_user.id),
+                TherapySession.recurring_group_id == ts.recurring_group_id,
+                TherapySession.date >= ts.date,
+                TherapySession.id != ts.id,
+            )
+        ).all()
+        targets.extend(siblings)
+
+    # Best-effort GCal cleanup. Don't let a calendar API hiccup block the DB
+    # delete the user requested — log and continue.
+    calendar_id = get_crm_calendar_id(current_user)
+    deleted_gcal = 0
+    if calendar_id:
+        from app.services.crm_calendar import delete_calendar_event
+        for t in targets:
+            if not t.google_event_id:
+                continue
+            try:
+                delete_calendar_event(calendar_id, t.google_event_id)
+                deleted_gcal += 1
+            except Exception as e:
+                logger.warning(f"GCal delete failed for {t.google_event_id}: {e}")
+
+    # Delete related payments first (foreign key constraint).
+    target_ids = [t.id for t in targets]
     related_payments = session.exec(
-        select(TherapistPayment).where(TherapistPayment.session_id == session_id)
+        select(TherapistPayment).where(TherapistPayment.session_id.in_(target_ids))
     ).all()
     for payment in related_payments:
         session.delete(payment)
 
-    session.delete(ts)
+    for t in targets:
+        session.delete(t)
     session.commit()
-    return {"ok": True}
+    return {"ok": True, "deleted": len(targets), "deleted_gcal": deleted_gcal, "scope": scope}
 
 
 @router.post("/sessions/{session_id}/quick-pay")

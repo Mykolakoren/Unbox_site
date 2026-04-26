@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { crmApi } from '../../api/crm';
 import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient, CrmPayment } from '../../api/crm';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
+import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import { toGel } from '../../utils/currency';
 import { parseUTC } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -442,7 +443,7 @@ function DayGroup({
     editingId: string | null;
     setEditingId: (id: string | null) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    deleteSession: (id: string) => Promise<void>;
+    deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookRoom?: (day: string) => void;
     onBookCab?: (session: CrmSession, clientName: string) => void;
@@ -1028,7 +1029,7 @@ interface GHSessionsProps {
     loading: boolean;
     createSession: (data: CrmSessionCreate) => Promise<any>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    deleteSession: (id: string) => Promise<void>;
+    deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     handleBookCab: (session: CrmSession, clientName: string) => void;
     chessDate: Date | undefined; setChessDate: (d: Date | undefined) => void;
@@ -1372,7 +1373,7 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     session: CrmSession; client?: CrmClient;
     isEditing: boolean; setEditingId: (id: string | null) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    deleteSession: (id: string) => Promise<void>;
+    deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookCab: (session: CrmSession, clientName: string) => void;
     navigate: ReturnType<typeof useNavigate>;
@@ -1384,6 +1385,20 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     const statusColor: string = isCancelled ? GH.danger : effectiveStatus === 'COMPLETED' ? GH.accent : GH.ink60;
 
     const actionBtnStyle: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', padding: '4px 8px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 };
+
+    const [deleteOpen, setDeleteOpen] = React.useState(false);
+    const handleDelete = async (scope: 'this' | 'future') => {
+        try {
+            const res = await deleteSession(session.id, scope);
+            toast.success(
+                scope === 'future' && res.deleted > 1
+                    ? `Удалено ${res.deleted} сессий`
+                    : 'Удалена',
+            );
+        } catch {
+            toast.error('Ошибка');
+        }
+    };
 
     return (
         <>
@@ -1420,7 +1435,7 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                             )}
                             <button onClick={() => setEditingId(isEditing ? null : session.id)}
                                 style={{ ...actionBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>Ред.</button>
-                            <button onClick={async () => { if (!confirm('Удалить сессию?')) return; try { await deleteSession(session.id); toast.success('Удалена'); } catch { toast.error('Ошибка'); } }}
+                            <button onClick={() => setDeleteOpen(true)}
                                 style={{ ...actionBtnStyle, border: `1px solid ${GH.danger}`, color: GH.danger }}>Уд.</button>
                         </div>
                     </div>
@@ -1476,6 +1491,13 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     onCancel={() => setEditingId(null)}
                 />
             )}
+            <DeleteSessionModal
+                isOpen={deleteOpen}
+                onClose={() => setDeleteOpen(false)}
+                onConfirm={handleDelete}
+                isRecurring={Boolean(session.recurringGroupId)}
+                label={`${client?.name || 'Клиент'} — ${format(dt, 'dd.MM.yyyy HH:mm')}`}
+            />
         </>
     );
 }

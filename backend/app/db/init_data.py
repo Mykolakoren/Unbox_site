@@ -246,6 +246,22 @@ def migrate_add_columns():
         except Exception:
             conn.rollback()
 
+    # therapy_sessions.recurring_group_id — added so the CRM delete UI can
+    # offer "this one" vs "this and all future" the way Google Calendar does.
+    # Backwards-compatible: NULL on every row created before the chessboard
+    # gained the recurring controls. Indexed because the delete-future flow
+    # queries by group_id + date >= cutoff.
+    with engine.connect() as conn:
+        try:
+            if dialect == 'postgresql':
+                conn.execute(text("ALTER TABLE therapy_sessions ADD COLUMN IF NOT EXISTS recurring_group_id VARCHAR"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_therapy_sessions_recurring_group_id ON therapy_sessions (recurring_group_id)"))
+            else:
+                conn.execute(text("ALTER TABLE therapy_sessions ADD COLUMN recurring_group_id VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     # resource table: convert services from TEXT to JSONB if needed (Postgres only)
     if dialect == 'postgresql':
         with engine.connect() as conn:

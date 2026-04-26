@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
 import { AccountSelect } from '../../components/crm/AccountSelect';
+import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import type { CrmClient, CrmSession, CrmNote, CrmPayment } from '../../api/crm';
 import {
     ArrowLeft, Phone, Mail, Tag, Wallet, Calendar, StickyNote,
@@ -59,6 +60,10 @@ export function CrmClientDetail() {
         name: '', phone: '', email: '', telegram: '', aliasCode: '', basePrice: '', currency: 'GEL', defaultAccount: 'cash', tags: '',
     });
     const [applyPriceTo, setApplyPriceTo] = useState<'none' | 'all_unpaid' | 'future_only'>('none');
+    // Pending session-delete confirmation; when set, shows the modal asking
+    // "this one only" vs "this and all future in the series" for recurring
+    // sessions (one-off sessions get the simpler single-button confirm).
+    const [pendingDelete, setPendingDelete] = useState<CrmSession | null>(null);
 
     const loadData = useCallback(async () => {
         if (!clientId) return;
@@ -266,8 +271,25 @@ export function CrmClientDetail() {
         );
     }
 
+    const closeDelete = () => setPendingDelete(null);
+    const handleDeleteSession = async (scope: 'this' | 'future') => {
+        if (!pendingDelete) return;
+        try {
+            const res = await crmApi.deleteSession(pendingDelete.id, scope);
+            toast.success(
+                scope === 'future' && res.deleted > 1
+                    ? `Удалено ${res.deleted} сессий из серии`
+                    : 'Сессия удалена',
+            );
+            loadData();
+        } catch {
+            toast.error('Ошибка удаления');
+        }
+    };
+
     return (
 
+        <>
         <GridHouseCrmClientDetail
             client={client}
             sessions={sessions}
@@ -320,7 +342,16 @@ export function CrmClientDetail() {
             loadData={loadData}
             navigate={navigate}
             paymentAccounts={paymentAccounts}
+            setPendingDelete={setPendingDelete}
         />
+        <DeleteSessionModal
+            isOpen={!!pendingDelete}
+            onClose={closeDelete}
+            onConfirm={handleDeleteSession}
+            isRecurring={Boolean(pendingDelete?.recurringGroupId)}
+            label={pendingDelete ? `${client?.name || 'Клиент'} — ${format(parseISO(pendingDelete.date), 'dd.MM.yyyy HH:mm')}` : undefined}
+        />
+        </>
     );
 }
 
@@ -438,6 +469,7 @@ interface GHClientDetailProps {
     loadData: () => Promise<void>;
     navigate: ReturnType<typeof useNavigate>;
     paymentAccounts: { id: string; label: string }[];
+    setPendingDelete: (s: CrmSession | null) => void;
 }
 
 const ghMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
@@ -463,7 +495,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
         showSyncPicker, setShowSyncPicker, syncMonthsBack, setSyncMonthsBack,
         syncMonthsForward, setSyncMonthsForward, syncing, setSyncing,
         applyPriceTo, setApplyPriceTo,
-        clientId, loadData, navigate, paymentAccounts,
+        clientId, loadData, navigate, paymentAccounts, setPendingDelete,
     } = props;
 
     const ghInput: React.CSSProperties = {
@@ -1124,14 +1156,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                     </button>
                                                                 ))}
                                                                 <button
-                                                                    onClick={async () => {
-                                                                        if (!confirm('Удалить эту сессию?')) return;
-                                                                        try {
-                                                                            await crmApi.deleteSession(session.id);
-                                                                            toast.success('Сессия удалена');
-                                                                            loadData();
-                                                                        } catch { toast.error('Ошибка удаления'); }
-                                                                    }}
+                                                                    onClick={() => setPendingDelete(session)}
                                                                     style={{
                                                                         ...ghMono, fontSize: 9, padding: '3px 10px',
                                                                         background: 'transparent', border: `1px solid ${GH.danger}`,
