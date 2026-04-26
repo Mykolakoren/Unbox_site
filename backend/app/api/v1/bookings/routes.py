@@ -123,11 +123,23 @@ def read_my_bookings(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user),
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 2000,
 ) -> Any:
-    """Retrieve current user's bookings."""
+    """Retrieve current user's bookings.
+
+    Default limit raised to 2000 + ORDER BY date DESC so heavy-CRM
+    specialists (Mykola has 100+) still get their full booking history.
+    Earlier we capped at 100 with no sort, which silently dropped the most
+    recent rows — chessboard then treated the missing bookings as
+    "anonymous public" and rendered them as "Занято" instead of the
+    linked client name.
+    """
     statement = (
-        select(Booking).where(Booking.user_id == current_user.email).offset(skip).limit(limit)
+        select(Booking)
+        .where(Booking.user_id == current_user.email)
+        .order_by(Booking.date.desc())
+        .offset(skip)
+        .limit(limit)
     )
     bookings = session.exec(statement).all()
     return [enrich_booking_status(b) for b in bookings]
@@ -971,6 +983,24 @@ def create_recurring_booking(
     recurring_group_id = str(gen_uuid4())
     created_bookings = []
     total_cost = 0.0
+    # If the booking is linked to a CRM client, every cabinet booking we
+    # spawn here gets a matching TherapySession too. Without this the
+    # chessboard renders the slot as "✓ Моё" / "Занято" because the
+    # client-name lookup goes through TherapySession.booking_id, and the
+    # specialist can't quick-pay or open the session from the CRM views.
+    # All sessions in the series share one recurring_group_id (separate
+    # from the booking series id) so the new "delete future" UX works.
+    crm_session_group_id = str(gen_uuid4()) if data.crm_client_id else None
+    crm_calendar_id = None
+    if data.crm_client_id:
+        # Resolve the specialist's personal CRM calendar once — used to push
+        # each session into Google Calendar alongside the cabinet event.
+        from app.api.v1.crm import get_crm_calendar_id as _get_crm_cal
+        crm_calendar_id = _get_crm_cal(booking_owner)
+    crm_client_obj = None
+    if data.crm_client_id:
+        from app.models.therapist_client import TherapistClient
+        crm_client_obj = session.get(TherapistClient, data.crm_client_id)
 
     for d in dates:
         try:
@@ -1040,7 +1070,7 @@ def create_recurring_booking(
         session.add(booking)
         session.flush()
 
-        # GCal sync
+        # GCal sync (cabinet calendar)
         try:
             event_id = gcal_service.create_event(booking, user_name=booking_owner.name)
             if event_id:
@@ -1048,6 +1078,47 @@ def create_recurring_booking(
                 session.add(booking)
         except Exception as e:
             logger.warning(f"GCal sync failed for recurring {d}: {e}")
+
+        # Auto-create the matching CRM TherapySession if the booking is
+        # linked to a client. Mirrors what the CRM chessboard does on a
+        # one-off click — without this the recurring series shows up as
+        # "Занято" tiles with no client name and no edit handle.
+        if crm_client_obj and crm_session_group_id:
+            from app.models.therapy_session import TherapySession as _TS
+            try:
+                h, m = map(int, data.start_time.split(":"))
+                session_date = d.replace(hour=h, minute=m, second=0, microsecond=0)
+            except Exception:
+                session_date = d
+            ts = _TS(
+                client_id=str(crm_client_obj.id),
+                specialist_id=str(booking_owner.id),
+                date=session_date,
+                duration_minutes=data.duration,
+                status="PLANNED",
+                price=crm_client_obj.base_price,
+                currency=crm_client_obj.currency,
+                account=crm_client_obj.default_account,
+                is_booked=True,
+                booking_id=str(booking.id),
+                recurring_group_id=crm_session_group_id,
+            )
+            # Mirror the cabinet GCal event into the specialist's personal
+            # CRM calendar too, so a session shows up under the client's
+            # name (not just "Кабинет 8 — Микола") in their day view.
+            if crm_calendar_id:
+                try:
+                    from app.services.crm_calendar import create_calendar_event as _crm_create_ev
+                    ts.google_event_id = _crm_create_ev(
+                        calendar_id=crm_calendar_id,
+                        client_name=crm_client_obj.name,
+                        alias_code=crm_client_obj.alias_code,
+                        session_date=session_date,
+                        duration_minutes=data.duration,
+                    )
+                except Exception as e:
+                    logger.warning(f"CRM GCal push failed for recurring {d}: {e}")
+            session.add(ts)
 
         total_cost += quote.final_price
         created_bookings.append(str(booking.id))
