@@ -64,6 +64,10 @@ export interface CrmSession {
     notes?: string;
     googleEventId?: string;
     bookingId?: string;
+    // Stamped on every member of a recurring series so the delete UI can
+    // offer "this one" vs "this and all future" — same pattern as Google
+    // Calendar. Null on legacy sessions and one-off sessions.
+    recurringGroupId?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -78,6 +82,7 @@ export interface CrmSessionCreate {
     isBooked?: boolean;
     notes?: string;
     bookingId?: string;
+    recurringGroupId?: string;
     pushToCalendar?: boolean;
 }
 
@@ -309,8 +314,14 @@ export const crmApi = {
         return response.data;
     },
 
-    deleteSession: async (id: string): Promise<void> => {
-        await api.delete(`/crm/sessions/${id}`);
+    /**
+     * Delete a CRM session. Pass `scope='future'` to also remove every later
+     * occurrence in the same recurring series (matches the GCal delete UX).
+     * Backend cleans up Google Calendar events for the deleted rows.
+     */
+    deleteSession: async (id: string, scope: 'this' | 'future' = 'this'): Promise<{ ok: boolean; deleted: number; deletedGcal: number; scope: string }> => {
+        const res = await api.delete(`/crm/sessions/${id}`, { params: { scope } });
+        return res.data;
     },
 
     autoCompleteSessions: async (): Promise<{ ok: boolean; autoCompleted: number }> => {

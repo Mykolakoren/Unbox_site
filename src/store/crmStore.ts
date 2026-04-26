@@ -41,7 +41,7 @@ interface CrmStore {
     fetchSessions: (params?: { clientId?: string; dateFrom?: string; dateTo?: string; status?: string }) => Promise<void>;
     createSession: (data: CrmSessionCreate) => Promise<CrmSession>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    deleteSession: (id: string) => Promise<void>;
+    deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
 
     // Payments
@@ -179,10 +179,28 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
         }
     },
 
-    deleteSession: async (id) => {
+    deleteSession: async (id, scope = 'this') => {
         try {
-            await crmApi.deleteSession(id);
-            set((s) => ({ sessions: s.sessions.filter((sess) => sess.id !== id) }));
+            const res = await crmApi.deleteSession(id, scope);
+            // For scope='this' we drop just one row; for 'future' we drop the
+            // pivot session and every later sibling in the same series.
+            if (scope === 'future') {
+                const pivot = get().sessions.find((s) => s.id === id);
+                const groupId = pivot?.recurringGroupId;
+                if (pivot && groupId) {
+                    set((s) => ({
+                        sessions: s.sessions.filter(
+                            (sess) =>
+                                !(sess.recurringGroupId === groupId && new Date(sess.date) >= new Date(pivot.date)),
+                        ),
+                    }));
+                } else {
+                    set((s) => ({ sessions: s.sessions.filter((sess) => sess.id !== id) }));
+                }
+            } else {
+                set((s) => ({ sessions: s.sessions.filter((sess) => sess.id !== id) }));
+            }
+            return { deleted: res.deleted, deletedGcal: res.deletedGcal };
         } catch (error) {
             toast.error('Не удалось удалить сессию');
             throw error;

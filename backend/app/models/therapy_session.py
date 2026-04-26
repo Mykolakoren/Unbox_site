@@ -21,6 +21,11 @@ class TherapySessionBase(SQLModel):
     notes: Optional[str] = None  # Inline notes for this session
     google_event_id: Optional[str] = Field(default=None, unique=True)
     booking_id: Optional[str] = None  # Link to Unbox room booking if applicable
+    # When the session was spawned as part of a recurring series (chessboard
+    # "Повторение" or future bulk), all sessions in the series share the same
+    # UUID. Lets the delete endpoint offer "this one vs this+future" the way
+    # Google Calendar does.
+    recurring_group_id: Optional[str] = Field(default=None, index=True)
 
 
 class TherapySession(TherapySessionBase, table=True):
@@ -41,6 +46,7 @@ class TherapySessionCreate(SQLModel):
     is_booked: bool = False
     notes: Optional[str] = None
     booking_id: Optional[str] = None
+    recurring_group_id: Optional[str] = None  # Stamp every member of a series with the same UUID
     push_to_calendar: bool = False  # If True, create Google Calendar event
 
 

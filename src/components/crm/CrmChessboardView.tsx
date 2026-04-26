@@ -1067,6 +1067,13 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             const hasClients = slotAssignments.some(s => s.clientId);
             if (hasClients) {
                 const baseDate = new Date(`${dateStr}T00:00:00`);
+                // One UUID stamped on every CRM session in this series — lets
+                // the delete UI later offer "this one vs this+future" the way
+                // Google Calendar does. Generated once per click, not per slot,
+                // so multi-client recurring (rare but possible) shares a group.
+                const recurringGroupId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : `rg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
                 for (let n = 1; n < opts.occurrences; n++) {
                     let nextDate: Date;
                     if (opts.recurringPattern === 'weekly') {
@@ -1092,6 +1099,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 // shows up in the specialist's Google Calendar
                                 // (calendar_id from /crm/settings).
                                 pushToCalendar: true,
+                                recurringGroupId,
                                 isBooked: false,
                             });
                             recurringCreated++;
