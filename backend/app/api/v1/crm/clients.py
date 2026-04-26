@@ -163,9 +163,20 @@ def list_clients(
         unpaid = [s for s in sessions_all if not s.is_paid and s.status == "COMPLETED"]
         c_dict["unpaidSum"] = sum((s.price if s.price is not None else base) for s in unpaid)
 
-        # LTV = sum of completed+paid sessions (more reliable than payments table after merges)
-        paid_sessions = [s for s in sessions_all if s.is_paid and s.status == "COMPLETED"]
-        c_dict["totalPaid"] = sum((s.price if s.price is not None else base) for s in paid_sessions)
+        # LTV = sum of REAL payments the client made. Earlier we computed
+        # this from is_paid+COMPLETED sessions × price; that double-counts
+        # whenever a session was force-marked paid by import/sync without
+        # an actual payment row (Petrov: 54 sessions × 5000 RUB = 270 000
+        # while only 7 real payments totalling 35 000 ever landed).
+        # Real payments are the source of truth — that's the actual money.
+        from app.models.therapist_payment import TherapistPayment as _TP
+        client_payments = session.exec(
+            select(_TP).where(
+                _TP.specialist_id == uid,
+                _TP.client_id == str(c.id),
+            )
+        ).all()
+        c_dict["totalPaid"] = round(sum(float(p.amount or 0) for p in client_payments), 2)
 
         result.append(c_dict)
 
@@ -220,16 +231,21 @@ def get_client_balance(
     debt_by_currency = _group_by_currency(unpaid_sessions)
     debt = sum(debt_by_currency.values())
 
-    # LTV = sum of completed+paid sessions
-    paid_sessions = session.exec(
-        select(TherapySession).where(
-            TherapySession.specialist_id == uid,
-            TherapySession.client_id == str(client_id),
-            TherapySession.status == "COMPLETED",
-            TherapySession.is_paid == True,
+    # LTV = sum of REAL payments. Same reasoning as in list_clients above:
+    # is_paid+COMPLETED sessions overcount when an import flagged sessions
+    # paid without creating payment rows. Use TherapistPayment as the
+    # source of truth so LTV reflects actual money.
+    from app.models.therapist_payment import TherapistPayment as _TP
+    client_payments = session.exec(
+        select(_TP).where(
+            _TP.specialist_id == uid,
+            _TP.client_id == str(client_id),
         )
     ).all()
-    paid_by_currency = _group_by_currency(paid_sessions)
+    paid_by_currency: dict = {}
+    for p in client_payments:
+        cur = (p.currency or default_cur).upper()
+        paid_by_currency[cur] = round(paid_by_currency.get(cur, 0) + float(p.amount or 0), 2)
     total_paid = sum(paid_by_currency.values())
 
     # Total expected (all non-cancelled sessions)
