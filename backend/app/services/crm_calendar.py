@@ -40,9 +40,17 @@ def _get_calendar_service():
 # ─── Core helpers ─────────────────────────────────────────────────────────────
 
 def _dt_to_rfc3339(dt: datetime) -> str:
-    """Convert naive UTC datetime → RFC3339 string."""
+    """Convert datetime → RFC3339 string for Google Calendar.
+
+    Naive datetimes coming from CRM endpoints (frontend sends
+    "YYYY-MM-DDTHH:MM:SS" without a TZ suffix) represent Tbilisi local
+    wall-clock time — that's the convention the rest of the CRM follows
+    (chessboard, session list, reminders). Treat them as Asia/Tbilisi
+    (UTC+4) and serialise with the offset so Google Calendar lands the
+    event at the right wall-clock time. The previous behaviour (assume
+    naive=UTC) buried events 4 hours late."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=4)))
     return dt.isoformat()
 
 

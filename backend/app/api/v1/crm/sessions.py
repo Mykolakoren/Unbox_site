@@ -82,8 +82,18 @@ def create_session(
         specialist_id=str(current_user.id),
     )
 
+    # Diagnostic — confirm whether push_to_calendar is actually arriving and
+    # whether the specialist has a calendar configured. Without this, a silent
+    # False (e.g. axios interceptor not converting key) is invisible.
+    logger.info(
+        f"[create_session] specialist={current_user.id} client={client.name} "
+        f"push_to_calendar={data.push_to_calendar} crm_data_keys="
+        f"{list((current_user.crm_data or {}).keys())}"
+    )
+
     if data.push_to_calendar:
         calendar_id = get_crm_calendar_id(current_user)
+        logger.info(f"[create_session] calendar_id={calendar_id!r} alias_code={client.alias_code!r}")
         if calendar_id:
             try:
                 from app.services.crm_calendar import create_calendar_event
@@ -96,8 +106,11 @@ def create_session(
                     notes=data.notes,
                 )
                 therapy_session.google_event_id = gcal_id
+                logger.info(f"[create_session] GCal event created: {gcal_id}")
             except Exception as e:
-                logger.warning(f"GCal push failed: {e}")
+                logger.warning(f"GCal push failed: {e}", exc_info=True)
+        else:
+            logger.warning(f"[create_session] push_to_calendar=True but calendar_id missing for user {current_user.id}")
 
     session.add(therapy_session)
     session.commit()
