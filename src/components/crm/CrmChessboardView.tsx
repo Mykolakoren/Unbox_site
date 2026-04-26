@@ -1096,7 +1096,14 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             });
                             recurringCreated++;
                         } catch (e) {
-                            // continue on failure (likely a duplicate)
+                            // Don't swallow silently — earlier we did, and a
+                            // missing gcal_event_id was invisible to the
+                            // specialist. Log so it surfaces in DevTools.
+                            console.error('Recurring CRM session create failed', {
+                                date: `${nextDateStr}T${timeStr}:00`,
+                                clientId: slot.clientId,
+                                error: e,
+                            });
                         }
                     }
                 }
