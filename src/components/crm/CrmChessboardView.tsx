@@ -615,9 +615,16 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
     // Drag to select
     const [newSlots, setNewSlots] = useState<string[]>([]);
-    type DragMode = 'new' | null;
+    // 'new' — drag-painting empty slots to pick a fresh booking range.
+    // 'move' — grab an existing OWN booking and drop it onto a free
+    // slot to reschedule it via PATCH /bookings/:id/reschedule.
+    type DragMode = 'new' | 'move' | null;
     const dragModeRef = useRef<DragMode>(null);
     const dragStartRef = useRef<{ resId: string; time: string } | null>(null);
+    // For 'move' drag — the booking being relocated and a hover preview slot
+    const movingBookingRef = useRef<BookingHistoryItem | null>(null);
+    const [moveHover, setMoveHover] = useState<{ resId: string; time: string } | null>(null);
+    const [reschedSaving, setReschedSaving] = useState(false);
     const [, setDragTick] = useState(0);
     const forceDragUpdate = () => setDragTick(t => t + 1);
 
@@ -768,7 +775,22 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         forceDragUpdate();
     };
 
+    /** Start dragging an OWN booking to relocate it. The booking can be
+     *  dropped on any free slot (any cabinet, any time within the day);
+     *  on drop we PATCH /bookings/:id/reschedule. Forbid past slots. */
+    const handleBookingMoveDown = (booking: BookingHistoryItem) => {
+        // Only confirmed bookings; cancelled/completed don't move
+        if (booking.status !== 'confirmed') return;
+        dragModeRef.current = 'move';
+        movingBookingRef.current = booking;
+        forceDragUpdate();
+    };
+
     const handleDragEnter = useCallback((resId: string, time: string) => {
+        if (dragModeRef.current === 'move') {
+            setMoveHover({ resId, time });
+            return;
+        }
         if (!dragModeRef.current || !dragStartRef.current) return;
         if (dragStartRef.current.resId !== resId) return;
         const startIdx = TIME_SLOTS.indexOf(dragStartRef.current.time);
@@ -787,6 +809,46 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
     const handleDragUp = useCallback(() => {
         if (!dragModeRef.current) return;
+
+        // Reschedule branch: dropped a moved booking onto a free slot
+        if (dragModeRef.current === 'move') {
+            const booking = movingBookingRef.current;
+            const target = moveHover;
+            dragModeRef.current = null;
+            movingBookingRef.current = null;
+            setMoveHover(null);
+            forceDragUpdate();
+            if (!booking || !target) return;
+            // Same slot? — no-op
+            const sameSlot = (booking.resourceId === target.resId)
+                && (booking.startTime === target.time)
+                && (format(parseUTC(booking.date), 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd'));
+            if (sameSlot) return;
+            // Verify target slot is free for the full duration of the booking
+            const dur = booking.duration || 60;
+            const need = Math.ceil(dur / 30);
+            const idx = TIME_SLOTS.indexOf(target.time);
+            if (idx < 0) { toast.error('Слот вне расписания'); return; }
+            for (let i = idx; i < idx + need; i++) {
+                if (i >= TIME_SLOTS.length) { toast.error('Бронь не помещается до конца дня'); return; }
+                if (isSlotOccupied(target.resId, TIME_SLOTS[i])) { toast.error('Слот занят целиком — выберите другое время'); return; }
+            }
+            // Fire reschedule
+            setReschedSaving(true);
+            const newDate = format(selectedDate, 'yyyy-MM-dd');
+            bookingsApi.rescheduleBooking(booking.id, {
+                newDate,
+                newStartTime: target.time,
+                newResourceId: target.resId,
+            }).then(async () => {
+                toast.success('Бронь перенесена');
+                await fetchBookings();
+            }).catch((err) => {
+                toast.error(err?.response?.data?.detail || 'Не удалось перенести бронь');
+            }).finally(() => setReschedSaving(false));
+            return;
+        }
+
         dragModeRef.current = null;
         dragStartRef.current = null;
         forceDragUpdate();
@@ -800,7 +862,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             }
             return prev;
         });
-    }, [isSlotOccupied]);
+    }, [isSlotOccupied, moveHover, selectedDate, fetchBookings]);
 
     useEffect(() => {
         const handleMove = (e: PointerEvent) => {
@@ -1285,14 +1347,29 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                         </div>
                                                     ) : (
                                                         <div
-                                                            onClick={isMine ? () => setLinkBooking(booking) : undefined}
+                                                            // pointerdown → start drag-to-move; click → open link modal.
+                                                            // The drag handler waits for pointer-move before
+                                                            // committing to "move" so a plain tap still opens
+                                                            // the modal (handled in handleDragUp branch).
+                                                            onPointerDown={isMine ? (e) => {
+                                                                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                                                                e.preventDefault();
+                                                                handleBookingMoveDown(booking);
+                                                            } : undefined}
+                                                            onClick={isMine ? (e) => {
+                                                                // Only treat as click if no drag happened
+                                                                if (dragModeRef.current === 'move' && moveHover) return;
+                                                                e.stopPropagation();
+                                                                setLinkBooking(booking);
+                                                            } : undefined}
                                                             className={clsx(
                                                                 'h-8 rounded-md border text-[10px] font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
                                                                 isMine
-                                                                    ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-pointer hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
-                                                                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-default'
+                                                                    ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-grab active:cursor-grabbing hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
+                                                                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-default',
+                                                                reschedSaving && 'opacity-60 pointer-events-none'
                                                             )}
-                                                            title={isMine ? (linkedClient ? 'Изменить клиента' : 'Привязать клиента') : undefined}
+                                                            title={isMine ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента` : undefined}
                                                         >
                                                             <span className="truncate flex-1">
                                                                 {isMine
@@ -1337,9 +1414,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                         ? 'bg-gray-50 cursor-not-allowed'
                                                         : isSelected
                                                             ? 'bg-unbox-green/20 cursor-pointer'
-                                                            : isPeakTime(slot)
-                                                                ? 'bg-amber-50/50 hover:bg-amber-100/40 cursor-pointer'
-                                                                : 'hover:bg-unbox-light/40 cursor-pointer'
+                                                            : (dragModeRef.current === 'move' && moveHover?.resId === resource.id && moveHover?.time === slot)
+                                                                ? 'bg-blue-200/60 ring-2 ring-blue-400 cursor-copy'
+                                                                : isPeakTime(slot)
+                                                                    ? 'bg-amber-50/50 hover:bg-amber-100/40 cursor-pointer'
+                                                                    : 'hover:bg-unbox-light/40 cursor-pointer'
                                                 )}
                                                 style={{ width: SLOT_W, minWidth: SLOT_W, height: 40 }}
                                             >
