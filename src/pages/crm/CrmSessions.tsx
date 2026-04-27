@@ -1328,9 +1328,11 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                 )}
 
                 {p.view === 'chess' ? (
-                    <div style={{ marginTop: 24 }}><CrmChessboardView initialDate={p.chessDate} /></div>
+                    // marginTop trimmed 24 → 12 — visual breathing room
+                    // doesn't need to be cavernous between tab strip and grid.
+                    <div style={{ marginTop: 12 }}><CrmChessboardView initialDate={p.chessDate} /></div>
                 ) : p.view === 'week' ? (
-                    <div style={{ marginTop: 24 }}>
+                    <div style={{ marginTop: 12 }}>
                         {/* Week nav */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                             <button onClick={() => p.setWeekAnchor(d => subWeeks(d, 1))}

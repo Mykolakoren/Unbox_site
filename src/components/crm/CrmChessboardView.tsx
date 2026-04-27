@@ -1484,7 +1484,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     // ── DESKTOP VIEW ──
 
     return (
-        <div className="space-y-4" onPointerUp={handleDragUp}>
+        // space-y-4 → space-y-2: tighter vertical rhythm so the filter
+        // row, day strip and chessboard sit close together. User asked to
+        // kill empty space across the page.
+        <div className="space-y-2" onPointerUp={handleDragUp}>
             {/* Controls — top row is now JUST the location filter; week
                 navigation moved one row down so it lives next to the day
                 buttons. The user wanted to flip pages of the calendar
