@@ -1485,30 +1485,39 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
     return (
         <div className="space-y-4" onPointerUp={handleDragUp}>
-            {/* Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                {/* Location filter */}
-                <div className="flex gap-1.5 flex-wrap">
-                    {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
-                        <button
-                            key={loc.id}
-                            onClick={() => setFilterLocation(loc.id)}
-                            className={clsx(
-                                'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                                filterLocation === loc.id
-                                    ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
-                            )}
-                        >
-                            {loc.name}
-                        </button>
-                    ))}
-                </div>
-
-                {weekNav}
+            {/* Controls — top row is now JUST the location filter; week
+                navigation moved one row down so it lives next to the day
+                buttons. The user wanted to flip pages of the calendar
+                without dragging the eyes from "today is Wednesday" up to
+                the corner and back. */}
+            <div className="flex gap-1.5 flex-wrap">
+                {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
+                    <button
+                        key={loc.id}
+                        onClick={() => setFilterLocation(loc.id)}
+                        className={clsx(
+                            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                            filterLocation === loc.id
+                                ? 'bg-unbox-green text-white border-unbox-green'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
+                        )}
+                    >
+                        {loc.name}
+                    </button>
+                ))}
             </div>
 
-            {daySelector}
+            {/* Day picker + week nav on one row. daySelector grows; weekNav
+                hugs the right edge so the chevrons land in a predictable
+                spot regardless of how many days are visible. */}
+            <div className="flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                    {daySelector}
+                </div>
+                <div className="shrink-0">
+                    {weekNav}
+                </div>
+            </div>
 
             {selectedBar}
 
