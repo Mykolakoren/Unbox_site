@@ -407,6 +407,7 @@ function WeekCalendar({
                                                     onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
                                                     onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                                                     onCancel={() => setEditingId(null)}
+                                                    onBookCab={!session.isBooked ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
                                                 />
                                             )}
                                         </div>
@@ -586,6 +587,18 @@ function DayGroup({
                                         }}
                                         onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                                         onCancel={() => setEditingId(null)}
+                                        onBookCab={!session.isBooked && onBookCab ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
+                                        onDelete={async () => {
+                                            // DayGroup keeps the legacy confirm path — sessions here are
+                                            // less likely to be part of a series and the GH list view (which
+                                            // covers recurring) already has the smarter modal.
+                                            if (!confirm('Удалить сессию?')) return;
+                                            try {
+                                                await deleteSession(session.id);
+                                                setEditingId(null);
+                                                toast.success('Сессия удалена');
+                                            } catch { toast.error('Ошибка'); }
+                                        }}
                                     />
                                 )}
                             </div>
@@ -705,6 +718,8 @@ function SessionEditPanel({
     onSave,
     onQuickPay,
     onCancel,
+    onBookCab,
+    onDelete,
 }: {
     session: import('../../api/crm').CrmSession;
     clientCurrency?: string;
@@ -712,6 +727,10 @@ function SessionEditPanel({
     onSave: (data: CrmSessionUpdate) => Promise<void>;
     onQuickPay?: (account: string) => Promise<void>;
     onCancel: () => void;
+    /** Open the cabinet-booking flow for this session (already prefilled). */
+    onBookCab?: () => void;
+    /** Open the delete confirm modal — handles "this one vs whole series" itself. */
+    onDelete?: () => void;
 }) {
     const clients = useCrmStore(s => s.clients);
     const [date, setDate] = useState(format(parseSessionDate(session.date), "yyyy-MM-dd'T'HH:mm"));
@@ -746,6 +765,22 @@ function SessionEditPanel({
             }
         } catch (err: any) {
             toast.error(err.message || 'Ошибка');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // Quick-cancel: changes status to CANCELLED_CLIENT and saves immediately.
+    // We default to "client cancelled" because that's the most common case;
+    // the dropdown is still there for the rarer "therapist cancelled" path.
+    const handleQuickCancel = async () => {
+        setSaving(true);
+        try {
+            await onSave({ status: 'CANCELLED_CLIENT' });
+            toast.success('Сессия отменена');
+            onCancel();
+        } catch (err: any) {
+            toast.error(err?.message || 'Не удалось отменить');
         } finally {
             setSaving(false);
         }
@@ -845,13 +880,57 @@ function SessionEditPanel({
                         />
                     )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                    {/*
+                      Quick actions, in order of escalation:
+                       — book a cabinet (only when not yet booked) opens the
+                         existing /dashboard/bookings flow with this session
+                         pre-attached, so the new booking auto-links back.
+                       — cancel = soft-cancel, status flips to
+                         CANCELLED_CLIENT, session row stays in DB so reports
+                         can still see "this hour was on the calendar".
+                       — delete = hard delete via the shared modal (handles
+                         "this one vs the whole recurring series" itself).
+                    */}
+                    {onBookCab && !session.isBooked && getEffectiveStatus(session) !== 'CANCELLED_CLIENT' && getEffectiveStatus(session) !== 'CANCELLED_THERAPIST' && (
+                        <button
+                            type="button"
+                            onClick={onBookCab}
+                            disabled={saving}
+                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-unbox-green/40 text-unbox-green hover:bg-unbox-light/60 transition-colors disabled:opacity-50"
+                            title="Забронировать кабинет под эту сессию"
+                        >
+                            + Кабинет
+                        </button>
+                    )}
+                    {getEffectiveStatus(session) !== 'CANCELLED_CLIENT' && getEffectiveStatus(session) !== 'CANCELLED_THERAPIST' && (
+                        <button
+                            type="button"
+                            onClick={handleQuickCancel}
+                            disabled={saving}
+                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-amber-400 text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50"
+                            title="Отметить сессию как отменённую (статус меняется, запись остаётся)"
+                        >
+                            ✗ Отменить
+                        </button>
+                    )}
+                    {onDelete && (
+                        <button
+                            type="button"
+                            onClick={onDelete}
+                            disabled={saving}
+                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                            title="Удалить сессию полностью (с возможностью удалить всю серию)"
+                        >
+                            🗑 Удалить
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={onCancel}
                         className="px-3 py-1.5 text-xs text-unbox-grey hover:bg-unbox-light/50 rounded-lg transition-colors"
                     >
-                        Отмена
+                        Закрыть
                     </button>
                     <button
                         type="submit"
@@ -1489,6 +1568,8 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Обновлена'); }}
                     onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                     onCancel={() => setEditingId(null)}
+                    onBookCab={!session.isBooked ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
+                    onDelete={() => { setEditingId(null); setDeleteOpen(true); }}
                 />
             )}
             <DeleteSessionModal
