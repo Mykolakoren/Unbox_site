@@ -1353,6 +1353,21 @@ def cancel_booking(
     booking.status = "cancelled"
     booking.cancelled_by = current_user.email
 
+    # ── Detach any CRM session that was relying on this cabinet booking ──
+    # Otherwise the session list keeps the "КАБ" badge and an `is_booked`
+    # flag pointing at a cancelled booking — invisible footgun the user
+    # spotted ("сейчас бронь который я открыл я удалил, но у неё по-прежнему
+    # показывает что есть кабинет привязаны, а это неверно").
+    from app.models.therapy_session import TherapySession as _TS
+    linked_sessions = session.exec(
+        select(_TS).where(_TS.booking_id == str(booking.id))
+    ).all()
+    for ts in linked_sessions:
+        ts.booking_id = None
+        ts.is_booked = False
+        ts.updated_at = datetime.now()
+        session.add(ts)
+
     session.add(booking)
     session.commit()
     session.refresh(booking)

@@ -210,6 +210,70 @@ def delete_session(
     return {"ok": True, "deleted": len(targets), "deleted_gcal": deleted_gcal, "scope": scope}
 
 
+@router.post("/sessions/{session_id}/detach-cabinet")
+def detach_session_cabinet(
+    session_id: str,
+    cancel_booking: bool = Query(False, description="Also cancel the linked cabinet booking (refunds owner)"),
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Remove the cabinet-booking link from a CRM session.
+
+    The session itself stays intact (date, client, price). Only the
+    `booking_id` / `is_booked` fields are cleared so the chessboard stops
+    rendering the КАБ badge and the session list shows "+Каб" again.
+
+    With `cancel_booking=true` we also cancel the underlying Booking row
+    (refunds the owner, frees the cabinet for others). With the default
+    `false`, only the link is broken — the cabinet booking stays as-is and
+    can be re-attached to a different session later.
+    """
+    ts = session.get(TherapySession, session_id)
+    if not ts or ts.specialist_id != str(current_user.id):
+        raise HTTPException(404, "Session not found")
+    if not ts.booking_id:
+        raise HTTPException(400, "Session has no cabinet booking attached")
+
+    detached_booking_id = ts.booking_id
+    booking_cancelled = False
+
+    if cancel_booking:
+        # Defer to the existing cancel flow so we get the same refund +
+        # GCal cleanup + waitlist-notify behaviour. Import lazily to dodge
+        # the circular import (bookings/routes.py imports CRM stuff too).
+        from app.api.v1.bookings.routes import cancel_booking as _cancel_booking_fn
+        try:
+            _cancel_booking_fn(
+                booking_id=detached_booking_id,
+                session=session,
+                current_user=current_user,
+            )
+            booking_cancelled = True
+            # cancel_booking already nulled booking_id on this session via the
+            # cleanup loop we added — refresh and return.
+            session.refresh(ts)
+        except HTTPException:
+            # Bubble booking-side errors (>24h, past booking, etc.) up so the
+            # specialist sees the actual reason rather than a silent no-op.
+            raise
+
+    if not booking_cancelled:
+        # Soft detach only — keep the booking, just unlink it.
+        ts.booking_id = None
+        ts.is_booked = False
+        ts.updated_at = datetime.now()
+        session.add(ts)
+        session.commit()
+        session.refresh(ts)
+
+    return {
+        "ok": True,
+        "session_id": ts.id,
+        "detached_booking_id": detached_booking_id,
+        "booking_cancelled": booking_cancelled,
+    }
+
+
 @router.post("/sessions/{session_id}/quick-pay")
 def quick_pay_session(
     session_id: str,
