@@ -2223,7 +2223,11 @@ function CrmQuickBookingModal({
                 <div>
                     <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Длительность</label>
                     <div className="flex gap-2">
-                        {[50, 60, 90, 120].map(d => (
+                        {/* 50-min option removed — was confusing alongside the
+                            standard 60/90/120 set. Therapy sessions that need
+                            50 min still use the SessionEditPanel dropdown which
+                            keeps the full range (30/45/50/60/90/120). */}
+                        {[60, 90, 120].map(d => (
                             <button
                                 key={d}
                                 onClick={() => setDuration(d)}
