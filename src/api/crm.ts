@@ -324,6 +324,19 @@ export const crmApi = {
         return res.data;
     },
 
+    /**
+     * Detach the cabinet booking from a CRM session. Default keeps the
+     * underlying booking alive (so it can be re-attached to a different
+     * session); pass `cancelBooking=true` to also cancel the cabinet
+     * booking entirely (refund + GCal delete via the standard cancel flow).
+     */
+    detachCabinet: async (sessionId: string, cancelBooking = false): Promise<{ ok: boolean; sessionId: string; detachedBookingId: string; bookingCancelled: boolean }> => {
+        const res = await api.post(`/crm/sessions/${sessionId}/detach-cabinet`, null, {
+            params: { cancel_booking: cancelBooking },
+        });
+        return res.data;
+    },
+
     autoCompleteSessions: async (): Promise<{ ok: boolean; autoCompleted: number }> => {
         const response = await api.post('/crm/sessions/auto-complete');
         return response.data;

@@ -407,7 +407,8 @@ function WeekCalendar({
                                                     onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
                                                     onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                                                     onCancel={() => setEditingId(null)}
-                                                    onBookCab={!session.isBooked ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
+                                                    onBookCab={() => onBookCab(session, client?.name || 'Клиент')}
+                                                    onRefresh={() => useCrmStore.getState().fetchSessions()}
                                                 />
                                             )}
                                         </div>
@@ -587,7 +588,7 @@ function DayGroup({
                                         }}
                                         onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                                         onCancel={() => setEditingId(null)}
-                                        onBookCab={!session.isBooked && onBookCab ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
+                                        onBookCab={onBookCab ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
                                         onDelete={async () => {
                                             // DayGroup keeps the legacy confirm path — sessions here are
                                             // less likely to be part of a series and the GH list view (which
@@ -599,6 +600,7 @@ function DayGroup({
                                                 toast.success('Сессия удалена');
                                             } catch { toast.error('Ошибка'); }
                                         }}
+                                        onRefresh={() => useCrmStore.getState().fetchSessions()}
                                     />
                                 )}
                             </div>
@@ -720,6 +722,7 @@ function SessionEditPanel({
     onCancel,
     onBookCab,
     onDelete,
+    onRefresh,
 }: {
     session: import('../../api/crm').CrmSession;
     clientCurrency?: string;
@@ -731,6 +734,11 @@ function SessionEditPanel({
     onBookCab?: () => void;
     /** Open the delete confirm modal — handles "this one vs whole series" itself. */
     onDelete?: () => void;
+    /**
+     * Refresh the parent's session list. Used after detach so the КАБ badge
+     * disappears immediately without waiting for the next fetch.
+     */
+    onRefresh?: () => Promise<void> | void;
 }) {
     const clients = useCrmStore(s => s.clients);
     const [date, setDate] = useState(format(parseSessionDate(session.date), "yyyy-MM-dd'T'HH:mm"));
@@ -781,6 +789,45 @@ function SessionEditPanel({
             onCancel();
         } catch (err: any) {
             toast.error(err?.message || 'Не удалось отменить');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // Detach cabinet: clears booking_id + is_booked on the session.
+    // `cancelToo` also cancels the underlying cabinet booking (refunds the
+    // owner). Default false = soft detach so the cabinet booking can be
+    // re-attached to a different session (e.g. wrong client originally).
+    const handleDetachCabinet = async (cancelToo: boolean) => {
+        if (cancelToo && !confirm('Отменить кабинетную бронь? Деньги вернутся на баланс.')) return;
+        setSaving(true);
+        try {
+            const { crmApi } = await import('../../api/crm');
+            await crmApi.detachCabinet(session.id, cancelToo);
+            toast.success(cancelToo ? 'Кабинет отвязан и бронь отменена' : 'Кабинет отвязан');
+            if (onRefresh) await onRefresh();
+            onCancel();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || err?.message || 'Не удалось отвязать кабинет');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // Change cabinet: detach old (keep booking row alive — user might want
+    // to manage it separately) then immediately open the booking flow to
+    // pick a new one. The new booking will re-link itself when created.
+    const handleChangeCabinet = async () => {
+        if (!onBookCab) return;
+        if (!confirm('Отвязать текущий кабинет и выбрать новый?')) return;
+        setSaving(true);
+        try {
+            const { crmApi } = await import('../../api/crm');
+            await crmApi.detachCabinet(session.id, false);
+            if (onRefresh) await onRefresh();
+            onBookCab();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || err?.message || 'Не удалось отвязать кабинет');
         } finally {
             setSaving(false);
         }
@@ -892,16 +939,49 @@ function SessionEditPanel({
                        — delete = hard delete via the shared modal (handles
                          "this one vs the whole recurring series" itself).
                     */}
-                    {onBookCab && !session.isBooked && getEffectiveStatus(session) !== 'CANCELLED_CLIENT' && getEffectiveStatus(session) !== 'CANCELLED_THERAPIST' && (
-                        <button
-                            type="button"
-                            onClick={onBookCab}
-                            disabled={saving}
-                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-unbox-green/40 text-unbox-green hover:bg-unbox-light/60 transition-colors disabled:opacity-50"
-                            title="Забронировать кабинет под эту сессию"
-                        >
-                            + Кабинет
-                        </button>
+                    {/* Cabinet controls — three-state:
+                          • not booked yet  → "+ Кабинет"
+                          • booked          → "↻ Поменять кабинет" + "✗ Отвязать"
+                          • cancelled       → hidden
+                       Hidden entirely when the session itself is cancelled because
+                       attaching a cabinet to a cancelled session is meaningless. */}
+                    {getEffectiveStatus(session) !== 'CANCELLED_CLIENT' && getEffectiveStatus(session) !== 'CANCELLED_THERAPIST' && (
+                        session.isBooked ? (
+                            <>
+                                {onBookCab && (
+                                    <button
+                                        type="button"
+                                        onClick={handleChangeCabinet}
+                                        disabled={saving}
+                                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-400 text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                                        title="Отвязать текущий кабинет и выбрать новый (старая бронь останется и её можно отдельно отменить)"
+                                    >
+                                        ↻ Поменять кабинет
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => handleDetachCabinet(false)}
+                                    disabled={saving}
+                                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-400 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                    title="Снять связь сессии с кабинетной бронью (сама бронь останется)"
+                                >
+                                    ⊘ Отвязать
+                                </button>
+                            </>
+                        ) : (
+                            onBookCab && (
+                                <button
+                                    type="button"
+                                    onClick={onBookCab}
+                                    disabled={saving}
+                                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-unbox-green/40 text-unbox-green hover:bg-unbox-light/60 transition-colors disabled:opacity-50"
+                                    title="Забронировать кабинет под эту сессию"
+                                >
+                                    + Кабинет
+                                </button>
+                            )
+                        )
                     )}
                     {getEffectiveStatus(session) !== 'CANCELLED_CLIENT' && getEffectiveStatus(session) !== 'CANCELLED_THERAPIST' && (
                         <button
@@ -1568,8 +1648,9 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Обновлена'); }}
                     onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
                     onCancel={() => setEditingId(null)}
-                    onBookCab={!session.isBooked ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
+                    onBookCab={() => onBookCab(session, client?.name || 'Клиент')}
                     onDelete={() => { setEditingId(null); setDeleteOpen(true); }}
+                    onRefresh={() => useCrmStore.getState().fetchSessions({ dateFrom: format(startOfMonth(new Date()), 'yyyy-MM-dd'), dateTo: format(addDays(new Date(), 60), 'yyyy-MM-dd') })}
                 />
             )}
             <DeleteSessionModal
