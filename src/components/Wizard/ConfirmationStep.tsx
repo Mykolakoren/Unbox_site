@@ -269,7 +269,16 @@ export function ConfirmationStep() {
                     });
                     const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
                     toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
-                    await fetchCurrentUser();
+                    // Refresh BOTH the user (balance) AND the bookings store —
+                    // earlier we only refetched the user, so when the next
+                    // chessboard render relied on a cached `bookings` array
+                    // (e.g. when the destination route was already mounted),
+                    // none of the new occurrences showed up. The chessboard's
+                    // own useEffect on mount only fires on first mount.
+                    await Promise.all([
+                        fetchCurrentUser(),
+                        useUserStore.getState().fetchBookings(),
+                    ]);
                     setConfirmed(true);
                     shouldResetOnUnmount.current = true;
                     setTimeout(() => {
