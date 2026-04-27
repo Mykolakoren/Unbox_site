@@ -445,8 +445,11 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                 </div>
             </div>
 
-            {/* ── KPI strip ── */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 18 : 32, marginBottom: narrow ? 18 : 32, flexWrap: 'wrap' }}>
+            {/* ── KPI strip ──
+                Tightened gap below: 32px was leaving the chessboard
+                visually disconnected from the page totals on a 1080p
+                screen. 12px keeps the hierarchy without the empty space. */}
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 18 : 32, marginBottom: narrow ? 12 : 14, flexWrap: 'wrap' }}>
                 <div>
                     <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 4 }}>ВСЕГО</p>
                     <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
@@ -465,10 +468,13 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                 )}
             </div>
 
-            {/* ── Grid view = chessboard (legacy component) ── */}
+            {/* ── Grid view = chessboard ──
+                Wrapper padding cut 20 → 10 and the "ШАХМАТКА · LEGACY VIEW"
+                tag stripped — admin doesn't need to be told what they're
+                looking at, the grid is self-evident. Closes the dead-space
+                gap the user flagged. */}
             {viewMode === 'grid' && (
-                <div style={{ border: ghabHairline, padding: 20, background: GH.paper }}>
-                    <div style={{ ...ghabMono, color: GH.ink30, marginBottom: 16 }}>ШАХМАТКА · LEGACY VIEW</div>
+                <div style={{ border: ghabHairline, padding: 10, background: GH.paper }}>
                     <AdminChessboardView />
                 </div>
             )}
