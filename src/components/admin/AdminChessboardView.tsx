@@ -782,53 +782,13 @@ export function AdminChessboardView() {
         // day strip, and grid that the user flagged as wasted space.
         <div className="space-y-2">
 
-            {/* ── Top row: location filter only.
-                Week-nav arrows used to live here in the right corner;
-                moved one row down so they sit next to the day picker
-                (admin asked for it — flipping weeks and picking a day
-                now happens in the same horizontal zone). */}
-            <div className="flex gap-1.5 flex-wrap">
-                {[{ id: 'all', name: 'Все' } as const, ...LOCATIONS].map(loc => (
-                    <button
-                        key={loc.id}
-                        onClick={() => setFilterLocation(loc.id)}
-                        className={clsx(
-                            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                            filterLocation === loc.id
-                                ? 'bg-unbox-green text-white border-unbox-green'
-                                : 'bg-white text-unbox-grey border-unbox-light hover:bg-unbox-light/50'
-                        )}
-                    >
-                        {loc.name}
-                    </button>
-                ))}
-            </div>
-
-            {/* ── Day tabs + week nav (same row) ──
-                Day buttons grow on the left; the week-nav chevrons hug
-                the right edge so they stay in a predictable spot
-                regardless of how many days are visible. */}
-            <div className="flex items-center gap-3">
-                <div className="flex gap-2 overflow-x-auto pb-1 flex-1 min-w-0">
-                    {weekDays.map(day => (
-                        <button
-                            key={day.toISOString()}
-                            onClick={() => setSelectedDate(day)}
-                            className={clsx(
-                                'flex flex-col items-center px-4 py-2 rounded-xl text-sm border min-w-[72px] transition-colors flex-shrink-0',
-                                isSameDay(day, selectedDate)
-                                    ? 'bg-unbox-green text-white border-unbox-green shadow-sm'
-                                    : isToday(day)
-                                        ? 'bg-unbox-light text-unbox-green border-unbox-green/40 font-semibold'
-                                        : 'bg-white text-unbox-dark border-unbox-light hover:bg-unbox-light/30'
-                            )}
-                        >
-                            <span className="font-bold text-base leading-tight">{format(day, 'd')}</span>
-                            <span className="text-[11px] capitalize">{format(day, 'EEE', { locale: ru })}</span>
-                        </button>
-                    ))}
-                </div>
-
+            {/* ── Top row: week-nav LEFT, location filter RIGHT.
+                Two formerly-separate rows (filter; day-picker+nav)
+                collapsed into this one shared row so the global controls
+                live in the same horizontal band. The day picker keeps
+                its own row below where it can still grow to fit all
+                seven days without crowding. */}
+            <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 shrink-0">
                     <button
                         onClick={() => setWeekStart(subWeeks(weekStart, 1))}
@@ -848,6 +808,45 @@ export function AdminChessboardView() {
                         <ChevronRight size={16} />
                     </button>
                 </div>
+
+                <div className="flex gap-1.5 flex-wrap ml-auto">
+                    {[{ id: 'all', name: 'Все' } as const, ...LOCATIONS].map(loc => (
+                        <button
+                            key={loc.id}
+                            onClick={() => setFilterLocation(loc.id)}
+                            className={clsx(
+                                'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                                filterLocation === loc.id
+                                    ? 'bg-unbox-green text-white border-unbox-green'
+                                    : 'bg-white text-unbox-grey border-unbox-light hover:bg-unbox-light/50'
+                            )}
+                        >
+                            {loc.name}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Day strip on its own row so day buttons can still grow
+                horizontally and stay tappable on narrower viewports. */}
+            <div className="flex gap-2 overflow-x-auto pb-1">
+                {weekDays.map(day => (
+                    <button
+                        key={day.toISOString()}
+                        onClick={() => setSelectedDate(day)}
+                        className={clsx(
+                            'flex flex-col items-center px-4 py-2 rounded-xl text-sm border min-w-[72px] transition-colors flex-shrink-0',
+                            isSameDay(day, selectedDate)
+                                ? 'bg-unbox-green text-white border-unbox-green shadow-sm'
+                                : isToday(day)
+                                    ? 'bg-unbox-light text-unbox-green border-unbox-green/40 font-semibold'
+                                    : 'bg-white text-unbox-dark border-unbox-light hover:bg-unbox-light/30'
+                        )}
+                    >
+                        <span className="font-bold text-base leading-tight">{format(day, 'd')}</span>
+                        <span className="text-[11px] capitalize">{format(day, 'EEE', { locale: ru })}</span>
+                    </button>
+                ))}
             </div>
 
             {/* ── Grid ── */}

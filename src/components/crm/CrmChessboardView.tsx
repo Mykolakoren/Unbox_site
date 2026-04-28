@@ -1488,39 +1488,34 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         // row, day strip and chessboard sit close together. User asked to
         // kill empty space across the page.
         <div className="space-y-2" onPointerUp={handleDragUp}>
-            {/* Controls — top row is now JUST the location filter; week
-                navigation moved one row down so it lives next to the day
-                buttons. The user wanted to flip pages of the calendar
-                without dragging the eyes from "today is Wednesday" up to
-                the corner and back. */}
-            <div className="flex gap-1.5 flex-wrap">
-                {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
-                    <button
-                        key={loc.id}
-                        onClick={() => setFilterLocation(loc.id)}
-                        className={clsx(
-                            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                            filterLocation === loc.id
-                                ? 'bg-unbox-green text-white border-unbox-green'
-                                : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
-                        )}
-                    >
-                        {loc.name}
-                    </button>
-                ))}
-            </div>
-
-            {/* Day picker + week nav on one row. daySelector grows; weekNav
-                hugs the right edge so the chevrons land in a predictable
-                spot regardless of how many days are visible. */}
-            <div className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                    {daySelector}
-                </div>
+            {/* Top row — week-nav on the LEFT, location filter on the RIGHT.
+                Used to be two separate rows; collapsing them saves a row
+                of vertical space and groups the two "global controls"
+                together. Day picker stays on its own row below so day
+                buttons can grow to fill width without squeezing. */}
+            <div className="flex items-center gap-3 flex-wrap">
                 <div className="shrink-0">
                     {weekNav}
                 </div>
+                <div className="flex gap-1.5 flex-wrap ml-auto">
+                    {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
+                        <button
+                            key={loc.id}
+                            onClick={() => setFilterLocation(loc.id)}
+                            className={clsx(
+                                'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                                filterLocation === loc.id
+                                    ? 'bg-unbox-green text-white border-unbox-green'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
+                            )}
+                        >
+                            {loc.name}
+                        </button>
+                    ))}
+                </div>
             </div>
+
+            {daySelector}
 
             {selectedBar}
 
