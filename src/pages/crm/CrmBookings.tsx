@@ -820,50 +820,66 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
-            {/* ── Head ── */}
-            <div style={{ padding: '48px 32px 0' }}>
-                <div style={ghMono}>CRM · Бронирования</div>
-                <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: '8px 0 0' }}>
-                    Мои бронирования.
-                </h1>
-            </div>
-
-            {/* ── Anchor KPI + secondary ── */}
+            {/* ── Compact head + KPI row ──
+                Was three vertical sections (top padding · giant title ·
+                cavernous KPI strip) eating ~280px before any content.
+                Collapsed into one row: title + the big "Предстоит" number
+                on the left, secondary KPIs on the right. Tabs hug the
+                next row instead of a fresh padded block. */}
             <div style={{
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-                padding: '32px 32px 24px', flexWrap: 'wrap', gap: 24,
+                padding: '20px 32px 0',
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'space-between',
+                gap: 24,
+                flexWrap: 'wrap',
             }}>
                 <div>
-                    <div style={{ fontSize: 'clamp(48px, 5vw, 72px)', fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                        {stats.upcoming}
+                    <div style={ghMono}>CRM · Бронирования</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 4 }}>
+                        <h1 style={{
+                            fontFamily: GH_SANS,
+                            fontSize: 'clamp(24px, 3vw, 36px)',
+                            fontWeight: 800,
+                            letterSpacing: '-0.02em',
+                            lineHeight: 1,
+                            margin: 0,
+                        }}>
+                            Мои бронирования.
+                        </h1>
+                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                            <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                                {stats.upcoming}
+                            </span>
+                            <span style={{ ...ghMono, fontSize: 9 }}>предстоит</span>
+                        </span>
                     </div>
-                    <div style={{ ...ghMono, marginTop: 4 }}>предстоит</div>
                 </div>
-                <div style={{ display: 'flex', gap: 24 }}>
+                <div style={{ display: 'flex', gap: 20 }}>
                     {[
                         { label: 'Всего', value: stats.total },
                         { label: 'С клиентом', value: stats.linked, color: GH.accent },
                         { label: 'Без клиента', value: stats.unlinked, color: stats.unlinked > 0 ? GH.danger : undefined },
                     ].map(kpi => (
                         <div key={kpi.label} style={{ textAlign: 'right' as const }}>
-                            <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink }}>
+                            <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink, lineHeight: 1 }}>
                                 {kpi.value}
                             </div>
-                            <div style={{ ...ghMono, fontSize: 9 }}>{kpi.label}</div>
+                            <div style={{ ...ghMono, fontSize: 9, marginTop: 2 }}>{kpi.label}</div>
                         </div>
                     ))}
                 </div>
             </div>
 
             {/* ── View mode tabs ── */}
-            <div style={{ display: 'flex', margin: '0 32px', borderBottom: `2px solid ${GH.ink}` }}>
+            <div style={{ display: 'flex', margin: '12px 32px 0', borderBottom: `2px solid ${GH.ink}` }}>
                 {VIEW_MODES.map(v => (
                     <button
                         key={v.key}
                         onClick={() => setViewMode(v.key)}
                         style={{
                             fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
-                            padding: '10px 20px',
+                            padding: '8px 18px',
                             background: viewMode === v.key ? GH.ink : 'transparent',
                             color: viewMode === v.key ? GH.paper : GH.ink60,
                             border: 'none', cursor: 'pointer',

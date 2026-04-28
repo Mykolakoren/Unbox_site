@@ -1223,78 +1223,93 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh', overflowX: 'hidden' }}>
-            {/* ── Head ── */}
-            <div style={{ padding: '48px clamp(16px, 4vw, 32px) 0' }}>
-                <div style={ghsMono}>CRM · Сессии</div>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
-                    <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(36px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
-                        Сессии.
-                    </h1>
-                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            {/* ── Compact head: breadcrumb + title + KPIs all on one row ──
+                Was three padded sections eating ~280px before any
+                content. Mirrored the CrmBookings tightening: title left
+                with the big "Завершено" number inline, secondary KPIs +
+                action buttons on the right. */}
+            <div style={{
+                padding: '20px clamp(16px, 4vw, 32px) 0',
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 16,
+            }}>
+                <div style={{ minWidth: 0 }}>
+                    <div style={ghsMono}>CRM · Сессии</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 4, flexWrap: 'wrap' }}>
+                        <h1 style={{
+                            fontFamily: GH_SANS,
+                            fontSize: 'clamp(24px, 3vw, 36px)',
+                            fontWeight: 800,
+                            letterSpacing: '-0.02em',
+                            lineHeight: 1,
+                            margin: 0,
+                        }}>
+                            Сессии.
+                        </h1>
+                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                            <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                                {p.stats.completed}
+                            </span>
+                            <span style={{ ...ghsMono, fontSize: 9 }}>
+                                завершено · {format(p.currentMonth, 'LLLL', { locale: ru })}
+                            </span>
+                        </span>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {[
+                            { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false },
+                            { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false },
+                            { label: 'Получено', value: p.stats.revenueLabel, color: GH.accent, sub: p.stats.revenueGel, multiline: true },
+                        ].map(kpi => (
+                            <div key={kpi.label} style={{ textAlign: 'right' as const, minWidth: 0 }}>
+                                <div style={{
+                                    fontSize: kpi.multiline && ghNarrow ? 13 : 16,
+                                    fontWeight: 700,
+                                    fontVariantNumeric: 'tabular-nums',
+                                    color: kpi.color || GH.ink,
+                                    whiteSpace: kpi.multiline && ghNarrow ? ('pre-line' as const) : ('normal' as const),
+                                    wordBreak: 'break-word' as const,
+                                    lineHeight: 1.25,
+                                }}>
+                                    {kpi.multiline && ghNarrow ? kpi.value.split(' · ').join('\n') : kpi.value}
+                                </div>
+                                <div style={{ ...ghsMono, fontSize: 9 }}>{kpi.label}</div>
+                                {kpi.sub && <div style={{ ...ghsMono, fontSize: 9, color: kpi.color || GH.ink30 }}>{kpi.sub}</div>}
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
                         <button
                             onClick={() => p.setShowSyncModal(true)}
-                            style={{ ...ghsMono, padding: '10px 16px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 }}
+                            style={{ ...ghsMono, padding: '8px 14px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 }}
                         >
                             Синхронизация
                         </button>
                         <button
                             onClick={() => { p.setPrefillDate(null); p.setShowForm(true); }}
-                            style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '10px 20px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}
+                            style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '8px 16px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}
                         >
-                            + Новая сессия
+                            + Новая
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* ── Anchor KPI + secondary ── */}
-            <div style={{
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-                padding: '24px clamp(16px, 4vw, 32px) 24px', flexWrap: 'wrap', gap: 16,
-            }}>
-                <div>
-                    <div style={{ fontSize: 'clamp(48px, 5vw, 72px)', fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                        {p.stats.completed}
-                    </div>
-                    <div style={{ ...ghsMono, marginTop: 4 }}>
-                        завершено · {format(p.currentMonth, 'LLLL', { locale: ru })}
-                    </div>
-                </div>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%', minWidth: 0 }}>
-                    {[
-                        { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false },
-                        { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false },
-                        { label: 'Получено', value: p.stats.revenueLabel, color: GH.accent, sub: p.stats.revenueGel, multiline: true },
-                    ].map(kpi => (
-                        <div key={kpi.label} style={{ textAlign: 'right' as const, minWidth: 0, maxWidth: '100%' }}>
-                            <div style={{
-                                fontSize: kpi.multiline && ghNarrow ? 14 : 18,
-                                fontWeight: 700,
-                                fontVariantNumeric: 'tabular-nums',
-                                color: kpi.color || GH.ink,
-                                // On narrow screens let the multi-currency label wrap each currency to its own line
-                                whiteSpace: kpi.multiline && ghNarrow ? ('pre-line' as const) : ('normal' as const),
-                                wordBreak: 'break-word' as const,
-                                lineHeight: 1.25,
-                            }}>
-                                {kpi.multiline && ghNarrow ? kpi.value.split(' · ').join('\n') : kpi.value}
-                            </div>
-                            <div style={{ ...ghsMono, fontSize: 9 }}>{kpi.label}</div>
-                            {kpi.sub && <div style={{ ...ghsMono, fontSize: 9, color: kpi.color || GH.ink30 }}>{kpi.sub}</div>}
-                        </div>
-                    ))}
-                </div>
-            </div>
-
             {/* ── View mode tabs ── */}
-            <div style={{ display: 'flex', margin: '0 clamp(16px, 4vw, 32px)', borderBottom: `2px solid ${GH.ink}` }}>
+            <div style={{ display: 'flex', margin: '12px clamp(16px, 4vw, 32px) 0', borderBottom: `2px solid ${GH.ink}` }}>
                 {VIEW_MODES.map(v => (
                     <button
                         key={v.key}
                         onClick={() => p.setView(v.key)}
                         style={{
                             fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
-                            padding: '10px 20px',
+                            padding: '8px 18px',
                             background: p.view === v.key ? GH.ink : 'transparent',
                             color: p.view === v.key ? GH.paper : GH.ink60,
                             border: 'none', cursor: 'pointer',
