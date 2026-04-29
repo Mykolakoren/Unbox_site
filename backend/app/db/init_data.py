@@ -262,6 +262,25 @@ def migrate_add_columns():
         except Exception:
             conn.rollback()
 
+    # Seed the cash-reconciliation category. When a shift closes with a
+    # non-zero discrepancy, end_shift writes a balancing CashboxTransaction
+    # under this category so the lifetime cash sum stays aligned with the
+    # last counted actual_balance — otherwise drift accumulates and every
+    # subsequent shift looks like it has "phantom" discrepancies.
+    # Stable ID so the backend can hard-code it without a lookup.
+    from app.models.expense_category import ExpenseCategory as _EC
+    with Session(engine) as ses:
+        existing = ses.get(_EC, "cash_reconciliation")
+        if not existing:
+            ses.add(_EC(
+                id="cash_reconciliation",
+                name="Расхождение кассы",
+                category_type="both",  # used for both income (+) and expense (−) rows
+                icon="alert-triangle",
+                is_active=True,
+            ))
+            ses.commit()
+
     # resource table: convert services from TEXT to JSONB if needed (Postgres only)
     if dialect == 'postgresql':
         with engine.connect() as conn:

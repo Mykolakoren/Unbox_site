@@ -50,17 +50,25 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
 
     if (!isOpen) return null;
 
-    // For branch closes use the freshly fetched per-branch cash. For global
-    // closes fall back to the store's overall cash total.
-    // Defensive Number() — a missing `balances.cash` (store not yet populated,
-    // or backend returning `{}`) blew up .toFixed() and crashed the whole
-    // /admin/finance boundary. Reported by Иры.
-    const cashBalance = Number(branch ? (branchCash ?? 0) : (balances?.cash ?? 0));
+    // Lifetime cash balance for the branch (every cash income minus every
+    // cash expense ever). Useful as a sanity check, but it is NOT what the
+    // backend will compare against — that's `preview.expected`, the
+    // algorithm's "previous shift's actual + this shift's flow". When prior
+    // shifts ended with discrepancies, the two numbers drift apart, and an
+    // admin who typed the lifetime number (because the till physically
+    // showed it) ended up with a phantom -82.5 ₾ "discrepancy" because the
+    // backend was comparing against the algorithm number instead.
+    const lifetimeBalance = Number(branch ? (branchCash ?? 0) : (balances?.cash ?? 0));
+    // Drive the headline number from the preview — same number the backend
+    // will use to compute discrepancy on submit. Falls back to lifetime
+    // until preview loads so the modal doesn't render an empty box.
+    const expectedBalance = preview ? Number(preview.expected ?? lifetimeBalance) : lifetimeBalance;
+    const drift = preview ? Math.round((lifetimeBalance - expectedBalance) * 100) / 100 : 0;
 
     const actualValue = parseFloat(actualBalance);
     const hasAmount = !isNaN(actualValue) && actualValue >= 0;
-    const discrepancy = hasAmount && !loadingBranchCash
-        ? Math.round((actualValue - cashBalance) * 100) / 100
+    const discrepancy = hasAmount && !loadingBranchCash && preview
+        ? Math.round((actualValue - expectedBalance) * 100) / 100
         : null;
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -138,16 +146,31 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                 </p>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Expected cash balance */}
+                    {/* Expected cash balance — uses the SAME number the backend
+                        will compare against on submit (preview.expected),
+                        not the lifetime cash sum. They drift apart when past
+                        shifts ended with un-reconciled discrepancies, and the
+                        old layout silently showed the wrong number which
+                        admins then typed verbatim → phantom discrepancy. */}
                     <div className="bg-gray-50 rounded-xl px-4 py-3">
                         <div className="text-xs text-gray-500 mb-0.5">
                             Ожидаемый остаток наличных {branch && <span className="text-unbox-grey/70">· {branch}</span>}
                         </div>
                         <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
-                            {loadingBranchCash
+                            {loadingBranchCash || !preview
                                 ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
-                                : `${cashBalance.toFixed(2)} ₾`}
+                                : `${expectedBalance.toFixed(2)} ₾`}
                         </div>
+                        {/* Drift warning: if total cash flow ever ≠ algorithm's
+                            running expected, surface it so the admin knows
+                            their till is "supposed" to physically have one
+                            number while history says another. Past
+                            un-reconciled discrepancies live here. */}
+                        {preview && Math.abs(drift) >= 0.01 && (
+                            <div className="mt-1 text-[11px] text-amber-700 leading-snug">
+                                ⚠ Сумма по истории ({lifetimeBalance.toFixed(2)} ₾) расходится с ожидаемой на {drift > 0 ? '+' : ''}{drift.toFixed(2)} ₾ — накопилось из прошлых незакрытых расхождений.
+                            </div>
+                        )}
                         {/* Excel #13 — backend breakdown so the admin can audit
                             where the expected figure came from. If the totals
                             don't match the display above, a backdated tx in
