@@ -399,13 +399,16 @@ function CrmAccessRequests() {
 
 // ── Sortable Card (Grid Preview) ────────────────────────────────────────────
 
-function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete, toggling, deleting }: {
+function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete, toggling, deleting, onSpecClick, activeSpec }: {
     specialist: SpecialistExtended;
     onEdit: () => void;
     onToggleVisibility: () => void;
     onDelete: () => void;
     toggling: boolean;
     deleting: boolean;
+    /** Click handler for specialization chips — toggles the page-level filter. */
+    onSpecClick?: (spec: string) => void;
+    activeSpec?: string;
 }) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id });
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, zIndex: isDragging ? 50 : 'auto' as any };
@@ -481,13 +484,29 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                     )}
                 </div>
 
-                {/* Tags */}
+                {/* Tags — clickable filter chips. Click toggles the page
+                    filter; clicking the active chip clears it. */}
                 <div className="flex flex-wrap gap-1 mb-3">
-                    {(specialist.specializations ?? []).slice(0, 2).map((tag, idx) => (
-                        <span key={idx} className="text-[10px] px-2 py-0.5 bg-unbox-light/50 text-unbox-grey rounded-full border border-unbox-light">
-                            {tag}
-                        </span>
-                    ))}
+                    {(specialist.specializations ?? []).slice(0, 2).map((tag, idx) => {
+                        const isActive = activeSpec === tag;
+                        return (
+                            <button
+                                key={idx}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onSpecClick?.(tag); }}
+                                title={isActive ? `Снять фильтр «${tag}»` : `Фильтровать по «${tag}»`}
+                                className={clsx(
+                                    'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
+                                    isActive
+                                        ? 'bg-unbox-dark text-white border-unbox-dark'
+                                        : 'bg-unbox-light/50 text-unbox-grey border-unbox-light hover:bg-unbox-light',
+                                    onSpecClick && 'cursor-pointer',
+                                )}
+                            >
+                                {tag}
+                            </button>
+                        );
+                    })}
                     {(specialist.specializations?.length ?? 0) > 2 && (
                         <span className="text-[10px] px-2 py-0.5 bg-unbox-light/50 text-unbox-grey rounded-full border border-unbox-light">
                             +{specialist.specializations.length - 2}
@@ -827,6 +846,14 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
         specFilter = 'all', setSpecFilter, allSpecTags = [],
     } = props;
 
+    /** Click on a spec chip in a row/card → toggle the page filter.
+     *  Clicking the chip already active clears the filter ("all"). */
+    const handleSpecChipClick = (spec: string) => {
+        if (!setSpecFilter) return;
+        setSpecFilter(specFilter === spec ? 'all' : spec);
+    };
+    const activeSpec = specFilter !== 'all' ? specFilter : undefined;
+
     const hiddenCount = specialists.length - verifiedCount;
 
     return (
@@ -941,6 +968,8 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                                     onDelete={() => handleDelete(s)}
                                                     toggling={toggling === s.id}
                                                     deleting={deleting === s.id}
+                                                    onSpecClick={handleSpecChipClick}
+                                                    activeSpec={activeSpec}
                                                 />
                                             ))}
                                         </div>
@@ -968,6 +997,8 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                                 onDelete={() => handleDelete(s)}
                                                 toggling={toggling === s.id}
                                                 deleting={deleting === s.id}
+                                                onSpecClick={handleSpecChipClick}
+                                                activeSpec={activeSpec}
                                             />
                                         ))}
                                     </SortableContext>
@@ -1004,7 +1035,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
 
 // ── GH Sortable Table Row ───────────────────────────────────────────────────
 
-function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete, toggling, deleting }: {
+function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete, toggling, deleting, onSpecClick, activeSpec }: {
     specialist: SpecialistExtended;
     index: number;
     onEdit: () => void;
@@ -1012,6 +1043,10 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
     onDelete: () => void;
     toggling: boolean;
     deleting: boolean;
+    /** Click on a specialization chip → toggles filter for that tag. */
+    onSpecClick?: (spec: string) => void;
+    /** Currently-active filter; matching chips render highlighted. */
+    activeSpec?: string;
 }) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id });
     const style: React.CSSProperties = {
@@ -1061,14 +1096,29 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
                 {categoryLabel}
             </div>
 
-            {/* Specializations */}
+            {/* Specializations — chips are clickable filters now (admin
+                request: same affordance as the role chips above the
+                table). Active chip renders inverted; clicking it again
+                clears the filter. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, padding: '0 8px' }}>
-                {(specialist.specializations ?? []).slice(0, 2).map((sp: string) => (
-                    <span key={sp} style={{
-                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.06em',
-                        padding: '2px 6px', background: GH.ink5, color: GH.ink60,
-                    }}>{sp}</span>
-                ))}
+                {(specialist.specializations ?? []).slice(0, 2).map((sp: string) => {
+                    const isActive = activeSpec === sp;
+                    return (
+                        <button
+                            key={sp}
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onSpecClick?.(sp); }}
+                            title={isActive ? `Снять фильтр «${sp}»` : `Фильтровать по «${sp}»`}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.06em',
+                                padding: '2px 6px',
+                                background: isActive ? GH.ink : GH.ink5,
+                                color: isActive ? GH.paper : GH.ink60,
+                                border: 'none', cursor: onSpecClick ? 'pointer' : 'default',
+                            }}
+                        >{sp}</button>
+                    );
+                })}
                 {(specialist.specializations?.length ?? 0) > 2 && (
                     <span style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink30 }}>+{specialist.specializations!.length - 2}</span>
                 )}
