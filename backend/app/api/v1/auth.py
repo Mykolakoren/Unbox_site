@@ -187,73 +187,99 @@ def google_login(
 
 
 @router.post("/telegram", response_model=dict)
-def telegram_login(
-    login_data: TelegramLoginData,
+async def telegram_login(
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> Any:
-    """
-    Verify Telegram Login Widget Data and login/register user
+    """Verify Telegram Login Widget data and log the user in.
+
+    Accepts a raw dict body instead of a Pydantic model — Telegram has
+    added optional fields over time (auth_method, is_premium, ...), and a
+    strict model would silently strip them, leaving the HMAC computation
+    one field short of what Telegram signed → "Invalid hash" on every
+    attempt. Mirrors the GET /telegram/callback handler which has always
+    iterated over `request.query_params` directly.
     """
     if not settings.TELEGRAM_BOT_TOKEN:
-         raise HTTPException(status_code=500, detail="Telegram Bot Token not configured")
+        raise HTTPException(status_code=500, detail="Telegram Bot Token not configured")
 
-    # Verify Hash
-    # Logic: sha256_HMAC(bot_token_hash, data_check_string) == hash
-    
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Body должен быть JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body должен быть JSON-объектом")
+
+    hash_val = body.pop("hash", None)
+    if not hash_val:
+        raise HTTPException(status_code=400, detail="Отсутствует поле hash в данных от Telegram")
+
+    # Build data_check_string over ALL remaining fields, in the exact
+    # form Telegram itself signed: each key alphabetically sorted,
+    # `key=value` joined by '\n'. Stringify here — values may arrive as
+    # ints (id, auth_date) or strings depending on the source.
     data_check_arr = []
-    # Sort keys alphabetically and filter out hash
-    auth_data_dict = login_data.model_dump(exclude={"hash", "photo_url"}, exclude_none=True)
-    if login_data.photo_url:
-        auth_data_dict['photo_url'] = login_data.photo_url
-        
-    for key, value in auth_data_dict.items():
-        if value is not None:
-             data_check_arr.append(f"{key}={value}")
-    
-    data_check_arr.sort()
+    for key in sorted(body.keys()):
+        value = body[key]
+        if value is None or value == "":
+            continue
+        data_check_arr.append(f"{key}={value}")
     data_check_string = "\n".join(data_check_arr)
-    
+
     secret_key = hashlib.sha256(settings.TELEGRAM_BOT_TOKEN.encode()).digest()
     hash_calc = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-    
-    if hash_calc != login_data.hash:
+
+    if hash_calc != hash_val:
+        # Log enough to debug a future "Invalid hash" — the keys we saw
+        # (NOT values, since they include user data), the calculated
+        # hash, and the received hash. Helps pinpoint when Telegram adds
+        # a new field we silently dropped.
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Telegram POST hash mismatch: keys=%s, expected=%s, got=%s",
+            sorted(body.keys()), hash_calc[:8], str(hash_val)[:8],
+        )
         raise HTTPException(status_code=400, detail="Invalid Telegram authentication hash")
-        
-    # Check Auth Date — reject stale auth data (> 24 hours old)
-    if time.time() - login_data.auth_date > 86400:
+
+    auth_date = body.get("auth_date")
+    try:
+        auth_date_i = int(auth_date) if auth_date is not None else 0
+    except (TypeError, ValueError):
+        auth_date_i = 0
+    if auth_date_i and time.time() - auth_date_i > 86400:
         raise HTTPException(status_code=400, detail="Telegram auth data expired. Please try again.")
 
-    telegram_id = str(login_data.id)
-    
-    # Check user by Telegram ID
+    tg_id_raw = body.get("id")
+    if tg_id_raw is None:
+        raise HTTPException(status_code=400, detail="Telegram payload без id")
+    telegram_id = str(tg_id_raw)
+
     user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
-    
+
     if not user:
-        # Note: Telegram Widget usually doesn't provide Email unless requested specifically
-        # If we don't have email, we might generate a placeholder or ask user to provide it later.
-        # For now, let's generate a placeholder email
         placeholder_email = f"{telegram_id}@telegram.unbox"
-        
+        first_name = body.get("first_name", "") or ""
+        last_name = body.get("last_name", "") or ""
+
         user = User(
             email=placeholder_email,
-            name=f"{login_data.first_name} {login_data.last_name or ''}".strip(),
+            name=f"{first_name} {last_name}".strip(),
             telegram_id=telegram_id,
-            avatar_url=login_data.photo_url,
+            avatar_url=body.get("photo_url"),
             hashed_password="",
-            is_admin=False
+            is_admin=False,
         )
         session.add(user)
         session.commit()
         session.refresh(user)
 
-    user_id = user.id
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
-        user_id, expires_delta=access_token_expires
+        user.id, expires_delta=access_token_expires
     )
     return {
         "access_token": access_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
     }
 
 from fastapi.responses import RedirectResponse
@@ -279,15 +305,21 @@ _TG_CALLBACK_FALLBACK_HTML = """<!DOCTYPE html>
   .spinner{width:28px;height:28px;margin:0 auto 16px;border:3px solid #E5E5E5;border-top-color:#476D6B;border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .small{font-size:13px;color:#666;margin-top:8px}
+  .err{color:#B00;font-size:12px;margin-top:8px;font-family:monospace;word-break:break-all}
 </style></head>
 <body>
   <div>
     <div class="spinner"></div>
     <div id="msg">Завершаем вход через Telegram…</div>
     <div class="small">Если ничего не происходит — <a href="/login">откройте страницу входа</a>.</div>
+    <div id="err" class="err"></div>
   </div>
 <script>
 (async function() {
+  function setMsg(t){ var e=document.getElementById('msg'); if(e)e.textContent=t; }
+  function setErr(t){ var e=document.getElementById('err'); if(e)e.textContent=t||''; console.error('[tg-auth]', t); }
+  function bounceLogin(){ setTimeout(function(){ window.location.replace('/login?tg_failed=1'); }, 3000); }
+
   // 1) Pull params from either fragment or query. Telegram prefers
   //    fragment when returning from oauth.telegram.org, so prefer it.
   var frag = window.location.hash || '';
@@ -326,35 +358,61 @@ _TG_CALLBACK_FALLBACK_HTML = """<!DOCTYPE html>
   }
 
   if (!payload || !payload.hash) {
-    document.getElementById('msg').textContent =
-      'Ссылка авторизации просрочена. Нажмите «Войти через Telegram» ещё раз.';
-    setTimeout(function(){ window.location.replace('/login'); }, 2500);
+    setMsg('Ссылка авторизации просрочена. Нажмите «Войти через Telegram» ещё раз.');
+    bounceLogin();
     return;
   }
 
+  console.info('[tg-auth] payload keys:', Object.keys(payload).sort());
+
   // 2) Hand off to the POST endpoint which re-verifies HMAC.
+  var resp, data;
   try {
-    var resp = await fetch('/api/v1/auth/telegram', {
+    resp = await fetch('/api/v1/auth/telegram', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
     });
-    var data = await resp.json();
-    if (!resp.ok) {
-      document.getElementById('msg').textContent =
-        data.detail || 'Не удалось войти через Telegram.';
-      setTimeout(function(){ window.location.replace('/login'); }, 2500);
-      return;
-    }
-    var token = data.access_token || (data.accessToken);
-    if (!token) throw new Error('no token');
-    try { window.localStorage.setItem('token', token); } catch (e) {}
-    window.location.replace('/dashboard?source=telegram');
+    data = await resp.json();
   } catch (err) {
-    document.getElementById('msg').textContent =
-      'Сбой при авторизации. Попробуйте ещё раз.';
-    setTimeout(function(){ window.location.replace('/login'); }, 2500);
+    setMsg('Сбой при отправке данных. Попробуйте ещё раз.');
+    setErr(String(err && err.message || err));
+    bounceLogin();
+    return;
   }
+  if (!resp.ok) {
+    setMsg('Не удалось войти через Telegram.');
+    setErr((data && data.detail) || ('HTTP ' + resp.status));
+    bounceLogin();
+    return;
+  }
+  var token = data && (data.access_token || data.accessToken);
+  if (!token) {
+    setMsg('Сервер не вернул токен. Попробуйте ещё раз.');
+    bounceLogin();
+    return;
+  }
+
+  // 3) Persist the token. Verify the write actually landed — some
+  //    browsers (private mode, storage disabled, quota issues) silently
+  //    drop the value and the SPA would then redirect us back to /login,
+  //    causing the "I clicked, nothing happened" symptom.
+  var stored = false;
+  try {
+    window.localStorage.setItem('token', token);
+    stored = window.localStorage.getItem('token') === token;
+  } catch (e) {
+    setErr('localStorage error: ' + (e && e.message || e));
+  }
+  if (!stored) {
+    setMsg('Браузер заблокировал хранение токена (приватный режим?). Откройте сайт в обычном окне.');
+    bounceLogin();
+    return;
+  }
+
+  // Done — give the storage write one tick to flush, then go.
+  setMsg('Готово, открываем кабинет…');
+  setTimeout(function(){ window.location.replace('/dashboard?source=telegram'); }, 50);
 })();
 </script>
 <noscript><p>Включите JavaScript или <a href="/login">войдите через форму</a>.</p></noscript>
@@ -470,20 +528,38 @@ def telegram_login_callback(
     <body>
         <div>
             <div class="spinner"></div>
-            <div class="ok">✓ Telegram авторизован</div>
-            <div class="small">Открываем ваш кабинет…</div>
+            <div id="ok" class="ok">✓ Telegram авторизован</div>
+            <div id="small" class="small">Открываем ваш кабинет…</div>
         </div>
         <script>
             (function() {{
                 var token = '{access_token}';
+                var stored = false;
                 try {{
                     window.localStorage.setItem('token', token);
+                    // Verify the write actually landed — some browsers
+                    // (private mode / disabled storage) silently drop it
+                    // and the SPA would then bounce us back to /login,
+                    // creating the "I clicked, nothing happened" symptom.
+                    stored = window.localStorage.getItem('token') === token;
                 }} catch (e) {{
-                    // Private mode / storage disabled — user will see login page,
-                    // they can retry from a normal session.
+                    stored = false;
                 }}
-                // Hand off to the SPA. `replace` so back-button doesn't re-fire auth.
-                window.location.replace('/dashboard?source=telegram');
+                if (!stored) {{
+                    document.getElementById('ok').textContent = 'Не удалось сохранить токен';
+                    document.getElementById('small').textContent =
+                        'Браузер блокирует localStorage (приватный режим?). Откройте сайт в обычном окне и повторите.';
+                    setTimeout(function(){{ window.location.replace('/login?tg_failed=storage'); }}, 3000);
+                    return;
+                }}
+                // Give the storage write one tick to flush before we
+                // navigate. Without this, on some browsers the SPA's
+                // first read of localStorage on the new page returns
+                // null because the previous document hasn't finished
+                // unloading.
+                setTimeout(function(){{
+                    window.location.replace('/dashboard?source=telegram');
+                }}, 50);
             }})();
         </script>
         <noscript>
