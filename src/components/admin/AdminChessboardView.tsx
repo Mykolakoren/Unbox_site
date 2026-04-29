@@ -570,6 +570,49 @@ export function AdminChessboardView() {
         }
     };
 
+    /** "Продлить +30 мин" — admins reported the menu disappeared. Restored
+     *  here on the chessboard popup. PATCH /bookings/{id}/extend; backend
+     *  checks the next slot is free and bills the delta if applicable. */
+    const handleExtend = async (b: BookingHistoryItem) => {
+        if (!confirm('Продлить бронь на 30 минут?')) return;
+        try {
+            await bookingsApi.extendBooking(b.id, 30);
+            toast.success('Бронь продлена на 30 минут');
+            await fetchAllBookings();
+            setSelectedBooking(null);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось продлить — возможно, следующий слот занят');
+        }
+    };
+
+    /** "Перенести" — prompt for new date + time, then PATCH /reschedule.
+     *  Resource stays the same (admin can change it later via separate
+     *  flow). Inputs use ISO format prefilled from the current booking so
+     *  the admin only edits what they need. */
+    const handleMove = async (b: BookingHistoryItem) => {
+        const currentDate = format(parseBookingDate(b.date), 'yyyy-MM-dd');
+        const newDate = prompt('Новая дата (YYYY-MM-DD):', currentDate);
+        if (!newDate) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+            toast.error('Дата должна быть в формате YYYY-MM-DD');
+            return;
+        }
+        const newStartTime = prompt('Новое время (HH:MM):', b.startTime || '10:00');
+        if (!newStartTime) return;
+        if (!/^\d{2}:\d{2}$/.test(newStartTime)) {
+            toast.error('Время должно быть в формате HH:MM');
+            return;
+        }
+        try {
+            await bookingsApi.rescheduleBooking(b.id, { newDate, newStartTime });
+            toast.success(`Бронь перенесена на ${newDate} ${newStartTime}`);
+            await fetchAllBookings();
+            setSelectedBooking(null);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось перенести — возможно, слот занят');
+        }
+    };
+
     // ─── Render ───────────────────────────────────────────────────────────────
 
     // ── MOBILE VIEW ──
@@ -829,12 +872,18 @@ export function AdminChessboardView() {
                                 <InfoRow label="Статус" value={statusLabel(selectedBooking)} />
                             </div>
                             {selectedBooking.status === 'confirmed' && (
-                                <div className="grid grid-cols-3 gap-1.5">
-                                    <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
-                                    <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
-                                        {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
-                                    </button>
-                                    <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Отмена</button>
+                                <div className="space-y-1.5">
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
+                                        <button onClick={() => handleExtend(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">Продлить +30 мин</button>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-1.5">
+                                        <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
+                                        <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
+                                            {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
+                                        </button>
+                                        <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Удалить</button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1202,25 +1251,46 @@ export function AdminChessboardView() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="px-3 pb-3 grid grid-cols-3 gap-1.5">
-                                <button
-                                    onClick={() => handleEditPrice(selectedBooking)}
-                                    className="py-1.5 text-xs font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark transition-colors"
-                                >
-                                    Цена
-                                </button>
-                                <button
-                                    onClick={() => handleToggleReRent(selectedBooking)}
-                                    className="py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
-                                >
-                                    {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
-                                </button>
-                                <button
-                                    onClick={() => handleCancel(selectedBooking.id)}
-                                    className="py-1.5 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
-                                >
-                                    Отмена
-                                </button>
+                            // Restored full action menu (Excel #28).
+                            // Layout: 2 wide buttons on top (Перенести,
+                            // Продлить +30 — primary "fix the time" actions
+                            // admins use most), then a 3-button row for
+                            // Цена / Пересдать / Удалить.
+                            <div className="px-3 pb-3 space-y-1.5">
+                                <div className="grid grid-cols-2 gap-1.5">
+                                    <button
+                                        onClick={() => handleMove(selectedBooking)}
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
+                                    >
+                                        Перенести
+                                    </button>
+                                    <button
+                                        onClick={() => handleExtend(selectedBooking)}
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                                    >
+                                        Продлить +30 мин
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                    <button
+                                        onClick={() => handleEditPrice(selectedBooking)}
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark transition-colors"
+                                    >
+                                        Цена
+                                    </button>
+                                    <button
+                                        onClick={() => handleToggleReRent(selectedBooking)}
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
+                                    >
+                                        {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
+                                    </button>
+                                    <button
+                                        onClick={() => handleCancel(selectedBooking.id)}
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                                    >
+                                        Удалить
+                                    </button>
+                                </div>
                             </div>
                         );
                     })()}
