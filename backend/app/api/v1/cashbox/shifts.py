@@ -233,6 +233,40 @@ def end_shift(
     session.add(report)
     session.commit()
     session.refresh(report)
+
+    # Reconciliation entry: when actual ≠ expected, write a balancing
+    # CashboxTransaction so the lifetime cash sum (the headline number on
+    # the finance dashboard and the next shift's expected baseline) stays
+    # aligned with the till's physically-counted amount. Without this, the
+    # ~half-thousand ₾ drift Unbox One accumulated keeps re-appearing as
+    # phantom discrepancies on every subsequent close.
+    #
+    # discrepancy = actual − expected
+    #   > 0 → admin had MORE cash than expected → write an income entry
+    #   < 0 → admin had LESS cash than expected → write an expense entry
+    if abs(discrepancy) >= 0.01:
+        sign_type = "income" if discrepancy > 0 else "expense"
+        amt = abs(round(discrepancy, 2))
+        admin_label = current_user.name or "admin"
+        recon = CashboxTransaction(
+            type=sign_type,
+            amount=amt,
+            currency="GEL",
+            payment_method="cash",
+            category_id="cash_reconciliation",
+            description=(
+                f"Корректировка при закрытии смены ({admin_label}). "
+                f"Ожидалось {expected:.2f} ₾, фактически {payload.actual_balance:.2f} ₾."
+            ),
+            branch=branch,
+            date=now,
+            admin_id=str(current_user.id),
+            admin_name=current_user.name or "",
+            shift_report_id=str(report.id),
+        )
+        session.add(recon)
+        session.commit()
+
     return report
 
 
