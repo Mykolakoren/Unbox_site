@@ -39,7 +39,20 @@ export function LoginPage() {
         () => new URLSearchParams(window.location.search).get('register') === '1'
     );
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    // Surface the reason the Telegram-callback page bounced us here, so the
+    // user knows why they didn't land on /dashboard. Strip the param from
+    // the URL once read so a refresh doesn't keep showing the message.
+    const [error, setError] = useState<string | null>(() => {
+        const reason = new URLSearchParams(window.location.search).get('tg_failed');
+        if (!reason) return null;
+        const url = new URL(window.location.href);
+        url.searchParams.delete('tg_failed');
+        window.history.replaceState({}, document.title, url.pathname + url.search);
+        if (reason === 'storage') {
+            return 'Браузер заблокировал сохранение токена (приватный режим / отключённый localStorage). Откройте сайт в обычном окне.';
+        }
+        return 'Не удалось войти через Telegram. Попробуйте ещё раз.';
+    });
     const [showPassword, setShowPassword] = useState(false);
 
     const [formData, setFormData] = useState({
