@@ -13,6 +13,56 @@ from app.api.v1.crm import get_crm_calendar_id
 
 router = APIRouter()
 
+# Service account address shown to admins when permissions are wrong. Kept
+# in one place so a future credential rotation only needs to be edited
+# here, not in every error message.
+GCAL_SERVICE_ACCOUNT = "psycrm-bot@psycrm-calendar.iam.gserviceaccount.com"
+
+
+def _gcal_error_to_message(exc: Exception, calendar_id: str) -> str:
+    """Translate a raw Google API error into a sentence the admin can act on.
+
+    The default `HTTPException(500, f"Google Calendar error: {e}")` dump
+    exposed the full request URL + error JSON which read like a stack
+    trace and gave admins nothing actionable. This helper detects the
+    common cases and returns Russian guidance pointing at the actual fix
+    (sharing the calendar with the service account, fixing the
+    `calendar_id`, etc.). Falls back to a generic message for genuinely
+    unexpected errors.
+    """
+    try:
+        from googleapiclient.errors import HttpError as _HttpError
+    except Exception:  # pragma: no cover — googleapiclient always present at runtime
+        _HttpError = None  # type: ignore
+
+    if _HttpError is not None and isinstance(exc, _HttpError):
+        status = getattr(exc.resp, "status", None)
+        if status == 404:
+            return (
+                f"Календарь {calendar_id} недоступен сервисному аккаунту. "
+                f"Откройте в Google Calendar настройки этого календаря → "
+                f"«Поделиться с конкретными пользователями» → добавьте "
+                f"{GCAL_SERVICE_ACCOUNT} с доступом «Видеть все события» "
+                f"(а для записи — «Внесение изменений в события»). "
+                f"Также проверьте, что в /crm/settings указан правильный calendar_id."
+            )
+        if status == 403:
+            return (
+                f"Сервисному аккаунту запрещён доступ к календарю {calendar_id}. "
+                f"Проверьте уровень доступа в настройках календаря: должен быть как минимум "
+                f"«Видеть все события» для {GCAL_SERVICE_ACCOUNT}."
+            )
+        if status == 401:
+            return (
+                "Авторизация сервисного аккаунта истекла или невалидна. "
+                "Сообщите разработчику — нужно обновить ключ psycrm-calendar.json."
+            )
+        # Other Google errors — keep the status code but skip the URL noise.
+        return f"Google Calendar API вернул ошибку {status}. Повторите попытку через минуту; если не пройдёт — сообщите разработчику."
+
+    # Non-Google exceptions (network, etc.)
+    return f"Не удалось обратиться к Google Calendar: {exc!s}"
+
 
 def _clean_client_name(summary: str) -> str:
     """Extract clean client name from calendar event summary."""
@@ -68,7 +118,7 @@ def sync_from_calendar(
             months_forward=months_forward,
         )
     except Exception as e:
-        raise HTTPException(500, f"Google Calendar error: {e}")
+        raise HTTPException(502, _gcal_error_to_message(e, calendar_id))
 
     # ── Auto-create clients from unmatched events ─────────────────────────
     auto_created_clients = 0
@@ -309,7 +359,7 @@ def backfill_alias_codes(
             months_forward=months_forward,
         )
     except Exception as e:
-        raise HTTPException(500, f"Google Calendar error: {e}")
+        raise HTTPException(502, _gcal_error_to_message(e, calendar_id))
 
     would_patch = []
     already_coded = 0
@@ -411,7 +461,7 @@ def sync_client_history(
             client_name=client.name,
         )
     except Exception as e:
-        raise HTTPException(500, f"Google Calendar error: {e}")
+        raise HTTPException(502, _gcal_error_to_message(e, calendar_id))
 
     uid = str(current_user.id)
     created = 0
