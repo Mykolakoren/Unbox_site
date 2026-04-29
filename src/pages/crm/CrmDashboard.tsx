@@ -149,14 +149,30 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     // they've reserved as a renter) on the CRM dashboard alongside their
     // therapy sessions. Two separate worlds, but admins want one screen
     // to plan their week.
-    const { bookings, fetchBookings } = useUserStore();
+    const { bookings, fetchBookings, currentUser } = useUserStore();
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
     const upcomingMyBookings = (() => {
         const now = new Date();
         const horizon = addDays(now, 7);
+        const myEmail = currentUser?.email;
         return (bookings || [])
-            .filter(b => b.status === 'confirmed' || b.status === 'completed')
-            .map(b => ({ ...b, _dt: parseUTC(b.date) }))
+            // Only OUR confirmed bookings — `bookings` in the store mixes
+            // /bookings/me with /bookings/public, so without this guard the
+            // dashboard would surface everyone-else's confirmed cabinet
+            // bookings (and miss our own when /me was momentarily slow).
+            .filter(b => (b.status === 'confirmed' || b.status === 'completed') && b.userId === myEmail)
+            .map(b => {
+                // Combine the booking's date column with its start_time to
+                // get the actual moment the booking starts. Earlier code
+                // used parseUTC(b.date) which always returned 00:00 UTC =
+                // 04:00 Tbilisi → today's evening bookings looked "past"
+                // and got dropped from the list.
+                const baseDate = parseUTC(b.date);
+                const [hh, mm] = (b.startTime || '00:00').split(':').map(Number);
+                const dt = new Date(baseDate);
+                dt.setHours(hh || 0, mm || 0, 0, 0);
+                return { ...b, _dt: dt };
+            })
             .filter(b => isAfter(b._dt, now) && b._dt < horizon)
             .sort((a, b) => a._dt.getTime() - b._dt.getTime())
             .slice(0, 8);
