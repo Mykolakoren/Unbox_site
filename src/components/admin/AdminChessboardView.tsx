@@ -93,12 +93,18 @@ export function AdminChessboardView() {
     const [adminBookSlot, setAdminBookSlot] = useState<{ resId: string; time: string; date: Date; duration?: number } | null>(null);
 
     // ── Drag-to-select NEW booking slots ──
+    // Multi-period selection: same resource can hold several non-contiguous
+    // chunks (e.g. cab 5: 10:00-11:00 AND 15:00-16:00). Chunks computed
+    // lazily from `newSlots` via `selectedNewBlocks` below.
     const [newSlots, setNewSlots] = useState<string[]>([]);
     type NewDragMode = 'new' | 'resize-start' | 'resize-end' | 'move' | null;
     const newDragModeRef = useRef<NewDragMode>(null);
     const newDragStartRef = useRef<{ resId: string; time: string } | null>(null);
     const newDragInitialBlockRef = useRef<{ resId: string; start: number; end: number } | null>(null);
     const newDragMoveOffsetRef = useRef<number>(0);
+    // Snapshot at drag-start. 'new' drags add a draft chunk on top of this;
+    // resize/move replace ONLY the dragged chunk in this snapshot.
+    const newDragInitialSlotsRef = useRef<string[]>([]);
     const [, setNewDragTick] = useState(0);
     const forceNewDragUpdate = () => setNewDragTick(t => t + 1);
 
@@ -237,18 +243,36 @@ export function AdminChessboardView() {
             if (!byRes[resId]) byRes[resId] = [];
             byRes[resId].push(idx);
         }
-        return Object.entries(byRes).map(([resId, indices]) => {
-            const sorted = [...indices].sort((a, b) => a - b);
-            return { resId, start: sorted[0], end: sorted[sorted.length - 1] };
-        });
+        // Split each resource's slots into CONTIGUOUS chunks so multiple
+        // periods in one cabinet render & resize independently.
+        const blocks: { resId: string; start: number; end: number }[] = [];
+        for (const [resId, raw] of Object.entries(byRes)) {
+            const sorted = [...raw].sort((a, b) => a - b);
+            let cur: number[] = [];
+            for (const i of sorted) {
+                if (cur.length === 0 || i === cur[cur.length - 1] + 1) cur.push(i);
+                else { blocks.push({ resId, start: cur[0], end: cur[cur.length - 1] }); cur = [i]; }
+            }
+            if (cur.length) blocks.push({ resId, start: cur[0], end: cur[cur.length - 1] });
+        }
+        return blocks;
     }, [newSlots]);
 
+    /** Find the chunk that contains a (resource, slot-idx) pair. */
+    const getNewBlockAt = (resId: string, idx: number) =>
+        selectedNewBlocks.find(b => b.resId === resId && idx >= b.start && idx <= b.end) ?? null;
+
+    /** Legacy helper — first chunk in a resource. New code prefers
+     *  `getNewBlockAt(resId, idx)` so resize on the second period
+     *  doesn't silently delete the first. */
     const getNewBlockForResource = (resId: string) =>
         selectedNewBlocks.find(b => b.resId === resId) ?? null;
 
     const isNewSlotSelected = (resId: string, time: string) =>
         newSlots.includes(`${resId}|${time}`);
 
+    /** Legacy "set per resource" helper — replaces the resource's slots.
+     *  Kept for compatibility; new chip removal uses {@link removeNewBlock}. */
     const setNewSlotRange = useCallback((resId: string, times: string[]) => {
         setNewSlots(prev => {
             const other = prev.filter(s => !s.startsWith(`${resId}|`));
@@ -256,18 +280,29 @@ export function AdminChessboardView() {
         });
     }, []);
 
+    /** Drop a single chunk; siblings in the same resource untouched. */
+    const removeNewBlock = useCallback((block: { resId: string; start: number; end: number }) => {
+        const idsToRemove = new Set<string>();
+        for (let i = block.start; i <= block.end; i++) {
+            idsToRemove.add(`${block.resId}|${TIME_SLOTS[i]}`);
+        }
+        setNewSlots(prev => prev.filter(s => !idsToRemove.has(s)));
+    }, []);
+
     // Drag handlers
     const handleNewDragDown = (resId: string, time: string, mode: NewDragMode) => {
         if (isSlotOccupied(resId, time) && mode === 'new') return;
+        const clickedIdx = TIME_SLOTS.indexOf(time);
 
         // If clicking on already-selected slot in 'new' mode → switch to 'move'
+        // Capture the SPECIFIC chunk under the cursor, not the first chunk.
         if (mode === 'new' && isNewSlotSelected(resId, time)) {
-            const block = getNewBlockForResource(resId);
+            const block = getNewBlockAt(resId, clickedIdx);
             if (block) {
                 newDragModeRef.current = 'move';
                 newDragStartRef.current = { resId, time };
                 newDragInitialBlockRef.current = block;
-                const clickedIdx = TIME_SLOTS.indexOf(time);
+                newDragInitialSlotsRef.current = [...newSlots];
                 newDragMoveOffsetRef.current = clickedIdx - block.start;
                 forceNewDragUpdate();
                 return;
@@ -276,10 +311,15 @@ export function AdminChessboardView() {
 
         newDragModeRef.current = mode;
         newDragStartRef.current = { resId, time };
+        newDragInitialSlotsRef.current = [...newSlots];
         if (mode === 'new') {
-            setNewSlotRange(resId, [time]);
+            // ADD a fresh chunk; do not wipe other chunks in this resource.
+            setNewSlots(prev => {
+                const slotId = `${resId}|${time}`;
+                return prev.includes(slotId) ? prev : [...prev, slotId];
+            });
         } else {
-            const block = getNewBlockForResource(resId);
+            const block = getNewBlockAt(resId, clickedIdx) ?? getNewBlockForResource(resId);
             if (block) newDragInitialBlockRef.current = block;
         }
         forceNewDragUpdate();
@@ -289,6 +329,7 @@ export function AdminChessboardView() {
         const mode = newDragModeRef.current;
         const startSlot = newDragStartRef.current;
         const initBlock = newDragInitialBlockRef.current;
+        const initialSnapshot = newDragInitialSlotsRef.current;
         if (!mode || !startSlot) return;
         const currentIdx = TIME_SLOTS.indexOf(time);
         const startIdx = TIME_SLOTS.indexOf(startSlot.time);
@@ -298,13 +339,19 @@ export function AdminChessboardView() {
             if (startSlot.resId !== resId) return;
             const minIdx = Math.min(startIdx, currentIdx);
             const maxIdx = Math.max(startIdx, currentIdx);
-            const slots: string[] = [];
+            const draftSlots: string[] = [];
             let blocked = false;
             for (let i = minIdx; i <= maxIdx; i++) {
                 if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
-                slots.push(TIME_SLOTS[i]);
+                draftSlots.push(TIME_SLOTS[i]);
             }
-            if (!blocked) setNewSlotRange(resId, slots);
+            if (blocked) return;
+            // Strip only the draft slots (might have been added on a prior
+            // tick) from the snapshot, then re-add. Existing chunks in this
+            // and other resources stay intact → multi-period works.
+            const draftIds = new Set(draftSlots.map(t => `${resId}|${t}`));
+            const survivors = initialSnapshot.filter(s => !draftIds.has(s));
+            setNewSlots([...survivors, ...draftIds]);
         } else if (mode === 'resize-end' && initBlock) {
             if (initBlock.resId !== resId) return;
             const minIdx = initBlock.start;
@@ -315,7 +362,15 @@ export function AdminChessboardView() {
                 if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
                 slots.push(TIME_SLOTS[i]);
             }
-            if (!blocked) setNewSlotRange(resId, slots);
+            if (blocked) return;
+            // Replace ONLY the chunk being resized.
+            const oldChunkIds = new Set<string>();
+            for (let i = initBlock.start; i <= initBlock.end; i++) {
+                oldChunkIds.add(`${resId}|${TIME_SLOTS[i]}`);
+            }
+            const survivors = initialSnapshot.filter(s => !oldChunkIds.has(s));
+            const newIds = slots.map(t => `${resId}|${t}`);
+            setNewSlots([...survivors, ...newIds]);
         } else if (mode === 'resize-start' && initBlock) {
             if (initBlock.resId !== resId) return;
             const maxIdx = initBlock.end;
@@ -326,7 +381,14 @@ export function AdminChessboardView() {
                 if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
                 slots.push(TIME_SLOTS[i]);
             }
-            if (!blocked) setNewSlotRange(resId, slots);
+            if (blocked) return;
+            const oldChunkIds = new Set<string>();
+            for (let i = initBlock.start; i <= initBlock.end; i++) {
+                oldChunkIds.add(`${resId}|${TIME_SLOTS[i]}`);
+            }
+            const survivors = initialSnapshot.filter(s => !oldChunkIds.has(s));
+            const newIds = slots.map(t => `${resId}|${t}`);
+            setNewSlots([...survivors, ...newIds]);
         } else if (mode === 'move' && initBlock) {
             if (initBlock.resId !== resId) return;
             const blockLen = initBlock.end - initBlock.start + 1;
@@ -339,7 +401,14 @@ export function AdminChessboardView() {
                 if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
                 slots.push(TIME_SLOTS[i]);
             }
-            if (!blocked) setNewSlotRange(resId, slots);
+            if (blocked) return;
+            const oldChunkIds = new Set<string>();
+            for (let i = initBlock.start; i <= initBlock.end; i++) {
+                oldChunkIds.add(`${resId}|${TIME_SLOTS[i]}`);
+            }
+            const survivors = initialSnapshot.filter(s => !oldChunkIds.has(s));
+            const newIds = slots.map(t => `${resId}|${t}`);
+            setNewSlots([...survivors, ...newIds]);
         }
     }, [isSlotOccupied]);
 
@@ -942,7 +1011,10 @@ export function AdminChessboardView() {
                                         // Free slot
                                         const slotIdx = TIME_SLOTS.indexOf(cell.slot);
                                         const newSel = isNewSlotSelected(resource.id, cell.slot);
-                                        const newBlock = newSel ? getNewBlockForResource(resource.id) : null;
+                                        // Chunk-aware lookup: same cabinet can hold
+                                        // multiple periods; use the chunk that contains
+                                        // THIS slot, not the first chunk in the resource.
+                                        const newBlock = newSel ? getNewBlockAt(resource.id, slotIdx) : null;
                                         const isNewStart = newBlock ? newBlock.start === slotIdx : false;
                                         const isNewEnd = newBlock ? newBlock.end === slotIdx : false;
                                         const isNewSingle = newBlock ? newBlock.start === newBlock.end : false;
