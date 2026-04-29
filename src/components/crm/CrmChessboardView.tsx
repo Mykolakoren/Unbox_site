@@ -729,7 +729,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     const [bookSlot, setBookSlot] = useState<{ resId: string; time: string; date: Date; duration: number } | null>(null);
     const [linkBooking, setLinkBooking] = useState<BookingHistoryItem | null>(null);
 
-    // Drag to select
+    // Drag to select. Multi-period in the same cabinet is supported the
+    // same way the dashboard chessboard does it: each contiguous run of
+    // slots in `newSlots` becomes a separate "chunk" with its own resize
+    // handles, summary chip and × button.
     const [newSlots, setNewSlots] = useState<string[]>([]);
     // 'new' — drag-painting empty slots to pick a fresh booking range.
     // 'move' — grab an existing OWN booking and drop it onto a free
@@ -737,6 +740,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     type DragMode = 'new' | 'move' | null;
     const dragModeRef = useRef<DragMode>(null);
     const dragStartRef = useRef<{ resId: string; time: string } | null>(null);
+    // Snapshot of all slots at the moment a 'new' drag begins. Lets the
+    // drag handler ADD a draft chunk on top of this snapshot without
+    // wiping other chunks the user has already drawn.
+    const dragInitialSlotsRef = useRef<string[]>([]);
     // For 'move' drag — the booking being relocated and a hover preview slot
     const movingBookingRef = useRef<BookingHistoryItem | null>(null);
     const [moveHover, setMoveHover] = useState<{ resId: string; time: string } | null>(null);
@@ -874,20 +881,65 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         });
     }, []);
 
-    const selectedBlock = useMemo(() => {
-        if (newSlots.length === 0) return null;
-        const [resId] = newSlots[0].split('|');
-        const times = newSlots.filter(s => s.startsWith(`${resId}|`)).map(s => s.split('|')[1]);
-        const indices = times.map(t => TIME_SLOTS.indexOf(t)).filter(i => i >= 0).sort((a, b) => a - b);
-        if (indices.length === 0) return null;
-        return { resId, start: indices[0], end: indices[indices.length - 1] };
+    /** Selected blocks — every CONTIGUOUS run of slots within a resource
+     *  becomes its own block (so cab 5 with 10:00-11:00 + 15:00-16:00 is
+     *  two blocks, not one 10:00-16:00 monstrosity). */
+    const selectedBlocks = useMemo(() => {
+        const byRes: Record<string, number[]> = {};
+        for (const slot of newSlots) {
+            if (!slot || !slot.includes('|')) continue;
+            const [resId, timeStr] = slot.split('|');
+            const idx = TIME_SLOTS.indexOf(timeStr);
+            if (idx === -1) continue;
+            (byRes[resId] ||= []).push(idx);
+        }
+        const blocks: { resId: string; start: number; end: number }[] = [];
+        for (const [resId, raw] of Object.entries(byRes)) {
+            const sorted = [...raw].sort((a, b) => a - b);
+            let cur: number[] = [];
+            for (const i of sorted) {
+                if (cur.length === 0 || i === cur[cur.length - 1] + 1) cur.push(i);
+                else { blocks.push({ resId, start: cur[0], end: cur[cur.length - 1] }); cur = [i]; }
+            }
+            if (cur.length) blocks.push({ resId, start: cur[0], end: cur[cur.length - 1] });
+        }
+        return blocks;
     }, [newSlots]);
+
+    /** Block containing a specific (resource, slot-idx). Used by cell
+     *  rendering for chunk-aware start/end edges. */
+    const getBlockAt = (resId: string, idx: number) =>
+        selectedBlocks.find(b => b.resId === resId && idx >= b.start && idx <= b.end) ?? null;
+
+    /** Legacy single-block view — first chunk in the resource. Kept only
+     *  for code paths that do not yet know about multi-period (mobile tap,
+     *  initial focus on continue, etc). */
+    const selectedBlock = selectedBlocks[0] ?? null;
+
+    /** Drop a single chunk from the selection. Other chunks (in the same
+     *  or other resources) stay untouched. */
+    const removeBlock = useCallback((block: { resId: string; start: number; end: number }) => {
+        const idsToRemove = new Set<string>();
+        for (let i = block.start; i <= block.end; i++) {
+            idsToRemove.add(`${block.resId}|${TIME_SLOTS[i]}`);
+        }
+        setNewSlots(prev => prev.filter(s => !idsToRemove.has(s)));
+    }, []);
 
     const handleDragDown = (resId: string, time: string) => {
         if (isSlotOccupied(resId, time)) return;
         dragModeRef.current = 'new';
         dragStartRef.current = { resId, time };
-        setNewSlotRange(resId, [time]);
+        // Snapshot at drag-start. New drags ADD a fresh chunk on top of
+        // this; resize/move replace ONLY the chunk being touched.
+        dragInitialSlotsRef.current = [...newSlots];
+        // Add the click point as a draft single-slot chunk; do NOT wipe
+        // the resource's other chunks (which the legacy `setNewSlotRange`
+        // did, breaking multi-period in the same cabinet).
+        setNewSlots(prev => {
+            const slotId = `${resId}|${time}`;
+            return prev.includes(slotId) ? prev : [...prev, slotId];
+        });
         forceDragUpdate();
     };
 
@@ -914,14 +966,21 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         if (startIdx === -1 || curIdx === -1) return;
         const minIdx = Math.min(startIdx, curIdx);
         const maxIdx = Math.max(startIdx, curIdx);
-        const slots: string[] = [];
+        const draftSlots: string[] = [];
         let blocked = false;
         for (let i = minIdx; i <= maxIdx; i++) {
             if (isSlotOccupied(resId, TIME_SLOTS[i])) { blocked = true; break; }
-            slots.push(TIME_SLOTS[i]);
+            draftSlots.push(TIME_SLOTS[i]);
         }
-        if (!blocked) setNewSlotRange(resId, slots);
-    }, [isSlotOccupied, setNewSlotRange]);
+        if (blocked) return;
+        // Strip only the draft slots (anything we may have added during
+        // earlier ticks of THIS drag) from the snapshot, then re-add the
+        // current draft. Existing chunks — same cabinet or different —
+        // survive intact, which is what makes multi-period selection work.
+        const draftIds = new Set(draftSlots.map(t => `${resId}|${t}`));
+        const survivors = dragInitialSlotsRef.current.filter(s => !draftIds.has(s));
+        setNewSlots([...survivors, ...draftIds]);
+    }, [isSlotOccupied]);
 
     const handleDragUp = useCallback(() => {
         if (!dragModeRef.current) return;
@@ -965,19 +1024,29 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             return;
         }
 
+        const dragRes = dragStartRef.current?.resId ?? null;
+        const dragTime = dragStartRef.current?.time ?? null;
         dragModeRef.current = null;
         dragStartRef.current = null;
         forceDragUpdate();
-        // Auto-extend to at least 60min
-        setNewSlots(prev => {
-            if (prev.length !== 1) return prev;
-            const [resId, timeStr] = prev[0].split('|');
-            const idx = TIME_SLOTS.indexOf(timeStr);
-            if (idx >= 0 && idx + 1 < TIME_SLOTS.length && !isSlotOccupied(resId, TIME_SLOTS[idx + 1])) {
-                return [...prev, `${resId}|${TIME_SLOTS[idx + 1]}`];
-            }
-            return prev;
-        });
+        // Auto-extend to at least 60min — applies only to the slot the
+        // user just clicked, and only if it's currently a SINGLETON
+        // chunk (no immediate neighbor in selection). With multi-period
+        // support we can't just check "total length === 1" anymore.
+        if (dragRes && dragTime) {
+            setNewSlots(prev => {
+                const idx = TIME_SLOTS.indexOf(dragTime);
+                if (idx < 0) return prev;
+                const startId = `${dragRes}|${dragTime}`;
+                if (!prev.includes(startId)) return prev;
+                const nextTime = idx + 1 < TIME_SLOTS.length ? TIME_SLOTS[idx + 1] : null;
+                const prevTime = idx > 0 ? TIME_SLOTS[idx - 1] : null;
+                if (nextTime && prev.includes(`${dragRes}|${nextTime}`)) return prev;
+                if (prevTime && prev.includes(`${dragRes}|${prevTime}`)) return prev;
+                if (!nextTime || isSlotOccupied(dragRes, nextTime)) return prev;
+                return [...prev, `${dragRes}|${nextTime}`];
+            });
+        }
     }, [isSlotOccupied, moveHover, selectedDate, fetchBookings]);
 
     useEffect(() => {
@@ -1002,11 +1071,22 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
     useEffect(() => { setNewSlots([]); }, [selectedDate]);
 
+    // Queue of remaining chunks waiting for the booking modal. When the
+    // user picks N chunks and clicks "Забронировать", we open the modal
+    // for the first chunk, and on each successful confirm pull the next
+    // one off this queue. Empty queue → close modal & clear selection.
+    const [pendingChunks, setPendingChunks] = useState<{ resId: string; time: string; duration: number }[]>([]);
+
     const handleContinue = () => {
-        if (!selectedBlock) return;
-        const startTime = TIME_SLOTS[selectedBlock.start];
-        const duration = (selectedBlock.end - selectedBlock.start + 1) * 30;
-        setBookSlot({ resId: selectedBlock.resId, time: startTime, date: selectedDate, duration });
+        if (selectedBlocks.length === 0) return;
+        const queue = selectedBlocks.map(b => ({
+            resId: b.resId,
+            time: TIME_SLOTS[b.start],
+            duration: (b.end - b.start + 1) * 30,
+        }));
+        const [first, ...rest] = queue;
+        setPendingChunks(rest);
+        setBookSlot({ resId: first.resId, time: first.time, date: selectedDate, duration: first.duration });
     };
 
     const handleBooked = async (bookingId: string, clientId: string | null, price: number) => {
@@ -1024,8 +1104,27 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         }
         await fetchBookings();
         await fetchSessions();
-        setNewSlots([]);
-        setBookSlot(null);
+        // Drop only the just-booked chunk from the selection — keep the
+        // remaining pending chunks visible while the modal advances.
+        if (bookSlot) {
+            const slotIdx = TIME_SLOTS.indexOf(bookSlot.time);
+            const slotCount = Math.max(1, Math.round((bookSlot.duration || 60) / 30));
+            const idsToRemove = new Set<string>();
+            for (let i = 0; i < slotCount; i++) {
+                const t = TIME_SLOTS[slotIdx + i];
+                if (t) idsToRemove.add(`${bookSlot.resId}|${t}`);
+            }
+            setNewSlots(prev => prev.filter(s => !idsToRemove.has(s)));
+        }
+        // If more chunks are queued, open the modal for the next one;
+        // otherwise close it and reset the queue.
+        if (pendingChunks.length > 0) {
+            const [next, ...rest] = pendingChunks;
+            setPendingChunks(rest);
+            setBookSlot({ resId: next.resId, time: next.time, date: selectedDate, duration: next.duration });
+        } else {
+            setBookSlot(null);
+        }
     };
 
     // Handle saving multi-slot client assignments for a booking
@@ -1304,17 +1403,42 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         </div>
     );
 
-    const selectedBar = newSlots.length > 0 && selectedBlock ? (
+    // Summary bar — one chip per chunk so multi-period selection
+    // ("Кабинет 5 · 10:00-11:00", "Кабинет 5 · 15:00-16:00") shows
+    // both periods with independent × buttons.
+    const selectedBar = selectedBlocks.length > 0 ? (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-unbox-green/10 border border-unbox-green/30 rounded-xl px-3 sm:px-4 py-2.5">
-            <span className="text-sm font-medium text-unbox-dark">
-                {RESOURCES.find(r => r.id === selectedBlock.resId)?.name} · {TIME_SLOTS[selectedBlock.start]} – {TIME_SLOTS[selectedBlock.end + 1] ?? '21:00'} ({(selectedBlock.end - selectedBlock.start + 1) * 30} мин)
-            </span>
-            <div className="flex gap-2 w-full sm:w-auto">
-                <button onClick={() => setNewSlots([])} className="flex-1 sm:flex-initial px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+            <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                {selectedBlocks.map((b, i) => {
+                    const resName = RESOURCES.find(r => r.id === b.resId)?.name || b.resId;
+                    const startT = TIME_SLOTS[b.start];
+                    const endT = TIME_SLOTS[b.end + 1] ?? '21:00';
+                    const mins = (b.end - b.start + 1) * 30;
+                    return (
+                        <div
+                            key={`${b.resId}-${b.start}-${i}`}
+                            className="inline-flex items-center gap-1.5 bg-white border border-unbox-green/30 rounded-lg px-2 py-1 text-xs font-semibold text-unbox-dark"
+                        >
+                            <span className="text-unbox-grey font-normal">{resName}</span>
+                            <span className="font-mono">{startT}–{endT}</span>
+                            <span className="text-unbox-grey font-normal">· {mins >= 60 ? `${(mins / 60).toString().replace(/\.0$/, '')}ч` : `${mins}м`}</span>
+                            <button
+                                onClick={() => removeBlock(b)}
+                                className="ml-1 rounded-full hover:bg-red-100 p-0.5 transition-colors"
+                                title="Убрать этот период"
+                            >
+                                <X size={11} className="text-red-500" />
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+            <div className="flex gap-2 shrink-0">
+                <button onClick={() => setNewSlots([])} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
                     Сбросить
                 </button>
-                <button onClick={handleContinue} className="flex-1 sm:flex-initial px-3 py-1.5 text-sm rounded-lg bg-unbox-green text-white hover:bg-unbox-dark font-semibold">
-                    Забронировать →
+                <button onClick={handleContinue} className="px-3 py-1.5 text-sm rounded-lg bg-unbox-green text-white hover:bg-unbox-dark font-semibold">
+                    Забронировать{selectedBlocks.length > 1 ? ` (${selectedBlocks.length})` : ''} →
                 </button>
             </div>
         </div>
@@ -1463,7 +1587,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     <CrmQuickBookModal
                         slot={bookSlot}
                         crmClients={clients}
-                        onClose={() => setBookSlot(null)}
+                        // Cancel at any point in the queue → drop remaining
+                        // chunks. The user has the chips & can re-trigger
+                        // "Забронировать" if they want to retry.
+                        onClose={() => { setBookSlot(null); setPendingChunks([]); }}
                         onBooked={handleBooked}
                     />
                 )}
@@ -1721,7 +1848,13 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 <CrmQuickBookModal
                     slot={bookSlot}
                     crmClients={clients.filter(c => c.isActive)}
-                    onClose={() => { setBookSlot(null); setNewSlots([]); }}
+                    onClose={() => {
+                        // Cancel mid-queue → drop remaining chunks; keep
+                        // the chips so the user can retry without
+                        // re-selecting from scratch.
+                        setBookSlot(null);
+                        setPendingChunks([]);
+                    }}
                     onBooked={handleBooked}
                 />
             )}
