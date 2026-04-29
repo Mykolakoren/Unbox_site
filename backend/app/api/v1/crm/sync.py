@@ -86,6 +86,60 @@ def _normalize_name(name: str) -> str:
     return " ".join(name.lower().strip().split())
 
 
+@router.get("/sync/test-connection")
+def test_calendar_connection(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """One-shot health check for the specialist's Google Calendar config.
+
+    Useful right after a specialist edits `calendar_id` in /crm/settings —
+    pings the calendar with a 1-event `events.list` call so the UI can
+    say "ok, this works" or "the service account can't see this calendar,
+    here's how to fix it" before they ever try to sync sessions. Returns
+    a normalised `{ok, calendar_id, service_account, message?}` shape so
+    the frontend can show a green/red state without parsing exception text.
+    """
+    calendar_id = get_crm_calendar_id(current_user)
+    if not calendar_id:
+        return {
+            "ok": False,
+            "calendar_id": None,
+            "service_account": GCAL_SERVICE_ACCOUNT,
+            "message": "Calendar ID не задан. Введите адрес календаря и сохраните.",
+        }
+
+    try:
+        # Tiny request — list 1 event in a 1-day window. If credentials and
+        # sharing are correct, this returns near-instantly even on calendars
+        # with thousands of events.
+        from app.services.crm_calendar import _get_calendar_service
+        service = _get_calendar_service()
+        from datetime import timedelta, timezone
+        now = datetime.now(timezone.utc)
+        service.events().list(
+            calendarId=calendar_id,
+            timeMin=now.isoformat(),
+            timeMax=(now + timedelta(days=1)).isoformat(),
+            maxResults=1,
+            singleEvents=True,
+        ).execute()
+    except Exception as e:
+        return {
+            "ok": False,
+            "calendar_id": calendar_id,
+            "service_account": GCAL_SERVICE_ACCOUNT,
+            "message": _gcal_error_to_message(e, calendar_id),
+        }
+
+    return {
+        "ok": True,
+        "calendar_id": calendar_id,
+        "service_account": GCAL_SERVICE_ACCOUNT,
+        "message": f"Подключение к {calendar_id} работает.",
+    }
+
+
 @router.post("/sync/calendar")
 def sync_from_calendar(
     session: Session = Depends(deps.get_session),

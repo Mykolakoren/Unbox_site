@@ -2,7 +2,7 @@
  * CRM Settings page — payment accounts, currencies, calendar sync, etc.
  */
 import { useEffect, useState } from 'react';
-import { Settings, Calendar, Link2, Coins, ShieldCheck, Save } from 'lucide-react';
+import { Settings, Calendar, Link2, Coins, ShieldCheck, Save, Copy, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { PaymentAccountsManager } from '../../components/crm/PaymentAccountsManager';
 import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
@@ -27,6 +27,20 @@ export function CrmSettings() {
     const [sotSaving, setSotSaving] = useState(false);
     const [rates, setRates] = useState<Record<string, number>>({});
     const [ratesSaving, setRatesSaving] = useState(false);
+    // Connection test state — null = idle, otherwise show ok/error result.
+    const [connTest, setConnTest] = useState<
+        | { state: 'idle' }
+        | { state: 'loading' }
+        | { state: 'ok'; message: string }
+        | { state: 'error'; message: string }
+    >({ state: 'idle' });
+    // Copy feedback for the service-account email (resets after 2s).
+    const [saCopied, setSaCopied] = useState(false);
+    // Hard-coded fallback so the UI shows a usable email even before the
+    // first /test-connection roundtrip; real value comes from the backend.
+    const [serviceAccount, setServiceAccount] = useState(
+        'psycrm-bot@psycrm-calendar.iam.gserviceaccount.com',
+    );
 
     useEffect(() => {
         fetchPaymentAccounts();
@@ -36,6 +50,34 @@ export function CrmSettings() {
         }).catch(() => {});
         fetchExchangeRates().then(r => setRates({ ...r }));
     }, []);
+
+    const handleTestConnection = async () => {
+        setConnTest({ state: 'loading' });
+        try {
+            const r = await crmApi.testCalendarConnection();
+            setServiceAccount(r.serviceAccount || serviceAccount);
+            if (r.ok) {
+                setConnTest({ state: 'ok', message: r.message || 'Подключение работает' });
+            } else {
+                setConnTest({ state: 'error', message: r.message || 'Не удалось подключиться' });
+            }
+        } catch (e: any) {
+            setConnTest({
+                state: 'error',
+                message: e?.response?.data?.detail || 'Сервер не ответил — попробуйте через минуту',
+            });
+        }
+    };
+
+    const handleCopyServiceAccount = async () => {
+        try {
+            await navigator.clipboard.writeText(serviceAccount);
+            setSaCopied(true);
+            setTimeout(() => setSaCopied(false), 2000);
+        } catch {
+            // Older browsers / non-https — silently no-op.
+        }
+    };
 
     const handleSaveCalendar = async () => {
         try {
@@ -93,6 +135,11 @@ export function CrmSettings() {
                 onSaveCalendar={handleSaveCalendar}
                 onToggleSourceOfTruth={handleToggleSourceOfTruth}
                 onSaveRates={handleSaveRates}
+                serviceAccount={serviceAccount}
+                saCopied={saCopied}
+                onCopyServiceAccount={handleCopyServiceAccount}
+                connTest={connTest}
+                onTestConnection={handleTestConnection}
             />
         );
 }
@@ -112,6 +159,12 @@ const GHS_MONO_LABEL: React.CSSProperties = {
     color: GH.ink60,
 };
 
+type ConnTestState =
+    | { state: 'idle' }
+    | { state: 'loading' }
+    | { state: 'ok'; message: string }
+    | { state: 'error'; message: string };
+
 function GridHouseCrmSettings({
     calendarId,
     setCalendarId,
@@ -125,6 +178,11 @@ function GridHouseCrmSettings({
     onSaveCalendar,
     onToggleSourceOfTruth,
     onSaveRates,
+    serviceAccount,
+    saCopied,
+    onCopyServiceAccount,
+    connTest,
+    onTestConnection,
 }: {
     calendarId: string;
     setCalendarId: (v: string) => void;
@@ -138,6 +196,11 @@ function GridHouseCrmSettings({
     onSaveCalendar: () => Promise<void>;
     onToggleSourceOfTruth: () => Promise<void>;
     onSaveRates: () => Promise<void>;
+    serviceAccount: string;
+    saCopied: boolean;
+    onCopyServiceAccount: () => void | Promise<void>;
+    connTest: ConnTestState;
+    onTestConnection: () => Promise<void>;
 }) {
     const inkBtn = (disabled?: boolean): React.CSSProperties => ({
         background: GH.ink,
@@ -293,7 +356,7 @@ function GridHouseCrmSettings({
                     <Calendar size={12} /> ID календаря для автосинхронизации
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 28 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 20 }}>
                     <input
                         type="text"
                         value={calendarId}
@@ -305,6 +368,133 @@ function GridHouseCrmSettings({
                         <Link2 size={14} />
                         {calendarSaved ? 'Сохранено' : 'Сохранить'}
                     </button>
+                </div>
+
+                {/* Connection panel — service-account email + test button.
+                    Most "404 Not Found" errors at sync time come from the
+                    user not having shared their calendar with the bot;
+                    surfacing the bot's email here + a one-click smoke test
+                    cuts that out. */}
+                <div
+                    style={{
+                        border: GHS_HAIRLINE,
+                        background: GH.paper,
+                        padding: 18,
+                        marginBottom: 28,
+                    }}
+                >
+                    <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginBottom: 8 }}>
+                        Сервисный аккаунт Unbox
+                    </div>
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '10px 12px',
+                            background: GH.ink5,
+                            border: `1px solid ${GH.ink10}`,
+                            marginBottom: 14,
+                        }}
+                    >
+                        <code
+                            style={{
+                                flex: 1,
+                                fontFamily: GH_MONO,
+                                fontSize: 13,
+                                color: GH.ink,
+                                wordBreak: 'break-all',
+                            }}
+                        >
+                            {serviceAccount}
+                        </code>
+                        <button
+                            type="button"
+                            onClick={onCopyServiceAccount}
+                            style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase',
+                                padding: '6px 10px',
+                                background: 'transparent',
+                                border: `1px solid ${GH.ink}`,
+                                cursor: 'pointer',
+                                color: GH.ink,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {saCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
+                            {saCopied ? 'Скопировано' : 'Копировать'}
+                        </button>
+                    </div>
+                    <p
+                        style={{
+                            fontFamily: GH_SANS,
+                            fontSize: 13,
+                            lineHeight: 1.55,
+                            color: GH.ink60,
+                            margin: '0 0 14px',
+                        }}
+                    >
+                        Чтобы синхронизация работала, поделитесь своим Google
+                        Calendar с этим адресом: в календаре «Настройки и общий
+                        доступ» → «Поделиться с конкретными пользователями» → доступ
+                        «Внесение изменений в события».
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <button
+                            type="button"
+                            onClick={onTestConnection}
+                            disabled={connTest.state === 'loading'}
+                            style={{
+                                ...inkBtn(connTest.state === 'loading'),
+                                padding: '10px 14px',
+                            }}
+                        >
+                            {connTest.state === 'loading'
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <ShieldCheck size={14} />}
+                            {connTest.state === 'loading' ? 'Проверяю' : 'Проверить подключение'}
+                        </button>
+                        {connTest.state === 'ok' && (
+                            <span
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    fontFamily: GH_SANS,
+                                    fontSize: 13,
+                                    color: GH.accent,
+                                }}
+                            >
+                                <CheckCircle size={14} /> {connTest.message}
+                            </span>
+                        )}
+                    </div>
+                    {connTest.state === 'error' && (
+                        <div
+                            style={{
+                                marginTop: 14,
+                                padding: '10px 14px',
+                                border: `1px solid ${GH.danger}`,
+                                background: 'rgba(220,38,38,0.04)',
+                                color: GH.danger,
+                                fontFamily: GH_SANS,
+                                fontSize: 13,
+                                lineHeight: 1.55,
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 8,
+                            }}
+                        >
+                            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                            <span>{connTest.message}</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Source of Truth — custom toggle */}

@@ -428,6 +428,22 @@ export const crmApi = {
         return response.data;
     },
 
+    /**
+     * Smoke-test the user's calendar config. Returns ok/false with a
+     * Russian message ready to show in the UI — useful as a pre-flight
+     * check on /crm/settings so misconfigured sharing surfaces before
+     * the admin clicks "Синхронизировать" expecting it to just work.
+     */
+    testCalendarConnection: async (): Promise<{
+        ok: boolean;
+        calendarId: string | null;
+        serviceAccount: string;
+        message?: string;
+    }> => {
+        const response = await api.get('/crm/sync/test-connection');
+        return response.data;
+    },
+
     syncClientHistory: async (clientId: string, monthsBack?: number, monthsForward?: number): Promise<{ totalFound: number; created: number }> => {
         const params: Record<string, number> = {};
         if (monthsBack !== undefined) params.months_back = monthsBack;
