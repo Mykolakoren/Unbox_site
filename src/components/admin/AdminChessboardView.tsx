@@ -515,14 +515,51 @@ export function AdminChessboardView() {
         }
     };
 
+    // Queue of chunks waiting for the booking modal. When the admin
+    // selects N periods (same or different cabinet) and clicks
+    // "Продолжить", we open the modal for the first chunk and on each
+    // success pull the next one off this queue. Empty queue → close
+    // modal & clear selection. Without this only the first chunk got
+    // booked and the rest silently disappeared — admins reported this.
+    const [pendingChunks, setPendingChunks] = useState<{ resId: string; time: string; duration: number }[]>([]);
+
     // Handle "Продолжить" — open admin booking modal with pre-filled duration
     const handleContinueNewBooking = () => {
-        if (newSlots.length === 0) return;
-        const block = selectedNewBlocks[0];
-        if (!block) return;
-        const startTime = TIME_SLOTS[block.start];
-        const duration = (block.end - block.start + 1) * 30;
-        setAdminBookSlot({ resId: block.resId, time: startTime, date: selectedDate, duration });
+        if (newSlots.length === 0 || selectedNewBlocks.length === 0) return;
+        const queue = selectedNewBlocks.map(b => ({
+            resId: b.resId,
+            time: TIME_SLOTS[b.start],
+            duration: (b.end - b.start + 1) * 30,
+        }));
+        const [first, ...rest] = queue;
+        setPendingChunks(rest);
+        setAdminBookSlot({ resId: first.resId, time: first.time, date: selectedDate, duration: first.duration });
+    };
+
+    /** Called from the modal's onBooked. Pops the just-booked chunk's
+     *  slots out of the selection, then either advances to the next
+     *  chunk in the queue or closes the modal entirely. */
+    const advanceBookingQueue = () => {
+        // Drop the slots that just got booked from the visual selection.
+        if (adminBookSlot) {
+            const idx = TIME_SLOTS.indexOf(adminBookSlot.time);
+            const slotCount = Math.max(1, Math.round((adminBookSlot.duration || 60) / 30));
+            const idsToRemove = new Set<string>();
+            for (let i = 0; i < slotCount; i++) {
+                const t = TIME_SLOTS[idx + i];
+                if (t) idsToRemove.add(`${adminBookSlot.resId}|${t}`);
+            }
+            setNewSlots(prev => prev.filter(s => !idsToRemove.has(s)));
+        }
+        if (pendingChunks.length > 0) {
+            const [next, ...rest] = pendingChunks;
+            setPendingChunks(rest);
+            setAdminBookSlot({ resId: next.resId, time: next.time, date: selectedDate, duration: next.duration });
+        } else {
+            setAdminBookSlot(null);
+            setNewSlots([]);
+        }
+        fetchAllBookings();
     };
 
     // ── Booking block style ───────────────────────────────────────────────────
@@ -842,12 +879,14 @@ export function AdminChessboardView() {
                     <AdminQuickBookingModal
                         slot={adminBookSlot}
                         users={users}
-                        onClose={() => { setAdminBookSlot(null); setNewSlots([]); }}
-                        onBooked={() => {
+                        onClose={() => {
+                            // Cancel mid-queue → drop remaining chunks; selection
+                            // is already shown in the chips so admin can retry
+                            // without re-selecting from scratch.
                             setAdminBookSlot(null);
-                            setNewSlots([]);
-                            fetchAllBookings();
+                            setPendingChunks([]);
                         }}
+                        onBooked={advanceBookingQueue}
                     />
                 )}
 
@@ -1338,7 +1377,37 @@ function AdminQuickBookingModal({
     const [selectedUser, setSelectedUser] = useState<{ id: string; email: string; name: string } | null>(null);
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
     const [recurringOccurrences, setRecurringOccurrences] = useState(12);
+    // Egor's request: let admins specify recurring as either "N occurrences"
+    // or "until a specific date". The first is the default, the second is
+    // a toggle. When in "until" mode we compute occurrences from firstDate
+    // → untilDate based on the pattern interval.
+    const [recurringMode, setRecurringMode] = useState<'count' | 'until'>('count');
+    const [recurringUntil, setRecurringUntil] = useState<string>(
+        format(addMinutes(slot.date, 90 * 24 * 60), 'yyyy-MM-dd'),
+    );
     const dateStr = format(slot.date, 'yyyy-MM-dd');
+
+    /** Compute the actual occurrence count to send to the backend. In
+     *  "count" mode it's just the input value; in "until" mode we walk
+     *  the interval (7/14/30 days) from firstDate until the chosen
+     *  end date and count how many occurrences fit. Inclusive on both
+     *  ends so "до 31 августа" includes 31 августа if it lands on the
+     *  weekday. Capped at the same max as the "count" input (52 weekly
+     *  / 24 monthly) so a fat-fingered "until 2099" can't bring down
+     *  the world. */
+    const effectiveOccurrences = (() => {
+        if (!recurringPattern) return recurringOccurrences;
+        if (recurringMode === 'count') return recurringOccurrences;
+        const start = slot.date;
+        const end = recurringUntil ? new Date(recurringUntil + 'T23:59:59') : start;
+        if (end < start) return 1;
+        const stepDays = recurringPattern === 'weekly' ? 7
+            : recurringPattern === 'biweekly' ? 14
+            : 30;
+        const diffDays = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        const max = recurringPattern === 'monthly' ? 24 : 52;
+        return Math.max(1, Math.min(max, Math.floor(diffDays / stepDays) + 1));
+    })();
 
     const endTime = (() => {
         if (!slot?.time || typeof slot.time !== 'string' || !slot.time.includes(':')) return '';
@@ -1370,7 +1439,7 @@ function AdminQuickBookingModal({
                     format: resource?.formats?.[0] || 'individual',
                     paymentMethod: 'balance',
                     firstDate: dateStr,
-                    occurrences: recurringOccurrences,
+                    occurrences: effectiveOccurrences,
                     pattern: recurringPattern,
                     targetUserId: selectedUser.email,
                 });
@@ -1526,25 +1595,65 @@ function AdminQuickBookingModal({
                         ))}
                     </div>
                     {recurringPattern && (
-                        <div className="flex items-center gap-2 pt-1">
-                            <input
-                                type="number"
-                                value={recurringOccurrences}
-                                onChange={e => {
-                                    const max = recurringPattern === 'monthly' ? 24 : 52;
-                                    setRecurringOccurrences(Math.max(2, Math.min(max, Number(e.target.value))));
-                                }}
-                                min={2}
-                                max={recurringPattern === 'monthly' ? 24 : 52}
-                                className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
-                            />
-                            <span className="text-xs text-unbox-grey">
-                                повторений · {recurringPattern === 'monthly'
-                                    ? `≈ ${recurringOccurrences} мес.`
-                                    : recurringPattern === 'biweekly'
-                                        ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
-                                        : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
-                            </span>
+                        <div className="space-y-2 pt-1">
+                            {/* Mode toggle: by count vs until date. Both
+                                eventually compute occurrences for the
+                                backend; "until" walks step intervals from
+                                firstDate to the picked date. */}
+                            <div className="flex gap-1.5">
+                                {([
+                                    { id: 'count' as const, label: 'По числу' },
+                                    { id: 'until' as const, label: 'До даты' },
+                                ]).map(m => (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        onClick={() => setRecurringMode(m.id)}
+                                        className={`flex-1 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                                            recurringMode === m.id
+                                                ? 'bg-unbox-dark text-white border-unbox-dark'
+                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-dark/50'
+                                        }`}
+                                    >
+                                        {m.label}
+                                    </button>
+                                ))}
+                            </div>
+                            {recurringMode === 'count' ? (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        value={recurringOccurrences}
+                                        onChange={e => {
+                                            const max = recurringPattern === 'monthly' ? 24 : 52;
+                                            setRecurringOccurrences(Math.max(2, Math.min(max, Number(e.target.value))));
+                                        }}
+                                        min={2}
+                                        max={recurringPattern === 'monthly' ? 24 : 52}
+                                        className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    />
+                                    <span className="text-xs text-unbox-grey">
+                                        повторений · {recurringPattern === 'monthly'
+                                            ? `≈ ${recurringOccurrences} мес.`
+                                            : recurringPattern === 'biweekly'
+                                                ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
+                                                : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
+                                    </span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="date"
+                                        value={recurringUntil}
+                                        min={dateStr}
+                                        onChange={e => setRecurringUntil(e.target.value)}
+                                        className="px-2 py-1.5 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    />
+                                    <span className="text-xs text-unbox-grey">
+                                        ≈ {effectiveOccurrences} {effectiveOccurrences === 1 ? 'бронь' : 'броней'}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -1555,7 +1664,7 @@ function AdminQuickBookingModal({
                     className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    {recurringPattern ? `Создать серию · ${recurringOccurrences} броней` : 'Забронировать'}
+                    {recurringPattern ? `Создать серию · ${effectiveOccurrences} броней` : 'Забронировать'}
                 </button>
             </div>
         </div>

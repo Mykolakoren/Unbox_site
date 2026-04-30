@@ -3,7 +3,7 @@ import logging
 from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from app.core.rate_limit import limiter
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
@@ -149,11 +149,25 @@ def read_my_bookings(
 def read_bookings(
     session: Session = Depends(deps.get_session),
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(5000, le=20000),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
-    """Retrieve all bookings (Admin only)."""
-    bookings = session.exec(select(Booking).offset(skip).limit(limit)).all()
+    """Retrieve all bookings (Admin only).
+
+    Returns rows ordered by date DESC so the admin chessboard sees the
+    NEWEST bookings first when the result is truncated. Without explicit
+    ORDER BY postgres returned the table in insertion order, which meant
+    the most recently-added recurring bookings (the ones admins had just
+    placed) silently fell off the end past the 1000-row limit and didn't
+    render on the chessboard. Limit raised to 5000 to give breathing room
+    on top of the sort, and capped at 20k just in case.
+    """
+    bookings = session.exec(
+        select(Booking)
+        .order_by(Booking.date.desc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
     return [enrich_booking_status(b) for b in bookings]
 
 
