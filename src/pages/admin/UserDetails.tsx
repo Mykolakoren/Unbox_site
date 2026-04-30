@@ -89,7 +89,28 @@ export function AdminUserDetails() {
         fetchCrmAccess();
     }, [fetchCrmAccess]);
 
+    // Pull the users list when this page is opened directly (deep link
+    // from Telegram, paste from URL, etc.) and the store is still empty.
+    // Without this the lookup `users.find(u => u.email === ...)` returns
+    // undefined and the page renders "Клиент не найден" even for users
+    // who exist — admins reported `/admin/users/psy_ann@bk.ru` doing
+    // exactly that.
+    const fetchUsers = useUserStore(s => s.fetchUsers);
+    const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
+    useEffect(() => {
+        if (users.length === 0) fetchUsers();
+        // Bookings are also accessed below for "Активность клиента"; same
+        // direct-link problem there.
+        if (bookings.length === 0) fetchAllBookings();
+    }, [users.length, bookings.length, fetchUsers, fetchAllBookings]);
+
     if (!user) {
+        // While the initial fetch is in flight, show a spinner instead of
+        // the false-negative "Клиент не найден". Distinguishes "still
+        // loading" from "really doesn't exist".
+        if (users.length === 0) {
+            return <div className="p-8 text-center text-unbox-grey">Загрузка…</div>;
+        }
         return <div className="p-8 text-center">Клиент не найден</div>;
     }
 

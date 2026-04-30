@@ -63,7 +63,12 @@ export const bookingsApi = {
         return response.data.map(mapToFrontend);
     },
 
-    getAllBookings: async (skip = 0, limit = 1000) => {
+    getAllBookings: async (skip = 0, limit = 5000) => {
+        // 5000 — enough headroom for ~12 months of activity at scale;
+        // backend caps at 20k. Bumped from 1000 because admins reported
+        // newly-placed recurring bookings missing from the chessboard
+        // (1000 fit the historical slow-growth count, but with 800+
+        // weekly recurring rows the tail got truncated).
         const response = await api.get<any[]>('/bookings', {
             params: { skip, limit }
         });
