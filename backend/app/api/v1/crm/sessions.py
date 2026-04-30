@@ -210,6 +210,135 @@ def delete_session(
     return {"ok": True, "deleted": len(targets), "deleted_gcal": deleted_gcal, "scope": scope}
 
 
+@router.get("/merge-suggestions")
+def list_merge_suggestions(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Find unlinked (CRM-session, cabinet-booking) pairs that occupy the
+    same date+time and could be merged into one event.
+
+    Specialists asked: "когда в календаре брони есть бронь, которая
+    совпадает по времени с моей сессией с конкретным клиентом — пусть
+    сервис меня спрашивает, нужно ли объединить эти события". This
+    endpoint surfaces every such pair so the UI can show a "Найдено N
+    пар, объединить?" banner.
+
+    Match criteria:
+      • Session.specialist_id == current user
+      • Session.booking_id IS NULL (no link yet)
+      • Session.status not cancelled
+      • Booking.user_id == current user's email
+      • Booking.status == "confirmed"
+      • Booking.date's day-of-month matches Session.date's day-of-month
+      • Booking.start_time matches Session.date's HH:MM
+    """
+    from app.models.booking import Booking
+    uid = str(current_user.id)
+    user_email = current_user.email
+
+    # Pull unlinked future-or-recent sessions for this specialist
+    sessions = session.exec(
+        select(TherapySession)
+        .where(TherapySession.specialist_id == uid)
+        .where(TherapySession.booking_id.is_(None))  # type: ignore
+        .where(TherapySession.status.not_in(("CANCELLED_CLIENT", "CANCELLED_THERAPIST")))  # type: ignore
+        .order_by(TherapySession.date.desc())
+        .limit(500)
+    ).all()
+    if not sessions:
+        return {"pairs": []}
+
+    # All confirmed bookings for this user (no time pre-filter needed —
+    # booking volume per specialist is small).
+    bookings = session.exec(
+        select(Booking)
+        .where(Booking.user_id == user_email)
+        .where(Booking.status == "confirmed")
+    ).all()
+
+    # Index bookings by (yyyy-mm-dd, hh:mm) for O(1) lookup per session.
+    book_idx: dict[tuple[str, str], list[Booking]] = {}
+    for b in bookings:
+        try:
+            key = (b.date.strftime("%Y-%m-%d"), b.start_time)
+        except Exception:
+            continue
+        book_idx.setdefault(key, []).append(b)
+
+    clients_cache: dict[str, TherapistClient] = {}
+    pairs: list[dict] = []
+    for ts in sessions:
+        try:
+            sess_key = (ts.date.strftime("%Y-%m-%d"), ts.date.strftime("%H:%M"))
+        except Exception:
+            continue
+        candidates = book_idx.get(sess_key, [])
+        for b in candidates:
+            if str(b.id) == ts.booking_id:
+                continue
+            cli = clients_cache.get(ts.client_id)
+            if cli is None:
+                cli = session.get(TherapistClient, ts.client_id)
+                if cli:
+                    clients_cache[ts.client_id] = cli
+            pairs.append({
+                "session_id": ts.id,
+                "session_date": ts.date.isoformat(),
+                "session_duration": ts.duration_minutes,
+                "client_id": ts.client_id,
+                "client_name": cli.name if cli else None,
+                "booking_id": str(b.id),
+                "booking_resource_id": b.resource_id,
+                "booking_start_time": b.start_time,
+                "booking_duration": b.duration,
+            })
+
+    return {"pairs": pairs}
+
+
+@router.post("/merge-suggestions/accept")
+def accept_merge_suggestion(
+    payload: dict = Body(...),
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_specialist),
+):
+    """Apply a single merge: link a session to a booking.
+
+    Sets session.booking_id + is_booked, and back-fills booking.crm_client_id
+    if it wasn't set. Both objects must belong to the current specialist —
+    refused otherwise.
+    """
+    from app.models.booking import Booking
+    sid = payload.get("session_id")
+    bid = payload.get("booking_id")
+    if not sid or not bid:
+        raise HTTPException(400, "session_id и booking_id обязательны")
+
+    ts = session.get(TherapySession, sid)
+    if not ts or ts.specialist_id != str(current_user.id):
+        raise HTTPException(404, "Session not found")
+
+    try:
+        from uuid import UUID as _UUID
+        b = session.get(Booking, _UUID(bid))
+    except Exception:
+        b = None
+    if not b or b.user_id != current_user.email:
+        raise HTTPException(404, "Booking not found")
+
+    ts.booking_id = str(b.id)
+    ts.is_booked = True
+    ts.updated_at = datetime.now()
+    if not b.crm_client_id and ts.client_id:
+        b.crm_client_id = ts.client_id
+
+    session.add(ts)
+    session.add(b)
+    session.commit()
+    return {"ok": True, "session_id": ts.id, "booking_id": str(b.id)}
+
+
 @router.post("/sessions/{session_id}/detach-cabinet")
 def detach_session_cabinet(
     session_id: str,
