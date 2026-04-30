@@ -337,6 +337,36 @@ export const crmApi = {
         return res.data;
     },
 
+    /**
+     * Find unlinked (CRM session, cabinet booking) pairs that share the
+     * same date + time. Used by the dashboard banner to ask "найдено N
+     * пар бронь+сессия в одно время — объединить?".
+     */
+    getMergeSuggestions: async (): Promise<{
+        pairs: Array<{
+            sessionId: string;
+            sessionDate: string;
+            sessionDuration: number;
+            clientId: string;
+            clientName?: string | null;
+            bookingId: string;
+            bookingResourceId: string;
+            bookingStartTime: string;
+            bookingDuration: number;
+        }>;
+    }> => {
+        const res = await api.get('/crm/merge-suggestions');
+        return res.data;
+    },
+
+    /** Apply a single merge: link the session to the booking. Sets
+     *  session.booking_id + is_booked, and back-fills the booking's
+     *  crm_client_id if missing. */
+    acceptMergeSuggestion: async (sessionId: string, bookingId: string): Promise<{ ok: boolean }> => {
+        const res = await api.post('/crm/merge-suggestions/accept', { sessionId, bookingId });
+        return res.data;
+    },
+
     autoCompleteSessions: async (): Promise<{ ok: boolean; autoCompleted: number }> => {
         const response = await api.post('/crm/sessions/auto-complete');
         return response.data;

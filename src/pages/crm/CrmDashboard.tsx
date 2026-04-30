@@ -151,6 +151,50 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     // to plan their week.
     const { bookings, fetchBookings, currentUser } = useUserStore();
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
+
+    // Merge-suggestion banner — when a CRM session and a cabinet booking
+    // share the same date+time, the specialist usually wants them treated
+    // as one event. Pull the list on mount and surface a banner when ≥1
+    // pair is unlinked.
+    type MergePair = {
+        sessionId: string; sessionDate: string; sessionDuration: number;
+        clientId: string; clientName?: string | null;
+        bookingId: string; bookingResourceId: string;
+        bookingStartTime: string; bookingDuration: number;
+    };
+    const [mergePairs, setMergePairs] = useState<MergePair[]>([]);
+    const [mergeOpen, setMergeOpen] = useState(false);
+    const [mergingId, setMergingId] = useState<string | null>(null);
+    const refreshMergeSuggestions = async () => {
+        try {
+            const res = await crmApi.getMergeSuggestions();
+            setMergePairs(res.pairs);
+        } catch {
+            setMergePairs([]);
+        }
+    };
+    useEffect(() => { refreshMergeSuggestions(); }, []);
+
+    const handleAcceptMerge = async (pair: MergePair) => {
+        setMergingId(pair.sessionId);
+        try {
+            await crmApi.acceptMergeSuggestion(pair.sessionId, pair.bookingId);
+            // Drop the pair locally so the user sees instant feedback.
+            setMergePairs(prev => prev.filter(p => p.sessionId !== pair.sessionId || p.bookingId !== pair.bookingId));
+            toast.success(`Объединено: ${pair.clientName || 'клиент'} и кабинет`);
+        } catch {
+            toast.error('Не удалось объединить');
+        } finally {
+            setMergingId(null);
+        }
+    };
+    const handleSkipMerge = (pair: MergePair) => {
+        // "Пропустить" — just hide locally for this session. We don't
+        // persist a server-side dismissal because the pair will return
+        // next pageload, but if the specialist genuinely doesn't want to
+        // merge they can detach manually or ignore the banner.
+        setMergePairs(prev => prev.filter(p => p.sessionId !== pair.sessionId || p.bookingId !== pair.bookingId));
+    };
     const upcomingMyBookings = (() => {
         const now = new Date();
         const horizon = addDays(now, 7);
@@ -271,6 +315,143 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '72px' }}>
+
+            {/* Merge-suggestions banner — appears only when there's at
+                least one unlinked (session, booking) pair at the same
+                time. Click "Объединить" applies the link; click
+                "Пропустить" hides this pair until the next page load. */}
+            {mergePairs.length > 0 && (
+                <div style={{
+                    border: `1px solid ${GH.accent}`,
+                    background: 'rgba(71,109,107,0.06)',
+                    padding: '14px 18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 16,
+                    flexWrap: 'wrap',
+                    marginBottom: -56,
+                }}>
+                    <div>
+                        <div style={{ ...monoLabel, color: GH.accent, marginBottom: 4 }}>СОВПАДЕНИЯ ПО ВРЕМЕНИ</div>
+                        <div style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink }}>
+                            Найдено <b>{mergePairs.length}</b> {mergePairs.length === 1 ? 'пара' : mergePairs.length < 5 ? 'пары' : 'пар'} «бронь+сессия» в одно время. Объединить в одно событие?
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setMergeOpen(true)}
+                        style={{
+                            background: GH.accent,
+                            color: GH.paper,
+                            fontFamily: GH_MONO,
+                            fontSize: 11,
+                            letterSpacing: '0.18em',
+                            textTransform: 'uppercase',
+                            padding: '10px 18px',
+                            border: 'none',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        Просмотреть
+                    </button>
+                </div>
+            )}
+
+            {/* Merge dialog — list of pairs with per-row Объединить /
+                Пропустить buttons. Closes itself when the list is empty. */}
+            {mergeOpen && (
+                <div
+                    onClick={() => setMergeOpen(false)}
+                    style={{
+                        position: 'fixed', inset: 0, zIndex: 100,
+                        background: 'rgba(0,0,0,0.45)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: 20,
+                    }}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            background: GH.paper, border: `1px solid ${GH.ink}`,
+                            maxWidth: 640, width: '100%', maxHeight: '80vh',
+                            overflowY: 'auto', padding: 24,
+                        }}
+                    >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
+                            <h2 style={{ fontFamily: GH_SANS, fontSize: 22, fontWeight: 700, margin: 0, color: GH.ink }}>
+                                Объединить бронь и сессию
+                            </h2>
+                            <button
+                                onClick={() => setMergeOpen(false)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}
+                            >
+                                ЗАКРЫТЬ
+                            </button>
+                        </div>
+                        {mergePairs.length === 0 ? (
+                            <div style={{ ...monoLabel, padding: '32px 0', textAlign: 'center', color: GH.ink30 }}>
+                                ВСЕ ОБЪЕДИНЕНО · ХОРОШО
+                            </div>
+                        ) : (
+                            <div>
+                                {mergePairs.map(pair => {
+                                    const dt = parseUTC(pair.sessionDate);
+                                    const resName = RESOURCES.find(r => r.id === pair.bookingResourceId)?.name || pair.bookingResourceId;
+                                    return (
+                                        <div
+                                            key={`${pair.sessionId}-${pair.bookingId}`}
+                                            style={{
+                                                borderTop: `1px solid ${GH.ink10}`,
+                                                padding: '14px 0',
+                                                display: 'grid',
+                                                gridTemplateColumns: '1fr auto',
+                                                gap: 12,
+                                                alignItems: 'center',
+                                            }}
+                                        >
+                                            <div>
+                                                <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 700, color: GH.ink }}>
+                                                    {pair.clientName || 'Клиент'} · {format(dt, 'd MMM, HH:mm', { locale: ru })}
+                                                </div>
+                                                <div style={{ ...monoLabel, marginTop: 4 }}>
+                                                    {resName} · {pair.bookingDuration} МИН
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 8 }}>
+                                                <button
+                                                    onClick={() => handleSkipMerge(pair)}
+                                                    style={{
+                                                        background: 'transparent', border: `1px solid ${GH.ink10}`,
+                                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em',
+                                                        textTransform: 'uppercase', padding: '8px 12px',
+                                                        cursor: 'pointer', color: GH.ink60,
+                                                    }}
+                                                >
+                                                    Пропустить
+                                                </button>
+                                                <button
+                                                    onClick={() => handleAcceptMerge(pair)}
+                                                    disabled={mergingId === pair.sessionId}
+                                                    style={{
+                                                        background: GH.ink, border: 'none',
+                                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em',
+                                                        textTransform: 'uppercase', padding: '8px 14px',
+                                                        cursor: mergingId === pair.sessionId ? 'default' : 'pointer',
+                                                        color: GH.paper,
+                                                        opacity: mergingId === pair.sessionId ? 0.5 : 1,
+                                                    }}
+                                                >
+                                                    {mergingId === pair.sessionId ? '…' : 'Объединить'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* ── Page header ── */}
             <header>
