@@ -171,7 +171,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
 
             list.push({
                 id: `trans-${t.id}`,
-                date: new Date(t.date),
+                date: getSafeDate(t.date),
                 type: 'transaction',
                 title: title,
                 description: t.description || `${t.amount} ₾`,
@@ -186,7 +186,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
         user.discountHistory?.forEach(d => {
             list.push({
                 id: d.id,
-                date: new Date(d.date),
+                date: getSafeDate(d.date),
                 type: 'discount_change',
                 title: 'Изменение скидки',
                 description: `${d.oldValue}% → ${d.newValue}% (${d.reason})`,
@@ -201,7 +201,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
             if (c.type === 'crm_access_requested') {
                 list.push({
                     id: c.id || `crm-req-${c.date}`,
-                    date: new Date(c.date),
+                    date: getSafeDate(c.date),
                     type: 'crm_access',
                     title: 'Запрос на CRM',
                     description: c.text,
@@ -212,7 +212,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
             } else if (c.type === 'crm_access_approved') {
                 list.push({
                     id: c.id || `crm-${c.date}`,
-                    date: new Date(c.date),
+                    date: getSafeDate(c.date),
                     type: 'crm_access',
                     title: 'CRM доступ одобрен',
                     description: `${c.adminName}: ${c.text}`,
@@ -223,7 +223,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
             } else if (c.type === 'crm_access_rejected') {
                 list.push({
                     id: c.id || `crm-${c.date}`,
-                    date: new Date(c.date),
+                    date: getSafeDate(c.date),
                     type: 'crm_access',
                     title: 'CRM запрос отклонён',
                     description: `${c.adminName}: ${c.text}`,
@@ -234,7 +234,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
             } else {
                 list.push({
                     id: c.id,
-                    date: new Date(c.date),
+                    date: getSafeDate(c.date),
                     type: 'comment',
                     title: c.type === 'permissions_update' ? 'Обновление прав' : c.type === 'subscription_topup' ? 'Пополнение абонемента' : 'Комментарий',
                     description: c.adminName ? `${c.adminName}: ${c.text}` : c.text,
