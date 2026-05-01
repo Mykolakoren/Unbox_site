@@ -1213,6 +1213,143 @@ def get_recurring_groups(
     return result
 
 
+@router.post("/recurring/{group_id}/extend")
+def extend_recurring_series(
+    group_id: str,
+    payload: dict = Body(...),
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Add N more occurrences after the last booking in a recurring series.
+
+    Used by the "Продлить серию" button on the booking-detail popup and
+    in Telegram reminder messages that fire as a series approaches its
+    final occurrences. We re-detect the original pattern from the last
+    two booking dates' interval (same logic as `recurring-groups`),
+    then walk forward N steps from the latest date and create the new
+    bookings under the SAME recurring_group_id.
+    """
+    add_occurrences = int(payload.get("add_occurrences") or 0)
+    if add_occurrences < 1 or add_occurrences > 52:
+        raise HTTPException(400, "add_occurrences должно быть от 1 до 52")
+
+    existing = session.exec(
+        select(Booking)
+        .where(Booking.recurring_group_id == group_id)
+        .order_by(Booking.date)
+    ).all()
+    if not existing:
+        raise HTTPException(404, "Серия не найдена")
+
+    # Ownership check — same rule as cancel
+    first = existing[0]
+    is_owner = (first.user_uuid and first.user_uuid == current_user.id) or (
+        first.user_id == current_user.email
+    )
+    if not is_owner and current_user.role not in ADMIN_ROLES:
+        raise HTTPException(403, "Not authorized")
+
+    # Detect pattern interval from the last two bookings (most recent
+    # interval — handles series that started weekly then user manually
+    # rescheduled; the tail interval is the source of truth).
+    dates_sorted = sorted([b.date for b in existing])
+    if len(dates_sorted) >= 2:
+        delta_days = (dates_sorted[-1] - dates_sorted[-2]).days
+    else:
+        delta_days = 7  # weekly default
+    # Snap to nearest known step
+    if delta_days <= 8:
+        step_days = 7
+    elif delta_days <= 16:
+        step_days = 14
+    else:
+        step_days = 30
+
+    # Build new dates starting after the latest existing one
+    last_date = dates_sorted[-1]
+    new_dates: list[datetime] = []
+    cur = last_date
+    for _ in range(add_occurrences):
+        cur = cur + timedelta(days=step_days)
+        new_dates.append(cur)
+
+    # Reuse the most recent confirmed booking as the template (price,
+    # extras, format, payment method etc).
+    template = next((b for b in reversed(existing) if b.status == "confirmed"), existing[-1])
+    booking_owner = _resolve_booking_owner(session, template)
+
+    # Conflict check first — atomic create.
+    conflicts: list[dict] = []
+    for d in new_dates:
+        available, reason = check_availability(
+            session=session,
+            resource_id=template.resource_id,
+            date=d,
+            start_time=template.start_time,
+            duration=template.duration,
+        )
+        if not available:
+            conflicts.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "day": d.strftime("%A"),
+                "reason": reason,
+            })
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Конфликт в {len(conflicts)} из {len(new_dates)} дат",
+                "conflicts": conflicts,
+            },
+        )
+
+    # Create
+    created = 0
+    total_cost = 0.0
+    for d in new_dates:
+        new_booking = Booking(
+            resource_id=template.resource_id,
+            location_id=template.location_id,
+            date=d,
+            start_time=template.start_time,
+            duration=template.duration,
+            status="confirmed",
+            final_price=template.final_price,
+            base_price=template.base_price,
+            applied_rule=template.applied_rule,
+            discount_amount=template.discount_amount,
+            discount_percent=template.discount_percent,
+            hours_deducted=template.hours_deducted if template.payment_method == "subscription" else None,
+            payment_method=template.payment_method,
+            format=template.format,
+            extras=template.extras or [],
+            user_id=template.user_id,
+            user_uuid=template.user_uuid,
+            crm_client_id=template.crm_client_id,
+            recurring_group_id=group_id,
+        )
+        session.add(new_booking)
+        session.flush()
+        try:
+            ev = gcal_service.create_event(new_booking, user_name=booking_owner.name if booking_owner else "")
+            if ev:
+                new_booking.gcal_event_id = ev
+                session.add(new_booking)
+        except Exception as e:
+            logger.warning(f"GCal sync failed for extend {d}: {e}")
+        created += 1
+        total_cost += new_booking.final_price
+
+    session.commit()
+
+    return {
+        "ok": True,
+        "created": created,
+        "total_cost": round(total_cost, 2),
+        "recurring_group_id": group_id,
+    }
+
+
 @router.delete("/recurring/{group_id}")
 def cancel_recurring_bookings(
     group_id: str,

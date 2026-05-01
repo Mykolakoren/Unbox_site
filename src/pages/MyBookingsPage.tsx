@@ -10,7 +10,7 @@ import {
     User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw
 } from 'lucide-react';
 import clsx from 'clsx';
-import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
+import { format, addDays, addMinutes, setHours, setMinutes, startOfToday, isBefore,
     startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks, isSameDay, isToday, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -1247,7 +1247,10 @@ function BookingsChessboard({
                                                                 : "bg-unbox-dark hover:bg-unbox-dark/90 text-white"
                                                 )}
                                             >
-                                                <span className="text-[10px] font-bold leading-none opacity-90">
+                                                <span className="text-[10px] font-bold leading-none opacity-90 flex items-center gap-1">
+                                                    {/* Recurring marker — orange star ⭐ for series bookings.
+                                                        Visible to both owner and admin. */}
+                                                    {myB.recurringGroupId && <span className="text-orange-500" title="Постоянная бронь (серия)">⭐</span>}
                                                     {myB.startTime} · {myB.duration / 60}ч
                                                     {isCompleted && ' ✓'}
                                                 </span>
@@ -2220,7 +2223,35 @@ function CrmQuickBookingModal({
     const [chosenExtras, setChosenExtras] = useState<string[]>([]);
     const [useSubscription, setUseSubscription] = useState(false);
     const [saving, setSaving] = useState(false);
+    // Extras section is collapsed by default in CRM mode — most therapy
+    // sessions don't need add-ons, the long list was visual noise.
+    const [extrasOpen, setExtrasOpen] = useState(false);
+    // Recurring controls — off by default; opens periodicity inputs when on.
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurringPattern, setRecurringPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
+    const [recurringMode, setRecurringMode] = useState<'count' | 'until'>('count');
+    const [recurringOccurrences, setRecurringOccurrences] = useState(8);
+    const [recurringUntil, setRecurringUntil] = useState<string>(
+        format(addDays(slot.date, 60), 'yyyy-MM-dd'),
+    );
     const dateStr = format(slot.date, 'yyyy-MM-dd');
+
+    /** Extras with CRM-specialist prices — therapists get a discounted
+     *  price list for their own sessions. Names match the public catalogue
+     *  so the user sees the same options, just cheaper. */
+    const CRM_EXTRAS_PRICES: Record<string, number> = {
+        sandbox: 5,        // 15 → 5
+        sandbox_toys: 5,   // 10 → 5
+        flipchart: 0,      // 10 → 0 (free for specialists)
+        projector: 10,     // 20 → 10
+    };
+    const crmExtras = useMemo(() =>
+        EXTRAS.map(e => ({
+            ...e,
+            price: CRM_EXTRAS_PRICES[e.id] !== undefined ? CRM_EXTRAS_PRICES[e.id] : e.price,
+        })),
+        // EXTRAS array is stable from data.ts, no dep needed
+    []);
 
     const hasSubscription = !!currentUser?.subscription?.planId && (currentUser?.subscription?.remainingHours ?? 0) > 0;
 
@@ -2231,14 +2262,16 @@ function CrmQuickBookingModal({
     const endDate = useMemo(() => addMinutes(startDate, duration), [startDate, duration]);
     const endTime = format(endDate, 'HH:mm');
 
-    // Price preview — uses the same calculator as the main booking wizard
+    // Price preview — uses the same calculator as the main booking wizard.
+    // Pass `crmExtras` (discounted variants) so the displayed total uses
+    // the specialist pricing, not the public catalogue.
     const pricing = useMemo(() => {
         try {
             return calculatePrice({
                 format: chosenFormat,
                 startTime: startDate,
                 endTime: endDate,
-                extras: EXTRAS.filter(e => chosenExtras.includes(e.id)),
+                extras: crmExtras.filter(e => chosenExtras.includes(e.id)),
                 resourceId: slot.resId,
                 paymentMethod: useSubscription ? 'subscription' : 'balance',
                 personalDiscountPercent: currentUser?.personalDiscountPercent,
@@ -2247,7 +2280,24 @@ function CrmQuickBookingModal({
         } catch {
             return null;
         }
-    }, [chosenFormat, startDate, endDate, chosenExtras, slot.resId, useSubscription, currentUser]);
+    }, [chosenFormat, startDate, endDate, chosenExtras, slot.resId, useSubscription, currentUser, crmExtras]);
+
+    /** When "Сделать регулярным" is on, walk the pattern interval to
+     *  count occurrences (until-date mode) or just use the entered N
+     *  (count mode). Capped to the same maxima as the public widget. */
+    const effectiveOccurrences = useMemo(() => {
+        if (!isRecurring) return 1;
+        if (recurringMode === 'count') return recurringOccurrences;
+        const start = slot.date;
+        const end = recurringUntil ? new Date(recurringUntil + 'T23:59:59') : start;
+        if (end < start) return 1;
+        const stepDays = recurringPattern === 'weekly' ? 7
+            : recurringPattern === 'biweekly' ? 14
+            : 30;
+        const diffDays = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        const max = recurringPattern === 'monthly' ? 24 : 52;
+        return Math.max(1, Math.min(max, Math.floor(diffDays / stepDays) + 1));
+    }, [isRecurring, recurringMode, recurringPattern, recurringOccurrences, recurringUntil, slot.date]);
 
     const hoursForSub = duration / 60;
     const enoughHoursOnSub = hasSubscription && (currentUser?.subscription?.remainingHours ?? 0) >= hoursForSub;
@@ -2255,6 +2305,36 @@ function CrmQuickBookingModal({
     const handleBook = async () => {
         setSaving(true);
         try {
+            if (isRecurring && effectiveOccurrences > 1) {
+                // Recurring path — backend creates N bookings under one
+                // recurring_group_id, GCal-syncs each, returns the created
+                // count. Linking to the existing CRM session happens for
+                // the FIRST booking only (the rest become standalone
+                // sessions that the specialist can attach manually if
+                // needed).
+                const result = await bookingsApi.createRecurringBooking({
+                    resourceId: slot.resId,
+                    locationId: resource?.locationId || 'unbox_one',
+                    startTime: slot.time,
+                    duration,
+                    format: chosenFormat,
+                    paymentMethod: useSubscription && enoughHoursOnSub ? 'subscription' : 'balance',
+                    firstDate: dateStr,
+                    occurrences: effectiveOccurrences,
+                    pattern: recurringPattern,
+                    crmClientId: crmMode.clientId,
+                });
+                if (crmMode.sessionId && result.bookingIds && result.bookingIds.length > 0) {
+                    await updateSession(crmMode.sessionId, {
+                        bookingId: result.bookingIds[0],
+                        isBooked: true,
+                    });
+                }
+                toast.success(`Серия из ${result.created} броней создана для ${crmMode.clientName}`);
+                onBooked();
+                return;
+            }
+
             const booking = await bookingsApi.createBooking({
                 resourceId: slot.resId,
                 date: dateStr, // Send as string 'YYYY-MM-DD' to avoid timezone shift
@@ -2369,11 +2449,24 @@ function CrmQuickBookingModal({
                     </div>
                 )}
 
-                {EXTRAS.length > 0 && (
+                {crmExtras.length > 0 && (
                     <div>
-                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Доп. опции</label>
+                        <button
+                            type="button"
+                            onClick={() => setExtrasOpen(o => !o)}
+                            className="w-full flex items-center justify-between text-xs font-medium text-unbox-grey mb-1.5 hover:text-unbox-dark transition-colors"
+                        >
+                            <span>
+                                Доп. опции
+                                {chosenExtras.length > 0 && (
+                                    <span className="ml-1.5 text-unbox-green">· {chosenExtras.length} выбрано</span>
+                                )}
+                            </span>
+                            <span style={{ display: 'inline-block', transition: 'transform 120ms', transform: extrasOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+                        </button>
+                        {extrasOpen && (
                         <div className="grid grid-cols-2 gap-2">
-                            {EXTRAS.map(e => {
+                            {crmExtras.map(e => {
                                 const active = chosenExtras.includes(e.id);
                                 return (
                                     <button
@@ -2389,18 +2482,106 @@ function CrmQuickBookingModal({
                                     >
                                         <div className="flex items-center justify-between gap-1">
                                             <span className="truncate">{e.name}</span>
-                                            {e.price > 0 && (
-                                                <span className={`text-[10px] shrink-0 ${active ? 'text-white/80' : 'text-unbox-grey'}`}>
-                                                    +{e.price}₾
-                                                </span>
-                                            )}
+                                            <span className={`text-[10px] shrink-0 ${active ? 'text-white/80' : e.price === 0 ? 'text-unbox-green' : 'text-unbox-grey'}`}>
+                                                {e.price === 0 ? 'бесплатно' : `+${e.price}₾`}
+                                            </span>
                                         </div>
                                     </button>
                                 );
                             })}
                         </div>
+                        )}
                     </div>
                 )}
+
+                {/* Recurring toggle — appears in CRM-from-session mode only.
+                    On: shows pattern + count/until. Submitting fires
+                    bookingsApi.createRecurringBooking; the first booking
+                    of the series is back-linked to the originating
+                    session, the rest stand on their own. */}
+                <div className="border border-unbox-light rounded-xl p-3 space-y-2.5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={isRecurring}
+                            onChange={e => setIsRecurring(e.target.checked)}
+                            className="accent-unbox-green"
+                        />
+                        <span className="text-sm font-medium text-unbox-dark">
+                            Сделать регулярным бронированием
+                        </span>
+                    </label>
+                    {isRecurring && (
+                        <div className="space-y-2 pl-6">
+                            <div className="flex gap-1.5">
+                                {([
+                                    { id: 'weekly' as const, label: 'Кажд. нед.' },
+                                    { id: 'biweekly' as const, label: '2 нед.' },
+                                    { id: 'monthly' as const, label: 'Месяц' },
+                                ]).map(p => (
+                                    <button
+                                        key={p.id}
+                                        type="button"
+                                        onClick={() => setRecurringPattern(p.id)}
+                                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium border transition-colors ${
+                                            recurringPattern === p.id
+                                                ? 'bg-unbox-green text-white border-unbox-green'
+                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        }`}
+                                    >
+                                        {p.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex gap-1.5">
+                                {([
+                                    { id: 'count' as const, label: 'По числу' },
+                                    { id: 'until' as const, label: 'До даты' },
+                                ]).map(m => (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        onClick={() => setRecurringMode(m.id)}
+                                        className={`flex-1 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                                            recurringMode === m.id
+                                                ? 'bg-unbox-dark text-white border-unbox-dark'
+                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-dark/50'
+                                        }`}
+                                    >
+                                        {m.label}
+                                    </button>
+                                ))}
+                            </div>
+                            {recurringMode === 'count' ? (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        value={recurringOccurrences}
+                                        onChange={e => {
+                                            const max = recurringPattern === 'monthly' ? 24 : 52;
+                                            setRecurringOccurrences(Math.max(2, Math.min(max, Number(e.target.value))));
+                                        }}
+                                        min={2}
+                                        max={recurringPattern === 'monthly' ? 24 : 52}
+                                        className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    />
+                                    <span className="text-xs text-unbox-grey">повторений</span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="date"
+                                        value={recurringUntil}
+                                        min={dateStr}
+                                        onChange={e => setRecurringUntil(e.target.value)}
+                                        className="px-2 py-1.5 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    />
+                                    <span className="text-xs text-unbox-grey">≈ {effectiveOccurrences} {effectiveOccurrences === 1 ? 'бронь' : 'броней'}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
 
                 {hasSubscription && (
                     <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${
@@ -2466,7 +2647,9 @@ function CrmQuickBookingModal({
                     className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Забронировать
+                    {isRecurring && effectiveOccurrences > 1
+                        ? `Создать серию · ${effectiveOccurrences} броней`
+                        : 'Забронировать'}
                 </button>
             </div>
         </div>
