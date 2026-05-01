@@ -5,6 +5,7 @@ import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { hasPermission } from '../../utils/permissions';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { safeFormat } from '../../utils/dateUtils';
 import type { User } from '../../store/types';
 
 interface Props {
@@ -230,7 +231,7 @@ export function UserBonuses({ user, currentUser }: Props) {
                                     </div>
                                     <div className="text-[11px] text-unbox-grey">
                                         {b.grantedByName && `от ${b.grantedByName}`}
-                                        {b.expiresAt && ` · до ${format(new Date(b.expiresAt), 'd MMM yyyy', { locale: ru })}`}
+                                        {b.expiresAt && ` · до ${safeFormat(b.expiresAt, 'd MMM yyyy', ru, '—')}`}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
