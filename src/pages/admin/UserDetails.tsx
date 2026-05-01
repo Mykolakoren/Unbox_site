@@ -39,8 +39,21 @@ export function AdminUserDetails() {
     const navigate = useNavigate();
     const { users, updateUserById, bookings, addTransaction, currentUser, cancelBooking } = useUserStore();
 
-    // Find User
-    const user = users.find(u => u.email === decodeURIComponent(email || ''));
+    /** The URL param can arrive in three forms — already-decoded, %-encoded,
+     *  or with stray whitespace from a copy-paste. Normalize to lowercase
+     *  trimmed for the comparison so admins don't see "Клиент не найден"
+     *  on a real user just because of a casing mismatch. */
+    const normalizeEmail = (raw: string | undefined): string => {
+        if (!raw) return '';
+        let s = raw.trim();
+        try { s = decodeURIComponent(s); } catch { /* already decoded or malformed */ }
+        return s.trim().toLowerCase();
+    };
+    const targetEmail = normalizeEmail(email);
+
+    // Find User — match on the normalized form so "psy_ann@bk.ru",
+    // "psy_ann%40bk.ru", and "PSY_ANN@bk.ru" all resolve to the same row.
+    const user = users.find(u => (u.email || '').trim().toLowerCase() === targetEmail);
 
     const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
     const [isAssignSubOpen, setIsAssignSubOpen] = useState(false);
