@@ -200,7 +200,7 @@ export const bookingsApi = {
         weeks?: number;  // backward compat
         targetUserId?: string;
         crmClientId?: string;
-    }): Promise<{ ok: boolean; recurringGroupId: string; created: number; totalCost: number; dates: string[] }> => {
+    }): Promise<{ ok: boolean; recurringGroupId: string; created: number; totalCost: number; dates: string[]; bookingIds: string[] }> => {
         const response = await api.post('/bookings/recurring', {
             ...data,
             weeks: data.occurrences,  // backend compat
@@ -227,6 +227,19 @@ export const bookingsApi = {
 
     cancelRecurringSeries: async (groupId: string): Promise<{ ok: boolean; cancelled: number }> => {
         const response = await api.delete(`/bookings/recurring/${groupId}`);
+        return response.data;
+    },
+
+    /**
+     * Extend an existing recurring series by N more occurrences after
+     * its last booking. Used by the "Продлить серию" button shown in
+     * the booking detail popup and in Telegram reminder messages
+     * approaching end-of-series.
+     */
+    extendRecurringSeries: async (groupId: string, addOccurrences: number): Promise<{ ok: boolean; created: number; totalCost: number }> => {
+        const response = await api.post(`/bookings/recurring/${groupId}/extend`, {
+            add_occurrences: addOccurrences,
+        });
         return response.data;
     },
 };

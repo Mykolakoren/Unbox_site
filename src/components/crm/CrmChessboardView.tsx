@@ -1763,6 +1763,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                             )}
                                                             title={isMine ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента` : undefined}
                                                         >
+                                                            {/* Recurring marker — оранжевая звёздочка ⭐ для серийных
+                                                                броней. Видна и владельцу, и админу/наблюдателю. */}
+                                                            {booking.recurringGroupId && (
+                                                                <span className="text-orange-500 shrink-0" title="Постоянная бронь (серия)">⭐</span>
+                                                            )}
                                                             <span className="truncate flex-1">
                                                                 {isMine
                                                                     ? (linkedClient ? linkedClient.name : '✓ Моё')

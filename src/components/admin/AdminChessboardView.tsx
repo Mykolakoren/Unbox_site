@@ -1083,8 +1083,10 @@ export function AdminChessboardView() {
                                                         )}
                                                         title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${b.finalPrice}₾`}
                                                     >
-                                                        <div className="font-semibold truncate text-[10px] leading-tight">
-                                                            {getUserName(b.userId)}
+                                                        <div className="font-semibold truncate text-[10px] leading-tight flex items-center gap-0.5">
+                                                            {/* Recurring marker — orange star for series. */}
+                                                            {b.recurringGroupId && <span className="text-orange-500 shrink-0" title="Постоянная бронь (серия)">⭐</span>}
+                                                            <span className="truncate">{getUserName(b.userId)}</span>
                                                         </div>
                                                         {(cell.colspan ?? 1) >= 3 && (
                                                             <div className="text-[9px] opacity-60 truncate">

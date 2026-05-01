@@ -94,6 +94,7 @@ export interface CrmSessionUpdate {
     price?: number;
     isPaid?: boolean;
     isBooked?: boolean;
+    bookingId?: string;
     notes?: string;
 }
 

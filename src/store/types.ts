@@ -119,6 +119,13 @@ export interface BookingHistoryItem extends BookingState {
     cancellationReason?: string;
     cancelledBy?: string; // Admin Name/ID who cancelled
     crmClientId?: string; // Link to TherapistClient.id
+    /**
+     * Recurring series ID. When non-null, this booking is one of a series
+     * created via /bookings/recurring; the chessboards mark these with an
+     * orange star ⭐ and the detail popup shows "Постоянная бронь · N
+     * сессий до конца".
+     */
+    recurringGroupId?: string;
     updatedAt?: string;
 }
 
