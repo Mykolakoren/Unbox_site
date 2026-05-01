@@ -29,7 +29,7 @@ import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient, CrmPaym
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import { toGel } from '../../utils/currency';
-import { parseUTC } from '../../utils/dateUtils';
+import { parseUTC, parseLocal } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -46,9 +46,10 @@ const STATUS_LABELS: Record<string, string> = {
     CANCELLED_THERAPIST: 'Отмена (терапевт)',
 };
 
-/** Parse session date — backend stores UTC naive datetimes */
+/** Parse a CRM session's date string. Wraps the shared parseLocal so
+ *  Tbilisi-naive timestamps from the CRM render at the correct hour. */
 function parseSessionDate(dateStr: string): Date {
-    return parseUTC(dateStr);
+    return parseLocal(dateStr);
 }
 
 /** Сессия уже прошла по времени */

@@ -1097,6 +1097,14 @@ def create_recurring_booking(
         # linked to a client. Mirrors what the CRM chessboard does on a
         # one-off click — without this the recurring series shows up as
         # "Занято" tiles with no client name and no edit handle.
+        #
+        # IMPORTANT: re-use an existing session on this date if one is
+        # already there (e.g. the client has a session synced from their
+        # historical Google Calendar recurring rule, or the specialist
+        # created one manually earlier). Without the lookup we'd insert a
+        # second session at the same wall-clock time and the chessboard
+        # would render two rows — one with "+КАБ" and one with the actual
+        # cabinet, which is exactly what Maxim/Nurlana hit.
         if crm_client_obj and crm_session_group_id:
             from app.models.therapy_session import TherapySession as _TS
             try:
@@ -1104,35 +1112,90 @@ def create_recurring_booking(
                 session_date = d.replace(hour=h, minute=m, second=0, microsecond=0)
             except Exception:
                 session_date = d
-            ts = _TS(
-                client_id=str(crm_client_obj.id),
-                specialist_id=str(booking_owner.id),
-                date=session_date,
-                duration_minutes=data.duration,
-                status="PLANNED",
-                price=crm_client_obj.base_price,
-                currency=crm_client_obj.currency,
-                account=crm_client_obj.default_account,
-                is_booked=True,
-                booking_id=str(booking.id),
-                recurring_group_id=crm_session_group_id,
-            )
-            # Mirror the cabinet GCal event into the specialist's personal
-            # CRM calendar too, so a session shows up under the client's
-            # name (not just "Кабинет 8 — Микола") in their day view.
-            if crm_calendar_id:
-                try:
-                    from app.services.crm_calendar import create_calendar_event as _crm_create_ev
-                    ts.google_event_id = _crm_create_ev(
-                        calendar_id=crm_calendar_id,
-                        client_name=crm_client_obj.name,
-                        alias_code=crm_client_obj.alias_code,
-                        session_date=session_date,
-                        duration_minutes=data.duration,
-                    )
-                except Exception as e:
-                    logger.warning(f"CRM GCal push failed for recurring {d}: {e}")
-            session.add(ts)
+
+            # Same-day match. The frontend renders date+start_time in
+            # Tbilisi local; legacy synced sessions are stored in UTC
+            # (07:00 UTC = 11:00 Tbilisi for an 11:00 series), so widen
+            # the match to "any session for this client on this calendar
+            # day where start time aligns either as Tbilisi-naive or as
+            # the equivalent UTC reading".
+            from datetime import timedelta as _td
+            day_start = d.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + _td(days=1)
+            same_day_existing = session.exec(
+                select(_TS)
+                .where(_TS.client_id == str(crm_client_obj.id))
+                .where(_TS.specialist_id == str(booking_owner.id))
+                .where(_TS.date >= day_start)
+                .where(_TS.date < day_end)
+                .where(_TS.status.not_in(("CANCELLED_CLIENT", "CANCELLED_THERAPIST")))  # type: ignore
+            ).all()
+
+            # The naive value we'd save (11:00 local) and the equivalent
+            # UTC clock (07:00 UTC for Tbilisi 11:00). A legacy session
+            # synced into UTC would land on the latter.
+            target_naive_h = (h, m)
+            try:
+                # Tbilisi → UTC: subtract 4h. (No DST in this TZ.)
+                utc_h = (h - 4) % 24
+                target_utc_h = (utc_h, m)
+            except Exception:
+                target_utc_h = target_naive_h
+
+            existing = None
+            for cand in same_day_existing:
+                if (cand.date.hour, cand.date.minute) in (target_naive_h, target_utc_h):
+                    existing = cand
+                    break
+
+            if existing:
+                # Re-use the existing row instead of duplicating. Link it
+                # to the new booking and stamp the recurring group so it
+                # behaves like the rest of the series.
+                existing.booking_id = str(booking.id)
+                existing.is_booked = True
+                if existing.recurring_group_id is None:
+                    existing.recurring_group_id = crm_session_group_id
+                existing.updated_at = datetime.now()
+                # If price was unset (legacy NULL), seed it from client
+                # so revenue reports stop counting these as "free".
+                if existing.price is None:
+                    existing.price = crm_client_obj.base_price
+                if existing.currency is None:
+                    existing.currency = crm_client_obj.currency
+                if existing.account is None:
+                    existing.account = crm_client_obj.default_account
+                session.add(existing)
+            else:
+                ts = _TS(
+                    client_id=str(crm_client_obj.id),
+                    specialist_id=str(booking_owner.id),
+                    date=session_date,
+                    duration_minutes=data.duration,
+                    status="PLANNED",
+                    price=crm_client_obj.base_price,
+                    currency=crm_client_obj.currency,
+                    account=crm_client_obj.default_account,
+                    is_booked=True,
+                    booking_id=str(booking.id),
+                    recurring_group_id=crm_session_group_id,
+                )
+                # Mirror the cabinet GCal event into the specialist's personal
+                # CRM calendar too, so a session shows up under the client's
+                # name (not just "Кабинет 8 — Микола") in their day view.
+                if crm_calendar_id:
+                    try:
+                        from app.services.crm_calendar import create_calendar_event as _crm_create_ev
+                        ts.google_event_id = _crm_create_ev(
+                            calendar_id=crm_calendar_id,
+                            client_name=crm_client_obj.name,
+                            alias_code=crm_client_obj.alias_code,
+                            session_date=session_date,
+                            duration_minutes=data.duration,
+                        )
+                    except Exception as e:
+                        logger.warning(f"CRM GCal push failed for recurring {d}: {e}")
+                session.add(ts)
 
         total_cost += quote.final_price
         created_bookings.append(str(booking.id))

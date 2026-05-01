@@ -22,7 +22,7 @@ import {
 import { format, addMonths, subMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { crmApi } from '../../api/crm';
-import { parseUTC } from '../../utils/dateUtils';
+import { parseUTC, parseLocal } from '../../utils/dateUtils';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
 import { isAfter, addDays } from 'date-fns';
@@ -395,7 +395,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         ) : (
                             <div>
                                 {mergePairs.map(pair => {
-                                    const dt = parseUTC(pair.sessionDate);
+                                    const dt = parseLocal(pair.sessionDate);
                                     const resName = RESOURCES.find(r => r.id === pair.bookingResourceId)?.name || pair.bookingResourceId;
                                     return (
                                         <div
@@ -786,7 +786,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             <span style={{ textAlign: 'right' }}>СТАТУС</span>
                         </div>
                         {dashboard.upcomingSessions.map((s) => {
-                            const dt = parseUTC(s.date);
+                            const dt = parseLocal(s.date);
                             const status = STATUS_GH[s.status] || { label: s.status, color: GH.ink60 };
                             return (
                                 <div
