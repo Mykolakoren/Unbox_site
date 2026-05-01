@@ -233,6 +233,13 @@ class TelegramService:
 
     # ─── Transport ────────────────────────────────────────────────────────────
 
+    def send_message(self, chat_id: str, text: str, parse_mode: str = "HTML") -> bool:
+        """Generic public sender for ad-hoc Telegram messages — used by
+        callers that don't fit one of the booking-specific helpers (e.g.
+        series-end reminders). Same retry / blocked-bot handling as the
+        private helper."""
+        return self._send_message(chat_id=str(chat_id), text=text, parse_mode=parse_mode)
+
     def _send_message(
         self, *, chat_id: str, text: str, parse_mode: Optional[str] = None,
         disable_web_page_preview: bool = True,

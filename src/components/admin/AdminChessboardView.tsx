@@ -1273,6 +1273,10 @@ export function AdminChessboardView() {
                             label="Статус"
                             value={statusLabel(selectedBooking)}
                         />
+                        {/* Recurring series banner — shows "Постоянная бронь · осталось N
+                            сессий" plus a [Продлить] button when this booking is part
+                            of a series. Future-count comes from /recurring-groups. */}
+                        {selectedBooking.recurringGroupId && <RecurringSeriesInfo groupId={selectedBooking.recurringGroupId} onExtended={() => fetchAllBookings()} />}
                     </div>
 
                     {/* Actions */}
@@ -1356,6 +1360,80 @@ function InfoRow({ label, value }: { label: string; value: string }) {
         <div className="flex justify-between gap-3">
             <span className="text-unbox-grey shrink-0">{label}</span>
             <span className="font-medium text-unbox-dark text-right">{value}</span>
+        </div>
+    );
+}
+
+/** Series detail block shown inside the booking-detail popup when the
+ *  booking has a recurring_group_id. Pulls /recurring-groups, finds
+ *  this group, displays "Постоянная бронь · осталось N сессий" with a
+ *  [Продлить серию] button. Click prompts how many extra occurrences
+ *  to add, then POSTs /bookings/recurring/{group_id}/extend. */
+function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExtended: () => void }) {
+    const [groupInfo, setGroupInfo] = useState<{ futureCount: number; totalCount: number; pattern: string } | null>(null);
+    const [extending, setExtending] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        bookingsApi.getRecurringGroups()
+            .then(groups => {
+                if (cancelled) return;
+                const g = groups.find(x => x.recurringGroupId === groupId);
+                if (g) setGroupInfo({ futureCount: g.futureCount, totalCount: g.totalCount, pattern: g.pattern });
+            })
+            .catch(() => { if (!cancelled) setGroupInfo(null); });
+        return () => { cancelled = true; };
+    }, [groupId]);
+
+    const handleExtend = async () => {
+        const raw = prompt('На сколько повторений продлить серию?', '8');
+        if (!raw) return;
+        const n = parseInt(raw, 10);
+        if (!n || n < 1 || n > 52) {
+            toast.error('От 1 до 52');
+            return;
+        }
+        setExtending(true);
+        try {
+            const res = await bookingsApi.extendRecurringSeries(groupId, n);
+            toast.success(`Серия продлена на ${res.created} броней`);
+            onExtended();
+        } catch (e: any) {
+            const detail = e?.response?.data?.detail;
+            if (typeof detail === 'object' && detail?.conflicts) {
+                toast.error(`Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+            } else {
+                toast.error(typeof detail === 'string' ? detail : 'Не удалось продлить серию');
+            }
+        } finally {
+            setExtending(false);
+        }
+    };
+
+    if (!groupInfo) return null;
+    const patternLabel = groupInfo.pattern === 'weekly' ? 'еженедельно'
+        : groupInfo.pattern === 'biweekly' ? 'раз в 2 нед.'
+        : 'ежемесячно';
+
+    return (
+        <div className="mt-2 pt-2 border-t border-unbox-light/50">
+            <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-orange-500">⭐</span>
+                <span className="text-xs font-semibold text-unbox-dark">Постоянная бронь</span>
+                <span className="text-[10px] text-unbox-grey">· {patternLabel}</span>
+            </div>
+            <div className="text-[11px] text-unbox-grey mb-2">
+                Осталось <span className="font-semibold text-unbox-dark">{groupInfo.futureCount}</span> из {groupInfo.totalCount} сессий
+            </div>
+            {groupInfo.futureCount <= 3 && (
+                <button
+                    onClick={handleExtend}
+                    disabled={extending}
+                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 transition-colors disabled:opacity-60"
+                >
+                    {extending ? '…' : 'Продлить серию'}
+                </button>
+            )}
         </div>
     );
 }

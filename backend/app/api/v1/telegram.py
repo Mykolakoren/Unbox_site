@@ -198,9 +198,88 @@ def send_reminders_endpoint(
     if sent:
         session.commit()
 
+    # ── Series-end reminders ──────────────────────────────────────────
+    # When a user's recurring series has only 3, 2, or 1 future bookings
+    # left, ping them once per threshold so they can decide whether to
+    # extend. Dedup is stored in user.crm_data['series_reminders'] as
+    # `{group_id: max_threshold_notified}` — we re-notify only if the
+    # current future_count is *lower* than the stored threshold.
+    from collections import defaultdict
+    series_groups: dict[str, list[Booking]] = defaultdict(list)
+    series_bookings = session.exec(
+        select(Booking)
+        .where(Booking.recurring_group_id.is_not(None))  # type: ignore
+        .where(Booking.status == "confirmed")
+        .where(Booking.date >= now.replace(hour=0, minute=0))
+    ).all()
+    for b in series_bookings:
+        series_groups[b.recurring_group_id].append(b)
+
+    series_sent = 0
+    for group_id, group_bookings in series_groups.items():
+        future_count = len(group_bookings)
+        if future_count > 3:
+            continue
+        # Pick a representative booking to resolve the owner.
+        rep = group_bookings[0]
+        owner: Optional[User] = None
+        if rep.user_uuid:
+            owner = session.get(User, rep.user_uuid)
+        if not owner and rep.user_id:
+            owner = session.exec(select(User).where(User.email == rep.user_id)).first()
+        if not owner or not owner.telegram_id:
+            continue
+        # Dedup
+        crm_data = owner.crm_data or {}
+        marks = dict(crm_data.get("series_reminders") or {})
+        last_threshold = marks.get(group_id)
+        # Send only if we haven't notified at this threshold before. We
+        # ratchet down: 3 → 2 → 1, and never re-fire for a higher count.
+        if last_threshold is not None and future_count >= last_threshold:
+            continue
+
+        resource_name = rep.resource_id
+        try:
+            res_obj = session.get(Resource, rep.resource_id)
+            if res_obj:
+                resource_name = res_obj.name or rep.resource_id
+        except Exception:
+            pass
+
+        # Detect pattern from interval between consecutive dates.
+        dates_sorted = sorted([b.date for b in group_bookings])
+        if len(dates_sorted) >= 2:
+            delta_days = (dates_sorted[1] - dates_sorted[0]).days
+        else:
+            delta_days = 7
+        pattern_label = "еженедельно" if delta_days <= 8 else ("раз в 2 нед." if delta_days <= 16 else "ежемесячно")
+
+        next_date = dates_sorted[0]
+        # Build a clean message with an "extend" deep-link.
+        text = (
+            f"⭐ <b>Постоянная бронь подходит к концу</b>\n\n"
+            f"{resource_name} · {pattern_label}\n"
+            f"Осталось <b>{future_count}</b> "
+            f"{'сессия' if future_count == 1 else ('сессии' if future_count < 5 else 'сессий')}\n"
+            f"Ближайшая: {next_date.strftime('%d.%m.%Y')} в {rep.start_time}\n\n"
+            f"Открыть и продлить → https://unbox.com.ge/admin/bookings"
+        )
+        ok = telegram_service.send_message(str(owner.telegram_id), text)
+        if ok:
+            marks[group_id] = future_count
+            new_crm_data = dict(crm_data)
+            new_crm_data["series_reminders"] = marks
+            owner.crm_data = new_crm_data
+            session.add(owner)
+            series_sent += 1
+
+    if series_sent:
+        session.commit()
+
     return {
         "scanned": scanned,
         "sent": sent,
+        "series_reminders_sent": series_sent,
         "skipped_no_telegram": skipped_no_tg,
         "skipped_wrong_window": skipped_wrong_window,
         "window_from": target_lower.isoformat(),
