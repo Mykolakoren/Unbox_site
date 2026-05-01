@@ -2,7 +2,14 @@ import { api } from './client';
 import type { User } from '../store/types';
 
 export const usersApi = {
-    getUsers: async (skip = 0, limit = 100, includeArchived = false) => {
+    /**
+     * Default limit raised from 100 → 1000 so every active user fits in
+     * one fetch even at moderate scale. The /admin/users/<email> page
+     * looks up by email in the local store; if a user falls past the
+     * limit they appear as "Клиент не найден" even though they exist.
+     * Backend caps at 5000 internally.
+     */
+    getUsers: async (skip = 0, limit = 1000, includeArchived = false) => {
         const response = await api.get<User[]>('/users/', {
             params: { skip, limit, include_archived: includeArchived }
         });

@@ -34,11 +34,17 @@ def _resolve_user(session: Session, user_id: str) -> User:
 def read_users(
     session: Session = Depends(get_session),
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(1000, le=5000),
     include_archived: bool = Query(False, description="Include soft-deleted users (Excel #11)"),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
-    """Retrieve users (Admin only). Excludes archived by default."""
+    """Retrieve users (Admin only). Excludes archived by default.
+
+    Limit raised from 100 → 1000 default (cap 5000) so the admin user-list
+    page and /admin/users/<email> deep-links return ALL users in one call.
+    Earlier defaults silently truncated past the 100th user; deep-link
+    targets falling off the tail rendered as "Клиент не найден".
+    """
     stmt = select(User)
     if not include_archived:
         stmt = stmt.where(User.archived_at.is_(None))  # type: ignore
