@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckSquare, Plus, Trash2, Calendar } from 'lucide-react';
 import { useUserStore, type Task } from '../../store/userStore';
 import { format } from 'date-fns';
+import { safeFormat } from '../../utils/dateUtils';
 import { ru } from 'date-fns/locale';
 import clsx from 'clsx';
 import { Button } from '../ui/Button';
@@ -104,7 +105,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                                 <div className="flex items-center gap-3 mt-1">
                                     <div className="text-[10px] text-gray-400 flex items-center gap-1">
                                         <Calendar size={10} />
-                                        {format(new Date(task.createdAt), 'd MMM', { locale: ru })}
+                                        {safeFormat(task.createdAt, 'd MMM', ru, '—')}
                                     </div>
                                     {task.dueDate && (
                                         <div className={clsx(
@@ -112,7 +113,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                                             isOverdue ? "text-red-500" : isDueToday ? "text-amber-500" : "text-blue-500"
                                         )}>
                                             <Calendar size={10} />
-                                            До: {format(new Date(task.dueDate), 'd MMM', { locale: ru })}
+                                            До: {safeFormat(task.dueDate, 'd MMM', ru, '—')}
                                         </div>
                                     )}
                                 </div>

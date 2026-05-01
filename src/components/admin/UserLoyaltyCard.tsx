@@ -3,6 +3,7 @@ import { Crown, Percent, History, TrendingUp, Info, Pencil } from 'lucide-react'
 import { useUserStore } from '../../store/userStore';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { safeFormat } from '../../utils/dateUtils';
 import clsx from 'clsx';
 
 
@@ -205,7 +206,7 @@ export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
                             <div className="absolute -left-[5px] top-2 w-2 h-2 rounded-full bg-gray-300"></div>
                             <div className="flex justify-between">
                                 <span className="font-medium text-gray-900">{log.oldValue}% → {log.newValue}%</span>
-                                <span className="text-xs text-gray-400">{format(new Date(log.date), 'd MMM yyyy', { locale: ru })}</span>
+                                <span className="text-xs text-gray-400">{safeFormat(log.date, 'd MMM yyyy', ru, '—')}</span>
                             </div>
                             <div className="text-xs text-gray-500 mt-1">{log.reason}</div>
                             <div className="text-[10px] text-gray-400 mt-0.5">by {log.adminName}</div>

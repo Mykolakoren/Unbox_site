@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { MessageSquare, Send, User } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { safeFormat } from '../../utils/dateUtils';
 import clsx from 'clsx';
 
 interface UserCommentsProps {
@@ -63,7 +63,11 @@ export function UserComments({ email }: UserCommentsProps) {
                             <div className="flex items-baseline justify-between mb-1">
                                 <span className="text-sm font-bold text-gray-900">{comment.adminName}</span>
                                 <span className="text-xs text-gray-400">
-                                    {format(new Date(comment.date), 'd MMM HH:mm', { locale: ru })}
+                                    {/* Merged-user comments arrive with `created_at`
+                                        instead of `date`; safeFormat returns a
+                                        fallback for missing/invalid dates so one
+                                        bad row no longer crashes the whole page. */}
+                                    {safeFormat(comment.date || (comment as any).created_at, 'd MMM HH:mm', ru, '—')}
                                 </span>
                             </div>
                             <div className="bg-gray-50 rounded-r-xl rounded-bl-xl p-3 text-sm text-gray-700 whitespace-pre-wrap border border-gray-100 group-hover:bg-gray-100 transition-colors">
