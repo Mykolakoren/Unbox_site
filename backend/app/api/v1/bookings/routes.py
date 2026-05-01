@@ -3,7 +3,7 @@ import logging
 from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from app.core.rate_limit import limiter
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
