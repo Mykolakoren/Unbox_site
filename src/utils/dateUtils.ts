@@ -18,6 +18,23 @@ export function parseUTC(d: string | Date): Date {
     return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
 }
 
+/** Parse a CRM session / cabinet booking timestamp written as Tbilisi
+ *  local wall-clock. The CRM frontend posts strings like "2026-05-22T11:00:00"
+ *  meaning 11:00 local, and the backend stores them as-is. Forcing a Z
+ *  via parseUTC shifts everything 4h forward (11:00 → 15:00 in display),
+ *  which is exactly the bug Максим/Нурлана's series hit. Use this
+ *  helper for fields known to carry local wall-clock. Strings that
+ *  already carry an explicit Z or +HH:MM offset are honoured, so legacy
+ *  rows written in true UTC still render correctly. */
+export function parseLocal(d: string | Date | null | undefined): Date {
+    if (!d) return new Date();
+    if (d instanceof Date) return d;
+    const s = String(d);
+    // Preserve explicit timezone if present.
+    if (s.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(s)) return new Date(s);
+    return new Date(s);
+}
+
 /**
  * Format a date in Batumi (Asia/Tbilisi) timezone using a date-fns format string.
  *
