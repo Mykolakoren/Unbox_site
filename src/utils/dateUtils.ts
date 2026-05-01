@@ -29,9 +29,19 @@ export function parseUTC(d: string | Date): Date {
  *   formatBatumi(parseUTC(tx.date), 'HH:mm')          // "14:30"
  *   formatBatumi(parseUTC(tx.date), 'd MMM yyyy', ru) // "20 янв 2026"
  */
-export function formatBatumi(d: string | Date, fmt: string, locale?: Locale): string {
-    const date = typeof d === 'string' ? parseUTC(d) : d;
-    return formatInTimeZone(date, BATUMI_TZ, fmt, locale ? { locale } : undefined);
+export function formatBatumi(d: string | Date | null | undefined, fmt: string, locale?: Locale, fallback: string = ''): string {
+    // Defensive: a null/undefined/invalid date is the most common cause
+    // of "Invalid time value" RangeErrors in admin pages. Return a
+    // fallback string instead of throwing, so one bad row in
+    // transactions/timeline/etc doesn't blow up the whole page.
+    if (d === null || d === undefined || d === '') return fallback;
+    try {
+        const date = typeof d === 'string' ? parseUTC(d) : d;
+        if (!(date instanceof Date) || isNaN(date.getTime())) return fallback;
+        return formatInTimeZone(date, BATUMI_TZ, fmt, locale ? { locale } : undefined);
+    } catch {
+        return fallback;
+    }
 }
 
 /**
