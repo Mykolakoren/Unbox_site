@@ -16,6 +16,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { useLocations } from '../../hooks/useLocations';
 import { useUserStore } from '../../store/userStore';
+import { getMyBookingsPath, getHomePath } from '../../utils/userPaths';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { Specialist } from '../Specialists/SpecialistCard';
 import type { Location } from '../../types/index';
@@ -316,17 +317,21 @@ function Masthead({
                     </button>
                 </div>
 
-                {/* Right: nav */}
+                {/* Right: nav. On <760 we hide "Специалисты" and
+                    "Кабинеты" too — both are reachable from the hero CTAs
+                    one screen down, and the row was overflowing 375 px on
+                    iPhone-class viewports. Mobile keeps only login / user
+                    menu so the masthead stays on a single line. */}
                 <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-                    <NavLink to="/specialists" label="Специалисты" />
-                    <NavDivider />
-                    <NavLink to="/#cabinets" label="Кабинеты" />
-                    <NavDivider />
+                    <NavLink to="/specialists" label="Специалисты" hideOnNarrow={narrow} />
+                    <NavDivider hideOnNarrow={narrow} />
+                    <NavLink to="/#cabinets" label="Кабинеты" hideOnNarrow={narrow} />
+                    <NavDivider hideOnNarrow={narrow} />
                     <NavLink to="/subscriptions" label="Тарифы" hideOnNarrow={narrow} />
                     {currentUser && (
                         <>
                             <NavDivider hideOnNarrow={narrow} />
-                            <NavLink to="/dashboard/bookings" label="Бронирования" hideOnNarrow={narrow} />
+                            <NavLink to={getMyBookingsPath(currentUser)} label="Бронирования" hideOnNarrow={narrow} />
                         </>
                     )}
                     {isAdmin && (
@@ -335,10 +340,10 @@ function Masthead({
                             <NavLink to="/admin" label="Админ" hideOnNarrow={narrow} />
                         </>
                     )}
-                    <NavDivider />
+                    <NavDivider hideOnNarrow={narrow} />
                     {currentUser ? (
                         <>
-                            <NavLink to="/dashboard" label={currentUser.name ?? 'Кабинет'} />
+                            <NavLink to={getHomePath(currentUser)} label={currentUser.name ?? 'Кабинет'} />
                             <NavDivider />
                             <button
                                 type="button"
@@ -1146,11 +1151,27 @@ function ContactFooter() {
                 <ContactBlock label="Почта" value="unbox.psy@gmail.com" />
                 <ContactBlock label="Часы" value={<>Пн—Вс<br/>09:00 — 22:00</>} />
             </div>
-            {/* Social links */}
-            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 32, ...MONO_LABEL }}>
-                <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Telegram ↗</a>
-                <a href="https://www.instagram.com/unbox.center/" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Instagram ↗</a>
-                <a href="https://www.facebook.com/UnboxYourself1" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Facebook ↗</a>
+            {/* Social links + public-offer link, mirrored across the row.
+                Telegram anchors the left, "Правила бронирования" anchors the
+                right — both stay above the © divider so the legal link
+                lives with the navigation, not with the city tag. */}
+            <div
+                style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 24,
+                    flexWrap: 'wrap',
+                    marginBottom: 32,
+                    ...MONO_LABEL,
+                }}
+            >
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                    <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Telegram ↗</a>
+                    <a href="https://www.instagram.com/unbox.center/" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Instagram ↗</a>
+                    <a href="https://www.facebook.com/UnboxYourself1" target="_blank" rel="noopener noreferrer" style={{ color: GH.ink60, textDecoration: 'none' }}>Facebook ↗</a>
+                </div>
+                <a href="/booking-rules" style={{ color: GH.ink60, textDecoration: 'none' }}>Правила бронирования ↗</a>
             </div>
             <div
                 style={{

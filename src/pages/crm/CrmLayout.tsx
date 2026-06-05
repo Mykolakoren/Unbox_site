@@ -14,10 +14,14 @@ import {
     BookOpen,
     Clock,
     UserCircle,
+    User as UserIcon,
     Shield,
     UserPlus,
     Plus,
     ExternalLink,
+    FileText,
+    CreditCard,
+    Gift,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
@@ -28,15 +32,24 @@ import type { User } from '../../store/types';
 import clsx from 'clsx';
 
 const CRM_TABS = [
-    { icon: LayoutDashboard, label: 'Дашборд',       path: '/crm',               exact: true },
-    { icon: Users,           label: 'Клиенты',       path: '/crm/clients' },
-    { icon: Calendar,        label: 'Сессии',        path: '/crm/sessions' },
-    { icon: BookOpen,        label: 'Бронирования',  path: '/crm/bookings' },
-    { icon: Wallet,          label: 'Финансы',       path: '/crm/finances' },
-    { icon: StickyNote,      label: 'Заметки',       path: '/crm/notes' },
-    { icon: Clock,           label: 'Расписание',    path: '/crm/schedule' },
-    { icon: UserCircle,      label: 'Моя анкета',    path: '/crm/profile' },
-    { icon: Settings,        label: 'Настройки',     path: '/crm/settings' },
+    { icon: LayoutDashboard, label: 'Дашборд',         path: '/crm',                exact: true },
+    { icon: Users,           label: 'Клиенты',         path: '/crm/clients' },
+    { icon: Calendar,        label: 'Сессии',          path: '/crm/sessions' },
+    { icon: BookOpen,        label: 'Бронирования',    path: '/crm/bookings' },
+    { icon: Wallet,          label: 'Финансы',         path: '/crm/finances' },
+    { icon: StickyNote,      label: 'Заметки',         path: '/crm/notes' },
+    { icon: Clock,           label: 'Расписание',      path: '/crm/schedule' },
+    { icon: UserCircle,      label: 'Моя анкета',      path: '/crm/profile' },
+    { icon: Settings,        label: 'Настройки',       path: '/crm/settings' },
+    // Owner 2026-06-05: Личный кабинет — спец иногда хочет глянуть свои
+    // абонементы, бонусы, баланс (как обычный клиент). Раньше для этого
+    // надо было жать «Мой CRM» toggle в /dashboard sidebar, что путало
+    // (вёл обратно сюда). Прямая ссылка убирает context-switching.
+    { icon: UserIcon,        label: 'Личный кабинет',  path: '/dashboard',          exact: true },
+    // Legal: surfaced in CRM nav so specialists who book on behalf of
+    // clients (and so accept the public offer for them) have one click
+    // to the rules page.
+    { icon: FileText,        label: 'Правила',         path: '/booking-rules' },
 ];
 
 function CrmTopTabs() {
@@ -93,7 +106,7 @@ export function CrmLayout() {
     const quickActions: QuickAction[] = [
         { label: 'Добавить клиента', sub: 'Создать карточку', path: '/crm/clients', icon: UserPlus },
         { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions', icon: Calendar },
-        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard/bookings', icon: Plus },
+        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/crm/bookings', icon: Plus },
         {
             label: 'Открыть Google Calendar',
             sub: calendarId ? 'Ваш личный календарь' : 'Google Calendar',
@@ -196,15 +209,27 @@ export function CrmLayout() {
 // ─────────────────────────────────────────────────────────────────────────
 
 const GH_NAV = [
-    { label: 'Дашборд',       path: '/crm',               exact: true },
-    { label: 'Клиенты',       path: '/crm/clients' },
-    { label: 'Сессии',        path: '/crm/sessions' },
-    { label: 'Бронирования',  path: '/crm/bookings' },
-    { label: 'Финансы',       path: '/crm/finances' },
-    { label: 'Заметки',       path: '/crm/notes' },
-    { label: 'Расписание',    path: '/crm/schedule' },
-    { label: 'Анкета',        path: '/crm/profile' },
-    { label: 'Настройки',     path: '/crm/settings' },
+    { label: 'Дашборд',         path: '/crm',                exact: true },
+    { label: 'Клиенты',         path: '/crm/clients' },
+    { label: 'Сессии',          path: '/crm/sessions' },
+    { label: 'Бронирования',    path: '/crm/bookings' },
+    { label: 'Слежу за слотами', path: '/crm/waitlist' },
+    { label: 'Финансы',         path: '/crm/finances' },
+    { label: 'Заметки',         path: '/crm/notes' },
+    { label: 'Расписание',      path: '/crm/schedule' },
+    { label: 'Анкета',          path: '/crm/profile' },
+    { label: 'Настройки',       path: '/crm/settings' },
+    { label: 'Правила',         path: '/booking-rules' },
+];
+
+/** Личные функции спеца — компактный row с иконками над nav. Эти штуки
+ *  нужны редко, но регулярно (счёт абонемента, бонусы, профиль). Раньше
+ *  пункт «Личный кабинет» в sidebar открывал весь /dashboard шелл — теперь
+ *  3 точечных шортката без смены контекста. */
+const PERSONAL_LINKS: Array<{ label: string; Icon: React.ElementType; path: string }> = [
+    { label: 'Абонемент', Icon: CreditCard, path: '/crm/subscription' },
+    { label: 'Бонусы',    Icon: Gift,       path: '/crm/bonuses' },
+    { label: 'Профиль',   Icon: UserCircle, path: '/crm/account' },
 ];
 
 function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: boolean; currentUser: User; quickActions: QuickAction[] }) {
@@ -325,6 +350,57 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                 </div>
             )}
 
+            {/* Personal toolbar — 3 шортката на личные функции
+                (Абонемент / Бонусы / Профиль). Раньше всё это было только
+                через /dashboard, требовало смены шелла. Теперь — без выхода
+                из CRM. */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 1,
+                borderBottom: `1px solid ${GH.ink10}`,
+                background: GH.ink10,
+            }}>
+                {PERSONAL_LINKS.map(({ label, Icon, path }) => (
+                    <Link
+                        key={path}
+                        to={path}
+                        onClick={() => setIsMobileOpen(false)}
+                        title={label}
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 4,
+                            padding: '10px 0',
+                            background: GH.paper,
+                            color: GH.ink60,
+                            textDecoration: 'none',
+                            transition: 'color 0.12s, background 0.12s',
+                        }}
+                        onMouseEnter={e => {
+                            e.currentTarget.style.background = GH.ink5;
+                            e.currentTarget.style.color = GH.ink;
+                        }}
+                        onMouseLeave={e => {
+                            e.currentTarget.style.background = GH.paper;
+                            e.currentTarget.style.color = GH.ink60;
+                        }}
+                    >
+                        <Icon size={16} />
+                        <span style={{
+                            fontFamily: GH_MONO,
+                            fontSize: 9,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                        }}>
+                            {label}
+                        </span>
+                    </Link>
+                ))}
+            </div>
+
             {/* Nav */}
             <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
                 {GH_NAV.map((tab, idx) => {
@@ -391,19 +467,6 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         → АДМИНКА
                     </button>
                 )}
-                <button
-                    onClick={() => navigate('/dashboard')}
-                    style={{
-                        ...monoLabel,
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                    }}
-                >
-                    ← К БРОНИРОВАНИЯМ
-                </button>
                 <button
                     onClick={() => { logout(); window.location.href = '/login'; }}
                     style={{

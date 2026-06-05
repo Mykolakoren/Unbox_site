@@ -16,6 +16,7 @@ Supported commands (for bound users):
   /start    — connect via deep-link, or see connection hint
   /book     — book a cabinet (location → format → date → cabinet → time → duration)
   /bookings — list upcoming bookings
+  /waitlist — list watched slots (still active waitlist subscriptions)
   /balance  — show balance and subscription
   /locations — list our locations with addresses
   /specialists — site link
@@ -36,9 +37,10 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import Any, Optional
+from uuid import UUID
 
 import requests
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
 from sqlmodel import Session, select
 
 from app.api import deps
@@ -48,13 +50,14 @@ from app.models.booking import Booking, BookingCreate
 from app.models.location import Location
 from app.models.resource import Resource
 from app.models.user import User
+from app.models.waitlist import Waitlist
 from app.services.telegram import telegram_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-LINK_TOKEN_TTL = timedelta(minutes=10)
+LINK_TOKEN_TTL = timedelta(minutes=30)
 TG_API_BASE = "https://api.telegram.org"
 
 FORMAT_LABELS = {
@@ -255,14 +258,17 @@ def send_reminders_endpoint(
         pattern_label = "еженедельно" if delta_days <= 8 else ("раз в 2 нед." if delta_days <= 16 else "ежемесячно")
 
         next_date = dates_sorted[0]
-        # Build a clean message with an "extend" deep-link.
+        # Build a clean message with a deep-link to the specific series.
+        # The frontend reads ?series=<group_id> on /dashboard/bookings and
+        # mobile /m/bookings, scrolls to the next-upcoming booking of the
+        # series, and surfaces a "Продлить / ОК завершится в срок" banner.
         text = (
             f"⭐ <b>Постоянная бронь подходит к концу</b>\n\n"
             f"{resource_name} · {pattern_label}\n"
             f"Осталось <b>{future_count}</b> "
             f"{'сессия' if future_count == 1 else ('сессии' if future_count < 5 else 'сессий')}\n"
             f"Ближайшая: {next_date.strftime('%d.%m.%Y')} в {rep.start_time}\n\n"
-            f"Открыть и продлить → https://unbox.com.ge/admin/bookings"
+            f"Открыть серию → https://unbox.com.ge/dashboard/bookings?series={group_id}"
         )
         ok = telegram_service.send_message(str(owner.telegram_id), text)
         if ok:
@@ -336,12 +342,14 @@ def daily_summary_endpoint(
 
     by_loc: dict = {}
     by_loc_revenue: dict = {}
+    total_hours_booked = 0.0  # sum of duration of every active booking created yesterday
     for b in bookings:
         if b.status == "cancelled":
             continue
         name = loc_names.get(b.location_id, b.location_id or "—")
         by_loc[name] = by_loc.get(name, 0) + 1
         by_loc_revenue[name] = by_loc_revenue.get(name, 0.0) + float(b.final_price or 0)
+        total_hours_booked += float(b.duration or 0) / 60.0
 
     # ── Cashbox summary ──
     txs = session.exec(
@@ -405,6 +413,7 @@ def daily_summary_endpoint(
         "",
         "<b>Бронирования</b>",
         f"• Всего создано: <b>{total_bookings}</b> (из них отмен: <b>{len(cancelled)}</b>)",
+        f"• Часов брони: <b>{total_hours_booked:g}</b> ч",
     ]
     if by_loc:
         lines.append(f"• По филиалам: {_fmt_count_dict(by_loc)}")
@@ -424,7 +433,10 @@ def daily_summary_endpoint(
     lines.append("<b>Остатки на утро</b>")
     lines.append(f"• {_fmt_money_dict({k: round(v, 2) for k, v in balance_by_method.items()})}")
 
-    sent = telegram_service.send_admin_alert("\n".join(lines))
+    # Daily summary goes to the OWNER chat (Микола) instead of the busy
+    # admin group. Falls back to admin chat if owner chat isn't set, so
+    # legacy installs still work.
+    sent = telegram_service.send_owner_summary("\n".join(lines))
     return {
         "sent": sent,
         "date": date_label,
@@ -435,6 +447,155 @@ def daily_summary_endpoint(
     }
 
 
+# ── POST /telegram/weekly-cashback ────────────────────────────────────────────
+# Monday-morning settlement: for each user with confirmed balance-paid
+# bookings during the previous Mon–Sun, find the weekly_progressive tier
+# they fulfilled, refund the per-booking delta to their balance, and
+# send them a Telegram digest of the past week. Cron from ops:
+#   curl -X POST 'https://unbox.com.ge/api/v1/telegram/weekly-cashback?secret=<SECRET>'
+# Optional `?user_id=<uuid>&dry_run=true` for ops-only test runs.
+
+@router.post("/weekly-cashback")
+def weekly_cashback_endpoint(
+    secret: Optional[str] = None,
+    user_id: Optional[str] = None,
+    dry_run: bool = False,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None) or settings.TELEGRAM_BOT_TOKEN
+    if not expected:
+        raise HTTPException(status_code=503, detail="Telegram not configured")
+    if secret != expected:
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    from app.services.weekly_cashback import (
+        previous_tbilisi_week_bounds,
+        compute_weekly_cashback_for_user,
+        format_telegram_digest,
+    )
+    from app.services.telegram import telegram_service
+
+    week_start, week_end = previous_tbilisi_week_bounds()
+
+    # Pick users to process. Default: anyone with a confirmed booking in
+    # the window. Caller can scope to a single user via ?user_id.
+    if user_id:
+        try:
+            target = session.get(User, UUID(user_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid user_id")
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        users = [target]
+    else:
+        rows = session.exec(
+            select(User).where(
+                User.id.in_(  # type: ignore[attr-defined]
+                    select(Booking.user_uuid).where(
+                        Booking.status == "confirmed",
+                        Booking.payment_method == "balance",
+                        Booking.date >= week_start,
+                        Booking.date < week_end,
+                    )
+                )
+            )
+        ).all()
+        users = list(rows)
+
+    processed = 0
+    cashback_total = 0.0
+    sent = 0
+    samples = []
+    for u in users:
+        summary = compute_weekly_cashback_for_user(
+            session=session,
+            user=u,
+            week_start=week_start,
+            week_end=week_end,
+            apply=not dry_run,
+        )
+        processed += 1
+        cashback_total += summary["cashback"]
+        if not dry_run and u.telegram_id:
+            text = format_telegram_digest(u, summary)
+            ok = telegram_service.send_message(chat_id=str(u.telegram_id), text=text)
+            if ok:
+                sent += 1
+        if dry_run and len(samples) < 3:
+            samples.append({"user": u.email, **summary})
+
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "week_start": week_start.strftime("%Y-%m-%d"),
+        "week_end": (week_end - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "users_processed": processed,
+        "cashback_total": round(cashback_total, 2),
+        "tg_sent": sent,
+        "samples": samples,
+    }
+
+
+# ── POST /telegram/resolve-username ───────────────────────────────────────────
+# Admin-only helper: turn `@username` into a numeric chat_id by hitting
+# Telegram's getChat. Works only if the user has at some point started the
+# bot OR shares a public group with it. If neither — Telegram returns
+# "chat not found" and we tell the admin what to do (send the user a
+# deep-link via the existing /telegram/link-token flow).
+
+@router.post("/resolve-username")
+def resolve_telegram_username(
+    body: dict = Body(...),
+    current_user: User = Depends(deps.require_admin),
+) -> dict[str, Any]:
+    """Resolve @username → numeric chat_id via Telegram getChat.
+
+    Body: { "username": "@petrik" }   (with or without @)
+    Returns: { "chat_id": "12345", "name": "Pavel" } on success,
+             404 with a Russian message otherwise.
+    """
+    raw = (body.get("username") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Укажите @username")
+    # Numeric chat_id passed through as-is — no resolve needed.
+    if raw.lstrip("-").isdigit():
+        return {"chat_id": raw, "name": None}
+    handle = raw if raw.startswith("@") else f"@{raw}"
+    if not settings.TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Бот не сконфигурирован")
+    try:
+        r = requests.get(
+            f"{TG_API_BASE}/bot{settings.TELEGRAM_BOT_TOKEN}/getChat",
+            params={"chat_id": handle},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        logger.warning("[tg:resolve] network error: %r", e)
+        raise HTTPException(status_code=502, detail="Не удалось связаться с Telegram")
+    data = r.json() if r.content else {}
+    if not data.get("ok"):
+        # Distinguish "chat not found" from generic errors so the admin
+        # gets actionable advice instead of a confusing 502.
+        desc = data.get("description") or ""
+        if "not found" in desc.lower() or r.status_code == 400:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Telegram-привязка не работает: владелец {handle} ещё ни разу не писал "
+                    f"нашему боту. Попросите ЕГО (не себя) открыть @Unbox_Booking_G_Bot "
+                    f"и нажать «Start», после чего попробуйте снова."
+                ),
+            )
+        logger.warning("[tg:resolve] bot API error: %r", data)
+        raise HTTPException(status_code=502, detail="Telegram вернул ошибку: см. логи")
+    chat = data.get("result") or {}
+    chat_id = chat.get("id")
+    if chat_id is None:
+        raise HTTPException(status_code=502, detail="Telegram вернул пустой ответ")
+    full_name = " ".join(filter(None, [chat.get("first_name"), chat.get("last_name")])) or None
+    return {"chat_id": str(chat_id), "name": full_name, "username": chat.get("username")}
+
+
 # ── POST /telegram/link-token ─────────────────────────────────────────────────
 
 @router.post("/link-token")
@@ -443,7 +604,28 @@ def create_link_token(
     session: Session = Depends(get_session),
     current_user: User = Depends(deps.get_current_user),
 ) -> dict[str, Any]:
-    """Generate a one-time token for binding this user's Telegram account."""
+    """Generate a one-time token for binding this user's Telegram account.
+
+    2026-06-05 owner: reuse валидный токен если он ещё не истёк. Раньше
+    каждый клик «Подключить» в профиле генерил новый токен и затирал
+    старый. Если юзер успел открыть первую ссылку в Telegram, а потом
+    нажал «Подключить» ещё раз — старая ссылка превращалась в
+    «❌ Ссылка недействительна» при попытке /start. Теперь — стабильно.
+    """
+    # Если уже есть живой токен — возвращаем его, не создавая новый.
+    existing_token = current_user.telegram_link_token
+    existing_exp = current_user.telegram_link_token_expires_at
+    if existing_token and existing_exp:
+        exp_aware = existing_exp if existing_exp.tzinfo else existing_exp.replace(tzinfo=timezone.utc)
+        if exp_aware > datetime.now(timezone.utc):
+            url = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start={existing_token}"
+            return {
+                "token": existing_token,
+                "url": url,
+                "expires_at": exp_aware.isoformat(),
+            }
+
+    # Нет валидного — генерим новый.
     token = secrets.token_urlsafe(24)
     expires_at = datetime.now(timezone.utc) + LINK_TOKEN_TTL
 
@@ -492,8 +674,25 @@ async def telegram_webhook(
     from_user = message.get("from") or {}
     username = from_user.get("username")
 
+    # 2026-06-05 owner: detailed logging для отладки binding-флоу
+    # (Valentina не привязывается — нужно увидеть что именно шлёт TG).
+    text_preview = (text[:60] + "…") if len(text) > 60 else text
+    logger.info(
+        "[tg:webhook] in: chat_id=%s username=%s text=%r",
+        chat_id, username, text_preview,
+    )
+
     if not chat_id or not text:
         return {"ok": True}
+
+    # Hot-booking reject-reason capture — replies to bot's prompt in admin
+    # chat. Must run BEFORE command parsing so that arbitrary text replies
+    # are processed without falling into the unknown-command fallback.
+    try:
+        if _handle_reject_reason_reply(session, message):
+            return {"ok": True}
+    except Exception:
+        logger.warning("[tg:reject-reason] handler error", exc_info=True)
 
     # Normalise — strip "/foo@BotName" suffix that Telegram adds in groups
     first_word = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
@@ -524,6 +723,8 @@ async def telegram_webhook(
 
     if first_word == "/bookings":
         return _handle_bookings(session, chat_id, user)
+    if first_word in ("/waitlist", "/watch"):
+        return _handle_waitlist(session, chat_id, user)
     if first_word == "/balance":
         return _handle_balance(chat_id, user)
     if first_word == "/locations":
@@ -546,6 +747,7 @@ async def telegram_webhook(
               "Я понимаю команды из меню ниже:\n"
               "/book — забронировать кабинет\n"
               "/bookings — мои брони\n"
+              "/waitlist — отслеживаемые слоты\n"
               "/balance — баланс и подписка\n"
               "/locations — где мы находимся\n"
               "/help — связь с администратором")
@@ -690,11 +892,16 @@ def _handle_bookings(session: Session, chat_id: int, user: Optional[User]) -> di
               "https://unbox.com.ge/profile")
         return {"ok": True}
 
-    # Day start at UTC midnight. The previous `today.replace(hour=0, minute=0)`
-    # left seconds/microseconds from `now()` — so today's bookings with
-    # `date = 2026-04-18 00:00:00` got silently filtered out when the current
-    # microsecond was > 0, which is always.
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Today's start in Tbilisi calendar (server runs UTC; Booking.date is
+    # stored as Tbilisi-calendar-day midnight, naive). At UTC 22:00 the
+    # naive datetime.now() still says Friday while in Tbilisi it's already
+    # Saturday — user expects to see Saturday's bookings. Shift to Tbilisi
+    # local first, drop time, then drop tzinfo to compare with the naive
+    # column.
+    _TBS = timedelta(hours=4)
+    today_start = (datetime.utcnow() + _TBS).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     # Match bookings either by email (legacy soft FK) OR by UUID (primary FK
     # on modern rows). Fixes the case where a user booked via the site and
     # later linked Telegram — the bookings live on the same user row, but the
@@ -739,6 +946,74 @@ def _handle_bookings(session: Session, chat_id: int, user: Optional[User]) -> di
         )
 
     lines.append("\n\nУправление: https://unbox.com.ge/bookings")
+    _send(chat_id, "\n".join(lines), parse_mode="HTML")
+    return {"ok": True}
+
+
+def _handle_waitlist(session: Session, chat_id: int, user: Optional[User]) -> dict:
+    """List the user's still-active waitlist subscriptions.
+
+    Mirrors `_handle_bookings` shape: bound-user check, today-cutoff so
+    yesterday's expired subscriptions don't pollute the view, location
+    name lookup, capped to 10. We intentionally show entries from today
+    onward (not just future): if someone subscribed for tonight 19:00 and
+    runs /waitlist at 18:50, that entry is still meaningful.
+    """
+    if not user:
+        _send(chat_id,
+              "Чтобы видеть отслеживаемые слоты, подключите аккаунт в профиле:\n"
+              "https://unbox.com.ge/profile")
+        return {"ok": True}
+
+    # Tbilisi-day cutoff — same logic as /bookings. Entries from earlier
+    # in today still show (they may yet fire), but yesterday's are dropped.
+    _TBS = timedelta(hours=4)
+    today_start = (datetime.utcnow() + _TBS).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    entries = session.exec(
+        select(Waitlist)
+        .where(
+            (Waitlist.user_uuid == user.id) | (Waitlist.user_id == user.email)
+        )
+        .where(Waitlist.status == "active")
+        .where(Waitlist.date >= today_start)
+        .order_by(Waitlist.date, Waitlist.start_time)
+    ).all()
+
+    if not entries:
+        _send(chat_id,
+              "👀 <b>Отслеживаемых слотов нет.</b>\n\n"
+              "Когда нужный слот занят, нажмите «Сообщить, когда освободится» "
+              "в шахматке — и я буду следить за ним за вас.\n\n"
+              "Шахматка: https://unbox.com.ge/booking",
+              parse_mode="HTML")
+        return {"ok": True}
+
+    entries = entries[:10]
+
+    res_ids = {e.resource_id for e in entries}
+    resources = {r.id: r for r in session.exec(select(Resource).where(Resource.id.in_(res_ids))).all()}  # type: ignore
+    loc_ids = {r.location_id for r in resources.values() if r.location_id}
+    locations = {l.id: l for l in session.exec(select(Location).where(Location.id.in_(loc_ids))).all()} if loc_ids else {}  # type: ignore
+
+    lines = ["👀 <b>Отслеживаемые слоты</b>\n"]
+    for e in entries:
+        res = resources.get(e.resource_id)
+        loc = locations.get(res.location_id) if res and res.location_id else None
+        date_str = _fmt_date_short(e.date)
+        res_name = escape(res.name if res else e.resource_id)
+        loc_name = f" · {escape(loc.name)}" if loc else ""
+        lines.append(
+            f"\n<b>{date_str}</b>, {escape(e.start_time)}–{escape(e.end_time)}\n"
+            f"📍 {res_name}{loc_name}"
+        )
+
+    lines.append(
+        "\n\nКак только в этом центре освободится любой кабинет на это время — пришлю уведомление сюда.\n"
+        "Управление: https://unbox.com.ge/dashboard/waitlist"
+    )
     _send(chat_id, "\n".join(lines), parse_mode="HTML")
     return {"ok": True}
 
@@ -845,9 +1120,16 @@ def _handle_book_start(session: Session, chat_id: int, user: Optional[User]) -> 
               "Или забронируйте через сайт: https://unbox.com.ge")
         return {"ok": True}
 
-    locations = session.exec(
-        select(Location).order_by(Location.name)
-    ).all()
+    # Explicit ordering: Unbox One → Unbox Uni → Neo School. Falls back to
+    # alphabetical for any new locations that show up later.
+    LOCATION_ORDER = ["unbox_one", "unbox_uni", "neo_school"]
+    raw_locations = session.exec(select(Location)).all()
+    def _loc_key(loc):
+        try:
+            return (LOCATION_ORDER.index(loc.id), loc.name)
+        except ValueError:
+            return (len(LOCATION_ORDER), loc.name)
+    locations = sorted(raw_locations, key=_loc_key)
     if not locations:
         _send(chat_id, "Локации временно недоступны. Попробуйте через сайт: https://unbox.com.ge")
         return {"ok": True}
@@ -855,7 +1137,7 @@ def _handle_book_start(session: Session, chat_id: int, user: Optional[User]) -> 
     rows = []
     for loc in locations:
         rows.append([{
-            "text": loc.name[:60],
+            "text": _loc_label(loc)[:60],
             "callback_data": f"b_l:{loc.id}",
         }])
     rows.append([{"text": "← Отмена", "callback_data": "b_cancel"}])
@@ -877,9 +1159,19 @@ def _handle_callback(session: Session, callback: dict) -> dict:
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
     message_id = message.get("message_id")
+    from_user = callback.get("from") or {}
+    from_user_id = from_user.get("id")
 
     if not callback_id or not chat_id or not message_id:
         return {"ok": True}
+
+    # ── Admin hot-booking approve/reject (group chat callbacks) ──────────
+    # `ba:` / `br:` callbacks live in the admin-group chat, so the chat_id
+    # is a group, not a user. Auth by `callback.from.id` matched to a User
+    # with admin role. Booking-flow callbacks below still use chat_id-bound
+    # personal-chat lookup.
+    if data.startswith("ba:") or data.startswith("br:"):
+        return _handle_hot_booking_callback(session, callback_id, chat_id, message_id, from_user_id, data)
 
     # Require bound user for all booking callbacks
     user = session.exec(
@@ -893,6 +1185,14 @@ def _handle_callback(session: Session, callback: dict) -> dict:
         if data == "b_cancel":
             _edit(chat_id, message_id, "Отменено. /book — чтобы начать заново.")
             _answer_callback(callback_id, "")
+            return {"ok": True}
+
+        # Busy-slot tap on the time picker. Earlier this used `b_cancel` as
+        # a fake "no-op", which actually killed the whole booking flow with
+        # "Отменено" — admins reported this exact symptom. Now it's a real
+        # no-op that pops a tooltip but keeps the keyboard intact.
+        if data.startswith("b_busy:"):
+            _answer_callback(callback_id, "Этот слот занят — выберите свободное время", show_alert=True)
             return {"ok": True}
 
         if data.startswith("b_l:"):
@@ -951,7 +1251,7 @@ def _book_step_format(session: Session, callback_id: str, chat_id: int, message_
     ).all()
     if not resources:
         _edit(chat_id, message_id,
-              f"В локации <b>{escape(location.name)}</b> нет доступных кабинетов.",
+              f"В локации <b>{escape(_loc_label(location))}</b> нет доступных кабинетов.",
               parse_mode="HTML")
         _answer_callback(callback_id, "")
         return {"ok": True}
@@ -961,6 +1261,12 @@ def _book_step_format(session: Session, callback_id: str, chat_id: int, message_
     for r in resources:
         for f in (r.formats or []):
             offered.add(f)
+
+    # Hard-rule: Neo School is rented to us as group/event space only —
+    # never expose individual/intervision options for it even if a resource
+    # is mistagged in the DB.
+    if loc == "neo_school":
+        offered &= {"group"}
 
     order = ["individual", "group", "intervision"]
     rows, row = [], []
@@ -980,7 +1286,7 @@ def _book_step_format(session: Session, callback_id: str, chat_id: int, message_
 
     _edit(
         chat_id, message_id,
-        f"🏢 <b>{escape(location.name)}</b>\n\nВыберите формат:",
+        f"🏢 <b>{escape(_loc_label(location))}</b>\n\nВыберите формат:",
         parse_mode="HTML",
         inline_keyboard=rows,
     )
@@ -1013,7 +1319,7 @@ def _book_step_date(session: Session, callback_id: str, chat_id: int, message_id
 
     _edit(
         chat_id, message_id,
-        f"🏢 <b>{escape(location.name)}</b> · {FORMAT_LABELS[fmt]}\n\nВыберите дату:",
+        f"🏢 <b>{escape(_loc_label(location))}</b> · {FORMAT_LABELS[fmt]}\n\nВыберите дату:",
         parse_mode="HTML",
         inline_keyboard=rows,
     )
@@ -1051,7 +1357,7 @@ def _book_step_resource(session: Session, callback_id: str, chat_id: int, messag
     resources = _list_resources_for_selection(session, loc, fmt)
     if not resources:
         _edit(chat_id, message_id,
-              f"Нет кабинетов, подходящих под формат «{FORMAT_LABELS[fmt]}» в локации {escape(location.name)}.",
+              f"Нет кабинетов, подходящих под формат «{FORMAT_LABELS[fmt]}» в локации {escape(_loc_label(location))}.",
               parse_mode="HTML")
         _answer_callback(callback_id, "")
         return {"ok": True}
@@ -1067,7 +1373,7 @@ def _book_step_resource(session: Session, callback_id: str, chat_id: int, messag
     day_label = _fmt_full_day(d_obj)
     _edit(
         chat_id, message_id,
-        f"🏢 <b>{escape(location.name)}</b> · {FORMAT_LABELS[fmt]}\n"
+        f"🏢 <b>{escape(_loc_label(location))}</b> · {FORMAT_LABELS[fmt]}\n"
         f"📅 {day_label}\n\nВыберите кабинет:",
         parse_mode="HTML",
         inline_keyboard=rows,
@@ -1123,11 +1429,15 @@ def _book_step_time(session: Session, callback_id: str, chat_id: int, message_id
 
     busy = _get_busy_slots(session, resource.id, d_obj)
 
-    # If booking today — cut off slots that already started
-    now = datetime.now()
+    # If booking today — cut off slots that already started.
+    # `d_obj` is the Tbilisi calendar date the user picked; server runs UTC,
+    # so plain datetime.now() won't match user's "today" near midnight.
+    # Shift to Tbilisi wall-clock first.
+    _TBS = timedelta(hours=4)
+    now_tb = datetime.utcnow() + _TBS
     min_start_min = 0
-    if d_obj == now.date():
-        min_start_min = now.hour * 60 + now.minute
+    if d_obj == now_tb.date():
+        min_start_min = now_tb.hour * 60 + now_tb.minute
 
     rows, row = [], []
     any_free = False
@@ -1138,12 +1448,14 @@ def _book_step_time(session: Session, callback_id: str, chat_id: int, message_id
         hhmm_label = f"{h:02d}:{mm:02d}"
         hhmm_code = f"{h:02d}{mm:02d}"
         if m in busy:
-            # Show greyed-out button — callback goes nowhere useful but we add it
-            # anyway so the layout stays even. Users mostly skip these.
-            label = f"× {hhmm_label}"
+            # Telegram doesn't tint inline buttons, so we lean on a 🔒 emoji
+            # prefix — reads as "blocked" at a glance. The earlier middle-dot
+            # wrapper (`·14:00·`) was too subtle, admins missed it. Tap is a
+            # no-op (`b_busy:HHMM`); the booking flow keeps going.
+            label = f"🔒 {hhmm_label}"
             row.append({
                 "text": label,
-                "callback_data": "b_cancel",  # treat as no-op → cancels flow; better than fake
+                "callback_data": f"b_busy:{hhmm_code}",
             })
         else:
             any_free = True
@@ -1161,7 +1473,7 @@ def _book_step_time(session: Session, callback_id: str, chat_id: int, message_id
     if not any_free:
         _edit(
             chat_id, message_id,
-            f"🏢 <b>{escape(location.name)}</b> · {FORMAT_LABELS[fmt]}\n"
+            f"🏢 <b>{escape(_loc_label(location))}</b> · {FORMAT_LABELS[fmt]}\n"
             f"📅 {day_label} · {escape(resource.name)}\n\n"
             "Свободного времени нет. Попробуйте другую дату или кабинет.",
             parse_mode="HTML",
@@ -1170,9 +1482,9 @@ def _book_step_time(session: Session, callback_id: str, chat_id: int, message_id
     else:
         _edit(
             chat_id, message_id,
-            f"🏢 <b>{escape(location.name)}</b> · {FORMAT_LABELS[fmt]}\n"
+            f"🏢 <b>{escape(_loc_label(location))}</b> · {FORMAT_LABELS[fmt]}\n"
             f"📅 {day_label} · {escape(resource.name)}\n\n"
-            "Выберите время начала (× — занято):",
+            "Выберите время начала (🔒 — уже занято):",
             parse_mode="HTML",
             inline_keyboard=rows,
         )
@@ -1243,7 +1555,7 @@ def _book_step_duration(session: Session, callback_id: str, chat_id: int, messag
     if not any_ok:
         _edit(
             chat_id, message_id,
-            f"🏢 <b>{escape(location.name)}</b> · {FORMAT_LABELS[fmt]}\n"
+            f"🏢 <b>{escape(_loc_label(location))}</b> · {FORMAT_LABELS[fmt]}\n"
             f"📅 {day_label} · {escape(resource.name)} · {time_label}\n\n"
             "Ни одна длительность не помещается до 22:00 или пересекается с занятыми слотами.",
             parse_mode="HTML",
@@ -1252,7 +1564,7 @@ def _book_step_duration(session: Session, callback_id: str, chat_id: int, messag
     else:
         _edit(
             chat_id, message_id,
-            f"🏢 <b>{escape(location.name)}</b> · {FORMAT_LABELS[fmt]}\n"
+            f"🏢 <b>{escape(_loc_label(location))}</b> · {FORMAT_LABELS[fmt]}\n"
             f"📅 {day_label} · {escape(resource.name)} · {time_label}\n\n"
             "Выберите длительность:",
             parse_mode="HTML",
@@ -1340,7 +1652,7 @@ def _book_step_confirm(
     # Build price breakdown lines
     lines = [
         "🧾 <b>Подтвердите бронирование</b>\n",
-        f"🏢 {escape(location.name)}",
+        f"🏢 {escape(_loc_label(location))}",
         f"📍 {escape(resource.name)}",
         f"🎭 Формат: {FORMAT_LABELS[fmt]}",
         f"📅 {day_label}",
@@ -1495,7 +1807,7 @@ def _book_do_confirm(
     _edit(
         chat_id, message_id,
         f"{header}\n\n"
-        f"🏢 {escape(location.name)}\n"
+        f"🏢 {escape(_loc_label(location))}\n"
         f"📍 {escape(resource.name)}\n"
         f"🎭 {FORMAT_LABELS[fmt]}\n"
         f"📅 {day_label}\n"
@@ -1517,7 +1829,7 @@ def _book_do_confirm(
         telegram_service.send_admin_alert(
             f"{badge} — через TG-бот\n\n"
             f"👤 {who}\n"
-            f"🏢 {escape(location.name)} · {escape(resource.name)}\n"
+            f"🏢 {escape(_loc_label(location))} · {escape(resource.name)}\n"
             f"📅 {day_label}  ⏰ {time_str}–{end_label}"
             f"{price_line}"
         )
@@ -1525,6 +1837,339 @@ def _book_do_confirm(
         logger.warning("[tg:admin-alert] booking alert failed: %r", _e)
 
     return {"ok": True}
+
+
+# ── Hot-booking inline approve/reject (admin chat) ─────────────────────────
+# Two-stage flow:
+#   1. Admin clicks "✅ Подтвердить" or "❌ Отклонить" on the alert message
+#      → callback `ba:<UUID>` / `br:<UUID>`.
+#   2. Approve runs immediately. Reject opens a ForceReply prompt asking for
+#      a reason; the admin replies with text, webhook detects the reply and
+#      calls /reject with the supplied reason.
+# State for stage 2 lives in TG itself (the reply_to_message ID), so a
+# server restart between stages doesn't break the flow.
+
+REJECT_PROMPT_MARKER = "[UNBOX-REJECT]"  # стабильный маркер чтобы парсить reply-to
+
+def _handle_hot_booking_callback(
+    session: Session,
+    callback_id: str,
+    chat_id: int,
+    message_id: int,
+    from_user_id: Optional[int],
+    data: str,
+) -> dict:
+    """Handle ✅/❌ tap on a hot-booking admin alert."""
+    from app.models.booking import Booking as _Booking
+    from app.core.permissions import ADMIN_ROLES
+
+    # Auth — only admins (matched by their personal TG id) can approve/reject.
+    if from_user_id is None:
+        _answer_callback(callback_id, "Не определён пользователь", show_alert=True)
+        return {"ok": True}
+    actor = session.exec(
+        select(User).where(User.telegram_id == str(from_user_id))
+    ).first()
+    if not actor or actor.role not in ADMIN_ROLES:
+        _answer_callback(callback_id, "Недостаточно прав", show_alert=True)
+        return {"ok": True}
+
+    try:
+        action, raw_id = data.split(":", 1)
+    except ValueError:
+        _answer_callback(callback_id, "Bad data", show_alert=True)
+        return {"ok": True}
+
+    try:
+        b_uuid = UUID(raw_id)
+    except (ValueError, TypeError):
+        _answer_callback(callback_id, "Неверный ID брони", show_alert=True)
+        return {"ok": True}
+
+    # Row lock — два админа double-tap «Подтвердить» подряд раньше
+    # успевали оба пройти status-check и оба списать баланс. SELECT FOR
+    # UPDATE сериализует — второй увидит уже status='confirmed' и
+    # короткое сообщение «уже обработана».
+    booking = session.exec(
+        select(_Booking).where(_Booking.id == b_uuid).with_for_update()
+    ).first()
+    if not booking:
+        _answer_callback(callback_id, "Бронь не найдена", show_alert=True)
+        return {"ok": True}
+    if booking.status != "pending_approval":
+        _answer_callback(callback_id, f"Бронь уже {booking.status} — ничего не делаем", show_alert=True)
+        # Снимаем кнопки с устаревшего сообщения чтобы не плодить нажатия
+        try:
+            _edit_reply_markup(chat_id, message_id, None)
+        except Exception:
+            pass
+        return {"ok": True}
+
+    if action == "ba":
+        # Approve — повторяем бизнес-логику /approve без HTTP-перевызова
+        # (нет admin-токена в TG-контексте). Списываем баланс, ставим
+        # confirmed, синхронизируем GCal, шлём уведомления клиенту.
+        from app.api.v1.bookings.routes import (
+            check_availability as _check_avail,
+        )
+        from app.services.google_calendar import gcal_service as _gcal
+
+        is_avail, reason = _check_avail(
+            session=session,
+            resource_id=booking.resource_id,
+            date=booking.date,
+            start_time=booking.start_time,
+            duration=booking.duration,
+            exclude_booking_id=str(booking.id),
+            requester_user_uuid=booking.user_uuid,
+        )
+        if not is_avail:
+            _answer_callback(callback_id, f"Слот занят: {reason}", show_alert=True)
+            return {"ok": True}
+
+        owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
+        if owner:
+            if (booking.payment_method or "").lower() == "subscription":
+                if owner.subscription:
+                    sub = dict(owner.subscription)
+                    rem = float(sub.get("remaining_hours") or 0)
+                    used = float(sub.get("used_hours") or 0)
+                    sub["remaining_hours"] = max(0.0, rem - float(booking.hours_deducted or 0))
+                    sub["used_hours"] = used + float(booking.hours_deducted or 0)
+                    owner.subscription = sub
+            else:
+                owner.balance = round((owner.balance or 0) - float(booking.final_price or 0), 2)
+            session.add(owner)
+
+        booking.status = "confirmed"
+        booking.updated_at = datetime.utcnow()
+        session.add(booking)
+        session.commit()
+        session.refresh(booking)
+
+        try:
+            ev_id = _gcal.create_event(booking, user_name=actor.name or "")
+            if ev_id:
+                booking.gcal_event_id = ev_id
+                session.add(booking)
+                session.commit()
+        except Exception:
+            logger.warning("[hot-booking tg-approve] gcal sync failed", exc_info=True)
+
+        # Notify client
+        try:
+            from app.models.resource import Resource as _Res
+            from app.models.location import Location as _Loc
+            from app.models.notification import Notification as _Notif
+            res = session.get(_Res, booking.resource_id) if booking.resource_id else None
+            loc = session.get(_Loc, res.location_id) if res and res.location_id else None
+            if owner and owner.telegram_id:
+                try:
+                    telegram_service._send_message(
+                        chat_id=owner.telegram_id,
+                        text=(
+                            f"✅ <b>Срочная бронь подтверждена</b>\n\n"
+                            f"📅 {booking.date.strftime('%d.%m')} · {booking.start_time}\n"
+                            f"📍 {(res.name if res else booking.resource_id)}"
+                            f"{(' · ' + loc.name) if loc else ''}\n\n"
+                            f"Деньги списаны с баланса."
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            if owner:
+                try:
+                    n = _Notif(
+                        type="hot_booking_approved",
+                        title="Бронь подтверждена",
+                        description=f"{(res.name if res else booking.resource_id)}{(' · ' + loc.name) if loc else ''} · {booking.date.strftime('%d.%m')} {booking.start_time}",
+                        recipient_id=str(owner.id),
+                        icon="CheckCircle",
+                        link="/dashboard/bookings",
+                    )
+                    session.add(n)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+        except Exception:
+            logger.warning("[hot-booking tg-approve] client notify failed", exc_info=True)
+
+        # Edit the original alert: show decision, remove buttons
+        try:
+            _edit_reply_markup(chat_id, message_id, None)
+            stamp = (datetime.utcnow() + timedelta(hours=4)).strftime("%H:%M")
+            _send(chat_id, f"✅ Подтверждено @ {actor.name or actor.email} · {stamp}", parse_mode="HTML")
+        except Exception:
+            pass
+        _answer_callback(callback_id, "✓ Подтверждено")
+        return {"ok": True}
+
+    if action == "br":
+        # Reject — ask for reason via ForceReply, encode booking_id in prompt
+        prompt_text = (
+            f"❌ Отклонение брони <code>{booking.id}</code>\n"
+            f"Введите причину для клиента (ответьте этим сообщением):\n"
+            f"<i>{REJECT_PROMPT_MARKER}:{booking.id}</i>"
+        )
+        try:
+            _send(chat_id, prompt_text, parse_mode="HTML", force_reply=True)
+        except Exception:
+            logger.warning("[hot-booking tg-reject] prompt send failed", exc_info=True)
+            _answer_callback(callback_id, "Не удалось отправить запрос причины", show_alert=True)
+            return {"ok": True}
+        _answer_callback(callback_id, "Введите причину в ответ на следующее сообщение")
+        return {"ok": True}
+
+    _answer_callback(callback_id, "Неизвестное действие", show_alert=True)
+    return {"ok": True}
+
+
+def _edit_reply_markup(chat_id: int, message_id: int, reply_markup: Optional[dict]) -> bool:
+    """Strip or update inline keyboard on an existing message."""
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup"
+        payload = {"chat_id": chat_id, "message_id": message_id}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        else:
+            payload["reply_markup"] = {"inline_keyboard": []}
+        r = requests.post(url, json=payload, timeout=10)
+        return bool(r.ok)
+    except Exception:
+        return False
+
+
+def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
+    """If `message` is a reply to our REJECT_PROMPT, parse out booking id
+    and run the reject. Returns True if handled (caller should stop).
+    Used from the webhook plain-text branch.
+
+    Spoofing guards (added 2026-05-07): the marker check alone wasn't enough
+    — a stale bot message (or anything quoting our prompt text) could be
+    replied-to and trigger a wrong reject. We now require:
+      1) reply target was sent by **a bot** (`reply_to_message.from.is_bot`)
+      2) and that bot is **our** bot (username matches TELEGRAM_BOT_USERNAME)
+      3) prompt was sent recently (TG provides reply_to.date — refuse if
+         older than 1h, since real reject prompts get replied-to within
+         seconds)
+    """
+    reply_to = message.get("reply_to_message") or {}
+    prompt_text = (reply_to.get("text") or "")
+    if REJECT_PROMPT_MARKER not in prompt_text:
+        return False
+
+    # Guard 1+2: reply target must be from our bot. Without this an admin
+    # could reply to ANY message containing the marker (e.g., screenshot,
+    # forwarded text from another chat) and trigger a reject.
+    reply_from = reply_to.get("from") or {}
+    if not reply_from.get("is_bot"):
+        return False
+    bot_username = settings.TELEGRAM_BOT_USERNAME or ""
+    reply_username = (reply_from.get("username") or "").lstrip("@")
+    if bot_username and reply_username and reply_username.lower() != bot_username.lstrip("@").lower():
+        return False
+
+    # Guard 3: prompt must be recent. Old bot messages quoting the marker
+    # (debug logs, stale notifications) shouldn't be hijackable. 1h is
+    # generous — real flow is seconds, but we leave room for slow admins.
+    try:
+        prompt_ts = int(reply_to.get("date") or 0)
+        if prompt_ts > 0 and (datetime.utcnow().timestamp() - prompt_ts) > 3600:
+            return False
+    except Exception:
+        pass
+
+    # Parse booking_id after marker
+    try:
+        idx = prompt_text.index(REJECT_PROMPT_MARKER)
+        tail = prompt_text[idx + len(REJECT_PROMPT_MARKER) + 1:]  # skip ":"
+        # tail is "UUID..." potentially followed by extra whitespace/newline
+        token = tail.split()[0].strip()
+        b_uuid = UUID(token)
+    except Exception:
+        return False
+
+    from app.models.booking import Booking as _Booking
+    from app.core.permissions import ADMIN_ROLES
+
+    from_user = message.get("from") or {}
+    from_user_id = from_user.get("id")
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+
+    actor = session.exec(
+        select(User).where(User.telegram_id == str(from_user_id))
+    ).first() if from_user_id else None
+    if not actor or actor.role not in ADMIN_ROLES:
+        # Reply from non-admin to bot's prompt — silently ignore.
+        return True
+
+    booking = session.get(_Booking, b_uuid)
+    if not booking or booking.status != "pending_approval":
+        if chat_id:
+            _send(chat_id, "Бронь уже обработана.", parse_mode="HTML")
+        return True
+
+    reason = (message.get("text") or "").strip() or "Слот недоступен"
+    booking.status = "cancelled"
+    booking.cancellation_reason = (
+        f"Отклонено админом ({actor.name or actor.email}): {reason}"
+    )
+    booking.cancelled_by = f"admin:{actor.email}"
+    booking.updated_at = datetime.utcnow()
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+
+    # Notify client
+    try:
+        from app.models.resource import Resource as _Res
+        from app.models.location import Location as _Loc
+        from app.models.notification import Notification as _Notif
+        owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
+        res = session.get(_Res, booking.resource_id) if booking.resource_id else None
+        loc = session.get(_Loc, res.location_id) if res and res.location_id else None
+        if owner and owner.telegram_id:
+            try:
+                telegram_service._send_message(
+                    chat_id=owner.telegram_id,
+                    text=(
+                        f"❌ <b>Срочная бронь отклонена</b>\n\n"
+                        f"📅 {booking.date.strftime('%d.%m')} · {booking.start_time}\n"
+                        f"📍 {(res.name if res else booking.resource_id)}"
+                        f"{(' · ' + loc.name) if loc else ''}\n\n"
+                        f"Причина: {reason}\n\n"
+                        f"Деньги не списаны. Можете выбрать другое время."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        if owner:
+            try:
+                n = _Notif(
+                    type="hot_booking_rejected",
+                    title="Бронь отклонена",
+                    description=f"{(res.name if res else booking.resource_id)}{(' · ' + loc.name) if loc else ''} · {booking.date.strftime('%d.%m')} {booking.start_time} · {reason}",
+                    recipient_id=str(owner.id),
+                    icon="XCircle",
+                    link="/dashboard/bookings",
+                )
+                session.add(n)
+                session.commit()
+            except Exception:
+                session.rollback()
+    except Exception:
+        logger.warning("[hot-booking tg-reject] client notify failed", exc_info=True)
+
+    # Echo to admin chat
+    if chat_id:
+        stamp = (datetime.utcnow() + timedelta(hours=4)).strftime("%H:%M")
+        _send(chat_id, f"❌ Отклонено @ {actor.name or actor.email} · {stamp} · «{reason}»", parse_mode="HTML")
+    return True
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -1539,16 +2184,32 @@ def _fmt_full_day(d: date) -> str:
     return f"{WEEKDAYS_RU[d.weekday()]}, {d.day} {MONTHS_RU[d.month - 1]}"
 
 
+def _loc_label(loc) -> str:
+    """`Unbox One (Палиашвили, 4)` — name with address in parens.
+
+    Address is optional in the schema; when missing we fall back to name only.
+    Used in every step of the /book flow so users always see where they're
+    booking, not just the brand label.
+    """
+    name = (loc.name or "").strip()
+    addr = (getattr(loc, "address", None) or "").strip()
+    return f"{name} ({addr})" if addr else name
+
+
 def _send(
     chat_id: int | str,
     text: str,
     parse_mode: Optional[str] = None,
     inline_keyboard: Optional[list] = None,
+    force_reply: bool = False,
 ) -> None:
     """Fire-and-forget sendMessage. Always clears any stale reply-keyboard.
 
     If `inline_keyboard` is given, it overrides the default remove_keyboard
     (inline keyboards attach to the message and don't affect the reply-keyboard).
+    If `force_reply=True`, sends a ForceReply markup so the next reply in
+    the chat is automatically threaded to this message — used for the
+    hot-booking reject-reason capture flow.
     Errors are logged, never raised.
     """
     if not settings.TELEGRAM_BOT_TOKEN:
@@ -1560,7 +2221,13 @@ def _send(
         "text": text,
         "disable_web_page_preview": True,
     }
-    if inline_keyboard is not None:
+    if force_reply:
+        # `selective: true` ограничивает требование reply теми, к кому
+        # прямо обращается prompt — в группе только админ, нажавший
+        # «Отклонить», увидит request, остальные не получат принудительный
+        # ввод.
+        payload["reply_markup"] = {"force_reply": True, "selective": True}
+    elif inline_keyboard is not None:
         payload["reply_markup"] = {"inline_keyboard": inline_keyboard}
     else:
         # Clears any stale ReplyKeyboardMarkup left over from a prior bot

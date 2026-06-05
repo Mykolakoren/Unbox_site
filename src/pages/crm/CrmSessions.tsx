@@ -29,7 +29,7 @@ import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient, CrmPaym
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import { toGel } from '../../utils/currency';
-import { parseUTC, parseLocal } from '../../utils/dateUtils';
+import { parseUTC } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -46,10 +46,17 @@ const STATUS_LABELS: Record<string, string> = {
     CANCELLED_THERAPIST: 'Отмена (терапевт)',
 };
 
-/** Parse a CRM session's date string. Wraps the shared parseLocal so
- *  Tbilisi-naive timestamps from the CRM render at the correct hour. */
+/** Parse a CRM session's date string.
+ *
+ *  Almost every session in the DB carries a UTC-naive timestamp:
+ *  rows imported from Google Calendar were stored that way by
+ *  `_parse_event_dt` (it strips tzinfo after astimezone(UTC)). The
+ *  small minority created via /crm/sessions POST or recurring
+ *  auto-create are normalized to UTC-naive at ingest, so we can
+ *  treat the entire column as UTC-naive and lean on parseUTC +
+ *  formatBatumi(Asia/Tbilisi) for display. */
 function parseSessionDate(dateStr: string): Date {
-    return parseLocal(dateStr);
+    return parseUTC(dateStr);
 }
 
 /** Сессия уже прошла по времени */
@@ -96,7 +103,7 @@ export function CrmSessions() {
     const dateTo = monthEnd > futureEnd ? monthEnd : futureEnd;
 
     const handleBookCab = (session: CrmSession, clientName: string) => {
-        navigate('/dashboard/bookings', {
+        navigate('/crm/bookings', {
             state: {
                 crmMode: {
                     sessionId: session.id,

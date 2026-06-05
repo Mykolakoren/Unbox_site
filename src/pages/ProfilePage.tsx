@@ -24,12 +24,22 @@ export function ProfilePage() {
 function useTelegramConnect() {
     const { fetchCurrentUser } = useUserStore();
     const [isConnecting, setIsConnecting] = useState(false);
+    /** Hold the active link-token while polling. Used by the UI to render
+     *  Safari-fallback («Скопировать команду») — Safari часто не доносит
+     *  `?start=<token>` payload до Telegram-приложения, оставляя юзера
+     *  с голым /start. Чтобы это обойти, показываем токен текстом и
+     *  кнопку «Скопировать `/start <token>`» — юзер вставляет это в
+     *  чат с ботом руками. */
+    const [activeToken, setActiveToken] = useState<string | null>(null);
+    const [activeUrl, setActiveUrl] = useState<string | null>(null);
     const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     const deadline = useRef<number>(0);
 
     const stopPolling = useCallback(() => {
         if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
         setIsConnecting(false);
+        setActiveToken(null);
+        setActiveUrl(null);
     }, []);
 
     useEffect(() => () => stopPolling(), [stopPolling]);
@@ -37,13 +47,20 @@ function useTelegramConnect() {
     const connect = useCallback(async () => {
         try {
             setIsConnecting(true);
-            const { data } = await api.post<{ url: string; expires_at: string }>('/telegram/link-token');
+            const { data } = await api.post<{ token: string; url: string; expires_at: string }>('/telegram/link-token');
+            setActiveToken(data.token);
+            setActiveUrl(data.url);
             // Open bot deep-link (Telegram app if installed, else web)
             window.open(data.url, '_blank', 'noopener,noreferrer');
-            toast.info('Откройте Telegram и нажмите «Start». Ждём подтверждения…', { duration: 5000 });
+            toast.info(
+                'Откройте Telegram → нажмите Start. Не работает в Safari? Скопируйте команду ниже и отправьте боту.',
+                { duration: 10000 },
+            );
 
-            // Poll every 2s for up to 3 minutes
-            deadline.current = Date.now() + 3 * 60 * 1000;
+            // Poll every 2s for up to 30 minutes — matches backend
+            // LINK_TOKEN_TTL. Раньше было 3 мин и юзеры (Valentina 2026-06-02)
+            // не успевали открыть Telegram → нажать Start → дождаться.
+            deadline.current = Date.now() + 30 * 60 * 1000;
             pollTimer.current = setInterval(async () => {
                 if (Date.now() > deadline.current) {
                     stopPolling();
@@ -64,7 +81,7 @@ function useTelegramConnect() {
         }
     }, [fetchCurrentUser, stopPolling]);
 
-    return { connect, isConnecting, cancel: stopPolling };
+    return { connect, isConnecting, cancel: stopPolling, activeToken, activeUrl };
 }
 
 
@@ -307,8 +324,35 @@ const ghpInput: React.CSSProperties = {
 // ── Grid House — Telegram Connect ────────────────────────────────────────────
 
 function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-    const { connect, isConnecting, cancel } = useTelegramConnect();
+    const { connect, isConnecting, cancel, activeToken } = useTelegramConnect();
     const isBound = !!value && /^\d+$/.test(value);
+    // 2026-06-05 owner: было — input напрямую звал onChange (= PATCH в БД)
+    // на каждый keystroke. Если юзер вводил @username, БД заполнялась
+    // мусором («@HHValentinaHH»), и polling потом никогда не давал
+    // success (regex ждёт цифры). Теперь — локальный state,
+    // валидация на blur, в БД попадают только цифры или пустота.
+    const [draft, setDraft] = useState(value);
+    useEffect(() => { setDraft(value); }, [value]);
+    const commit = () => {
+        const trimmed = draft.trim();
+        if (trimmed === value) return; // ничего не менялось
+        if (trimmed === '') {
+            onChange('');
+            return;
+        }
+        if (/^\d+$/.test(trimmed)) {
+            onChange(trimmed);
+            return;
+        }
+        // @username или что-то нецифровое — не сохраняем, откатываем
+        toast.error(
+            'В поле — только числовой Telegram chat_id. ' +
+            'Узнать своё число можно у бота @userinfobot. ' +
+            'Чтобы подключить по логину, используйте кнопку «Подключить Telegram» выше.',
+            { duration: 9000 },
+        );
+        setDraft(value);
+    };
 
     if (isBound) {
         return (
@@ -353,23 +397,103 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                     <><Send size={16} /> Подключить Telegram</>
                 )}
             </button>
+
+            {/* Safari fallback — t.me deep-link не доносит ?start=<token>
+                в Telegram-приложение, если открыт из Safari. Юзер видит
+                бот, но без полезной нагрузки. Лекарство: показать
+                команду текстом + кнопка Скопировать, чтобы юзер вручную
+                отправил `/start TOKEN` боту. */}
+            {isConnecting && activeToken && (
+                <div style={{
+                    marginTop: 12,
+                    padding: 14,
+                    background: '#FFF7E6',
+                    border: '1px solid #F2C94C',
+                }}>
+                    <div style={{ ...ghpMono, fontSize: 9, color: '#8A5A00', marginBottom: 6 }}>
+                        НЕ СРАБОТАЛО? SAFARI-ОБХОД
+                    </div>
+                    <div style={{ fontSize: 12, color: GH.ink, lineHeight: 1.55, marginBottom: 10 }}>
+                        Откройте бота{' '}
+                        <a
+                            href="https://t.me/Unbox_Booking_G_Bot"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: GH.ink, textDecoration: 'underline', fontWeight: 600 }}
+                        >
+                            @Unbox_Booking_G_Bot
+                        </a>{' '}
+                        и отправьте ему сообщение ниже как есть.
+                    </div>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'stretch',
+                        gap: 0,
+                        background: '#fff',
+                        border: '1px solid ' + GH.ink20,
+                    }}>
+                        <code style={{
+                            flex: 1,
+                            padding: '10px 12px',
+                            fontFamily: GH_MONO,
+                            fontSize: 12,
+                            color: GH.ink,
+                            wordBreak: 'break-all',
+                            lineHeight: 1.4,
+                        }}>
+                            /start {activeToken}
+                        </code>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                navigator.clipboard.writeText(`/start ${activeToken}`);
+                                toast.success('Скопировано — вставьте боту');
+                            }}
+                            style={{
+                                padding: '0 14px',
+                                background: GH.ink,
+                                color: '#fff',
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                letterSpacing: '0.08em',
+                                textTransform: 'uppercase' as const,
+                                border: 'none',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                            }}
+                            aria-label="Скопировать команду"
+                        >
+                            Копировать
+                        </button>
+                    </div>
+                    <div style={{ fontSize: 11, color: GH.ink60, marginTop: 8, lineHeight: 1.5 }}>
+                        Бот ответит «Готово, Telegram подключён» — и эта страница
+                        тоже подтянет привязку через пару секунд.
+                    </div>
+                </div>
+            )}
+
             <div style={{ marginTop: 12 }}>
                 <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 4, fontSize: 9 }}>
-                    ИЛИ @USERNAME ВРУЧНУЮ
+                    ИЛИ ВРУЧНУЮ — ЧИСЛОВОЙ CHAT_ID
                 </label>
                 <input
                     type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     style={{ ...ghpInput, fontSize: 13 }}
-                    placeholder="@username"
-                    value={value}
-                    onChange={(e) => onChange(e.target.value)}
+                    placeholder="142420406"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commit}
                 />
                 <div style={{ fontSize: 11, color: GH.ink60, marginTop: 6, lineHeight: 1.5 }}>
-                    При ручном вводе уведомления придут, только если вы уже писали боту{' '}
-                    <a href="https://t.me/Unbox_Booking_G_Bot" target="_blank" rel="noopener noreferrer"
+                    Узнать своё число — напишите{' '}
+                    <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer"
                        style={{ color: GH.ink, textDecoration: 'underline' }}>
-                        @Unbox_Booking_G_Bot
-                    </a>.
+                        @userinfobot
+                    </a>, он пришлёт ваш chat_id. @username сюда не подойдёт —
+                    используйте кнопку «Подключить Telegram» выше.
                 </div>
             </div>
         </>

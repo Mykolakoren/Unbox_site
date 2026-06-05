@@ -4,45 +4,34 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
 import {
-    format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
+    format, addMinutes, setHours, setMinutes, startOfToday,
     addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval,
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
+import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
+import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
+import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
+import { parseUTC, tbilisiNow } from '../../utils/dateUtils';
+// 2026-06-06 owner (Фаза 3 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md):
+// TIME_SLOTS / timeToMin / parseBookingDate раньше дублировались в
+// AdminChessboardView и CrmChessboardView. Теперь — общие. parseUTC
+// заменяет локальный parseBookingDate (имя другое, тело идентичное).
+import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
+import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 
-// ─── Time Slots: 09:00 – 21:30 (30-min steps) ───────────────────────────────
-// Last bookable slot starts at 21:30 → ends 22:00. Slots 21:00 and 21:30
-// fall into the evening surcharge band (PRICING_CONFIG.peak_hours 20:00–22:00),
-// so they automatically cost +25% — no extra UI logic needed.
-const TIME_SLOTS: string[] = (() => {
-    const slots: string[] = [];
-    let t = setMinutes(setHours(startOfToday(), 9), 0);
-    const end = setMinutes(setHours(startOfToday(), 22), 0);
-    while (isBefore(t, end)) {
-        slots.push(format(t, 'HH:mm'));
-        t = addMinutes(t, 30);
-    }
-    return slots;
-})();
+const _adminMinToTime = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-const timeToMin = (t: string | undefined | null) => {
-    if (!t || typeof t !== 'string' || !t.includes(':')) return 0;
-    const [h, m] = t.split(':').map(Number);
-    return (h || 0) * 60 + (m || 0);
-};
-
-const parseBookingDate = (d: string | Date): Date => {
-    if (d instanceof Date) return d;
-    const s = String(d);
-    return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
-};
+// TIME_SLOTS (09:00–21:30 шаг 30 мин) и timeToMin теперь из общего
+// bookingHelpers — см. там же комментарий про peak_hours surcharge.
 
 // ─── Cell types ──────────────────────────────────────────────────────────────
 type CellInfo =
@@ -59,6 +48,45 @@ export function AdminChessboardView() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [selectedBooking, setSelectedBooking] = useState<BookingHistoryItem | null>(null);
+    // Slot-watch — admin can subscribe themselves to a slot (e.g. monitor
+    // when a busy room frees up so they can offer it to a walk-in client).
+    const [waitlistTarget, setWaitlistTarget] = useState<{
+        resourceId: string;
+        resourceName: string;
+        locationName?: string | null;
+        date: Date;
+        startTime: string;
+        endTime: string;
+    } | null>(null);
+    const openWaitlistFor = useCallback((b: BookingHistoryItem) => {
+        if (!b.startTime || !b.duration || !b.resourceId) return;
+        const res = RESOURCES.find(r => r.id === b.resourceId);
+        const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
+        const endTimeStr = _adminMinToTime(_adminTimeToMin(b.startTime) + b.duration);
+        setWaitlistTarget({
+            resourceId: b.resourceId,
+            resourceName: res?.name || b.resourceId,
+            locationName: loc?.name ?? null,
+            date: parseUTC(b.date),
+            startTime: b.startTime,
+            endTime: endTimeStr,
+        });
+    }, []);
+    // When the admin clicks "Удалить" on a booking that's part of a recurring
+    // series, we show a 3-button choice (this / series / cancel) instead of
+    // a plain confirm() so they don't have to delete N rows one-by-one.
+    const [seriesCancelTarget, setSeriesCancelTarget] = useState<BookingHistoryItem | null>(null);
+
+    // Same idea for "Перенести": when the moved booking lives in a series we
+    // ask whether the new time/resource should propagate to every later
+    // sibling. ``Move`` collected the desired new date+time into this
+    // state and the modal renders below.
+    const [seriesMoveTarget, setSeriesMoveTarget] = useState<{
+        booking: BookingHistoryItem;
+        newDate: string;
+        newStartTime: string;
+        newResourceId?: string;
+    } | null>(null);
 
     // Excel #59 — "Перенести бронь" in a client's history deep-links here with
     // ?highlight=<bookingId>. We jump the week/day to the booking's date,
@@ -70,7 +98,7 @@ export function AdminChessboardView() {
         const booking = bookings.find(b => b.id === highlightId);
         if (!booking) return;
         try {
-            const d = parseBookingDate(booking.date);
+            const d = parseUTC(booking.date);
             setSelectedDate(d);
             setWeekStart(startOfWeek(d, { weekStartsOn: 1 }));
             setSelectedBooking(booking);
@@ -143,10 +171,10 @@ export function AdminChessboardView() {
         return bookings.filter(b => {
             if (!b || !b.date) return false;
             try {
-                const bd = parseBookingDate(b.date);
+                const bd = parseUTC(b.date);
                 if (isNaN(bd.getTime())) return false;
                 return format(bd, 'yyyy-MM-dd') === dateStr &&
-                    (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed');
+                    (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed' || b.status === 'pending_approval');
             } catch {
                 return false;
             }
@@ -180,21 +208,20 @@ export function AdminChessboardView() {
     }, [bookingsOnDate]);
 
     // ── Row cells (pre-processed, handles colspan/skip) ───────────────────────
+    // Use Tbilisi-aware "now" + Tbilisi-aware slot instant (Date.UTC with h-4)
+    // so admins on a non-Tbilisi browser TZ see the same boundary as locals.
+    // The 12h backdate window for admins is preserved.
     const rowCellsMap = useMemo(() => {
-        const now = new Date();
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const nowStr = format(now, 'yyyy-MM-dd');
+        const [y, mo, d] = dateStr.split('-').map(Number);
 
         const isPast = (slot: string): boolean => {
-            // Admin can book up to 12 hours in the past
-            const slotMin = timeToMin(slot);
-            const slotDate = new Date(selectedDate);
-            slotDate.setHours(Math.floor(slotMin / 60), slotMin % 60, 0, 0);
-            const hoursAgo = (now.getTime() - slotDate.getTime()) / (1000 * 60 * 60);
-            if (hoursAgo > 0 && hoursAgo <= 12) return false; // Allow recent past for admins
-            if (dateStr < nowStr) return true;
-            if (dateStr > nowStr) return false;
-            return slotMin < now.getHours() * 60 + now.getMinutes();
+            const [h, m] = slot.split(':').map(Number);
+            // Slot instant in true UTC ms: Tbilisi h:m on (y,mo,d) = UTC (h-4):m on same date
+            const slotMs = Date.UTC(y, mo - 1, d, h - 4, m, 0);
+            const hoursAgo = (Date.now() - slotMs) / 3_600_000;
+            if (hoursAgo > 0 && hoursAgo <= 12) return false; // 12h admin backdate window
+            return hoursAgo > 0;
         };
 
         const map = new Map<string, CellInfo[]>();
@@ -223,12 +250,11 @@ export function AdminChessboardView() {
 
     // ── Drag-to-select helpers ────────────────────────────────────────────────
     const isSlotOccupied = useCallback((resId: string, time: string) => {
-        // Check past
-        const now = new Date();
+        // Tbilisi-aware past check (see rowCellsMap for rationale).
+        const now = tbilisiNow();
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const nowStr = format(now, 'yyyy-MM-dd');
-        if (dateStr < nowStr) return true;
-        if (dateStr === nowStr && timeToMin(time) < now.getHours() * 60 + now.getMinutes()) return true;
+        if (dateStr < now.ymd) return true;
+        if (dateStr === now.ymd && timeToMin(time) < now.totalMins) return true;
         return slotMap.has(`${resId}|${time}`);
     }, [selectedDate, slotMap]);
 
@@ -564,6 +590,9 @@ export function AdminChessboardView() {
 
     // ── Booking block style ───────────────────────────────────────────────────
     const getBookingStyle = (b: BookingHistoryItem) => {
+        // Срочная бронь, ожидающая решения админа — красная рамка-пунктир,
+        // чтобы её было видно прямо на сетке без перехода в фильтр «Ожидает».
+        if (b.status === 'pending_approval') return 'bg-red-50 text-red-800 border-red-500 border-dashed';
         if (b.status === 'completed')  return 'bg-gray-200 text-gray-600 border-gray-300';
         if (b.status === 're-rented')  return 'bg-orange-200 text-orange-800 border-orange-400';
         if (b.isReRentListed)          return 'bg-amber-100 text-amber-800 border-amber-400 border-dashed';
@@ -572,24 +601,69 @@ export function AdminChessboardView() {
 
     // ── Popup status label ────────────────────────────────────────────────────
     const statusLabel = (b: BookingHistoryItem) => {
+        if (b.status === 'pending_approval') return '⏳ Ожидает подтверждения';
         if (b.status === 'confirmed')  return b.isReRentListed ? '📤 На переаренде' : '✅ Активно';
         if (b.status === 're-rented')  return '🔄 Пересдано';
         if (b.status === 'completed')  return '☑️ Завершено';
         return b.status;
     };
 
+    // ── Discount label — translates the rule code stored on the booking
+    // into something an admin can read at a glance. Useful in the popup so
+    // they don't have to remember what WEEKLY_PROGRESSIVE vs CONSECUTIVE_HOURS
+    // means; date+role+state-of-week becomes obvious.
+    const discountRuleLabel = (rule: string | undefined | null): string => {
+        switch (rule) {
+            case 'PERSONAL_DISCOUNT':     return 'Личная скидка';
+            case 'WEEKLY_PROGRESSIVE':    return 'Недельная (накопленные часы)';
+            case 'CONSECUTIVE_HOURS':     return 'За длительность брони';
+            case 'MANUAL_OVERRIDE':       return 'Ручная корректировка';
+            case 'SUBSCRIPTION':          return 'Абонемент';
+            case 'SUBSCRIPTION_DISCOUNT': return 'Скидка по абонементу';
+            case 'HOT_BOOKING':           return 'Горячая бронь';
+            default:                      return rule || '';
+        }
+    };
+
     // ── Actions ───────────────────────────────────────────────────────────────
     const handleCancel = (id: string) => {
+        // If the booking belongs to a series, give the admin the same
+        // "this / series" choice Google Calendar offers — otherwise admins
+        // had to click N times to clean up a recurring weekly slot.
+        const target = selectedBooking && selectedBooking.id === id ? selectedBooking : bookings.find(b => b.id === id) || null;
+        if (target?.recurringGroupId) {
+            setSeriesCancelTarget(target);
+            return;
+        }
         if (confirm('Отменить это бронирование?')) {
             cancelBooking(id);
             setSelectedBooking(null);
         }
     };
-    const handleEditPrice = (b: BookingHistoryItem) => {
-        const val = prompt('Новая цена (GEL):', String(b.finalPrice));
-        if (val !== null) {
-            const p = parseFloat(val);
-            if (!isNaN(p)) { setManualPrice(b.id, p); setSelectedBooking(null); }
+    const handleEditPrice = async (b: BookingHistoryItem) => {
+        // Replaces the legacy local-only setManualPrice — that one mutated
+        // the Zustand store and never hit the server, so the value reverted
+        // on reload. Now persists via PATCH /bookings/{id}/price; server
+        // adjusts the owner's balance/sub by the delta if the row was paid.
+        const val = prompt(`Новая цена (GEL). Текущая: ${b.finalPrice}₾.`, String(b.finalPrice));
+        if (val === null) return;
+        const p = parseFloat(val);
+        if (isNaN(p) || p < 0) {
+            toast.error('Введите неотрицательное число');
+            return;
+        }
+        if (Math.abs(p - (b.finalPrice || 0)) < 0.005) {
+            toast.error('Новая цена совпадает со старой');
+            return;
+        }
+        const reason = prompt('Причина (необязательно — для аудита):', '') || undefined;
+        try {
+            await bookingsApi.setPrice(b.id, p, reason);
+            toast.success(`Цена изменена: ${b.finalPrice}₾ → ${p}₾`);
+            setSelectedBooking(null);
+            await fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
         }
     };
     // Excel #67: previously this fired listForReRent and dropped the dialog
@@ -622,12 +696,44 @@ export function AdminChessboardView() {
         }
     };
 
+    /** Сократить бронь — для броней >60 мин. Спрашивает сколько и с какой
+     *  стороны (начало/конец). Минимальный итог — 60 мин. */
+    const handleShorten = async (b: BookingHistoryItem) => {
+        const dur = b.duration || 60;
+        if (dur <= 60) {
+            toast.error('Бронь уже минимальная (60 мин), сократить нельзя');
+            return;
+        }
+        const removeRaw = window.prompt(
+            `На сколько минут сократить? (кратно 30, максимум ${dur - 60})`,
+            '60',
+        );
+        if (removeRaw === null) return;
+        const remove = parseInt(removeRaw, 10);
+        if (!Number.isFinite(remove) || remove < 30 || remove % 30 !== 0) {
+            toast.error('Введите число кратное 30');
+            return;
+        }
+        const sideRaw = window.prompt('С какой стороны убрать? "конец" (по умолчанию) или "начало":', 'конец');
+        if (sideRaw === null) return;
+        const side: 'start' | 'end' = sideRaw.trim().toLowerCase().startsWith('нач') ? 'start' : 'end';
+        if (!confirm(`Сократить на ${remove} мин с ${side === 'start' ? 'начала' : 'конца'}? Деньги/часы вернутся пропорционально.`)) return;
+        try {
+            await bookingsApi.shortenBooking(b.id, { removeMinutes: remove, side });
+            toast.success(`Бронь сокращена на ${remove} мин, средства возвращены`);
+            await fetchAllBookings();
+            setSelectedBooking(null);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось сократить');
+        }
+    };
+
     /** "Перенести" — prompt for new date + time, then PATCH /reschedule.
      *  Resource stays the same (admin can change it later via separate
      *  flow). Inputs use ISO format prefilled from the current booking so
      *  the admin only edits what they need. */
     const handleMove = async (b: BookingHistoryItem) => {
-        const currentDate = format(parseBookingDate(b.date), 'yyyy-MM-dd');
+        const currentDate = format(parseUTC(b.date), 'yyyy-MM-dd');
         const newDate = prompt('Новая дата (YYYY-MM-DD):', currentDate);
         if (!newDate) return;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
@@ -638,6 +744,14 @@ export function AdminChessboardView() {
         if (!newStartTime) return;
         if (!/^\d{2}:\d{2}$/.test(newStartTime)) {
             toast.error('Время должно быть в формате HH:MM');
+            return;
+        }
+        // Series → defer to choice modal so admin picks "this only" vs
+        // "this + every later sibling". Otherwise call the single-booking
+        // reschedule endpoint directly.
+        if (b.recurringGroupId) {
+            setSeriesMoveTarget({ booking: b, newDate, newStartTime });
+            setSelectedBooking(null);
             return;
         }
         try {
@@ -905,16 +1019,104 @@ export function AdminChessboardView() {
                             </div>
                             <div className="space-y-2 text-sm mb-4">
                                 <InfoRow label="Ресурс" value={resources.find(r => r.id === selectedBooking.resourceId)?.name ?? ''} />
-                                <InfoRow label="Дата" value={format(parseBookingDate(selectedBooking.date), 'd MMMM yyyy', { locale: ru })} />
+                                <InfoRow label="Дата" value={format(parseUTC(selectedBooking.date), 'd MMMM yyyy', { locale: ru })} />
                                 <InfoRow label="Время" value={`${selectedBooking.startTime} · ${(selectedBooking.duration ?? 0) / 60}ч`} />
-                                <InfoRow label="Цена" value={`${selectedBooking.finalPrice} ₾`} />
+                                {/* Цена + Скидка — две строки. Раньше админам приходилось
+                                    лазить в /admin/bookings или гадать «почему 18 а не 20»;
+                                    теперь правило и процент видно прямо в попапе. */}
+                                {selectedBooking.appliedRule && selectedBooking.appliedRule !== 'NONE'
+                                    && selectedBooking.appliedRule !== 'SUBSCRIPTION'
+                                    && (selectedBooking.discountPercent || selectedBooking.discountAmount) ? (
+                                    <>
+                                        <InfoRow
+                                            label="Цена"
+                                            value={`${selectedBooking.finalPrice} ₾  (база ${(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)} ₾ − ${selectedBooking.discountAmount?.toFixed(0) ?? 0} ₾)`}
+                                        />
+                                        <InfoRow
+                                            label="Скидка"
+                                            value={`${discountRuleLabel(selectedBooking.appliedRule)} · −${selectedBooking.discountPercent ?? 0}%`}
+                                        />
+                                    </>
+                                ) : (
+                                    <InfoRow
+                                        label="Цена"
+                                        value={
+                                            selectedBooking.appliedRule === 'SUBSCRIPTION'
+                                                ? `${selectedBooking.finalPrice ?? 0} ₾  (по абонементу)`
+                                                : `${selectedBooking.finalPrice ?? 0} ₾`
+                                        }
+                                    />
+                                )}
                                 <InfoRow label="Статус" value={statusLabel(selectedBooking)} />
+                                {/* Deferred-billing payment status — only show if explicitly set
+                                    (legacy rows = NULL = silent). Keeps the panel uncluttered for
+                                    bookings created before the 24h-defer rollout. */}
+                                {selectedBooking.paymentStatus && (
+                                    <InfoRow
+                                        label="Оплата"
+                                        value={
+                                            selectedBooking.paymentStatus === 'pending'
+                                                ? 'Ожидает (списание за 24ч до начала)'
+                                                : selectedBooking.paymentStatus === 'waived'
+                                                    ? `Штраф снят${selectedBooking.waiverReason ? ` · ${selectedBooking.waiverReason}` : ''}`
+                                                    : selectedBooking.chargedAt
+                                                        ? `Оплачено ${format(new Date(selectedBooking.chargedAt), 'd MMM HH:mm', { locale: ru })}`
+                                                        : 'Оплачено'
+                                        }
+                                    />
+                                )}
                             </div>
+                            {/* Pending hot-booking — Approve / Reject inline в попапе.
+                                Раньше эти кнопки были только в списке /admin/bookings,
+                                и админу приходилось переключаться между шахматкой и
+                                списком. Теперь можно решить прямо из шахматки. */}
+                            {selectedBooking.status === 'pending_approval' && (
+                                <div className="space-y-1.5 mb-3">
+                                    <div className="text-[11px] text-red-700 font-medium">Срочная бронь — клиент ждёт решения</div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        <button
+                                            onClick={async () => {
+                                                try {
+                                                    await bookingsApi.approveBooking(selectedBooking.id);
+                                                    toast.success('Бронь подтверждена, клиент уведомлён');
+                                                    setSelectedBooking(null);
+                                                    await fetchAllBookings();
+                                                } catch (e: any) {
+                                                    toast.error(e?.response?.data?.detail || 'Ошибка');
+                                                }
+                                            }}
+                                            className="py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white"
+                                        >
+                                            ✓ Подтвердить
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                const reason = window.prompt('Причина отклонения (будет отправлена клиенту):', '');
+                                                if (reason === null) return;
+                                                try {
+                                                    await bookingsApi.rejectBooking(selectedBooking.id, reason.trim() || undefined);
+                                                    toast.success('Бронь отклонена, клиент уведомлён');
+                                                    setSelectedBooking(null);
+                                                    await fetchAllBookings();
+                                                } catch (e: any) {
+                                                    toast.error(e?.response?.data?.detail || 'Ошибка');
+                                                }
+                                            }}
+                                            className="py-2 text-xs font-bold rounded-lg bg-red-50 text-red-700 border border-red-200"
+                                        >
+                                            ✕ Отклонить
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             {selectedBooking.status === 'confirmed' && (
                                 <div className="space-y-1.5">
                                     <div className="grid grid-cols-2 gap-1.5">
                                         <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
                                         <button onClick={() => handleExtend(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">Продлить +30 мин</button>
+                                        {(selectedBooking.duration || 60) > 60 && (
+                                            <button onClick={() => handleShorten(selectedBooking)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700">Сократить (— минут)</button>
+                                        )}
                                     </div>
                                     <div className="grid grid-cols-3 gap-1.5">
                                         <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
@@ -923,6 +1125,69 @@ export function AdminChessboardView() {
                                         </button>
                                         <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Удалить</button>
                                     </div>
+                                    {/* Format change — useful when client picked the wrong rate
+                                        at checkout. Only shown for cabinets that actually have a
+                                        group rate (7/8 — see RESOURCES). For others the toggle
+                                        would be a no-op. */}
+                                    {(() => {
+                                        // Cab 2 in One ("мини-группы" — до 4 чел) добавлен по запросу
+                                        // админа: помещение хоть и небольшое, но позволяет вести группу
+                                        // или семью. Кабинеты 7/8 — большие групповые залы (20 чел).
+                                        const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2'].includes(selectedBooking.resourceId || '');
+                                        if (!groupCapable) return null;
+                                        const target: 'individual' | 'group' =
+                                            (selectedBooking.format === 'group') ? 'individual' : 'group';
+                                        const targetLabel = target === 'group' ? 'Групповой' : 'Индивид.';
+                                        return (
+                                            <button
+                                                onClick={async () => {
+                                                    if (!window.confirm(`Сменить формат на «${targetLabel}»? Цена пересчитается, разница спишется/вернётся.`)) return;
+                                                    try {
+                                                        await bookingsApi.changeFormat(selectedBooking.id, target);
+                                                        toast.success(`Формат изменён на «${targetLabel}»`);
+                                                        setSelectedBooking(null);
+                                                        await fetchAllBookings();
+                                                    } catch (e: any) {
+                                                        toast.error(e?.response?.data?.detail || 'Не удалось сменить формат');
+                                                    }
+                                                }}
+                                                className="w-full py-2 text-xs font-medium rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center gap-1.5"
+                                            >
+                                                🔄 Сменить формат: → {targetLabel}
+                                            </button>
+                                        );
+                                    })()}
+                                    {/* Waive — only relevant while charge is still on the table.
+                                        For `waived` rows the panel above already shows the reason. */}
+                                    {(selectedBooking.paymentStatus === 'pending' || selectedBooking.paymentStatus === 'paid') && (
+                                        <button
+                                            onClick={async () => {
+                                                const reason = window.prompt('Причина снятия штрафа (обязательно):', '');
+                                                if (!reason || !reason.trim()) return;
+                                                try {
+                                                    const res = await bookingsApi.waiveCharge(selectedBooking.id, reason.trim());
+                                                    toast.success(
+                                                        res.scenario === 'waived_paid_refunded'
+                                                            ? 'Штраф снят, средства возвращены'
+                                                            : 'Штраф снят (списание не произойдёт)'
+                                                    );
+                                                    setSelectedBooking(null);
+                                                    await fetchAllBookings();
+                                                } catch (e: any) {
+                                                    toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
+                                                }
+                                            }}
+                                            className="w-full py-2 text-xs font-medium rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center gap-1.5"
+                                        >
+                                            🩹 Снять штраф (с причиной)
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => { const b = selectedBooking; setSelectedBooking(null); openWaitlistFor(b); }}
+                                        className="w-full py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700 flex items-center justify-center gap-1.5"
+                                    >
+                                        <Bell size={12} /> Следить за слотом
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -1216,17 +1481,24 @@ export function AdminChessboardView() {
                 <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
             </div>
 
-            {/* ── Admin Quick Booking Modal ── */}
+            {/* ── Admin Quick Booking Modal ──
+                Uses the same queue logic as the mobile branch so multi-
+                period selections (e.g. cab 5 at 10:00–11:00 AND 13:00–14:00)
+                walk the modal through every chunk. Earlier desktop just
+                wiped state on first onBooked, so admins reported "только
+                первый слот сохранился, остальные пропали". */}
             {adminBookSlot && (
                 <AdminQuickBookingModal
                     slot={adminBookSlot}
                     users={users}
-                    onClose={() => { setAdminBookSlot(null); setNewSlots([]); }}
-                    onBooked={() => {
+                    onClose={() => {
+                        // Cancelling mid-queue drops the remaining chunks but
+                        // keeps the selection visible in the chips so the
+                        // admin can retry without re-clicking the cells.
                         setAdminBookSlot(null);
-                        setNewSlots([]);
-                        fetchAllBookings();
+                        setPendingChunks([]);
                     }}
+                    onBooked={advanceBookingQueue}
                 />
             )}
 
@@ -1259,16 +1531,40 @@ export function AdminChessboardView() {
                         />
                         <InfoRow
                             label="Дата"
-                            value={format(parseBookingDate(selectedBooking.date), 'd MMMM yyyy', { locale: ru })}
+                            value={format(parseUTC(selectedBooking.date), 'd MMMM yyyy', { locale: ru })}
                         />
                         <InfoRow
                             label="Время"
                             value={`${selectedBooking.startTime} · ${(selectedBooking.duration ?? 0) / 60}ч`}
                         />
-                        <InfoRow
-                            label="Цена"
-                            value={`${selectedBooking.finalPrice} ₾`}
-                        />
+                        {/* Цена + Скидка — мобильный попап получает ту же
+                            раскладку, что и десктоп выше: если применилась
+                            скидка (или peak-наценка), правило и процент
+                            видны рядом с ценой, чтобы админ не гадал
+                            «почему N а не 20». */}
+                        {selectedBooking.appliedRule && selectedBooking.appliedRule !== 'NONE'
+                            && selectedBooking.appliedRule !== 'SUBSCRIPTION'
+                            && (selectedBooking.discountPercent || selectedBooking.discountAmount) ? (
+                            <>
+                                <InfoRow
+                                    label="Цена"
+                                    value={`${selectedBooking.finalPrice} ₾  (база ${selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0} ₾ − ${selectedBooking.discountAmount?.toFixed(0) ?? 0} ₾)`}
+                                />
+                                <InfoRow
+                                    label="Скидка"
+                                    value={`${discountRuleLabel(selectedBooking.appliedRule)} · −${selectedBooking.discountPercent ?? 0}%`}
+                                />
+                            </>
+                        ) : (
+                            <InfoRow
+                                label="Цена"
+                                value={
+                                    selectedBooking.appliedRule === 'SUBSCRIPTION'
+                                        ? `${selectedBooking.finalPrice ?? 0} ₾  (по абонементу)`
+                                        : `${selectedBooking.finalPrice ?? 0} ₾`
+                                }
+                            />
+                        )}
                         <InfoRow
                             label="Статус"
                             value={statusLabel(selectedBooking)}
@@ -1336,11 +1632,57 @@ export function AdminChessboardView() {
                                         Удалить
                                     </button>
                                 </div>
+                                <button
+                                    onClick={() => { const b = selectedBooking; setSelectedBooking(null); openWaitlistFor(b); }}
+                                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 flex items-center justify-center gap-1.5 transition-colors"
+                                >
+                                    <Bell size={12} /> Следить за слотом
+                                </button>
                             </div>
                         );
                     })()}
                 </div>
             )}
+
+            {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
+                <CancelBookingChoiceModal
+                    bookingId={seriesCancelTarget.id}
+                    groupId={seriesCancelTarget.recurringGroupId}
+                    onClose={() => setSeriesCancelTarget(null)}
+                    onCompleted={async () => {
+                        setSeriesCancelTarget(null);
+                        setSelectedBooking(null);
+                        await fetchAllBookings();
+                    }}
+                />
+            )}
+
+            {seriesMoveTarget && (
+                <RescheduleScopeChoiceModal
+                    bookingId={seriesMoveTarget.booking.id}
+                    newDate={seriesMoveTarget.newDate}
+                    newStartTime={seriesMoveTarget.newStartTime}
+                    newResourceId={seriesMoveTarget.newResourceId}
+                    onClose={() => setSeriesMoveTarget(null)}
+                    onCompleted={async () => {
+                        setSeriesMoveTarget(null);
+                        await fetchAllBookings();
+                    }}
+                />
+            )}
+
+            {/* Slot-watch — opened from "Следить за слотом" in either popup. */}
+            <WaitlistSubscribeModal
+                isOpen={!!waitlistTarget}
+                onClose={() => setWaitlistTarget(null)}
+                resourceId={waitlistTarget?.resourceId ?? ''}
+                resourceName={waitlistTarget?.resourceName ?? ''}
+                locationName={waitlistTarget?.locationName}
+                date={waitlistTarget?.date ?? new Date()}
+                startTime={waitlistTarget?.startTime ?? ''}
+                endTime={waitlistTarget?.endTime ?? ''}
+                extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+            />
         </div>
     );
 }
@@ -1457,6 +1799,13 @@ function AdminQuickBookingModal({
     const [selectedUser, setSelectedUser] = useState<{ id: string; email: string; name: string } | null>(null);
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
     const [recurringOccurrences, setRecurringOccurrences] = useState(12);
+    const [conflictState, setConflictState] = useState<null | {
+        conflicts: ConflictItem[];
+        resourceId: string;
+        time: string;
+        duration: number;
+    }>(null);
+    const allBookings = useUserStore(s => s.bookings);
     // Egor's request: let admins specify recurring as either "N occurrences"
     // or "until a specific date". The first is the default, the second is
     // a toggle. When in "until" mode we compute occurrences from firstDate
@@ -1503,20 +1852,22 @@ function AdminQuickBookingModal({
         ).slice(0, 8)
         : [];
 
-    const handleBook = async () => {
+    const handleBook = async (overrideResourceId?: string) => {
         if (!selectedUser) {
             toast.error('Выберите пользователя');
             return;
         }
         setSaving(true);
+        const bookResId = overrideResourceId || slot.resId;
+        const bookResource = RESOURCES.find(r => r.id === bookResId) || resource;
         try {
             if (recurringPattern) {
                 const result = await bookingsApi.createRecurringBooking({
-                    resourceId: slot.resId,
-                    locationId: resource?.locationId || 'unbox_one',
+                    resourceId: bookResId,
+                    locationId: bookResource?.locationId || 'unbox_one',
                     startTime: slot.time,
                     duration,
-                    format: resource?.formats?.[0] || 'individual',
+                    format: bookResource?.formats?.[0] || 'individual',
                     paymentMethod: 'balance',
                     firstDate: dateStr,
                     occurrences: effectiveOccurrences,
@@ -1527,12 +1878,12 @@ function AdminQuickBookingModal({
                 toast.success(`Создано ${result.created} бронирований (${patternLabel}) на ${result.totalCost} ₾`);
             } else {
                 await bookingsApi.createBooking({
-                    resourceId: slot.resId,
+                    resourceId: bookResId,
                     date: dateStr,
                     startTime: slot.time,
                     duration,
-                    format: resource?.formats?.[0] || 'individual',
-                    locationId: resource?.locationId,
+                    format: bookResource?.formats?.[0] || 'individual',
+                    locationId: bookResource?.locationId,
                     targetUserId: selectedUser.email,
                 } as any);
                 toast.success(`Бронирование создано для ${selectedUser.name}`);
@@ -1540,12 +1891,31 @@ function AdminQuickBookingModal({
             onBooked();
         } catch (e: any) {
             const detail = e?.response?.data?.detail;
-            if (typeof detail === 'object' && detail?.conflicts) {
-                const conflicts = detail.conflicts as Array<{ date: string; day: string }>;
-                toast.error(`Конфликт: заняты ${conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+            const message = typeof detail === 'string'
+                ? detail
+                : (detail?.message || e.message || 'Ошибка бронирования');
+            const hasStructuredConflicts = typeof detail === 'object' && Array.isArray(detail?.conflicts);
+            const isConflict = hasStructuredConflicts
+                || message.includes('Time slot is already booked')
+                || message.includes('Conflict');
+
+            if (isConflict) {
+                const conflicts: ConflictItem[] = hasStructuredConflicts
+                    ? detail.conflicts.map((c: any) => ({
+                        date: String(c.date || dateStr).slice(0, 10),
+                        reason: c.reason || c.message || `${c.date}${c.start_time ? ' ' + c.start_time : ''} занято`,
+                    }))
+                    : [{ date: dateStr, reason: message }];
+                setConflictState({
+                    conflicts,
+                    resourceId: slot.resId,
+                    time: slot.time,
+                    duration,
+                });
+            } else if (Array.isArray(detail)) {
+                toast.error(detail.map((d: any) => d.msg).join(', '));
             } else {
-                const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
-                toast.error(msg);
+                toast.error(message);
             }
         } finally {
             setSaving(false);
@@ -1739,7 +2109,7 @@ function AdminQuickBookingModal({
                 </div>
 
                 <button
-                    onClick={handleBook}
+                    onClick={() => handleBook()}
                     disabled={saving || !selectedUser}
                     className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
@@ -1747,6 +2117,29 @@ function AdminQuickBookingModal({
                     {recurringPattern ? `Создать серию · ${effectiveOccurrences} броней` : 'Забронировать'}
                 </button>
             </div>
+
+            {conflictState && (
+                <BookingConflictDialog
+                    conflicts={conflictState.conflicts}
+                    resourceId={conflictState.resourceId}
+                    time={conflictState.time}
+                    duration={conflictState.duration}
+                    ownBookings={allBookings}
+                    onClose={() => setConflictState(null)}
+                    onOpenBooking={() => {
+                        // Admin context: the dialog reaches this branch only if
+                        // the conflict reason mentions "у вас уже есть", which
+                        // shouldn't normally trigger when booking for a third
+                        // party. Just close — the admin can pick the user from
+                        // the bookings list manually if they want.
+                        setConflictState(null);
+                    }}
+                    onPickCabinet={(altResourceId) => {
+                        setConflictState(null);
+                        handleBook(altResourceId);
+                    }}
+                />
+            )}
         </div>
     );
 }

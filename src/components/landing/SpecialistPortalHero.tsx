@@ -8,6 +8,7 @@ import {
 import { format, isToday, isTomorrow, isBefore } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useUserStore } from '../../store/userStore';
+import { getMyBookingsPath } from '../../utils/userPaths';
 import { useCrmModeStore } from '../../store/crmModeStore';
 import { RESOURCES } from '../../utils/data';
 import { crmApi } from '../../api/crm';
@@ -58,6 +59,7 @@ function formatTimeRange(startTime: string | null, duration: number): string {
 // ── Booking card ─────────────────────────────────────────────────────────────
 function BookingCard({ booking }: { booking: BookingHistoryItem }) {
     const navigate = useNavigate();
+    const currentUser = useUserStore(s => s.currentUser);
     const isPast = (() => {
         const d = parseUTC(booking.date);
         if (!booking.startTime) return isBefore(d, new Date());
@@ -86,7 +88,7 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
             whileTap={{ scale: 0.98 }}
             className="rounded-2xl p-4 cursor-pointer group transition-shadow hover:shadow-lg"
             style={glassTile}
-            onClick={() => navigate('/dashboard/bookings')}
+            onClick={() => navigate(getMyBookingsPath(currentUser))}
         >
             <div className="flex items-start gap-3">
                 {/* Date badge */}
@@ -147,6 +149,8 @@ interface Props {
 export function SpecialistPortalHero({ user }: Props) {
     const { bookings, fetchBookings } = useUserStore();
     const navigate = useNavigate();
+    // Alias for clarity — helpers ниже принимают user-like объект.
+    const currentUser = user;
     const firstName = user.name?.split(' ')[0] ?? 'Специалист';
     const isAdmin = user.role === 'admin' || user.role === 'senior_admin' || user.role === 'owner';
 
@@ -285,7 +289,7 @@ export function SpecialistPortalHero({ user }: Props) {
                         <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            onClick={() => navigate('/dashboard/bookings')}
+                            onClick={() => navigate(getMyBookingsPath(currentUser))}
                             className="text-xs font-semibold px-3 py-1.5 rounded-xl text-unbox-dark/60 hover:text-unbox-dark transition-colors"
                             style={{ background: 'rgba(255,255,255,0.60)', border: '1px solid rgba(255,255,255,0.80)' }}
                         >
@@ -294,7 +298,7 @@ export function SpecialistPortalHero({ user }: Props) {
                         <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            onClick={() => navigate('/dashboard/bookings')}
+                            onClick={() => navigate(getMyBookingsPath(currentUser))}
                             className="text-xs font-semibold px-3 py-1.5 rounded-xl text-white transition-colors flex items-center gap-1"
                             style={{ background: 'rgba(71,109,107,0.85)' }}
                         >
@@ -311,7 +315,7 @@ export function SpecialistPortalHero({ user }: Props) {
                         <motion.button
                             whileHover={{ scale: 1.03 }}
                             whileTap={{ scale: 0.97 }}
-                            onClick={() => navigate('/dashboard/bookings')}
+                            onClick={() => navigate(getMyBookingsPath(currentUser))}
                             className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
                             style={{ background: 'rgba(71,109,107,0.85)' }}
                         >
@@ -325,7 +329,7 @@ export function SpecialistPortalHero({ user }: Props) {
                         ))}
                         {upcomingBookings.length > 4 && (
                             <button
-                                onClick={() => navigate('/dashboard/bookings')}
+                                onClick={() => navigate(getMyBookingsPath(currentUser))}
                                 className="text-xs text-unbox-green font-semibold text-center py-2 hover:underline"
                             >
                                 Ещё {upcomingBookings.length - 4} бронирований →
@@ -344,7 +348,7 @@ export function SpecialistPortalHero({ user }: Props) {
                 className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
             >
                 {[
-                    { icon: CalendarDays, label: 'Мои брони', href: '/dashboard/bookings', color: 'rgba(99,102,241,1)', bg: 'rgba(99,102,241,0.08)' },
+                    { icon: CalendarDays, label: 'Мои брони', href: getMyBookingsPath(currentUser), color: 'rgba(99,102,241,1)', bg: 'rgba(99,102,241,0.08)' },
                     { icon: Users, label: 'Мои клиенты', href: '/crm', color: 'rgba(71,109,107,1)', bg: 'rgba(71,109,107,0.08)' },
                     { icon: BriefcaseMedical, label: 'Сессии', href: '/crm/sessions', color: 'rgba(168,85,247,1)', bg: 'rgba(168,85,247,0.08)' },
                     { icon: Wallet, label: 'Финансы', href: '/crm/finances', color: 'rgba(245,158,11,1)', bg: 'rgba(245,158,11,0.08)' },

@@ -1,7 +1,7 @@
-import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { QuickActionsFab, type QuickAction } from './ui/QuickActionsFab';
-import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut, Plus, Search } from 'lucide-react';
+import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut, Plus, Search, FileText, Bell, Smartphone, Gift, CreditCard } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmAccessToggle } from './CrmAccessToggle';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
@@ -37,13 +37,62 @@ export function DashboardLayout() {
         );
     }
 
-    const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
+    // 2026-06-05 owner: специалисты больше не «висят» в /dashboard —
+    // их основной шелл /crm, со всеми личными функциями уже встроенными.
+    // Прямой URL /dashboard/* (старая закладка, ручной набор) → молча
+    // перенаправляем на эквивалент в /crm. Чистые юзеры (role='user' или
+    // role не указан) и админы продолжают видеть /dashboard как было —
+    // у первых это основной шелл, у вторых — fallback для личного.
+    if (currentUser.role === 'specialist') {
+        const path = window.location.pathname;
+        const search = window.location.search;
+        const hash = window.location.hash;
+        const map: Record<string, string> = {
+            '/dashboard':         '/crm',
+            '/dashboard/bookings':'/crm/bookings',
+            '/dashboard/waitlist':'/crm/waitlist',
+            '/dashboard/bonuses': '/crm/bonuses',
+            '/dashboard/profile': '/crm/account',
+        };
+        const target = map[path];
+        if (target) {
+            return <Navigate to={target + search + hash} replace />;
+        }
+        // Любой другой /dashboard/* — на CRM index.
+        if (path.startsWith('/dashboard')) {
+            return <Navigate to="/crm" replace />;
+        }
+    }
 
+    const isAdmin = currentUser.role === 'admin' || currentUser.role === 'senior_admin' || currentUser.role === 'owner';
+    // Anyone who can book — specialists included — should see the Mobile link
+    // and get into /m. Earlier the sidebar entry was admin-only because the
+    // beta was admin-only; that gate is now lifted on MobileLayout itself,
+    // so we widen the link visibility too.
+    const canBook = isAdmin || currentUser.role === 'specialist' || currentUser.isAdmin;
+
+    // 2026-06-05 owner: для клиентов sidebar теперь самодостаточный —
+    // вместо общих «Настроек» отдельные пункты Абонементы / Бонусы
+    // (раньше были только из кнопок в /dashboard и теряли видимость).
+    // «Mobile (beta)» переименовано в «С телефона» — слово beta устарело
+    // (мобильный давно основной интерфейс на phone-width).
     const navItems = [
-        { icon: LayoutDashboard, label: 'Обзор', path: '/dashboard', exact: true },
-        { icon: Calendar, label: 'Мои бронирования', path: '/dashboard/bookings' },
-        { icon: Settings, label: 'Настройки', path: '/dashboard/profile' },
+        { icon: LayoutDashboard, label: 'Обзор',            path: '/dashboard',          exact: true },
+        { icon: Calendar,        label: 'Мои бронирования', path: '/dashboard/bookings' },
+        { icon: Bell,            label: 'Слежу за слотами', path: '/dashboard/waitlist' },
+        { icon: CreditCard,      label: 'Абонементы',       path: '/subscriptions' },
+        { icon: Gift,            label: 'Бонусы',           path: '/dashboard/bonuses' },
+        { icon: Settings,        label: 'Профиль',          path: '/dashboard/profile' },
         ...(isAdmin ? [{ icon: ShieldCheck, label: 'Админ-панель', path: '/admin' }] : []),
+        // С телефона — для тех у кого есть booking permission. MobileLayout
+        // enforces access check внутри. App.tsx редирект автоматически
+        // переводит phone-width на /m, поэтому desktop-ссылка нужна только
+        // как «открыть руками» (например с iPad).
+        ...(canBook ? [{ icon: Smartphone, label: 'С телефона', path: '/m' }] : []),
+        // Legal — placed last so it sits right above the divider/"Выйти"
+        // at the bottom of the sidebar; far enough from primary nav not
+        // to compete for attention but always visible without scroll.
+        { icon: FileText,        label: 'Правила бронирования', path: '/booking-rules' },
     ];
 
     const quickActions: QuickAction[] = [
@@ -158,10 +207,18 @@ function GridHouseDashboardShell({
                     </div>
                 </div>
 
-                {/* CRM toggle */}
-                <div style={{ padding: '12px 24px', borderBottom: hairline }}>
-                    <CrmAccessToggle />
-                </div>
+                {/* CRM toggle — owner 2026-06-05: показываем только тем кому
+                    он реально нужен (запросить доступ). Для специалистов/
+                    админов /crm стал основной рабочей зоной (login redirect),
+                    toggle тут только мусорит — у них есть прямые пути. */}
+                {currentUser.role !== 'specialist'
+                  && currentUser.role !== 'admin'
+                  && currentUser.role !== 'senior_admin'
+                  && currentUser.role !== 'owner' && (
+                    <div style={{ padding: '12px 24px', borderBottom: hairline }}>
+                        <CrmAccessToggle />
+                    </div>
+                )}
 
                 {/* Nav */}
                 <nav style={{ flex: 1, padding: '12px 0' }}>

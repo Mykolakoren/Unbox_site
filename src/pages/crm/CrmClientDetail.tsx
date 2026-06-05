@@ -13,7 +13,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
-import { parseUTC, parseLocal } from '../../utils/dateUtils';
+import { parseUTC } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
@@ -109,13 +109,13 @@ export function CrmClientDetail() {
     // Split sessions into future and past
     const now = new Date();
     const futureSessions = useMemo(() =>
-        sessions.filter(s => parseLocal(s.date) > now && s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST')
-            .sort((a, b) => parseLocal(a.date).getTime() - parseLocal(b.date).getTime()),
+        sessions.filter(s => parseUTC(s.date) > now && s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST')
+            .sort((a, b) => parseUTC(a.date).getTime() - parseUTC(b.date).getTime()),
         [sessions]
     );
     const pastSessions = useMemo(() =>
-        sessions.filter(s => parseLocal(s.date) <= now)
-            .sort((a, b) => parseLocal(b.date).getTime() - parseLocal(a.date).getTime()),
+        sessions.filter(s => parseUTC(s.date) <= now)
+            .sort((a, b) => parseUTC(b.date).getTime() - parseUTC(a.date).getTime()),
         [sessions]
     );
 
@@ -844,11 +844,11 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                             background: s.isBooked ? GH.accent : GH.danger,
                                         }} />
                                         <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                            {format(parseLocal(s.date), 'dd MMM yyyy, HH:mm', { locale: ru })}
+                                            {format(parseUTC(s.date), 'dd MMM yyyy, HH:mm', { locale: ru })}
                                         </span>
                                         {!s.isBooked && (
                                             <button
-                                                onClick={() => navigate('/dashboard/bookings', {
+                                                onClick={() => navigate('/crm/bookings', {
                                                     state: { crmMode: { sessionId: s.id, clientId: client.id, clientName: client.name, date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z', duration: s.durationMinutes } },
                                                 })}
                                                 style={{ ...ghMono, fontSize: 9, padding: '2px 8px', background: 'rgba(184,74,47,0.08)', color: GH.danger, border: 'none', cursor: 'pointer' }}
@@ -970,7 +970,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
                                 {/* Rows */}
                                 {pastSessions.map(session => {
-                                    const dt = parseLocal(session.date);
+                                    const dt = parseUTC(session.date);
                                     const sessionPrice = session.price ?? client.basePrice;
                                     const isCancelled = session.status === 'CANCELLED_CLIENT' || session.status === 'CANCELLED_THERAPIST';
                                     const isEditing = editingSession === session.id;

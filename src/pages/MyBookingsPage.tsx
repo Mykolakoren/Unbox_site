@@ -7,32 +7,36 @@ import { Button } from '../components/ui/Button';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw
+    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw, Bell
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format, addDays, addMinutes, setHours, setMinutes, startOfToday, isBefore,
     startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks, isSameDay, isToday, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { RESOURCES, EXTRAS, LOCATIONS } from '../utils/data';
 import { isPeakTime, calculatePrice } from '../utils/pricing';
+import { BookingConflictDialog, type ConflictItem } from '../components/BookingConflictDialog';
 import type { Format } from '../types';
 import { generateGoogleCalendarUrl } from '../utils/calendar';
 import { bookingsApi } from '../api/bookings';
 import { toast } from 'sonner';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
+import { CancelBookingChoiceModal } from '../components/CancelBookingChoiceModal';
+import { RescheduleScopeChoiceModal } from '../components/RescheduleScopeChoiceModal';
 import type { BookingHistoryItem } from '../store/types';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ChessboardScroller } from '../components/ui/ChessboardScroller';
 import { waitlistApi } from '../api/waitlist';
+import { WaitlistSubscribeModal } from '../components/ui/WaitlistSubscribeModal';
+import { tbilisiNow } from '../utils/dateUtils';
 
-// Parse backend UTC date string (no 'Z' suffix) correctly
-const parseUTC = (d: string | Date) => {
-    const s = String(d);
-    return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
-};
+// 2026-06-05 owner: parseUTC + safeFormat вынесены в utils/bookingHelpers
+// (Фаза 1 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md). Раньше каждая
+// бронь-страница имела свою копию, что создавало риск тонких отличий.
+import { parseUTC, safeFormat } from '../utils/bookingHelpers';
 
 const timeToMins = (t: string) => {
     const [h, m] = t.split(':').map(Number);
@@ -98,6 +102,41 @@ function BookingsChessboard({
     // Quick booking slot for CRM mode
     const [crmSlot, setCrmSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
+    // Waitlist subscribe target — set when user taps a busy slot, drives the
+    // shared mobile-friendly modal (replaces native window.confirm). One state
+    // serves both desktop and mobile chessboard renderings.
+    const [waitlistTarget, setWaitlistTarget] = useState<{
+        resourceId: string;
+        resourceName: string;
+        locationName?: string | null;
+        date: Date;
+        startTime: string;
+        endTime: string;
+    } | null>(null);
+    const openWaitlistFor = useCallback((b: BookingHistoryItem) => {
+        // Diagnostic: when the modal silently fails (missing fields, broken
+        // render path, etc.) the user just sees a dead tap. Surface the
+        // failure as a toast so admins can report the actual cause instead
+        // of "ничего не происходит".
+        if (!b.startTime || !b.duration || !b.resourceId) {
+            toast.error(
+                `Не удалось открыть подписку (нет данных): ` +
+                `time=${b.startTime ?? '?'}, dur=${b.duration ?? '?'}, res=${b.resourceId ?? '?'}`,
+            );
+            return;
+        }
+        const res = RESOURCES.find(r => r.id === b.resourceId);
+        const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
+        const endTimeStr = minsToTime(timeToMins(b.startTime) + b.duration);
+        setWaitlistTarget({
+            resourceId: b.resourceId,
+            resourceName: res?.name || b.resourceId,
+            locationName: loc?.name ?? null,
+            date: parseUTC(b.date),
+            startTime: b.startTime,
+            endTime: endTimeStr,
+        });
+    }, []);
     const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     const tableRef = useRef<HTMLDivElement>(null);
@@ -107,6 +146,15 @@ function BookingsChessboard({
     const [dragTarget, setDragTarget] = useState<{ resId: string; time: string } | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ resId: string; time: string; offsetMins: number } | null>(null);
+    // After a series booking is dropped on a new slot, hold the chosen
+    // destination here and let the choice modal ask "this only" vs
+    // "this + every later sibling" before hitting the API.
+    const [seriesMoveTarget, setSeriesMoveTarget] = useState<{
+        booking: BookingHistoryItem;
+        newDate: string;
+        newStartTime: string;
+        newResourceId?: string;
+    } | null>(null);
 
     // ── Drag-to-select NEW booking slots ──
     // Multi-period selection: same resource can hold several non-contiguous
@@ -172,7 +220,10 @@ function BookingsChessboard({
         return h >= 21;
     };
 
-    const resources = RESOURCES;
+    // Owner 2026-05-27: filter out admin-disabled cabinets from the user-
+    // facing booking grid. Static data carries the same `isActive` flag,
+    // so this works without a backend round-trip.
+    const resources = RESOURCES.filter(r => r.isActive !== false);
 
     // Build day's booking map — include completed bookings
     const dayUserBookings = useMemo(() =>
@@ -198,21 +249,35 @@ function BookingsChessboard({
             return s >= bStart && s < bEnd;
         }) ?? null;
 
-    // Can cancel/reschedule? confirmed + >24h before start
+    // Can cancel/reschedule? confirmed + >24h before start (Tbilisi wall-clock).
+    // booking.date stores the Tbilisi calendar day; startTime is "HH:MM" Tbilisi.
+    // Convert that to a real UTC instant (subtract 4h) before comparing with
+    // Date.now() — without this we overestimated the gap by 4h and the cancel
+    // button stayed visible too long.
     const canModify = (b: BookingHistoryItem) => {
         if (b.status !== 'confirmed' || !b.startTime) return false;
         const [h, m] = b.startTime.split(':').map(Number);
-        const start = parseUTC(b.date);
-        start.setUTCHours(h, m, 0, 0);
-        return (start.getTime() - Date.now()) > 24 * 60 * 60 * 1000;
+        const datePart = parseUTC(b.date);
+        // Build Tbilisi-instant: same Y-M-D from datePart, h:m Tbilisi, then -4h to UTC
+        const startUTC = Date.UTC(
+            datePart.getUTCFullYear(),
+            datePart.getUTCMonth(),
+            datePart.getUTCDate(),
+            h - 4, m, 0, 0,
+        );
+        return (startUTC - Date.now()) > 24 * 60 * 60 * 1000;
     };
 
-    // Is slot in the past?
+    // Is slot in the past? Compares Tbilisi wall-clock both sides — without
+    // tbilisiNow() the previous `new Date().getHours()` returned the
+    // browser's local hour, so admins on a UK VPN saw an evening slot as
+    // "still bookable" 4 hours after Tbilisi closed.
     const isSlotPast = useCallback((time: string) => {
         if (!isToday(selectedDate)) return isBefore(selectedDate, startOfToday());
         const [h, m] = time.split(':').map(Number);
-        const now = new Date();
-        return h < now.getHours() || (h === now.getHours() && m <= now.getMinutes());
+        const now = tbilisiNow();
+        const slotMins = h * 60 + m;
+        return slotMins <= now.totalMins;
     }, [selectedDate]);
 
     // Days that have bookings (for dot indicators)
@@ -551,7 +616,10 @@ function BookingsChessboard({
             date: selectedDate,
             format: (resource?.formats?.[0] as any) || 'individual',
             selectedSlots: [...newSlots],
-            step: 4, // confirmation: cost calculation + payment method + CRM client
+            // Was step 4 (skip straight to payment) — admins reported users
+            // had no way to add extras. Now lands on OptionsStep so the
+            // format + extras pickers are visible before checkout.
+            step: 3,
         });
 
         setNewSlots([]);
@@ -661,8 +729,24 @@ function BookingsChessboard({
         );
 
         if (confirmed) {
+            const newDate = format(selectedDate, 'yyyy-MM-dd');
+            // Series → defer to the choice modal so the user picks
+            // "this only" vs "this + every later sibling". When CRM mode
+            // is active we also need to sync the linked session, but
+            // that happens after the modal completes (see seriesMoveTarget
+            // render below).
+            if (dragBooking.recurringGroupId) {
+                setSeriesMoveTarget({
+                    booking: dragBooking,
+                    newDate,
+                    newStartTime: newTime,
+                    newResourceId: oldRes !== newRes ? newRes : undefined,
+                });
+                setDragBooking(null);
+                setDragTarget(null);
+                return;
+            }
             try {
-                const newDate = format(selectedDate, 'yyyy-MM-dd');
                 await bookingsApi.rescheduleBooking(dragBooking.id, {
                     newDate,
                     newStartTime: newTime,
@@ -754,10 +838,20 @@ function BookingsChessboard({
             }
             setNewSlotRange(resId, slots);
         } else {
-            // First selection — ALWAYS auto-select pair (1h minimum)
-            const pairStart = slotIdx % 2 === 0 ? slotIdx : slotIdx - 1;
-            const pairEnd = pairStart + 1;
-            if (pairEnd >= timeSlots.length) return; // not enough slots
+            // First selection — auto-select 2 adjacent 30-min slots (1h min)
+            // STARTING from the tap. Used to snap pairStart down to an even
+            // index ("снэп к началу часа") which forced 10:30 taps to become
+            // 10:00–11:00 bookings — admins reported it as "не могу выбрать
+            // 10:30–11:30, либо час с :00, либо никак". Respect the user's
+            // chosen start slot; if it's the very last slot in the day, fall
+            // back to start-1 so we still have a 60-min window.
+            let pairStart = slotIdx;
+            let pairEnd = pairStart + 1;
+            if (pairEnd >= timeSlots.length) {
+                pairStart = timeSlots.length - 2;
+                pairEnd = timeSlots.length - 1;
+                if (pairStart < 0) return;
+            }
             const slots: string[] = [];
             for (let i = pairStart; i <= pairEnd; i++) {
                 if (isSlotOccupied(resId, timeSlots[i])) return; // both must be free
@@ -813,7 +907,12 @@ function BookingsChessboard({
                                     )}
                                 >
                                     <span className="text-[9px] font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
-                                    <span className="text-sm font-bold">{format(day, 'd')}</span>
+                                    <span className="text-sm font-bold">
+                                        {format(day, 'd')}
+                                        <span className="ml-0.5 text-[8px] font-medium uppercase opacity-70">
+                                            {format(day, 'MMM', { locale: ru })}
+                                        </span>
+                                    </span>
                                     {hasBooking && <span className={clsx("absolute bottom-1 w-1.5 h-1.5 rounded-full", isSelected ? "bg-white/80" : "bg-unbox-green")} />}
                                 </button>
                             );
@@ -888,9 +987,30 @@ function BookingsChessboard({
                     </div>
                 )}
 
-                {/* 2-column time grid */}
+                {/* 2-column time grid.
+                    Pre-compute rendered cells so мы можем пропустить целые
+                    строки, где оба слота — это mid-cell брони (return null).
+                    Без этого получались «пустые ряды» внутри длинной чужой
+                    брони, и шахматка визуально казалась бесконечно занятой,
+                    маскируя свободные окошки между бронями. */}
                 <div className="rounded-2xl bg-white/60 backdrop-blur-sm border border-unbox-light/30 p-2 space-y-1.5">
-                    {mobileRes && mobileHourPairs.map(([left, right]) => (
+                    {mobileRes && mobileHourPairs.map(([left, right]) => {
+                        // Skip rows where both cells are mid-slots of bookings
+                        // (both will return null below). Без этого внутри
+                        // длинной брони (3+ часа) рендерилась цепочка пустых
+                        // div'ов с gap, делая страницу визуально «занятой».
+                        const leftIsMid = !!left && (() => {
+                            const mB = findBookingAtSlot(dayUserBookings, mobileRes.id, left);
+                            const pB = !mB ? findBookingAtSlot(dayPublicBookings, mobileRes.id, left) : null;
+                            return !!mB || (!!pB && timeToMins(pB.startTime!) !== timeToMins(left));
+                        })();
+                        const rightIsMid = !!right && (() => {
+                            const mB = findBookingAtSlot(dayUserBookings, mobileRes.id, right);
+                            const pB = !mB ? findBookingAtSlot(dayPublicBookings, mobileRes.id, right) : null;
+                            return !!mB || (!!pB && timeToMins(pB.startTime!) !== timeToMins(right));
+                        })();
+                        if (leftIsMid && (rightIsMid || !right)) return null;
+                        return (
                         <div key={left} className="flex gap-1.5">
                             {[left, right].map((time, colIdx) => {
                                 if (!time) return <div key={`empty-${colIdx}`} className="flex-1" />;
@@ -924,42 +1044,92 @@ function BookingsChessboard({
                                     );
                                 }
 
-                                // Skip mid-slots of bookings
+                                // Skip mid-slots — they were briefly rendered as
+                                // tappable "↑ продолжение" cells, but for длинных
+                                // (2-3 ч) броней это превращало шахматку в
+                                // сплошное серое полотно: 5 строк подряд
+                                // "продолжение" визуально топили рядом стоящие
+                                // свободные ячейки 12:00/20:00, и админы
+                                // жаловались "всё занято, хотя есть окошки".
+                                // Возвращаем null + позже row-с-обоих-null
+                                // не рендерится — это даёт компактную картинку,
+                                // как в CRM-шахматке. Тап по чужой брони
+                                // нужно делать на её стартовой ячейке.
                                 if (myB || (pubB && timeToMins(pubB.startTime!) !== timeToMins(time))) {
                                     return null;
                                 }
-
-                                // Other user's booking
+                                // Other user's booking. On mobile we surface the
+                                // "Следить за слотом" affordance: tapping the
+                                // busy cell opens the same modal the desktop
+                                // chessboard uses. Re-rentable slots show a
+                                // dashed amber tint instead — those are
+                                // available right now without subscribing.
                                 if (pubB && timeToMins(pubB.startTime!) === timeToMins(time)) {
                                     const endTime = minsToTime(timeToMins(pubB.startTime!) + pubB.duration);
                                     const pubName = usersMap?.get(pubB.userId) || '';
+                                    const isReRentAvail = pubB.isReRentListed;
                                     return (
                                         <button
                                             key={time}
-                                            className="flex-1 flex flex-col justify-center px-2.5 py-2 rounded-xl text-left min-h-[48px] bg-gray-100 border border-gray-200 text-gray-400"
+                                            onClick={() => {
+                                                if (isReRentAvail) {
+                                                    toast.info('Этот слот можно занять прямо сейчас — переаренда.');
+                                                    return;
+                                                }
+                                                openWaitlistFor(pubB);
+                                            }}
+                                            title="Тап — следить за слотом"
+                                            className={clsx(
+                                                'flex-1 flex flex-col justify-center px-2.5 py-2 rounded-xl text-left min-h-[48px] active:scale-[0.97] transition-transform',
+                                                isReRentAvail
+                                                    ? 'bg-amber-50 border border-amber-300 border-dashed text-amber-700'
+                                                    : 'bg-gray-100 border border-gray-200 text-gray-500'
+                                            )}
                                         >
-                                            <div className="text-[10px] font-bold tabular-nums">{pubB.startTime}–{endTime}</div>
-                                            <div className="text-[10px] truncate">{pubName || 'Занято'}</div>
+                                            <div className="flex items-center justify-between gap-1">
+                                                <div className="text-[10px] font-bold tabular-nums">{pubB.startTime}–{endTime}</div>
+                                                {!isReRentAvail && <Bell size={11} className="text-orange-500 shrink-0" />}
+                                            </div>
+                                            <div className="text-[10px] truncate">
+                                                {isReRentAvail ? '↻ можно занять' : (pubName || 'Занято — тап чтобы следить')}
+                                            </div>
                                         </button>
                                     );
                                 }
 
-                                // Free slot
+                                // Free slot. Mirror desktop's CRM-hint styling: when
+                                // the user is booking a cabinet for an existing CRM
+                                // session, paint slots inside the session's time
+                                // window with the same orange diagonal-stripe hint
+                                // so they can immediately see where the session
+                                // sits — previously only desktop had this.
+                                const isCrmHint = !isPast && !!crmMode &&
+                                    crmHintDate === format(selectedDate, 'yyyy-MM-dd') &&
+                                    timeToMins(time) >= crmHintStartMins &&
+                                    timeToMins(time) < crmHintEndMins;
                                 return (
                                     <button
                                         key={time}
                                         onClick={() => !isPast && handleMobileTap(mobileRes.id, time, isHourCol)}
                                         disabled={isPast}
+                                        title={isCrmHint && crmMode ? `Время сессии: ${format(parseISO(crmMode.date), 'HH:mm')} (${crmMode.duration ?? 60} мин)` : undefined}
                                         className={clsx(
                                             'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all min-h-[48px]',
                                             isPast
                                                 ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
                                                 : newSel
                                                     ? 'bg-unbox-green text-white shadow-sm'
-                                                    : isPeakTime(time)
-                                                        ? 'bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]'
-                                                        : 'bg-white text-unbox-dark border border-unbox-light/40 active:scale-[0.97]'
+                                                    : isCrmHint
+                                                        ? 'text-unbox-dark active:scale-[0.97]'
+                                                        : isPeakTime(time)
+                                                            ? 'bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]'
+                                                            : 'bg-white text-unbox-dark border border-unbox-light/40 active:scale-[0.97]'
                                         )}
+                                        style={(!newSel && isCrmHint) ? {
+                                            background: 'repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(249,115,22,0.18) 5px, rgba(249,115,22,0.18) 10px)',
+                                            outline: '1.5px dashed rgba(249,115,22,0.6)',
+                                            outlineOffset: '-1px',
+                                        } : undefined}
                                     >
                                         <span className={clsx('text-sm font-bold tabular-nums', newSel ? 'text-white' : isPast ? 'text-gray-300' : 'text-unbox-dark')}>
                                             {time}
@@ -968,6 +1138,8 @@ function BookingsChessboard({
                                             <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                                             </div>
+                                        ) : isCrmHint ? (
+                                            <div className="w-5 h-5 rounded-full border-2 border-orange-400" style={{ background: 'rgba(249,115,22,0.15)' }} />
                                         ) : !isPast ? (
                                             <div className="w-5 h-5 rounded-full border-2 border-unbox-light" />
                                         ) : null}
@@ -975,7 +1147,8 @@ function BookingsChessboard({
                                 );
                             })}
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 {/* Bottom bar */}
@@ -1081,7 +1254,7 @@ function BookingsChessboard({
                                 </span>
                                 <span className="ml-2 text-unbox-grey">{activeBooking.finalPrice} ₾</span>
                             </div>
-                            {canModify(activeBooking) && (
+                            {canModify(activeBooking) ? (
                                 <div className="grid grid-cols-3 gap-2">
                                     <button onClick={() => { onReschedule(activeBooking); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-unbox-light text-unbox-dark">Перенести</button>
                                     <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-amber-50 text-amber-700">
@@ -1089,7 +1262,35 @@ function BookingsChessboard({
                                     </button>
                                     <button onClick={() => { onCancel(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-red-50 text-red-600">Отменить</button>
                                 </div>
-                            )}
+                            ) : activeBooking.status === 'confirmed' && !(() => {
+                                const [bh, bm] = (activeBooking.startTime || '00:00').split(':').map(Number);
+                                const dp = parseUTC(activeBooking.date);
+                                const endUTC = Date.UTC(dp.getUTCFullYear(), dp.getUTCMonth(), dp.getUTCDate(), bh - 4, bm + (activeBooking.duration || 60), 0, 0);
+                                return endUTC < Date.now();
+                            })() ? (
+                                // Same UX as desktop: show why cancel is gone
+                                // and offer переаренду as the alternative the
+                                // client actually has in this window.
+                                <div className="space-y-2">
+                                    {activeBooking.isReRentListed ? (
+                                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-center text-amber-700">
+                                            ♻️ Выставлено на переаренду
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="text-[11px] text-unbox-grey text-center italic px-2">
+                                                Менее 24ч до начала — самостоятельная отмена недоступна по правилам бронирования.
+                                            </div>
+                                            <button
+                                                onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }}
+                                                className="w-full py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
+                                            >
+                                                ♻️ Выставить на переаренду
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 )}
@@ -1107,6 +1308,21 @@ function BookingsChessboard({
                         }}
                     />
                 )}
+                {/* Waitlist modal — копия desktop-mount'а, иначе на мобильном
+                    ранний return закрывает компонент до того как мы дойдём до
+                    единственного <WaitlistSubscribeModal> внизу — state
+                    обновляется при тапе но окно нигде не рендерится. */}
+                <WaitlistSubscribeModal
+                    isOpen={!!waitlistTarget}
+                    onClose={() => setWaitlistTarget(null)}
+                    resourceId={waitlistTarget?.resourceId ?? ''}
+                    resourceName={waitlistTarget?.resourceName ?? ''}
+                    locationName={waitlistTarget?.locationName}
+                    date={waitlistTarget?.date ?? new Date()}
+                    startTime={waitlistTarget?.startTime ?? ''}
+                    endTime={waitlistTarget?.endTime ?? ''}
+                    extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+                />
             </div>
         );
     }
@@ -1141,7 +1357,15 @@ function BookingsChessboard({
                                 <span className={clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelected ? "opacity-80" : "opacity-50")}>
                                     {format(day, 'EEE', { locale: ru })}
                                 </span>
-                                <span className="text-base font-bold leading-none">{format(day, 'd')}</span>
+                                {/* Day-number + month abbreviation so a week
+                                    that straddles two months (29 апр → 1 мая)
+                                    isn't ambiguous. */}
+                                <span className="text-base font-bold leading-none">
+                                    {format(day, 'd')}
+                                    <span className="ml-1 text-[10px] font-medium uppercase tracking-wider opacity-70">
+                                        {format(day, 'MMM', { locale: ru })}
+                                    </span>
+                                </span>
                                 {hasBooking && (
                                     <span className={clsx(
                                         "absolute bottom-1 w-1.5 h-1.5 rounded-full",
@@ -1303,35 +1527,19 @@ function BookingsChessboard({
                                         const pubSpan = Math.max(1, Math.round(pubB.duration / 30));
                                         skipUntilIdx = idx + pubSpan - 1;
                                         // Excel #14 — "поставить слот на отслеживание".
-                                        // Click on a busy slot opens a confirm dialog, then
-                                        // POSTs /waitlist with this resource+date+time.
-                                        // When the booking is cancelled / rescheduled,
-                                        // backend's notify_waitlist_for_freed_slot pings
-                                        // the subscriber via in-app + Telegram (if linked).
-                                        const handleWaitlistClick = async () => {
+                                        // Click on a busy slot opens the WaitlistSubscribeModal
+                                        // (mobile-friendly bottom sheet, replaces window.confirm).
+                                        // The modal POSTs /waitlist on confirm; backend's
+                                        // notify_waitlist_for_freed_slot pings any subscriber
+                                        // when the slot frees up — broadened to the whole
+                                        // location, so subscribing to Кабинет 5 also fires
+                                        // when Кабинет 6/7/8/9 in the same branch frees.
+                                        const handleWaitlistClick = () => {
                                             if (isReRentAvailable) {
                                                 toast.info('Слот доступен для переаренды — выберите его внизу шахматки.');
                                                 return;
                                             }
-                                            const endTimeStr = minsToTime(timeToMins(pubB.startTime!) + pubB.duration);
-                                            const dayLabel = format(selectedDate, 'd MMMM', { locale: ru });
-                                            const ok = window.confirm(
-                                                `Подписаться на этот слот?\n\n` +
-                                                `${r.name} · ${dayLabel}, ${pubB.startTime}–${endTimeStr}\n\n` +
-                                                `Если бронь отменят, пришлём уведомление, чтобы успели занять.`
-                                            );
-                                            if (!ok) return;
-                                            try {
-                                                await waitlistApi.addToWaitlist({
-                                                    resourceId: r.id,
-                                                    date: format(selectedDate, "yyyy-MM-dd'T'00:00:00"),
-                                                    startTime: pubB.startTime!,
-                                                    endTime: endTimeStr,
-                                                });
-                                                toast.success('Подписка оформлена. Сообщим, как только освободится.');
-                                            } catch (err: any) {
-                                                toast.error(err?.response?.data?.detail || 'Не удалось подписаться');
-                                            }
+                                            openWaitlistFor(pubB);
                                         };
                                         cells.push(
                                             <td
@@ -1805,6 +2013,47 @@ function BookingsChessboard({
                     }}
                 />
             )}
+
+            {seriesMoveTarget && (
+                <RescheduleScopeChoiceModal
+                    bookingId={seriesMoveTarget.booking.id}
+                    newDate={seriesMoveTarget.newDate}
+                    newStartTime={seriesMoveTarget.newStartTime}
+                    newResourceId={seriesMoveTarget.newResourceId}
+                    onClose={() => setSeriesMoveTarget(null)}
+                    onCompleted={async () => {
+                        // CRM-mode drag: keep the linked session in sync
+                        // with the new wall-clock the booking just landed
+                        // on. Only the anchor's time matters here — the
+                        // session was linked to that one row.
+                        if (crmMode?.sessionId) {
+                            try {
+                                await updateSession(crmMode.sessionId, {
+                                    date: `${seriesMoveTarget.newDate}T${seriesMoveTarget.newStartTime}:00`,
+                                });
+                            } catch (err: any) {
+                                toast.error(err.response?.data?.detail || 'Не удалось обновить сессию');
+                            }
+                        }
+                        setSeriesMoveTarget(null);
+                        refreshBookings();
+                    }}
+                />
+            )}
+
+            {/* Waitlist subscribe — single modal instance shared by desktop
+                and mobile slot taps. Opens via openWaitlistFor(). */}
+            <WaitlistSubscribeModal
+                isOpen={!!waitlistTarget}
+                onClose={() => setWaitlistTarget(null)}
+                resourceId={waitlistTarget?.resourceId ?? ''}
+                resourceName={waitlistTarget?.resourceName ?? ''}
+                locationName={waitlistTarget?.locationName}
+                date={waitlistTarget?.date ?? new Date()}
+                startTime={waitlistTarget?.startTime ?? ''}
+                endTime={waitlistTarget?.endTime ?? ''}
+                extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+            />
         </div>
     );
 }
@@ -1816,9 +2065,64 @@ export function MyBookingsPage() {
     const { currentUser, bookings, users, fetchUsers, cancelBooking, fetchBookings } = useUserStore();
     const startEditing = useBookingStore(s => s.startEditing);
     const { clients: crmClients, fetchClients } = useCrmStore();
-    const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
+    // Default to "Список" instead of "Шахматка" — Анна, Райская и Миша
+    // жаловались, что шахматка с большим количеством броней (33+) на телефоне
+    // нечитаема: нужно тыкать дату → кабинет → ползать пальцем по сетке.
+    // Список сразу даёт хронологический обзор «вот ближайшие, вот прошедшие»
+    // и кнопки переноса/отмены/продления для каждой брони. CRM-режим всё
+    // равно переключает на сетку (см. effect ниже), так что воркфлоу
+    // «забронировать кабинет под клиента» не страдает.
+    const [viewMode, setViewMode] = useState<'list' | 'grid' | 'series'>('list');
     const [mobileLocFilter, setMobileLocFilter] = useState<string>('all');
+    // Deep-link from Telegram series-end reminder. When the URL has
+    // ?series=<group_id>, the page jumps to list view, scrolls to the
+    // next-upcoming booking of that series, and surfaces a banner with
+    // "Продлить" + "ОК, не продлевать" buttons (the latter calls
+    // dismissSeriesEndReminder so no more pings fire).
+    const [searchParams, setSearchParams] = useSearchParams();
+    const highlightedSeriesId = searchParams.get('series');
+    const clearHighlightedSeries = useCallback(() => {
+        const next = new URLSearchParams(searchParams);
+        next.delete('series');
+        setSearchParams(next, { replace: true });
+    }, [searchParams, setSearchParams]);
+    useEffect(() => {
+        if (!highlightedSeriesId) return;
+        setViewMode('list');
+        // Wait for cards to render before scrolling. 250 ms is long
+        // enough for the bookings list to mount after a cold deep-link.
+        const t = window.setTimeout(() => {
+            const el = document.querySelector<HTMLElement>(`[data-series-anchor="${highlightedSeriesId}"]`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 250);
+        return () => window.clearTimeout(t);
+    }, [highlightedSeriesId]);
     const [publicBookings, setPublicBookings] = useState<BookingHistoryItem[]>([]);
+
+    // Recurring-series info, fetched ONCE per page mount instead of once per
+    // BookingCard. Earlier the strip on each card hit /recurring-groups on
+    // its own useEffect — for a specialist with 50+ active series this
+    // exploded into 50+ parallel calls and tripped the 30/min rate limit.
+    // Now we hit the endpoint once and pass a Map down to each card.
+    const [seriesInfoMap, setSeriesInfoMap] = useState<Map<string, { futureCount: number; lastDate: string | null; pattern: string }>>(new Map());
+    const refreshSeriesInfo = useCallback(async () => {
+        try {
+            const groups = await bookingsApi.getRecurringGroups();
+            const m = new Map<string, { futureCount: number; lastDate: string | null; pattern: string }>();
+            groups.forEach(g => {
+                const lastDate = (g as any).lastDate ?? (g as any).last_date ?? null;
+                m.set(g.recurringGroupId, {
+                    futureCount: (g as any).futureCount ?? (g as any).future_count ?? 0,
+                    lastDate,
+                    pattern: g.pattern,
+                });
+            });
+            setSeriesInfoMap(m);
+        } catch {
+            // Quiet — series strip just won't render the count, no toast spam.
+        }
+    }, []);
+    useEffect(() => { refreshSeriesInfo(); }, [refreshSeriesInfo]);
 
     // CRM booking mode: passed from CRM Dashboard "Без кабинета"
     const [crmMode, setCrmMode] = useState<{
@@ -1854,6 +2158,46 @@ export function MyBookingsPage() {
         bookingsApi.getPublicBookings().then(setPublicBookings).catch(() => {});
     }, [fetchBookings]);
 
+    // Deep-link from /dashboard/waitlist "Забронировать" — when the user
+    // taps that button, route state carries focusResourceId + forceView.
+    // We jump straight to the chessboard, with the resource's location
+    // already filtered, so the user doesn't have to hunt for the cabinet
+    // after a slot-freed alert.
+    useEffect(() => {
+        const focusId = (location.state as any)?.focusResourceId as string | undefined;
+        const forceView = (location.state as any)?.forceView as 'grid' | 'list' | 'series' | undefined;
+        if (focusId) {
+            const r = RESOURCES.find(x => x.id === focusId);
+            if (r?.locationId) setMobileLocFilter(r.locationId);
+        }
+        if (forceView && forceView !== viewMode) {
+            setViewMode(forceView);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.state]);
+
+    // Auto-refresh on mount + when the tab regains focus.
+    // Why: App.tsx fires fetchBookings() once on initial app mount, but if
+    // a user logs in in another tab, navigates from /login → /dashboard/bookings,
+    // or comes back from a booking they just created in /booking, the store
+    // can be stale or empty. Users were noticing they had to manually refresh
+    // the page to see their bookings — this closes that gap.
+    useEffect(() => {
+        refreshBookings();
+        const onFocus = () => {
+            if (document.visibilityState === 'visible') {
+                refreshBookings();
+            }
+        };
+        document.addEventListener('visibilitychange', onFocus);
+        window.addEventListener('focus', onFocus);
+        return () => {
+            document.removeEventListener('visibilitychange', onFocus);
+            window.removeEventListener('focus', onFocus);
+        };
+        // refreshBookings is stable via useCallback — listed below for lint
+    }, [refreshBookings]);
+
     const usersMap = useMemo(() => {
         const m = new Map<string, string>();
         users.forEach(u => { m.set(u.email, u.name); m.set(u.id, u.name); });
@@ -1869,18 +2213,59 @@ export function MyBookingsPage() {
         confirmLabel?: string;
     }>({ isOpen: false, title: '', message: null, onConfirm: () => {} });
 
-    // Always filter by the logged-in user's own email — even for admins. Previously
-    // admins saw ALL bookings in /dashboard/bookings which (a) made bookings they'd
-    // created on behalf of clients appear as "theirs", and (b) caused false conflict
-    // warnings on the personal chessboard when creating parallel bookings for clients.
-    // Admins have a dedicated /admin/bookings page to see all bookings.
-    const userBookings = bookings
-        .filter(b => b.userId === currentUser?.email)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Recurring-series cancel choice. Set when the user clicks "Отменить
+    // бронь" on a row that's part of a series; renders a 3-button modal
+    // (this / future / cancel) instead of the single-row confirm above.
+    const [seriesCancelTarget, setSeriesCancelTarget] = useState<BookingHistoryItem | null>(null);
 
-    // Split into upcoming and past
-    const upcomingBookings = userBookings.filter(b => b.status === 'confirmed');
-    const pastBookings = userBookings.filter(b => b.status === 'completed' || b.status === 'cancelled' || b.status === 're-rented' || b.status === 'rescheduled');
+    // Filter to "mine" — even for admins. /admin/bookings exists for admins
+    // who want to see everything. Match by:
+    //   • userUuid (every modern booking has it; unambiguous)
+    //   • current email (legacy rows + manual entries)
+    //   • any prior email recorded in this user's `commentHistory`
+    //     (email_change events) — Anna's case: she had bookings under a
+    //     synthetic/old email and the strict equality used to drop them
+    //     even though the backend `/me` endpoint already returned them.
+    const knownEmails = (() => {
+        const set = new Set<string>();
+        if (currentUser?.email) set.add(currentUser.email.toLowerCase());
+        const ch: any[] = (currentUser as any)?.commentHistory || [];
+        ch.forEach(e => {
+            if (e?.type === 'email_change' && typeof e.old_email === 'string') {
+                set.add(String(e.old_email).toLowerCase());
+            }
+        });
+        return set;
+    })();
+    const userBookings = bookings.filter(b => {
+        if (currentUser?.id && (b as any).userUuid === currentUser.id) return true;
+        const uid = (b.userId || '').toLowerCase();
+        return uid && knownEmails.has(uid);
+    });
+
+    // Sort key = booking start as a Date (date column + start_time). Used to
+    // make "Ближайшие" list nearest-first instead of recent-first. Anna's
+    // complaint: a freshly-created series of 12 weekly slots had the same
+    // `createdAt`, so the list ordered by createdAt randomly within the
+    // batch and the user landed on "29 июня, 15 июня, 1 июня" — far-future
+    // dates she "до июня ещё не дожила".
+    const startMs = (b: BookingHistoryItem) => {
+        const d = parseUTC(b.date);
+        if (b.startTime) {
+            const [h, m] = b.startTime.split(':').map(Number);
+            d.setUTCHours(h || 0, m || 0, 0, 0);
+        }
+        return d.getTime();
+    };
+
+    // Split into upcoming and past, each sorted in the direction that
+    // surfaces "what matters next" first.
+    const upcomingBookings = userBookings
+        .filter(b => b.status === 'confirmed')
+        .sort((a, b) => startMs(a) - startMs(b)); // earliest upcoming first
+    const pastBookings = userBookings
+        .filter(b => b.status === 'completed' || b.status === 'cancelled' || b.status === 're-rented' || b.status === 'rescheduled')
+        .sort((a, b) => startMs(b) - startMs(a)); // most-recently-past first
 
     const handleEdit = (booking: any) => {
         startEditing(booking, 'reschedule');
@@ -1890,6 +2275,13 @@ export function MyBookingsPage() {
     const handleCancel = (id: string) => {
         const booking = bookings.find(b => b.id === id);
         if (!booking) return;
+
+        // Series → defer to choice modal instead of single-row confirm.
+        if (booking.recurringGroupId) {
+            setSeriesCancelTarget(booking);
+            return;
+        }
+
         const refundText = booking.paymentMethod === 'subscription'
             ? `${booking.hoursDeducted || (booking.duration / 60)} ч. будут возвращены на ваш абонемент.`
             : `${booking.finalPrice} ₾ будут возвращены на ваш баланс.`;
@@ -1911,7 +2303,21 @@ export function MyBookingsPage() {
                     toast.success('Бронирование отменено');
                     refreshBookings();
                 } catch (error: any) {
-                    toast.error(error.response?.data?.detail || 'Не удалось отменить бронирование');
+                    const detail = error?.response?.data?.detail || 'Не удалось отменить бронирование';
+                    // <24h hard-block: backend returns Russian text mentioning "24"
+                    // and "переаренду / администратором". Surface a sonner action
+                    // button so the user can hop straight into Telegram with admin.
+                    if (typeof detail === 'string' && /24\s*час/i.test(detail)) {
+                        toast.error(detail, {
+                            duration: 10000,
+                            action: {
+                                label: 'Написать админу',
+                                onClick: () => window.open('https://t.me/UnboxCenter', '_blank'),
+                            },
+                        });
+                    } else {
+                        toast.error(typeof detail === 'string' ? detail : 'Не удалось отменить бронирование');
+                    }
                 }
             }
         });
@@ -1963,24 +2369,143 @@ export function MyBookingsPage() {
     };
 
     return (
+        <>
+            <GridHouseMyBookings
+                viewMode={viewMode} setViewMode={setViewMode}
+                userBookings={userBookings} bookings={bookings}
+                upcomingBookings={upcomingBookings} pastBookings={pastBookings}
+                handleEdit={handleEdit} handleCancel={handleCancel}
+                handleReRent={handleReRent} handleCancelReRent={handleCancelReRent}
+                handleBookAgain={handleBookAgain} handleLinkClient={handleLinkClient}
+                currentUser={currentUser} usersMap={usersMap}
+                publicBookings={publicBookings} refreshBookings={refreshBookings}
+                crmMode={crmMode} setCrmMode={setCrmMode}
+                crmClients={crmClients} modalConfig={modalConfig} setModalConfig={setModalConfig}
+                mobileLocFilter={mobileLocFilter} setMobileLocFilter={setMobileLocFilter}
+                navigate={navigate} location={location}
+                seriesInfoMap={seriesInfoMap} refreshSeriesInfo={refreshSeriesInfo}
+                highlightedSeriesId={highlightedSeriesId}
+                clearHighlightedSeries={clearHighlightedSeries}
+            />
 
-        <GridHouseMyBookings
-            viewMode={viewMode} setViewMode={setViewMode}
-            userBookings={userBookings} bookings={bookings}
-            upcomingBookings={upcomingBookings} pastBookings={pastBookings}
-            handleEdit={handleEdit} handleCancel={handleCancel}
-            handleReRent={handleReRent} handleCancelReRent={handleCancelReRent}
-            handleBookAgain={handleBookAgain} handleLinkClient={handleLinkClient}
-            currentUser={currentUser} usersMap={usersMap}
-            publicBookings={publicBookings} refreshBookings={refreshBookings}
-            crmMode={crmMode} setCrmMode={setCrmMode}
-            crmClients={crmClients} modalConfig={modalConfig} setModalConfig={setModalConfig}
-            mobileLocFilter={mobileLocFilter} setMobileLocFilter={setMobileLocFilter}
-            navigate={navigate} location={location}
-        />
+            {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
+                <CancelBookingChoiceModal
+                    bookingId={seriesCancelTarget.id}
+                    groupId={seriesCancelTarget.recurringGroupId}
+                    onClose={() => setSeriesCancelTarget(null)}
+                    onCompleted={async () => {
+                        setSeriesCancelTarget(null);
+                        refreshBookings();
+                    }}
+                />
+            )}
+        </>
     );
 }
 
+
+
+// ─── Series View — group user's recurring bookings by group_id ───────────────
+// Surfaces "Постоянные брони" on mobile so a regular client-specialist can
+// find all their recurring slots in one place. Each group renders the
+// upcoming occurrences as BookingCards (so all action buttons — перенести,
+// отменить, продлить серию — keep working). Past occurrences are hidden;
+// non-recurring bookings are filtered out entirely.
+function SeriesView({
+    bookings,
+    seriesInfoMap,
+    onSeriesChanged,
+    onEdit, onCancel, onReRent, onBookAgain, onLinkClient,
+    crmClients,
+}: {
+    bookings: BookingHistoryItem[];
+    seriesInfoMap: Map<string, { futureCount: number; lastDate: string | null; pattern: string }>;
+    onSeriesChanged: () => void | Promise<void>;
+    onEdit: (b: BookingHistoryItem) => void;
+    onCancel: (id: string) => void;
+    onReRent: (id: string) => void;
+    onBookAgain: (b: BookingHistoryItem) => void;
+    onLinkClient: (id: string, clientId: string | null) => void;
+    crmClients: any[];
+}) {
+    const grouped = useMemo(() => {
+        const parseSort = (b: BookingHistoryItem): number => {
+            try {
+                const d = new Date(b.date as any);
+                return d.getTime() || 0;
+            } catch { return 0; }
+        };
+        const m = new Map<string, BookingHistoryItem[]>();
+        const now = Date.now();
+        bookings.forEach(b => {
+            if (!b.recurringGroupId) return;
+            if (b.status !== 'confirmed' && b.status !== 'completed') return;
+            const t = parseSort(b);
+            // Only future / today; past occurrences shown in normal List view.
+            if (t && t < now - 12 * 3600 * 1000) return;
+            const arr = m.get(b.recurringGroupId) || [];
+            arr.push(b);
+            m.set(b.recurringGroupId, arr);
+        });
+        m.forEach(arr => arr.sort((a, b) => parseSort(a) - parseSort(b)));
+        return Array.from(m.entries()).sort(([, a], [, b]) => parseSort(a[0]) - parseSort(b[0]));
+    }, [bookings]);
+
+    if (grouped.length === 0) {
+        return (
+            <div style={{ padding: '64px 16px', textAlign: 'center', color: GH.ink30 }}>
+                <div style={{ ...ghmbMono, marginBottom: 8 }}>ПОСТОЯННЫХ БРОНЕЙ НЕТ</div>
+                <div style={{ fontSize: 13 }}>
+                    Создайте серию из шахматки — несколько одинаковых слотов на ⭐
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{ padding: '16px' }}>
+            {grouped.map(([groupId, items]) => {
+                const head = items[0];
+                const info = seriesInfoMap.get(groupId);
+                const patternLabel = info?.pattern === 'monthly' ? 'Ежемес.'
+                    : info?.pattern === 'biweekly' ? '2 нед.'
+                    : 'Еженед.';
+                const resource = RESOURCES.find(r => r.id === head.resourceId);
+                return (
+                    <div key={groupId} style={{ marginBottom: 24 }}>
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+                            paddingBottom: 6, borderBottom: `2px solid ${GH.ink}`,
+                        }}>
+                            <span style={{ color: '#f97316' }}>⭐</span>
+                            <span style={{ fontSize: 14, fontWeight: 700 }}>
+                                {resource?.name || head.resourceId}
+                            </span>
+                            <span style={{ ...ghmbMono, color: GH.ink60 }}>
+                                {head.startTime} · {patternLabel} · {info?.futureCount ?? items.length} впереди
+                            </span>
+                        </div>
+                        {items.slice(0, 6).map(b => (
+                            <BookingCard
+                                key={b.id} booking={b}
+                                onEdit={onEdit} onCancel={onCancel} onReRent={onReRent}
+                                onBookAgain={onBookAgain}
+                                onLinkClient={onLinkClient} crmClients={crmClients}
+                                seriesInfoMap={seriesInfoMap}
+                                onSeriesChanged={onSeriesChanged}
+                            />
+                        ))}
+                        {items.length > 6 && (
+                            <div style={{ ...ghmbMono, color: GH.ink30, padding: '8px 0' }}>
+                                + ещё {items.length - 6} в этой серии
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
 
 
 // ─── Booking Card (List view) ────────────────────────────────────────────────
@@ -1993,6 +2518,10 @@ function BookingCard({
     onBookAgain,
     onLinkClient: _onLinkClient,
     isPast = false,
+    seriesInfoMap,
+    onSeriesChanged,
+    highlightedSeriesId,
+    clearHighlightedSeries,
 }: {
     booking: BookingHistoryItem;
     crmClients: Array<{ id: string; name: string; aliasCode?: string }>;
@@ -2002,7 +2531,33 @@ function BookingCard({
     onBookAgain: (booking: BookingHistoryItem) => void;
     onLinkClient: (bookingId: string, clientId: string | null) => void;
     isPast?: boolean;
+    // Series map is fetched once per page in MyBookingsPage and shared across
+    // all cards. Earlier each card hit /recurring-groups on mount → 50 API
+    // calls for a heavy specialist, tripping the rate limit.
+    seriesInfoMap?: Map<string, { futureCount: number; lastDate: string | null; pattern: string }>;
+    onSeriesChanged?: () => void;
+    // Telegram series-end deep-link: when set, ALL cards of that group
+    // render with a highlighted ring; the next-upcoming one (first in
+    // DOM order with `data-series-anchor`) is the scroll anchor and
+    // shows the action banner with Продлить / ОК.
+    highlightedSeriesId?: string | null;
+    clearHighlightedSeries?: () => void;
 }) {
+    const isHighlighted = !!highlightedSeriesId && booking.recurringGroupId === highlightedSeriesId;
+    const [dismissing, setDismissing] = useState(false);
+    const handleDismissSeriesReminder = async () => {
+        if (!booking.recurringGroupId) return;
+        setDismissing(true);
+        try {
+            await bookingsApi.dismissSeriesEndReminder(booking.recurringGroupId);
+            toast.success('Серия завершится в срок — больше не напомним');
+            clearHighlightedSeries?.();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось сохранить');
+        } finally {
+            setDismissing(false);
+        }
+    };
     const canMod = (() => {
         if (booking.status !== 'confirmed' || !booking.startTime) return false;
         const [h, m] = booking.startTime.split(':').map(Number);
@@ -2013,14 +2568,57 @@ function BookingCard({
 
     const clientInfo = booking.crmClientId ? crmClients.find(c => c.id === booking.crmClientId) : null;
 
+    // Pulled from the page-level Map (single source of truth). null when
+    // the page hasn't fetched yet OR this booking isn't part of any
+    // tracked series.
+    const seriesInfo = booking.recurringGroupId
+        ? (seriesInfoMap?.get(booking.recurringGroupId) ?? null)
+        : null;
+    const [extending, setExtending] = useState(false);
+
+    const handleExtend = async () => {
+        if (!booking.recurringGroupId) return;
+        const raw = window.prompt('На сколько встреч продлить серию?', '4');
+        if (!raw) return;
+        const n = parseInt(raw, 10);
+        if (!Number.isFinite(n) || n < 1 || n > 52) {
+            toast.error('Введите число от 1 до 52');
+            return;
+        }
+        setExtending(true);
+        try {
+            const res = await bookingsApi.extendRecurringSeries(booking.recurringGroupId, n);
+            toast.success(`Серия продлена: +${res?.created ?? n}`);
+            // Refresh the page-level map (one call) instead of refetching here.
+            onSeriesChanged?.();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось продлить серию');
+        } finally {
+            setExtending(false);
+        }
+    };
+
     return (
-        <Card className={clsx("p-4 sm:p-6", isPast && "opacity-70")}>
+        <Card
+            className={clsx(
+                "p-4 sm:p-6",
+                isPast && "opacity-70",
+                isHighlighted && "ring-2 ring-amber-400 shadow-lg",
+            )}
+            data-series-anchor={isHighlighted ? booking.recurringGroupId : undefined}
+        >
             <div className="flex justify-between items-start mb-3 gap-2">
                 <div className="min-w-0">
-                    <div className="text-[10px] sm:text-xs text-unbox-grey mb-0.5">
-                        {format(new Date(booking.createdAt), 'd MMM yyyy, HH:mm', { locale: ru })}
+                    {/* Reordered 2026-05-07: дата/время брони — первой жирной
+                        строкой, кабинет/филиал — второй, дата создания —
+                        в самый низ карточки маленьким серым (см. ниже). Раньше
+                        дата создания висела сверху и путала клиентов с датой
+                        самой брони. */}
+                    <div className="text-base sm:text-lg font-bold flex items-center gap-1.5 text-unbox-dark mb-1">
+                        <Clock size={16} />
+                        {safeFormat(booking.date, 'd MMMM', { locale: ru })}, {booking.startTime} ({booking.duration / 60}ч)
                     </div>
-                    <h3 className="font-bold text-base sm:text-lg mb-0.5">
+                    <h3 className="text-sm sm:text-base font-semibold text-unbox-dark mb-0.5">
                         {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}
                     </h3>
                     <div className="text-xs sm:text-sm text-unbox-grey mb-1">
@@ -2028,10 +2626,6 @@ function BookingCard({
                             booking.format === 'individual' ? 'Индивидуальный' :
                             booking.format === 'intervision' ? 'Интервизия' : 'Групповой'
                         }
-                    </div>
-                    <div className="text-sm text-unbox-dark flex items-center gap-1.5 font-medium">
-                        <Clock size={14} />
-                        {format(parseUTC(booking.date), 'd MMMM', { locale: ru })}, {booking.startTime} ({booking.duration / 60}ч)
                     </div>
                     {clientInfo && (
                         <div className="text-xs text-unbox-green flex items-center gap-1 mt-1">
@@ -2098,6 +2692,73 @@ function BookingCard({
                 </div>
             </div>
 
+            {/* Recurring-series strip — visible whenever this booking is part
+                of a series. Tells the user "this is recurring", how many slots
+                are still booked ahead, when the last one is, and offers a
+                Продлить button so they can extend before the tail runs out
+                (Anna's exact ask). Only shown for the current user's own
+                series — admin-only series management lives in /admin. */}
+            {booking.recurringGroupId && booking.status === 'confirmed' && !isPast && seriesInfo && (
+                <div className="mt-3 pt-3 border-t border-dashed border-unbox-light flex items-center justify-between gap-2 flex-wrap">
+                    <div className="text-xs text-unbox-grey flex items-center gap-1.5">
+                        <span className="text-orange-500" title="Постоянная бронь">⭐</span>
+                        <span>
+                            Постоянная бронь · впереди&nbsp;
+                            <span className="font-medium text-unbox-dark">{seriesInfo.futureCount}</span>
+                            {seriesInfo.lastDate && (
+                                <>
+                                    {' · до '}
+                                    <span className="font-medium text-unbox-dark">
+                                        {safeFormat(seriesInfo.lastDate, 'd MMM yyyy', { locale: ru })}
+                                    </span>
+                                </>
+                            )}
+                        </span>
+                    </div>
+                    {canMod && (
+                        <button
+                            onClick={handleExtend}
+                            disabled={extending}
+                            className="text-xs px-2.5 py-1 rounded-md border border-unbox-green text-unbox-green hover:bg-unbox-green hover:text-white transition-colors disabled:opacity-50"
+                        >
+                            {extending ? 'Продлеваем…' : 'Продлить'}
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Series-end deep-link banner — shown only when this card matches
+                the ?series=<group_id> param from the Telegram reminder. Gives
+                the user a clear choice: продлить или ОК (завершится в срок). */}
+            {isHighlighted && booking.recurringGroupId && booking.status === 'confirmed' && !isPast && (
+                <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                    <div className="text-sm font-bold text-amber-900 mb-1">
+                        ⭐ Серия подходит к концу
+                    </div>
+                    <div className="text-xs text-amber-800 mb-2">
+                        Хотите продлить или пусть завершится в срок?
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                        {canMod && (
+                            <button
+                                onClick={handleExtend}
+                                disabled={extending}
+                                className="text-xs px-3 py-1.5 rounded-md bg-unbox-green text-white font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+                            >
+                                {extending ? 'Продлеваем…' : 'Продлить серию'}
+                            </button>
+                        )}
+                        <button
+                            onClick={handleDismissSeriesReminder}
+                            disabled={dismissing}
+                            className="text-xs px-3 py-1.5 rounded-md bg-white border border-amber-300 text-amber-900 font-semibold hover:bg-amber-100 transition-colors disabled:opacity-50"
+                        >
+                            {dismissing ? 'Сохраняем…' : 'ОК, завершится в срок'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Payment info */}
             <div className="flex items-center gap-3 pt-3 border-t border-unbox-light text-sm">
                 <div className="flex items-center gap-1.5 text-unbox-dark font-medium">
@@ -2145,14 +2806,23 @@ function BookingCard({
                                         <Key className="w-3.5 h-3.5 text-unbox-green shrink-0" />
                                         <div>
                                             <div className="text-[9px] uppercase font-bold text-unbox-green">Код двери</div>
-                                            <div className="text-xs font-mono font-bold text-unbox-dark">#{booking.id.slice(-4).toUpperCase()}</div>
+                                            {/* Static per-center code (one physical lock per branch).
+                                                Used to render `#XXXX` derived from booking id, but
+                                                that confused users since the lock is actually the
+                                                same for the whole center. */}
+                                            <div className="text-xs font-mono font-bold text-unbox-dark">
+                                                {booking.locationId === 'unbox_uni' ? '7777#'
+                                                    : booking.locationId === 'unbox_one' ? '0408#'
+                                                    : booking.locationId === 'neo_school' ? '1122#'
+                                                    : '—'}
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                         <Wifi className="w-3.5 h-3.5 text-unbox-green shrink-0" />
                                         <div>
                                             <div className="text-[9px] uppercase font-bold text-unbox-green">Wi-Fi</div>
-                                            <div className="text-xs font-mono font-bold text-unbox-dark">unbox2024</div>
+                                            <div className="text-xs font-mono font-bold text-unbox-dark">unboxyourself</div>
                                         </div>
                                     </div>
                                 </div>
@@ -2174,14 +2844,37 @@ function BookingCard({
                 </div>
             )}
 
-            {booking.status === 're-rented' && (
-                <div className="mt-4 pt-4 border-t border-unbox-light">
-                    <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm text-center font-medium border border-green-100 flex flex-col items-center">
-                        <span>Средства возвращены на баланс</span>
-                        <span className="text-lg font-bold text-green-800">+{(booking.finalPrice * 0.5).toFixed(1)} ₾</span>
+            {(() => {
+                // Show the "переарендован" badge when:
+                //  • old status='re-rented' rows (legacy), OR
+                //  • status='cancelled' + cancellation_reason flags it as
+                //    auto-cancelled-due-to-rerent (current backend path).
+                const reason = (booking as any).cancellationReason || '';
+                const isAutoRerent = booking.status === 'cancelled'
+                    && /re-rent|переаренд/i.test(reason);
+                if (booking.status !== 're-rented' && !isAutoRerent) return null;
+
+                // Refund amount: parse from reason string ("· 18.00GEL"),
+                // fall back to half of finalPrice if missing.
+                const m = /([0-9]+(?:\.[0-9]+)?)\s*GEL/i.exec(reason);
+                const refunded = m ? parseFloat(m[1]) : (booking.finalPrice || 0) * 0.5;
+                const ts = (booking as any).updatedAt;
+                return (
+                    <div className="mt-4 pt-4 border-t border-unbox-light">
+                        <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm border border-green-100 flex flex-col items-center gap-1">
+                            <span className="font-semibold">♻️ Слот переарендован</span>
+                            <span className="text-base font-bold text-green-800">
+                                Возвращено 50% · +{refunded.toFixed(2)} ₾
+                            </span>
+                            {ts && (
+                                <span className="text-[11px] text-green-700/80 font-mono">
+                                    {safeFormat(ts, 'd MMM yyyy, HH:mm', { locale: ru })}
+                                </span>
+                            )}
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {(booking.status === 'completed' || booking.status === 'cancelled') && (
                 <div className="mt-4 pt-4 border-t border-unbox-light">
@@ -2190,6 +2883,13 @@ function BookingCard({
                     </Button>
                 </div>
             )}
+
+            {/* Дата создания брони — внизу карточки, маленьким серым.
+                Раньше была сверху и сбивала с толку (клиенты путали её с
+                датой самой брони, которая теперь жирной строкой сверху). */}
+            <div className="mt-3 pt-2 text-[10px] text-unbox-grey/70">
+                Бронь создана {safeFormat(booking.createdAt, 'd MMM yyyy, HH:mm', { locale: ru })}
+            </div>
         </Card>
     );
 }
@@ -2208,8 +2908,12 @@ function CrmQuickBookingModal({
     onBooked: () => void;
 }) {
     const { updateSession } = useCrmStore();
-    const { currentUser } = useUserStore();
+    const { currentUser, bookings } = useUserStore();
     const resource = RESOURCES.find(r => r.id === slot.resId);
+
+    // Conflict dialog state — populated when a booking attempt hits an
+    // occupied slot. Replaces the bare red toast (2026-05-22 spec).
+    const [conflict, setConflict] = useState<ConflictItem[] | null>(null);
 
     // Available formats (fallback to 'individual' for CRM — therapy is 1-on-1 by default)
     const availableFormats = (resource?.formats && resource.formats.length > 0)
@@ -2223,9 +2927,13 @@ function CrmQuickBookingModal({
     const [chosenExtras, setChosenExtras] = useState<string[]>([]);
     const [useSubscription, setUseSubscription] = useState(false);
     const [saving, setSaving] = useState(false);
-    // Extras section is collapsed by default in CRM mode — most therapy
-    // sessions don't need add-ons, the long list was visual noise.
-    const [extrasOpen, setExtrasOpen] = useState(false);
+    // Extras section is now OPEN by default. Was collapsed earlier on the
+    // assumption "most therapy sessions don't need add-ons", but admins kept
+    // reporting that users couldn't find allowed extras (sandbox, projector,
+    // couch, coffee) — the small "Доп. опции ▾" caret was easy to miss right
+    // after slot pick. With only 4 short cards the visual noise is minimal,
+    // and choosing-by-default beats a hidden option.
+    const [extrasOpen, setExtrasOpen] = useState(true);
     // Recurring controls — off by default; opens periodicity inputs when on.
     const [isRecurring, setIsRecurring] = useState(false);
     const [recurringPattern, setRecurringPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
@@ -2236,22 +2944,13 @@ function CrmQuickBookingModal({
     );
     const dateStr = format(slot.date, 'yyyy-MM-dd');
 
-    /** Extras with CRM-specialist prices — therapists get a discounted
-     *  price list for their own sessions. Names match the public catalogue
-     *  so the user sees the same options, just cheaper. */
-    const CRM_EXTRAS_PRICES: Record<string, number> = {
-        sandbox: 5,        // 15 → 5
-        sandbox_toys: 5,   // 10 → 5
-        flipchart: 0,      // 10 → 0 (free for specialists)
-        projector: 10,     // 20 → 10
-    };
-    const crmExtras = useMemo(() =>
-        EXTRAS.map(e => ({
-            ...e,
-            price: CRM_EXTRAS_PRICES[e.id] !== undefined ? CRM_EXTRAS_PRICES[e.id] : e.price,
-        })),
-        // EXTRAS array is stable from data.ts, no dep needed
-    []);
+    /** Extras list — same prices as the public catalogue.
+     *  The earlier `CRM_EXTRAS_PRICES` override was for an old discounting
+     *  scheme that never went live; it pointed at extras IDs that no longer
+     *  appear in the public list (flipchart) and missed the new ones (couch,
+     *  coffee_meama). Just trusting EXTRAS keeps the spec UI in sync with
+     *  whatever pricing the public-facing /checkout shows. */
+    const crmExtras = EXTRAS;
 
     const hasSubscription = !!currentUser?.subscription?.planId && (currentUser?.subscription?.remainingHours ?? 0) > 0;
 
@@ -2302,7 +3001,9 @@ function CrmQuickBookingModal({
     const hoursForSub = duration / 60;
     const enoughHoursOnSub = hasSubscription && (currentUser?.subscription?.remainingHours ?? 0) >= hoursForSub;
 
-    const handleBook = async () => {
+    const handleBook = async (resourceIdOverride?: string) => {
+        const bookResId = resourceIdOverride || slot.resId;
+        const bookResource = RESOURCES.find(r => r.id === bookResId) || resource;
         setSaving(true);
         try {
             if (isRecurring && effectiveOccurrences > 1) {
@@ -2313,8 +3014,8 @@ function CrmQuickBookingModal({
                 // sessions that the specialist can attach manually if
                 // needed).
                 const result = await bookingsApi.createRecurringBooking({
-                    resourceId: slot.resId,
-                    locationId: resource?.locationId || 'unbox_one',
+                    resourceId: bookResId,
+                    locationId: bookResource?.locationId || 'unbox_one',
                     startTime: slot.time,
                     duration,
                     format: chosenFormat,
@@ -2336,13 +3037,13 @@ function CrmQuickBookingModal({
             }
 
             const booking = await bookingsApi.createBooking({
-                resourceId: slot.resId,
+                resourceId: bookResId,
                 date: dateStr, // Send as string 'YYYY-MM-DD' to avoid timezone shift
                 startTime: slot.time,
                 duration,
                 format: chosenFormat,
                 extras: chosenExtras,
-                locationId: resource?.locationId,
+                locationId: bookResource?.locationId,
                 paymentMethod: useSubscription && enoughHoursOnSub ? 'subscription' : 'balance',
             } as any);
             await bookingsApi.linkCrmClient(booking.id, crmMode.clientId);
@@ -2363,8 +3064,26 @@ function CrmQuickBookingModal({
             toast.success(`Кабинет забронирован для ${crmMode.clientName}`);
             onBooked();
         } catch (e: any) {
+            const status = e?.response?.status;
             const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : e.message || 'Ошибка бронирования';
+            // Conflict (409 / occupied-slot) → branded dialog with alternatives.
+            // Two response shapes: recurring → {message, conflicts:[{date,reason}]};
+            // single → a plain string reason.
+            if (detail && typeof detail === 'object' && Array.isArray(detail.conflicts)) {
+                setConflict(detail.conflicts.map((c: any) => ({
+                    date: c.date,
+                    reason: c.reason || detail.message || 'Слот занят',
+                })));
+                return;
+            }
+            if (typeof detail === 'string'
+                && (status === 409 || /занят|уже есть бронь/i.test(detail))) {
+                setConflict([{ date: dateStr, reason: detail }]);
+                return;
+            }
+            const msg = typeof detail === 'string' ? detail
+                : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ')
+                    : e.message || 'Ошибка бронирования';
             toast.error(msg);
         } finally {
             setSaving(false);
@@ -2457,7 +3176,7 @@ function CrmQuickBookingModal({
                             className="w-full flex items-center justify-between text-xs font-medium text-unbox-grey mb-1.5 hover:text-unbox-dark transition-colors"
                         >
                             <span>
-                                Доп. опции
+                                Дополнительные услуги
                                 {chosenExtras.length > 0 && (
                                     <span className="ml-1.5 text-unbox-green">· {chosenExtras.length} выбрано</span>
                                 )}
@@ -2642,7 +3361,7 @@ function CrmQuickBookingModal({
                 )}
 
                 <button
-                    onClick={handleBook}
+                    onClick={() => handleBook()}
                     disabled={saving}
                     className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
                 >
@@ -2652,6 +3371,28 @@ function CrmQuickBookingModal({
                         : 'Забронировать'}
                 </button>
             </div>
+
+            {conflict && (
+                <BookingConflictDialog
+                    conflicts={conflict}
+                    resourceId={slot.resId}
+                    time={slot.time}
+                    duration={duration}
+                    ownBookings={bookings}
+                    onClose={() => setConflict(null)}
+                    onOpenBooking={() => {
+                        // The conflicting booking lives in "Мои брони" on this
+                        // same page — close the modals so the user sees it.
+                        setConflict(null);
+                        onClose();
+                        toast.info('Откройте бронь в списке «Мои брони» ниже');
+                    }}
+                    onPickCabinet={(altResId) => {
+                        setConflict(null);
+                        handleBook(altResId);
+                    }}
+                />
+            )}
         </div>
     );
 }
@@ -2664,8 +3405,8 @@ const ghmbMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, lette
 const ghmbHairline = `1px solid ${GH.ink10}`;
 
 interface GridHouseMyBookingsProps {
-    viewMode: 'list' | 'grid';
-    setViewMode: (v: 'list' | 'grid') => void;
+    viewMode: 'list' | 'grid' | 'series';
+    setViewMode: (v: 'list' | 'grid' | 'series') => void;
     userBookings: BookingHistoryItem[];
     bookings: BookingHistoryItem[];
     upcomingBookings: BookingHistoryItem[];
@@ -2689,6 +3430,10 @@ interface GridHouseMyBookingsProps {
     setMobileLocFilter: (v: string) => void;
     navigate: ReturnType<typeof useNavigate>;
     location: ReturnType<typeof useLocation>;
+    seriesInfoMap: Map<string, { futureCount: number; lastDate: string | null; pattern: string }>;
+    refreshSeriesInfo: () => void;
+    highlightedSeriesId: string | null;
+    clearHighlightedSeries: () => void;
 }
 
 function GridHouseMyBookings({
@@ -2697,9 +3442,21 @@ function GridHouseMyBookings({
     handleBookAgain, handleLinkClient, currentUser, usersMap,
     publicBookings, refreshBookings, crmMode, setCrmMode,
     crmClients, modalConfig, setModalConfig, mobileLocFilter, setMobileLocFilter,
-    navigate, location,
+    navigate, location, seriesInfoMap, refreshSeriesInfo,
+    highlightedSeriesId, clearHighlightedSeries,
 }: GridHouseMyBookingsProps) {
     const totalBookings = upcomingBookings.length + pastBookings.length;
+    const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const check = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', check);
+        return () => window.removeEventListener('resize', check);
+    }, []);
+    // Hide "Стать специалистом" for anyone who isn't a plain client. Owners,
+    // admins and specialists already work on Unbox — the apply form makes
+    // no sense for them. Микола (owner) was seeing it because we matched
+    // only role==='specialist'.
+    const isStaffOrSpecialist = !!currentUser?.role && currentUser.role !== 'user';
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, paddingBottom: 80 }}>
@@ -2731,50 +3488,48 @@ function GridHouseMyBookings({
                 </div>
 
                 {/* Excel #19 — quick actions strip on the bookings page (the
-                    /dashboard hub for clients). Three shortcuts: subscriptions,
-                    bonuses/discounts info, become a specialist. Sticks below
-                    the header on desktop, scrolls into view on mobile. */}
+                    /dashboard hub for clients). Mobile: equal-width compact
+                    chips on one row. Specialists never see "Стать специалистом". */}
                 <div style={{
-                    display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16,
-                    padding: '10px 12px', background: GH.ink5,
+                    display: 'flex', gap: isMobile ? 6 : 8,
+                    flexWrap: isMobile ? 'nowrap' : 'wrap',
+                    marginBottom: 16,
+                    padding: isMobile ? '6px 8px' : '10px 12px',
+                    background: GH.ink5,
                     borderRadius: 8,
                 }}>
-                    <button
-                        onClick={() => navigate('/subscriptions')}
-                        style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 6,
-                            padding: '8px 14px', borderRadius: 6,
-                            border: `1px solid ${GH.ink10}`, background: GH.paper,
-                            fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
-                            cursor: 'pointer',
-                        }}
-                    >
-                        🎫 Оформить абонемент
-                    </button>
-                    <button
-                        onClick={() => navigate('/dashboard/bonuses')}
-                        style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 6,
-                            padding: '8px 14px', borderRadius: 6,
-                            border: `1px solid ${GH.ink10}`, background: GH.paper,
-                            fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
-                            cursor: 'pointer',
-                        }}
-                    >
-                        🎁 Скидки и бонусы
-                    </button>
-                    <button
-                        onClick={() => navigate('/crm/apply')}
-                        style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 6,
-                            padding: '8px 14px', borderRadius: 6,
-                            border: `1px solid ${GH.ink10}`, background: GH.paper,
-                            fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
-                            cursor: 'pointer',
-                        }}
-                    >
-                        ✨ Стать специалистом Unbox
-                    </button>
+                    {(() => {
+                        const baseBtn: React.CSSProperties = isMobile
+                            ? {
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                gap: 4, padding: '7px 8px', borderRadius: 6,
+                                border: `1px solid ${GH.ink10}`, background: GH.paper,
+                                fontFamily: GH_SANS, fontSize: 12, fontWeight: 600, color: GH.ink,
+                                cursor: 'pointer',
+                                flex: '1 1 0', minWidth: 0,
+                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }
+                            : {
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '8px 14px', borderRadius: 6,
+                                border: `1px solid ${GH.ink10}`, background: GH.paper,
+                                fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink,
+                                cursor: 'pointer',
+                            };
+                        return <>
+                            <button onClick={() => navigate('/subscriptions')} style={baseBtn}>
+                                🎫 {isMobile ? 'Абонемент' : 'Оформить абонемент'}
+                            </button>
+                            <button onClick={() => navigate('/dashboard/bonuses')} style={baseBtn}>
+                                🎁 {isMobile ? 'Бонусы' : 'Скидки и бонусы'}
+                            </button>
+                            {!isStaffOrSpecialist && (
+                                <button onClick={() => navigate('/become-specialist')} style={baseBtn}>
+                                    ✨ {isMobile ? 'Стать спецом' : 'Стать специалистом Unbox'}
+                                </button>
+                            )}
+                        </>;
+                    })()}
                 </div>
 
                 {/* View toggle tabs */}
@@ -2803,23 +3558,62 @@ function GridHouseMyBookings({
                     >
                         Шахматка
                     </button>
+                    {/* «Серии» — куда мобильный спец-клиент жалуется что не
+                        находит свои постоянные брони. Здесь только rows с
+                        recurring_group_id, отсортированные по группе. Использует
+                        тот же список (BookingCard) — никаких новых компонентов. */}
+                    <button
+                        onClick={() => setViewMode('series')}
+                        style={{
+                            padding: '10px 20px', fontWeight: 600, fontSize: 13, fontFamily: GH_SANS,
+                            border: 'none', cursor: 'pointer',
+                            borderBottom: viewMode === 'series' ? `2px solid ${GH.ink}` : '2px solid transparent',
+                            color: viewMode === 'series' ? GH.ink : GH.ink30,
+                            background: 'transparent', marginBottom: -2,
+                        }}
+                    >
+                        Серии
+                    </button>
                     {viewMode === 'grid' && (
+                        // Раньше тут был ряд chip-кнопок «Все / Unbox One / Unbox Uni /
+                        // Neo School», который не влезал в ширину мобильного экрана —
+                        // правый край обрезался. На мобильном собираем всё в один
+                        // dropdown (по умолчанию «Все филиалы»), на десктопе оставляем
+                        // chip-ряд — там места хватает.
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center', paddingBottom: 2 }}>
-                            {[{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
-                                <button
-                                    key={loc.id}
-                                    onClick={() => setMobileLocFilter(loc.id)}
+                            {isMobile ? (
+                                <select
+                                    value={mobileLocFilter}
+                                    onChange={(e) => setMobileLocFilter(e.target.value)}
                                     style={{
-                                        padding: '4px 10px', fontSize: 10, fontWeight: 600, fontFamily: GH_MONO,
-                                        letterSpacing: '0.1em', textTransform: 'uppercase' as const,
-                                        border: mobileLocFilter === loc.id ? `1px solid ${GH.ink}` : ghmbHairline,
-                                        background: mobileLocFilter === loc.id ? GH.ink : 'transparent',
-                                        color: mobileLocFilter === loc.id ? GH.paper : GH.ink30, cursor: 'pointer',
+                                        padding: '4px 8px', fontSize: 11, fontWeight: 600, fontFamily: GH_MONO,
+                                        letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+                                        border: ghmbHairline, background: GH.paper, color: GH.ink,
+                                        cursor: 'pointer', maxWidth: 140,
                                     }}
                                 >
-                                    {loc.name}
-                                </button>
-                            ))}
+                                    <option value="all">Все филиалы</option>
+                                    {LOCATIONS.map(loc => (
+                                        <option key={loc.id} value={loc.id}>{loc.name}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                [{ id: 'all', name: 'Все' }, ...LOCATIONS].map(loc => (
+                                    <button
+                                        key={loc.id}
+                                        onClick={() => setMobileLocFilter(loc.id)}
+                                        style={{
+                                            padding: '4px 10px', fontSize: 10, fontWeight: 600, fontFamily: GH_MONO,
+                                            letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                                            border: mobileLocFilter === loc.id ? `1px solid ${GH.ink}` : ghmbHairline,
+                                            background: mobileLocFilter === loc.id ? GH.ink : 'transparent',
+                                            color: mobileLocFilter === loc.id ? GH.paper : GH.ink30, cursor: 'pointer',
+                                        }}
+                                    >
+                                        {loc.name}
+                                    </button>
+                                ))
+                            )}
                         </div>
                     )}
                 </div>
@@ -2833,7 +3627,19 @@ function GridHouseMyBookings({
             )}
 
             {/* Content */}
-            {viewMode === 'grid' ? (
+            {viewMode === 'series' ? (
+                <SeriesView
+                    bookings={userBookings}
+                    seriesInfoMap={seriesInfoMap}
+                    onSeriesChanged={refreshSeriesInfo}
+                    onEdit={handleEdit}
+                    onCancel={handleCancel}
+                    onReRent={handleReRent}
+                    onBookAgain={handleBookAgain}
+                    onLinkClient={handleLinkClient}
+                    crmClients={crmClients}
+                />
+            ) : viewMode === 'grid' ? (
                 <div style={{ padding: '16px' }}>
                     {crmMode && (
                         <div style={{ marginBottom: 12, padding: '10px 16px', border: `1px solid ${GH.accent}30`, background: 'rgba(71,109,107,0.04)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2872,6 +3678,10 @@ function GridHouseMyBookings({
                                     onEdit={handleEdit} onCancel={handleCancel} onReRent={handleReRent}
                                     onBookAgain={handleBookAgain}
                                     onLinkClient={handleLinkClient} crmClients={crmClients}
+                                    seriesInfoMap={seriesInfoMap}
+                                    onSeriesChanged={refreshSeriesInfo}
+                                    highlightedSeriesId={highlightedSeriesId}
+                                    clearHighlightedSeries={clearHighlightedSeries}
                                 />
                             ))}
                         </div>
@@ -2885,7 +3695,11 @@ function GridHouseMyBookings({
                                     onEdit={handleEdit} onCancel={handleCancel} onReRent={handleReRent}
                                     onBookAgain={handleBookAgain}
                                     onLinkClient={handleLinkClient} crmClients={crmClients}
+                                    seriesInfoMap={seriesInfoMap}
+                                    onSeriesChanged={refreshSeriesInfo}
                                     isPast
+                                    highlightedSeriesId={null}
+                                    clearHighlightedSeries={clearHighlightedSeries}
                                 />
                             ))}
                         </div>
@@ -2893,10 +3707,10 @@ function GridHouseMyBookings({
                     {totalBookings === 0 && (
                         <EmptyState
                             title="Пока нет бронирований"
-                            hint="Забронируйте кабинет в один клик, шахматка сверху покажет свободное время."
+                            hint="Переключитесь на «Шахматку» сверху и кликните по свободному слоту."
                             action={{
                                 label: '+ Забронировать кабинет',
-                                onClick: () => navigate('/dashboard/bookings'),
+                                onClick: () => setViewMode('grid'),
                             }}
                         />
                     )}

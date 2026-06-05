@@ -1,5 +1,6 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { calculatePrice } from '../../utils/pricing';
+import { getMyBookingsPath } from '../../utils/userPaths';
 import { useUserStore } from '../../store/userStore';
 import { bookingsApi } from '../../api/bookings';
 import { Button } from '../ui/Button';
@@ -17,7 +18,7 @@ import {
 } from 'lucide-react';
 import { generateGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendar';
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { EXTRAS, RESOURCES } from '../../utils/data';
+import { EXTRAS, RESOURCES, availableExtrasForResource } from '../../utils/data';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
@@ -27,10 +28,11 @@ import { motion } from 'framer-motion';
 import { useCrmStore } from '../../store/crmStore';
 import { User as UserIcon, Gift } from 'lucide-react';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
+import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 
 export function ConfirmationStep() {
     const state = useBookingStore();
-    const { currentUser, addBookings, bookings, users, fetchCurrentUser } = useUserStore();
+    const { currentUser, addBookings, bookings, users, fetchCurrentUser, fetchUsers } = useUserStore();
     const [confirmed, setConfirmed] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [availabilityError, setAvailabilityError] = useState<string | null>(null);
@@ -43,21 +45,70 @@ export function ConfirmationStep() {
     const [activeBonuses, setActiveBonuses] = useState<Bonus[]>([]);
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
     const [recurringOccurrences, setRecurringOccurrences] = useState(12);
+    // Branded conflict dialog state — replaces the bare red toast that used
+    // to fire on 409/Conflict from the bookings API. See BookingConflictDialog
+    // for the own-vs-other booking split + alternative-cabinet suggestions.
+    const [conflictState, setConflictState] = useState<null | {
+        conflicts: ConflictItem[];
+        resourceId: string;
+        time: string;
+        duration: number;
+    }>(null);
 
     // Guest form state (when no user is authenticated)
     const [guestName, setGuestName] = useState('');
     const [guestPhone, setGuestPhone] = useState('');
     const [guestEmail, setGuestEmail] = useState('');
 
-    // Fetch CRM clients and bonuses
+    // Determine if the current user can act on behalf of others (admin-proxy
+    // booking flow). Specialists only ever book for themselves.
+    const isAdminActor = !!(currentUser && (
+        currentUser.role === 'owner'
+        || currentUser.role === 'senior_admin'
+        || currentUser.role === 'admin'
+        || currentUser.isAdmin
+    ));
+
+    // Resolve target specialist's UUID — needed to scope the CRM-clients
+    // dropdown to that specialist's roster (otherwise an admin booking-for-
+    // Yana would see only their own clients).
+    const targetSpecialistUuid = useMemo(() => {
+        if (!state.bookingForUser) return undefined;
+        const target = users?.find(u => u.email === state.bookingForUser || u.id === state.bookingForUser);
+        return target?.id;
+    }, [state.bookingForUser, users]);
+
+    // Specialists list for the "За кого бронируешь?" picker — admins/owner
+    // are included because they often have CRM clients of their own
+    // (Yulia/Mykola see clients themselves).
+    const specialistChoices = useMemo(() => {
+        if (!isAdminActor || !users) return [];
+        return users
+            .filter(u => {
+                const role = u.role;
+                return role === 'specialist' || role === 'owner'
+                    || role === 'senior_admin' || role === 'admin' || u.isAdmin;
+            })
+            .filter(u => !!u.email)
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+    }, [isAdminActor, users]);
+
+    // Lazy-load users list for admins (otherwise specialistChoices stays empty).
+    useEffect(() => {
+        if (isAdminActor && (!users || users.length === 0)) {
+            fetchUsers().catch(() => {});
+        }
+    }, [isAdminActor, users, fetchUsers]);
+
+    // Fetch CRM clients (scoped to target specialist when in proxy mode) and bonuses
     useEffect(() => {
         if (currentUser) {
-            fetchCrmClients(true).catch(() => {});
+            fetchCrmClients(true, false, targetSpecialistUuid).catch(() => {});
             bonusesApi.getMyBonuses().then(bonuses => {
                 setActiveBonuses(bonuses.filter(b => b.status === 'active' && b.type === 'freeHour'));
             }).catch(() => {});
         }
-    }, [currentUser, fetchCrmClients]);
+    }, [currentUser, fetchCrmClients, targetSpecialistUuid]);
 
     // Reset booking state only after unmount (route change) to avoid race with <Navigate to="/" />
     useEffect(() => {
@@ -214,6 +265,22 @@ export function ConfirmationStep() {
     // Auto-select subscription if eligible?
     // We already do this via default paymentMethod in store or user action.
     // Logic: if current method is 'subscription' but not eligible, switch to 'balance'.
+    // Auto-prune extras that the chosen resource doesn't support — e.g.
+    // user picked 'couch' on a cabinet, then re-routed to a capsule via
+    // the conflict dialog's "альтернативный кабинет" CTA. The capsule
+    // can't host a couch, so the extra silently drops. Otherwise the
+    // booking would carry a phantom +5 ₾ for nothing.
+    useEffect(() => {
+        const currentResId = cartDetails[0]?.resourceId;
+        if (!currentResId) return;
+        const resource = RESOURCES.find(r => r.id === currentResId);
+        const allowedIds = new Set(availableExtrasForResource(resource).map(e => e.id));
+        const cleaned = state.extras.filter(id => allowedIds.has(id));
+        if (cleaned.length !== state.extras.length) {
+            useBookingStore.setState({ extras: cleaned });
+        }
+    }, [cartDetails, state.extras]);
+
     // Auto-switch payment method if current one becomes ineligible
     useEffect(() => {
         if (!isSubscriptionEligible && state.paymentMethod === 'subscription') {
@@ -282,12 +349,26 @@ export function ConfirmationStep() {
                     setConfirmed(true);
                     shouldResetOnUnmount.current = true;
                     setTimeout(() => {
-                        navigate('/dashboard/bookings', { state: { targetDate: new Date(state.date).toISOString() } });
+                        navigate(getMyBookingsPath(currentUser), { state: { targetDate: new Date(state.date).toISOString() } });
                     }, 2000);
                 } catch (e: any) {
                     const detail = e?.response?.data?.detail;
                     if (typeof detail === 'object' && detail?.conflicts) {
-                        toast.error(`Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+                        const item = cartDetails[0];
+                        if (item?.resourceId) {
+                            setConflictState({
+                                conflicts: detail.conflicts.map((c: any) => ({
+                                    date: String(c.date || '').slice(0, 10),
+                                    reason: c.reason
+                                        || `${c.date}${c.start_time ? ' ' + c.start_time : ''} занято`,
+                                })),
+                                resourceId: item.resourceId,
+                                time: item.startTime,
+                                duration: item.duration,
+                            });
+                        } else {
+                            toast.error(`Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
+                        }
                     } else {
                         toast.error(typeof detail === 'string' ? detail : e.message || 'Ошибка создания серии');
                     }
@@ -452,18 +533,26 @@ export function ConfirmationStep() {
             if (newBookings.length > 0) {
                 console.log(`Submitting ${newBookings.length} bookings...`);
 
-                if (isRescheduling && oldBooking) {
-                    // Reschedule updates a single existing booking — merge all selected slots
-                    // into one continuous block (use first start time, sum durations)
-                    const mergedDate = newBookings[0].date;
-                    const mergedStartTime = newBookings[0].startTime;
-                    const mergedResourceId = newBookings[0].resourceId;
-                    await bookingsApi.rescheduleBooking(oldBooking.id, {
-                        newDate: mergedDate,
-                        newStartTime: mergedStartTime,
-                        newResourceId: mergedResourceId,
+                if (isRescheduling && state.editBookingId) {
+                    // Reschedule a single existing booking — uses the new
+                    // slot's date/time/resource. Critical: do NOT depend on
+                    // `oldBooking` being present in the local store. When the
+                    // wizard mounts before `bookings` is fetched (or the
+                    // user reloads /checkout), `oldBooking` is null and the
+                    // old code fell through to `addBookings`, creating a
+                    // duplicate instead of moving the original.
+                    const newSlot = newBookings[0];
+                    await bookingsApi.rescheduleBooking(state.editBookingId, {
+                        newDate: newSlot.date,
+                        newStartTime: newSlot.startTime,
+                        newResourceId: newSlot.resourceId,
                     });
-                    await fetchCurrentUser();
+                    // Refetch both — user balance may have changed (price
+                    // diff) and bookings array still holds the pre-move row.
+                    await Promise.all([
+                        fetchCurrentUser(),
+                        useUserStore.getState().fetchBookings(),
+                    ]);
                 } else {
                     await addBookings(newBookings);
                 }
@@ -505,7 +594,7 @@ export function ConfirmationStep() {
                 // Navigate after showing success screen
                 const bookingDate = state.date instanceof Date ? state.date.toISOString() : new Date(state.date).toISOString();
                 setTimeout(() => {
-                    navigate('/dashboard/bookings', { state: { targetDate: bookingDate } });
+                    navigate(getMyBookingsPath(currentUser), { state: { targetDate: bookingDate } });
                 }, isPending ? 3000 : 2000);
             } else {
                 toast.error("Ошибка создания бронирования: не удалось сформировать данные.");
@@ -513,43 +602,72 @@ export function ConfirmationStep() {
 
         } catch (error: any) {
             console.error("Booking Confirmation Failed:", error);
-            const message = error.response?.data?.detail || "Произошла ошибка при подтверждении бронирования.";
+            const detail = error.response?.data?.detail;
+            const message = (typeof detail === 'string' ? detail : detail?.message)
+                || "Произошла ошибка при подтверждении бронирования.";
 
-            if (message.includes("Time slot is already booked") || message.includes("Conflict")) {
-                toast.custom((t) => (
-                    <div className="w-full bg-white rounded-2xl shadow-xl border-l-4 border-red-500 overflow-hidden relative">
-                        <div className="p-4">
-                            <div className="flex items-start gap-4">
-                                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
-                                    <CalendarIcon size={20} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <h3 className="text-sm font-bold text-unbox-dark mb-1">
-                                        Время уже занято
-                                    </h3>
-                                    <p className="text-sm text-unbox-grey leading-relaxed mb-2">
-                                        К сожалению, выбранный слот был забронирован другим пользователем.
-                                    </p>
-                                    <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-xs font-medium border border-red-100">
-                                        {message.replace("Time slot is already booked: ", "")}
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => toast.dismiss(t)}
-                                    className="text-unbox-grey hover:text-unbox-grey transition-colors"
-                                >
-                                    <ArrowRight size={16} className="rotate-45" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                ), { duration: 5000 });
+            // 409/Conflict — open the branded dialog with own-vs-other split
+            // + alternative-cabinet suggestions. Fall back to the single-slot
+            // path when the backend didn't ship a structured conflicts list.
+            const isConflict = message.includes("Time slot is already booked")
+                || message.includes("Conflict")
+                || (typeof detail === 'object' && Array.isArray(detail?.conflicts));
+            if (isConflict) {
+                const firstSlot = cartDetails[0];
+                const slotResourceId = firstSlot?.resourceId || state.resourceId;
+                const slotTime = firstSlot?.startTime || state.startTime;
+                const slotDuration = firstSlot?.duration || state.duration || 60;
+                const baseDate = format(state.date, 'yyyy-MM-dd');
+
+                let conflicts: ConflictItem[] = [];
+                if (typeof detail === 'object' && Array.isArray(detail?.conflicts)) {
+                    // Server returned a structured list (multi-slot / recurring).
+                    conflicts = detail.conflicts.map((c: any) => ({
+                        date: String(c.date || baseDate).slice(0, 10),
+                        reason: c.reason || c.message || message,
+                    }));
+                } else {
+                    conflicts = [{ date: baseDate, reason: message }];
+                }
+
+                if (slotResourceId && slotTime) {
+                    setConflictState({
+                        conflicts,
+                        resourceId: slotResourceId,
+                        time: slotTime,
+                        duration: slotDuration,
+                    });
+                } else {
+                    // Couldn't resolve the slot — fall back to a plain toast
+                    // so the user at least sees what went wrong.
+                    toast.error(message);
+                }
             } else {
                 toast.error(message);
             }
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const handlePickAlternativeCabinet = (altResourceId: string) => {
+        // Swap the cabinet, rewrite selectedSlots to point at it (keeping the
+        // same times), and re-fire the booking. selectedSlots is keyed by
+        // "resourceId|HH:MM" so a simple prefix swap is enough.
+        const oldResourceId = conflictState?.resourceId;
+        setConflictState(null);
+        if (!oldResourceId) return;
+        const newSlots = state.selectedSlots.map(s => {
+            const parts = s.split('|');
+            if (parts[0] === oldResourceId) {
+                return `${altResourceId}|${parts[1]}`;
+            }
+            return s;
+        });
+        state.replaceSlots(newSlots);
+        state.setResourceId(altResourceId);
+        // Re-run the confirm flow in next tick so state has settled.
+        setTimeout(() => { handleConfirm(); }, 0);
     };
 
     const handleAddToCalendar = () => {
@@ -728,6 +846,41 @@ export function ConfirmationStep() {
                 )}
             </div>
 
+            {/* Admin-proxy specialist picker — only for admins. Picking a
+                specialist sets `bookingForUser` so the booking is owned by
+                them (target_user_id), and the CRM-clients dropdown below
+                refetches scoped to their roster. */}
+            {isAdminActor && specialistChoices.length > 0 && (
+                <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
+                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark flex items-center gap-2">
+                        <UserIcon size={16} /> За кого бронируешь?
+                    </h3>
+                    <select
+                        value={state.bookingForUser || ''}
+                        onChange={(e) => {
+                            const val = e.target.value || null;
+                            state.setBookingForUser(val);
+                            // Wipe selected client — old pick belongs to a
+                            // different specialist's CRM and would 403 on submit.
+                            setSelectedCrmClientId('');
+                        }}
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm sm:text-base text-unbox-dark bg-white"
+                    >
+                        <option value="">— За себя ({currentUser?.name || currentUser?.email}) —</option>
+                        {specialistChoices
+                            .filter(u => u.email !== currentUser?.email)
+                            .map(u => (
+                                <option key={u.id} value={u.email}>
+                                    {u.name || u.email}
+                                </option>
+                            ))}
+                    </select>
+                    <p className="text-xs text-unbox-grey">
+                        Бронь будет создана от имени выбранного специалиста (списание/абонемент тоже его).
+                    </p>
+                </div>
+            )}
+
             {/* CRM Client Selector (for specialists) */}
             {crmClients.length > 0 && (
                 <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
@@ -841,6 +994,54 @@ export function ConfirmationStep() {
                 </div>
             )}
 
+            {/* Extras accordion — owner 2026-05-27: merged here from the
+                removed OptionsStep. Stays collapsed by default (90% of
+                bookings have zero extras), expandable for the rare case. */}
+            {effectiveUser && !isRescheduling && !isEditing && (
+                <details
+                    className="pt-3 sm:pt-4 border-t border-unbox-light"
+                    style={{ cursor: 'pointer' }}
+                >
+                    <summary
+                        className="font-bold text-base sm:text-lg text-unbox-dark flex items-center justify-between gap-2 list-none"
+                        style={{ outline: 'none' }}
+                    >
+                        <span>Дополнительные услуги
+                            {state.extras.length > 0 && (
+                                <span className="ml-2 text-sm font-normal text-unbox-green">
+                                    · {state.extras.length} выбрано
+                                </span>
+                            )}
+                        </span>
+                        <span className="text-xs text-unbox-grey">тапни чтобы открыть</span>
+                    </summary>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                        {availableExtrasForResource(
+                            RESOURCES.find(r => r.id === cartDetails[0]?.resourceId)
+                        ).map(e => {
+                            const sel = state.extras.includes(e.id);
+                            return (
+                                <button
+                                    key={e.id}
+                                    type="button"
+                                    onClick={() => state.toggleExtra(e.id)}
+                                    className={`p-3 rounded-xl border text-left transition-colors ${
+                                        sel
+                                            ? 'bg-unbox-light border-unbox-green'
+                                            : 'bg-white border-unbox-light hover:border-unbox-green/50'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="font-medium text-unbox-dark text-sm">{e.name}</span>
+                                        <span className="text-sm text-unbox-dark font-bold">+{e.price} ₾</span>
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </details>
+            )}
+
             {/* Recurring Booking Selector */}
             {effectiveUser && !isRescheduling && !isEditing && (
                 <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
@@ -926,14 +1127,19 @@ export function ConfirmationStep() {
                                 <ArrowRight size={24} />
                             </div>
 
-                            {/* New */}
+                            {/* New — read from cartDetails first. state.startTime/
+                                state.resourceId may still hold the OLD values
+                                that startEditing pre-populated, so falling
+                                back to them as a primary source made the
+                                "Станет" panel show the time the user is
+                                leaving instead of the new pick. */}
                             <div>
                                 <div className="text-xs uppercase font-bold text-unbox-green mb-1">Станет</div>
                                 <div className="font-medium text-unbox-dark">
-                                    {format(new Date(state.date), 'd MMM', { locale: ru })}, {state.startTime || cartDetails[0]?.startTime}
+                                    {format(new Date(state.date), 'd MMM', { locale: ru })}, {cartDetails[0]?.startTime || state.startTime}
                                 </div>
                                 <div className="text-sm text-unbox-grey">
-                                    {RESOURCES.find(r => r.id === (state.resourceId || cartDetails[0]?.resourceId))?.name}
+                                    {RESOURCES.find(r => r.id === (cartDetails[0]?.resourceId || state.resourceId))?.name}
                                 </div>
                                 <div className="text-sm font-bold mt-1 text-unbox-green">
                                     {totalPrice} ₾
@@ -979,6 +1185,26 @@ export function ConfirmationStep() {
                     </Button>
                 </div>
             </div>
+
+            {conflictState && (
+                <BookingConflictDialog
+                    conflicts={conflictState.conflicts}
+                    resourceId={conflictState.resourceId}
+                    time={conflictState.time}
+                    duration={conflictState.duration}
+                    ownBookings={bookings}
+                    onClose={() => setConflictState(null)}
+                    onOpenBooking={(bookingId) => {
+                        setConflictState(null);
+                        // Drop the wizard reset on unmount so we don't wipe the
+                        // booking the user is heading to in case they hit Back.
+                        navigate(getMyBookingsPath(currentUser), {
+                            state: { highlightBookingId: bookingId },
+                        });
+                    }}
+                    onPickCabinet={handlePickAlternativeCabinet}
+                />
+            )}
         </motion.div>
     );
 }

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
-    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star,
+    BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star, Wrench,
+    CreditCard, Gift, UserCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
     { path: '/admin/tasks',       icon: ClipboardList,   label: 'Задачи' },
     { path: '/admin/users',       icon: Users,           label: 'Клиенты' },
     { path: '/admin/cabinets',    icon: Box,             label: 'Кабинеты' },
+    { path: '/admin/maintenance', icon: Wrench,          label: 'Обслуживание' },
     { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
     { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
     { path: '/admin/waitlist',    icon: Clock,           label: 'Лист ожидания' },
@@ -360,6 +362,61 @@ function GridHouseAdminShell({
                     <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>
                         {currentUser?.name ?? '—'}
                     </div>
+                </div>
+
+                {/* Personal toolbar — 3 шортката на личные функции
+                    (Абонемент / Бонусы / Профиль). Симметрично с CRM-шеллом:
+                    админу не нужно уходить в /dashboard ради счёта или
+                    профиля. */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 1,
+                    borderBottom: hairline,
+                    background: GH.ink10,
+                }}>
+                    {([
+                        { label: 'Абонемент', Icon: CreditCard, path: '/admin/subscription' },
+                        { label: 'Бонусы',    Icon: Gift,       path: '/admin/bonuses' },
+                        { label: 'Профиль',   Icon: UserCircle, path: '/admin/account' },
+                    ] as const).map(({ label, Icon, path }) => (
+                        <Link
+                            key={path}
+                            to={path}
+                            onClick={() => setMobileOpen(false)}
+                            title={label}
+                            style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 4,
+                                padding: '10px 0',
+                                background: narrow ? '#F3EFE2' : '#F0ECDD',
+                                color: GH.ink60,
+                                textDecoration: 'none',
+                                transition: 'color 0.12s, background 0.12s',
+                            }}
+                            onMouseEnter={e => {
+                                e.currentTarget.style.background = GH.paper;
+                                e.currentTarget.style.color = GH.ink;
+                            }}
+                            onMouseLeave={e => {
+                                e.currentTarget.style.background = narrow ? '#F3EFE2' : '#F0ECDD';
+                                e.currentTarget.style.color = GH.ink60;
+                            }}
+                        >
+                            <Icon size={16} />
+                            <span style={{
+                                fontFamily: GH_MONO,
+                                fontSize: 9,
+                                letterSpacing: '0.08em',
+                                textTransform: 'uppercase',
+                            }}>
+                                {label}
+                            </span>
+                        </Link>
+                    ))}
                 </div>
 
                 {/* Nav — scrolls independently so Footer stays pinned. */}

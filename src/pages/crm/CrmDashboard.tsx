@@ -22,7 +22,7 @@ import {
 import { format, addMonths, subMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { crmApi } from '../../api/crm';
-import { parseUTC, parseLocal } from '../../utils/dateUtils';
+import { parseUTC } from '../../utils/dateUtils';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES } from '../../utils/data';
 import { isAfter, addDays } from 'date-fns';
@@ -395,7 +395,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         ) : (
                             <div>
                                 {mergePairs.map(pair => {
-                                    const dt = parseLocal(pair.sessionDate);
+                                    const dt = parseUTC(pair.sessionDate);
                                     const resName = RESOURCES.find(r => r.id === pair.bookingResourceId)?.name || pair.bookingResourceId;
                                     return (
                                         <div
@@ -786,7 +786,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             <span style={{ textAlign: 'right' }}>СТАТУС</span>
                         </div>
                         {dashboard.upcomingSessions.map((s) => {
-                            const dt = parseLocal(s.date);
+                            const dt = parseUTC(s.date);
                             const status = STATUS_GH[s.status] || { label: s.status, color: GH.ink60 };
                             return (
                                 <div
@@ -869,7 +869,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                 }}>
                     <h2 style={sectionHead}>Мои бронирования кабинетов</h2>
                     <button
-                        onClick={() => navigate('/dashboard/bookings')}
+                        onClick={() => navigate('/crm/bookings')}
                         style={{ ...monoLabel, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: GH.ink }}
                     >
                         ВСЕ БРОНИ →
@@ -881,7 +881,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         <div style={{ fontFamily: GH_SANS, fontSize: '14px', color: GH.ink60, marginTop: '8px' }}>
                             На ближайшие 7 дней вы не арендовали ни одного кабинета.{' '}
                             <button
-                                onClick={() => navigate('/dashboard/bookings')}
+                                onClick={() => navigate('/crm/bookings')}
                                 style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: GH.ink, textDecoration: 'underline' }}
                             >
                                 Забронировать
@@ -910,7 +910,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             return (
                                 <div
                                     key={b.id}
-                                    onClick={() => navigate('/dashboard/bookings')}
+                                    onClick={() => navigate('/crm/bookings')}
                                     style={{
                                         display: 'grid', gridTemplateColumns: '80px 110px 1fr 100px',
                                         gap: '20px', alignItems: 'baseline',
@@ -1119,7 +1119,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     {([
                         { label: 'Добавить клиента', sub: 'Создать новую карточку', path: '/crm/clients' },
                         { label: 'Запланировать сессию', sub: 'Новая запись', path: '/crm/sessions' },
-                        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/dashboard/bookings' },
+                        { label: 'Забронировать кабинет', sub: 'Unbox One · Uni · Neo', path: '/crm/bookings' },
                         // Excel #19 — кнопка "Купить абонемент" внутри CRM
                         // (специалисты часто хотят оформить себе абонемент
                         // прямо отсюда, не уходя в клиентский кабинет).

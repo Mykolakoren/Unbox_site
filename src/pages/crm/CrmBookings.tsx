@@ -28,47 +28,23 @@ import clsx from 'clsx';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
-// ─── Безопасное извлечение даты из брони ─────────────────────────────────────
-function getSafeBookingDate(booking: BookingHistoryItem): { dateStr: string; dateObj: Date | null } {
-    try {
-        const rawDate = booking.date as any;
-        let dateStr: string;
-        if (rawDate instanceof Date) {
-            dateStr = rawDate.toISOString().split('T')[0];
-        } else if (typeof rawDate === 'string') {
-            // Handle corrupted strings like "2025-12-25T... 12:00"
-            dateStr = rawDate.replace(' 12:00', '').split('T')[0].split(' ')[0];
-        } else {
-            return { dateStr: '', dateObj: null };
-        }
+// 2026-06-05 owner: getSafeBookingDate вынесена в utils/bookingHelpers
+// (Фаза 1 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md). Свой safeFormat
+// раньше принимал Date | null, общий принимает str | Date | null —
+// сигнатура шире, рендеринг тот же.
+import { getSafeBookingDate, safeFormat as sharedSafeFormat } from '../../utils/bookingHelpers';
 
-        if (!dateStr || dateStr.length < 8) return { dateStr, dateObj: null };
-
-        const timeStr = booking.startTime && /^\d{2}:\d{2}/.test(booking.startTime)
-            ? booking.startTime
-            : '00:00';
-        const d = new Date(`${dateStr}T${timeStr}`);
-        if (isNaN(d.getTime())) return { dateStr, dateObj: null };
-        return { dateStr, dateObj: d };
-    } catch {
-        return { dateStr: '', dateObj: null };
-    }
-}
-
+// Локальный shim: старый код звал safeFormat(dateObj, fmt) — общий
+// принимает либо строку либо Date. Обёртка сохраняет старую сигнатуру
+// чтобы не править ~30 call-sites внутри файла.
 function safeFormat(dateObj: Date | null, fmt: string, opts?: any): string {
-    if (!dateObj) return '—';
-    try { return format(dateObj, fmt, opts); } catch { return '—'; }
+    return sharedSafeFormat(dateObj, fmt, opts, '—');
 }
 
 // ─── Статусы бронирований ─────────────────────────────────────────────────────
-const BOOKING_STATUS_LABELS: Record<string, string> = {
-    confirmed: 'Подтверждена',
-    completed: 'Завершена',
-    cancelled: 'Отменена',
-    rescheduled: 'Перенесена',
-    no_show: 'Не явился',
-    're-rented': 'Пересдана',
-};
+// 2026-06-05 owner: словарь статусов вынесен в utils/bookingHelpers, чтобы
+// MyBookingsPage и mobile-страницы пользовались одним и тем же словарём.
+import { BOOKING_STATUS_LABELS } from '../../utils/bookingHelpers';
 
 const BOOKING_STATUS_COLORS: Record<string, string> = {
     confirmed: 'bg-blue-100 text-blue-700 border-blue-200',
@@ -465,7 +441,13 @@ function BookingCard({ booking, linkedClient, linkedSessionId, linkedSessions, c
                         <Calendar size={14} className={isPast ? 'text-gray-400' : 'text-unbox-green'} />
                     </div>
                     <div>
-                        <div className="font-semibold text-sm text-gray-900">
+                        <div className="font-semibold text-sm text-gray-900 flex items-center gap-1">
+                            {/* Recurring marker — feature parity with the chessboard
+                                view; missing here meant series weren't visible in
+                                the list tab on /crm/bookings. */}
+                            {booking.recurringGroupId && (
+                                <span className="text-orange-500" title="Постоянная бронь (серия)">⭐</span>
+                            )}
                             {safeFormat(dateObj, 'd MMMM yyyy', { locale: ru }) || dateStr || '—'}
                         </div>
                         <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -565,7 +547,9 @@ export function CrmBookings() {
         const { currentUser, bookings: allBookings } = useUserStore();
     const { clients, sessions, fetchClients, fetchSessions } = useCrmStore();
 
-    const [viewMode, setViewMode] = useState<'list' | 'chess' | 'series'>('list');
+    // Default = chessboard (matching admin /admin/bookings convention).
+    // Specialists work in shahmatka day-to-day; the list is secondary.
+    const [viewMode, setViewMode] = useState<'list' | 'chess' | 'series'>('chess');
     const [filter, setFilter] = useState<FilterType>('upcoming');
     const [modalBooking, setModalBooking] = useState<BookingHistoryItem | null>(null);
     const [modalExistingSessionId, setModalExistingSessionId] = useState<string | undefined>();
@@ -585,11 +569,13 @@ export function CrmBookings() {
         fetchSessions();
     }, []);
 
-    // Load recurring groups when series tab opens
+    // Load recurring groups when series tab opens.
+    // scope=mine forces backend to scope by current user even when the caller
+    // is an admin — /crm/bookings is a per-specialist page, not a global view.
     useEffect(() => {
         if (viewMode === 'series') {
             setLoadingGroups(true);
-            bookingsApi.getRecurringGroups()
+            bookingsApi.getRecurringGroups({ scope: 'mine' })
                 .then(setRecurringGroups)
                 .catch(() => {})
                 .finally(() => setLoadingGroups(false));
@@ -616,15 +602,19 @@ export function CrmBookings() {
         [allBookings, currentUser?.email]
     );
 
-    // Build lookup: bookingId → sessions (array for multi-client splits)
+    // Build lookup: bookingId → LIVE sessions (array for multi-client splits).
+    // Cancelled rows must be excluded — otherwise an old CANCELLED_CLIENT
+    // session that was later replaced by an active one for the same client
+    // gets counted twice → `hasMultiple = true` → the row renders the same
+    // client name twice ("double name" bug Микола reported on /crm/bookings).
     const sessionsByBookingId = useMemo(() => {
         const map = new Map<string, typeof sessions>();
         sessions.forEach(s => {
-            if (s.bookingId) {
-                const arr = map.get(s.bookingId) || [];
-                arr.push(s);
-                map.set(s.bookingId, arr);
-            }
+            if (!s.bookingId) return;
+            if (s.status === 'CANCELLED_CLIENT' || s.status === 'CANCELLED_THERAPIST') return;
+            const arr = map.get(s.bookingId) || [];
+            arr.push(s);
+            map.set(s.bookingId, arr);
         });
         return map;
     }, [sessions]);
@@ -820,26 +810,29 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
-            {/* ── Compact head + KPI row ──
-                Was three vertical sections (top padding · giant title ·
-                cavernous KPI strip) eating ~280px before any content.
-                Collapsed into one row: title + the big "Предстоит" number
-                on the left, secondary KPIs on the right. Tabs hug the
-                next row instead of a fresh padded block. */}
+            {/* ── Compact header — title + inline KPIs left, action cluster
+                (+ Бронь · Список / Шахматка / Серии) right. Mirrors the
+                admin /admin/bookings layout so the two pages feel like a
+                pair. */}
             <div style={{
-                padding: '20px 32px 0',
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'space-between',
-                gap: 24,
-                flexWrap: 'wrap',
+                padding: 'clamp(14px, 3vw, 20px) clamp(16px, 4vw, 32px) 12px',
+                borderBottom: `2px solid ${GH.ink}`,
+                marginBottom: 0,
             }}>
-                <div>
-                    <div style={ghMono}>CRM · Бронирования</div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 4 }}>
+                <div style={ghMono}>CRM · Бронирования</div>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    gap: 24,
+                    flexWrap: 'wrap',
+                    marginTop: 4,
+                }}>
+                    {/* LEFT: title + inline KPIs */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 24, flexWrap: 'wrap' }}>
                         <h1 style={{
                             fontFamily: GH_SANS,
-                            fontSize: 'clamp(24px, 3vw, 36px)',
+                            fontSize: 'clamp(22px, 2.6vw, 32px)',
                             fontWeight: 800,
                             letterSpacing: '-0.02em',
                             lineHeight: 1,
@@ -847,50 +840,83 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                         }}>
                             Мои бронирования.
                         </h1>
-                        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                            <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                                {stats.upcoming}
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 18 }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 24, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                                    {stats.upcoming}
+                                </span>
+                                <span style={{ ...ghMono, fontSize: 9 }}>предстоит</span>
                             </span>
-                            <span style={{ ...ghMono, fontSize: 9 }}>предстоит</span>
-                        </span>
+                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.accent, lineHeight: 1 }}>
+                                    {stats.linked}
+                                </span>
+                                <span style={{ ...ghMono, fontSize: 9 }}>с клиентом</span>
+                            </span>
+                            {stats.unlinked > 0 && (
+                                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.danger, lineHeight: 1 }}>
+                                        {stats.unlinked}
+                                    </span>
+                                    <span style={{ ...ghMono, fontSize: 9 }}>без клиента</span>
+                                </span>
+                            )}
+                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.ink, lineHeight: 1 }}>
+                                    {stats.total}
+                                </span>
+                                <span style={{ ...ghMono, fontSize: 9 }}>всего</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* RIGHT: + Бронь next to view toggle */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                            onClick={() => setViewMode('chess')}
+                            style={{
+                                padding: '6px 14px',
+                                border: ghHairline,
+                                cursor: 'pointer',
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase' as const,
+                                background: GH.ink,
+                                color: GH.paper,
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                            }}
+                        >
+                            + Бронь
+                        </button>
+                        <div style={{ display: 'flex' }}>
+                            {VIEW_MODES.map((v, i) => (
+                                <button
+                                    key={v.key}
+                                    onClick={() => setViewMode(v.key)}
+                                    style={{
+                                        padding: '6px 14px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontFamily: GH_MONO,
+                                        fontSize: 10,
+                                        letterSpacing: '0.14em',
+                                        textTransform: 'uppercase' as const,
+                                        background: viewMode === v.key ? GH.ink : 'transparent',
+                                        color: viewMode === v.key ? GH.paper : GH.ink60,
+                                        borderTop: ghHairline,
+                                        borderBottom: ghHairline,
+                                        borderLeft: ghHairline,
+                                        borderRight: i === VIEW_MODES.length - 1 ? ghHairline : 'none',
+                                        transition: 'all 120ms',
+                                    }}
+                                >
+                                    {v.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
-                <div style={{ display: 'flex', gap: 20 }}>
-                    {[
-                        { label: 'Всего', value: stats.total },
-                        { label: 'С клиентом', value: stats.linked, color: GH.accent },
-                        { label: 'Без клиента', value: stats.unlinked, color: stats.unlinked > 0 ? GH.danger : undefined },
-                    ].map(kpi => (
-                        <div key={kpi.label} style={{ textAlign: 'right' as const }}>
-                            <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: kpi.color || GH.ink, lineHeight: 1 }}>
-                                {kpi.value}
-                            </div>
-                            <div style={{ ...ghMono, fontSize: 9, marginTop: 2 }}>{kpi.label}</div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* ── View mode tabs ── */}
-            <div style={{ display: 'flex', margin: '12px 32px 0', borderBottom: `2px solid ${GH.ink}` }}>
-                {VIEW_MODES.map(v => (
-                    <button
-                        key={v.key}
-                        onClick={() => setViewMode(v.key)}
-                        style={{
-                            fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
-                            padding: '8px 18px',
-                            background: viewMode === v.key ? GH.ink : 'transparent',
-                            color: viewMode === v.key ? GH.paper : GH.ink60,
-                            border: 'none', cursor: 'pointer',
-                            marginBottom: -2,
-                            borderBottom: viewMode === v.key ? `2px solid ${GH.ink}` : '2px solid transparent',
-                            transition: 'all 120ms',
-                        }}
-                    >
-                        {v.label}
-                    </button>
-                ))}
             </div>
 
             {/* ── Content ── */}
@@ -902,6 +928,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                         loadingGroups={loadingGroups} recurringGroups={recurringGroups}
                         confirmCancelGroupId={confirmCancelGroupId} setConfirmCancelGroupId={setConfirmCancelGroupId}
                         cancellingGroupId={cancellingGroupId} handleCancelSeries={handleCancelSeries}
+                        clientById={clientById}
                     />
                 ) : (
                     <>
@@ -925,10 +952,13 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                             ))}
                         </div>
 
-                        {/* Table header */}
+                        {/* Table header — скрываем на узком экране (<700px),
+                            где строка-карточка стоит в одну колонку и
+                            табличный header теряет смысл. */}
                         {!loadingClients && filteredBookings.length > 0 && (
-                            <div style={{
-                                display: 'grid', gridTemplateColumns: '48px 120px 1fr 140px 100px',
+                            <div className="cb-table-header" style={{
+                                display: 'grid', gridTemplateColumns: '40px 110px 1fr 120px 100px',
+                                gap: 8,
                                 padding: '8px 0', borderBottom: ghHairline,
                             }}>
                                 {['№', 'Дата', 'Клиент', 'Кабинет', 'Статус'].map(h => (
@@ -936,6 +966,11 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                                 ))}
                             </div>
                         )}
+                        <style>{`
+                            @media (max-width: 700px) {
+                                .cb-table-header { display: none !important; }
+                            }
+                        `}</style>
 
                         {/* Rows */}
                         {loadingClients ? (
@@ -1010,34 +1045,77 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
     const { dateObj } = getSafeBookingDate(booking);
     const isActive = booking.status === 'confirmed' || booking.status === 'completed';
     const hasMultiple = (linkedSessions?.length || 0) > 1;
+    // Cabinets 7 & 8 have a group rate that differs from individual; for
+    // others the toggle would be a no-op so we hide the button.
+    // Cab 2 in One — мини-группы до 4 чел, добавлен по запросу админа.
+    const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2'].includes(booking.resourceId || '');
+    const fetchBookings = useUserStore(s => s.fetchBookings);
+
+    const handleWaive = async () => {
+        const reason = window.prompt('Причина снятия штрафа (обязательно):', '');
+        if (!reason || !reason.trim()) return;
+        try {
+            const res = await bookingsApi.waiveCharge(booking.id, reason.trim());
+            toast.success(
+                res.scenario === 'waived_paid_refunded'
+                    ? 'Штраф снят, средства возвращены'
+                    : 'Штраф снят (списание не произойдёт)'
+            );
+            await fetchBookings?.();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
+        }
+    };
+
+    const handleChangeFormat = async () => {
+        const target: 'individual' | 'group' = (booking.format === 'group') ? 'individual' : 'group';
+        const targetLabel = target === 'group' ? 'Групповой' : 'Индивид.';
+        if (!window.confirm(`Сменить формат на «${targetLabel}»? Цена пересчитается.`)) return;
+        try {
+            await bookingsApi.changeFormat(booking.id, target);
+            toast.success(`Формат изменён на «${targetLabel}»`);
+            await fetchBookings?.();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось сменить формат');
+        }
+    };
 
     return (
+        // Раньше grid `40px 110px 1fr 130px 100px 130px` (510px фиксированных
+        // колонок + gaps) — на узком мобильном это не помещалось, имя клиента
+        // съедалось до нуля, а статус и actions уезжали за правый край.
+        // Теперь flex с wrap: дата+время и клиент остаются вверху строки,
+        // кабинет/статус/действия переносятся в новую строку на мобильном.
         <div
             style={{
-                display: 'grid', gridTemplateColumns: '48px 120px 1fr 140px 100px',
-                alignItems: 'center', padding: '12px 0', borderBottom: ghHairline,
+                display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+                padding: '14px 0', borderBottom: ghHairline,
                 opacity: isActive ? 1 : 0.4, transition: 'background 120ms',
+                gap: '8px 14px',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
             {/* № */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, letterSpacing: '0.14em' }}>
+            <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, letterSpacing: '0.14em', minWidth: 28 }}>
                 {String(index + 1).padStart(2, '0')}
             </div>
 
             {/* Дата + время */}
-            <div>
-                <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ flexShrink: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {booking.recurringGroupId && (
+                        <span style={{ color: '#f97316' }} title="Постоянная бронь (серия)">⭐</span>
+                    )}
                     {safeFormat(dateObj, 'd MMM', { locale: ru })}
                 </div>
                 <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-                    {booking.startTime || '—'}{booking.duration ? ` · ${booking.duration}\u2032` : ''}
+                    {booking.startTime || '—'}{booking.duration ? ` · ${booking.duration} мин` : ''}
                 </div>
             </div>
 
             {/* Клиент */}
-            <div>
+            <div style={{ flex: '1 1 140px', minWidth: 0 }}>
                 {hasMultiple ? (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         {linkedSessions!.map((sess, idx) => {
@@ -1079,16 +1157,56 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
             </div>
 
             {/* Кабинет */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>
+            <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {resource?.name || booking.resourceId}
             </div>
 
             {/* Статус */}
-            <div style={{
-                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
-                color: booking.status === 'cancelled' || booking.status === 'no_show' ? GH.danger : GH.ink60,
-            }}>
-                {BOOKING_STATUS_LABELS[booking.status] || booking.status}
+            <div style={{ flexShrink: 0 }}>
+                <div style={{
+                    fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                    color: booking.status === 'cancelled' || booking.status === 'no_show' ? GH.danger : GH.ink60,
+                    whiteSpace: 'nowrap',
+                }}>
+                    {BOOKING_STATUS_LABELS[booking.status] || booking.status}
+                </div>
+                {booking.paymentStatus && (
+                    <div style={{
+                        fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase',
+                        marginTop: 3,
+                        color: booking.paymentStatus === 'pending' ? '#92400E'
+                            : booking.paymentStatus === 'waived' ? GH.accent
+                            : GH.ink30,
+                    }} title={booking.paymentStatus === 'waived' && booking.waiverReason ? booking.waiverReason : undefined}>
+                        {booking.paymentStatus === 'pending' ? 'Ожидает оплату'
+                            : booking.paymentStatus === 'waived' ? 'Штраф снят'
+                            : 'Оплачено'}
+                    </div>
+                )}
+            </div>
+
+            {/* Действия — waive + format change. Скрываем для прошедших/отменённых */}
+            <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                {isActive && (booking.paymentStatus === 'pending' || booking.paymentStatus === 'paid') && (
+                    <button onClick={handleWaive}
+                        title="Снять штраф (с причиной)"
+                        style={{
+                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                            padding: '4px 8px', background: 'transparent', border: ghHairline, color: GH.ink60, cursor: 'pointer',
+                        }}>
+                        🩹 Штраф
+                    </button>
+                )}
+                {isActive && groupCapable && (
+                    <button onClick={handleChangeFormat}
+                        title="Сменить формат (индивид/групп)"
+                        style={{
+                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                            padding: '4px 8px', background: 'transparent', border: ghHairline, color: GH.ink60, cursor: 'pointer',
+                        }}>
+                        🔄 {booking.format === 'group' ? 'Индив.' : 'Групп.'}
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -1096,10 +1214,11 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
 
 // ─── GH: Вид серий ───────────────────────────────────────────────────────────
 
-function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries }: {
+function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries, clientById }: {
     loadingGroups: boolean; recurringGroups: any[];
     confirmCancelGroupId: string | null; setConfirmCancelGroupId: (id: string | null) => void;
     cancellingGroupId: string | null; handleCancelSeries: (groupId: string) => Promise<void>;
+    clientById: Map<string, CrmClient>;
 }) {
     if (loadingGroups) {
         return <div style={{ padding: '80px 0', textAlign: 'center' }}><div style={ghMono}>Загрузка...</div></div>;
@@ -1114,12 +1233,14 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
     }
     return (
         <div style={{ marginTop: 24 }}>
-            {/* Table header */}
+            {/* Table header — Клиент column shows who the series was booked
+                for (looked up via crmClientId). Without it the user couldn't
+                tell which series belongs to which client at a glance. */}
             <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 110px 80px 80px 140px',
+                display: 'grid', gridTemplateColumns: '1fr 1fr 110px 70px 70px 90px 110px 140px',
                 padding: '8px 0', borderBottom: ghHairline,
             }}>
-                {['Кабинет', 'Паттерн', 'Осталось', 'След.', ''].map(h => (
+                {['Кабинет', 'Клиент', 'Паттерн', 'Осталось', 'Всего', 'След.', 'Заканчивается', ''].map(h => (
                     <div key={h || 'empty'} style={{ ...ghMono, fontSize: 9 }}>{h}</div>
                 ))}
             </div>
@@ -1131,7 +1252,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                 return (
                     <div key={g.recurringGroupId}
                         style={{
-                            display: 'grid', gridTemplateColumns: '1fr 110px 80px 80px 140px',
+                            display: 'grid', gridTemplateColumns: '1fr 1fr 110px 70px 70px 90px 110px 140px',
                             alignItems: 'center', padding: '14px 0', borderBottom: ghHairline, transition: 'background 120ms',
                         }}
                         onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
@@ -1140,13 +1261,22 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                         <div>
                             <div style={{ fontSize: 14, fontWeight: 600 }}>{resource?.name || g.resourceId}</div>
                             <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase', marginTop: 2 }}>
-                                {g.startTime} · {g.duration}\u2032
+                                {g.startTime} · {g.duration} мин
                             </div>
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>
+                            {g.crmClientId
+                                ? (clientById.get(g.crmClientId)?.name || <span style={{ color: GH.ink60 }}>—</span>)
+                                : <span style={{ color: GH.ink60, fontStyle: 'italic' }}>без клиента</span>}
                         </div>
                         <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase' }}>{patternLabel}</div>
                         <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{g.futureCount}</div>
+                        <div style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>{g.totalCount}</div>
                         <div style={{ fontSize: 13, fontWeight: 500 }}>
                             {g.nextDate ? format(new Date(g.nextDate + 'T00:00:00'), 'd MMM', { locale: ru }) : '—'}
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>
+                            {g.lastDate ? format(new Date(g.lastDate + 'T00:00:00'), 'd MMM yyyy', { locale: ru }) : '—'}
                         </div>
                         <div>
                             {isConfirming ? (

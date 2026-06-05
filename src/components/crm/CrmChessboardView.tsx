@@ -4,12 +4,12 @@ import { useBookingStore } from '../../store/bookingStore';
 import { useCrmStore } from '../../store/crmStore';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
 import {
-    format, addMinutes, setHours, setMinutes, startOfToday, isBefore,
+    format, addMinutes, setHours, setMinutes, startOfToday,
     addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval,
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus, Bell } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -19,30 +19,19 @@ import type { CrmClient } from '../../api/crm';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { parseUTC } from '../../utils/dateUtils';
 import { apiErrorMessage } from '../../utils/errors';
+import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
+import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
+import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
+import { tbilisiNow } from '../../utils/dateUtils';
 
-// ─── Time Slots: 09:00 – 21:30 (30-min steps, last block ends 22:00) ─────
-// Evening 21:00–22:00 carries the peak-hour surcharge automatically.
-const TIME_SLOTS: string[] = (() => {
-    const slots: string[] = [];
-    let t = setMinutes(setHours(startOfToday(), 9), 0);
-    const end = setMinutes(setHours(startOfToday(), 22), 0);
-    while (isBefore(t, end)) {
-        slots.push(format(t, 'HH:mm'));
-        t = addMinutes(t, 30);
-    }
-    return slots;
-})();
+// 2026-06-06 owner (Фаза 3 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md):
+// TIME_SLOTS, timeToMin, parseBookingDate раньше дублировались в
+// AdminChessboardView и CrmChessboardView. Теперь — общие.
+// parseUTC заменяет локальный parseBookingDate (тело идентичное).
+import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
 
-const timeToMin = (t: string) => {
-    const [h, m] = t.split(':').map(Number);
-    return h * 60 + m;
-};
-
-const parseBookingDate = (d: string | Date): Date => {
-    if (d instanceof Date) return d;
-    const s = String(d);
-    return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
-};
+const _minToTime = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
 type CellInfo =
     | { type: 'free'; slot: string; past: boolean }
@@ -126,7 +115,7 @@ function CrmQuickBookModal({
             } as any);
             await useUserStore.getState().fetchBookings();
             const newBooking = useUserStore.getState().bookings.find(b => {
-                const bd = parseBookingDate(b.date);
+                const bd = parseUTC(b.date);
                 return format(bd, 'yyyy-MM-dd') === dateStr &&
                     b.startTime === slot.time &&
                     b.resourceId === slot.resId &&
@@ -728,6 +717,52 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [bookSlot, setBookSlot] = useState<{ resId: string; time: string; date: Date; duration: number } | null>(null);
     const [linkBooking, setLinkBooking] = useState<BookingHistoryItem | null>(null);
+    // Open instead of bookingsApi.cancelBooking when the target booking is
+    // part of a recurring series — gives the specialist the same "this /
+    // future" choice the CRM /sessions delete already offers.
+    const [seriesCancelTarget, setSeriesCancelTarget] = useState<BookingHistoryItem | null>(null);
+    // Waitlist subscribe modal — fired when specialist taps a foreign booking
+    // (someone else's slot). Backend then notifies them when ANY cabinet in
+    // the same branch frees up at the same time.
+    const [waitlistTarget, setWaitlistTarget] = useState<{
+        resourceId: string;
+        resourceName: string;
+        locationName?: string | null;
+        date: Date;
+        startTime: string;
+        endTime: string;
+    } | null>(null);
+    const openWaitlistFor = useCallback((b: BookingHistoryItem) => {
+        // Diagnostic toast on missing data — было: silent return на пустых
+        // полях, юзер видел dead тап. Теперь админ хотя бы видит причину.
+        if (!b.startTime || !b.duration || !b.resourceId) {
+            toast.error(
+                `Не удалось открыть подписку (нет данных): ` +
+                `time=${b.startTime ?? '?'}, dur=${b.duration ?? '?'}, res=${b.resourceId ?? '?'}`,
+            );
+            return;
+        }
+        const res = RESOURCES.find(r => r.id === b.resourceId);
+        const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
+        const endTimeStr = _minToTime(_timeToMin(b.startTime) + b.duration);
+        setWaitlistTarget({
+            resourceId: b.resourceId,
+            resourceName: res?.name || b.resourceId,
+            locationName: loc?.name ?? null,
+            date: parseUTC(b.date),
+            startTime: b.startTime,
+            endTime: endTimeStr,
+        });
+    }, []);
+    // Same idea for drag-and-drop reschedule of a series booking — after
+    // the drop we collect the chosen slot here, the modal asks scope, and
+    // the actual API call (single vs propagate) happens inside the modal.
+    const [seriesMoveTarget, setSeriesMoveTarget] = useState<{
+        booking: BookingHistoryItem;
+        newDate: string;
+        newStartTime: string;
+        newResourceId?: string;
+    } | null>(null);
 
     // Drag to select. Multi-period in the same cabinet is supported the
     // same way the dashboard chessboard does it: each contiguous run of
@@ -777,7 +812,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         return bookings.filter(b => {
             if (!b.date) return false;
             try {
-                const bd = parseBookingDate(b.date);
+                const bd = parseUTC(b.date);
                 return format(bd, 'yyyy-MM-dd') === dateStr &&
                     (b.status === 'confirmed' || b.status === 're-rented' || b.status === 'completed');
             } catch { return false; }
@@ -824,16 +859,18 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         return map;
     }, [clients]);
 
-    // Row cells
+    // Row cells. Tbilisi-aware now() — without it admins on UK VPN saw
+    // wrong "is past" boundary (slots already over by Tbilisi-clock still
+    // looked free in their browser-local 22:00 evening).
     const rowCellsMap = useMemo(() => {
-        const now = new Date();
+        const now = tbilisiNow();
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const nowStr = format(now, 'yyyy-MM-dd');
+        const nowStr = now.ymd;
 
         const isPast = (slot: string): boolean => {
             if (dateStr < nowStr) return true;
             if (dateStr > nowStr) return false;
-            return timeToMin(slot) < now.getHours() * 60 + now.getMinutes();
+            return timeToMin(slot) < now.totalMins;
         };
 
         const map = new Map<string, CellInfo[]>();
@@ -863,11 +900,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
     // Drag helpers
     const isSlotOccupied = useCallback((resId: string, time: string) => {
-        const now = new Date();
+        const now = tbilisiNow();
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const nowStr = format(now, 'yyyy-MM-dd');
+        const nowStr = now.ymd;
         if (dateStr < nowStr) return true;
-        if (dateStr === nowStr && timeToMin(time) < now.getHours() * 60 + now.getMinutes()) return true;
+        if (dateStr === nowStr && timeToMin(time) < now.totalMins) return true;
         return slotMap.has(`${resId}|${time}`);
     }, [selectedDate, slotMap]);
 
@@ -1009,8 +1046,20 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 if (isSlotOccupied(target.resId, TIME_SLOTS[i])) { toast.error('Слот занят целиком — выберите другое время'); return; }
             }
             // Fire reschedule
-            setReschedSaving(true);
             const newDate = format(selectedDate, 'yyyy-MM-dd');
+            // Series → defer to the choice modal so the specialist picks
+            // "this only" vs "this + every later sibling". Otherwise hit
+            // the single-booking endpoint directly.
+            if (booking.recurringGroupId) {
+                setSeriesMoveTarget({
+                    booking,
+                    newDate,
+                    newStartTime: target.time,
+                    newResourceId: target.resId,
+                });
+                return;
+            }
+            setReschedSaving(true);
             bookingsApi.rescheduleBooking(booking.id, {
                 newDate,
                 newStartTime: target.time,
@@ -1291,6 +1340,14 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     };
 
     const handleDeleteBooking = async (booking: BookingHistoryItem) => {
+        if (booking.recurringGroupId) {
+            // Defer to the choice modal so the specialist picks "this" vs
+            // "all future". Close the link modal first so the choice
+            // modal isn't competing for focus.
+            setLinkBooking(null);
+            setSeriesCancelTarget(booking);
+            return;
+        }
         try {
             await bookingsApi.cancelBooking(booking.id);
             toast.success('Бронь удалена');
@@ -1469,24 +1526,32 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
             const bookingCell = bookingBySlot.get(slot);
             if (bookingCell && bookingCell.type === 'booking') {
                 const { booking, isMine, colspan } = bookingCell;
-                const linkedSessions = sessionsByBookingId.get(booking.id) || [];
+                // Mirror desktop's filter: cancelled CRM sessions don't count
+                // for naming the slot. Without this, a slot whose only linked
+                // session was cancelled by the client kept rendering the
+                // client's name on mobile (matching the desktop bug Анна
+                // / Максим/Нурлана reported on the cabinet chessboard).
+                const allLinkedSessions = sessionsByBookingId.get(booking.id) || [];
+                const linkedSessions = allLinkedSessions.filter(
+                    s => s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST'
+                );
                 const firstSession = linkedSessions[0];
-                // Same fallback as desktop: if no TherapySession is linked, fall
-                // back to the booking's own crm_client_id (recurring bookings).
+                const allCancelled = allLinkedSessions.length > 0 && linkedSessions.length === 0;
                 const linkedClient = firstSession
                     ? clientById.get(firstSession.clientId)
-                    : (booking.crmClientId ? clientById.get(booking.crmClientId) : undefined);
+                    : (booking.crmClientId && !allCancelled ? clientById.get(booking.crmClientId) : undefined);
                 const endSlotIdx = TIME_SLOTS.indexOf(slot) + colspan;
                 const endTime = endSlotIdx < TIME_SLOTS.length ? TIME_SLOTS[endSlotIdx] : '21:00';
                 // For multi-slot bookings that span to the next column, we'll handle via colspan spanning
                 return (
                     <button
-                        onClick={isMine ? () => setLinkBooking(booking) : undefined}
+                        onClick={() => isMine ? setLinkBooking(booking) : openWaitlistFor(booking)}
+                        title={isMine ? undefined : 'Тап — следить за слотом'}
                         className={clsx(
-                            'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px]',
+                            'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px] active:scale-[0.97]',
                             isMine
                                 ? 'bg-unbox-green/10 border border-unbox-green/30 text-unbox-dark'
-                                : 'bg-gray-100 border border-gray-200 text-gray-400'
+                                : 'bg-gray-100 border border-gray-200 text-gray-500 hover:bg-orange-50 hover:border-orange-200'
                         )}
                     >
                         <div className="min-w-0">
@@ -1496,11 +1561,13 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                     ? (linkedSessions.length > 1
                                         ? `${linkedSessions.length} клиента`
                                         : linkedClient?.name || 'Привязать клиента')
-                                    : (booking.userId?.split('@')[0] || 'Занято')
+                                    : 'Занято — тап чтобы следить'
                                 }
                             </div>
                         </div>
-                        {isMine && <UserPlus size={12} className="text-unbox-green shrink-0" />}
+                        {isMine
+                            ? <UserPlus size={12} className="text-unbox-green shrink-0" />
+                            : <Bell size={12} className="text-orange-500 shrink-0" />}
                     </button>
                 );
             }
@@ -1604,6 +1671,21 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         onDeleteBooking={handleDeleteBooking}
                     />
                 )}
+                {/* Slot-watch (waitlist) modal — раньше был только в desktop-ветке,
+                    из-за чего мобильный тап по «Занято» открывал состояние, но
+                    окно не рендерилось. Дублируем здесь чтобы модал был
+                    доступен и на mobile. */}
+                <WaitlistSubscribeModal
+                    isOpen={!!waitlistTarget}
+                    onClose={() => setWaitlistTarget(null)}
+                    resourceId={waitlistTarget?.resourceId ?? ''}
+                    resourceName={waitlistTarget?.resourceName ?? ''}
+                    locationName={waitlistTarget?.locationName}
+                    date={waitlistTarget?.date ?? new Date()}
+                    startTime={waitlistTarget?.startTime ?? ''}
+                    endTime={waitlistTarget?.endTime ?? ''}
+                    extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+                />
             </div>
         );
     }
@@ -1679,17 +1761,30 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                     {cells.map((cell) => {
                                         if (cell.type === 'booking') {
                                             const { booking, colspan, isMine } = cell;
-                                            const linkedSessions = sessionsByBookingId.get(booking.id) || [];
+                                            // Only LIVE sessions count for naming the slot. A cancelled
+                                            // CRM session leaves the cabinet booked (specialist paid for
+                                            // it and may want to re-rent) but the slot is no longer
+                                            // attached to that client — rendering "Алена грум" on a
+                                            // slot whose session is CANCELLED_CLIENT confused several
+                                            // specialists ("в календаре нет, а тут есть"). Filter
+                                            // cancelled out before deciding the label.
+                                            const allLinkedSessions = sessionsByBookingId.get(booking.id) || [];
+                                            const linkedSessions = allLinkedSessions.filter(
+                                                s => s.status !== 'CANCELLED_CLIENT' && s.status !== 'CANCELLED_THERAPIST'
+                                            );
                                             // For single-hour bookings, show the first linked client; for multi-hour, show count
                                             const firstSession = linkedSessions[0];
                                             // Prefer the explicit TherapySession link, but fall back to the
                                             // booking's own crm_client_id — recurring cabinet bookings created
                                             // with a linked client carry crmClientId on the booking itself
                                             // and the matching session sometimes lags (sync race) or doesn't
-                                            // exist at all on legacy rows.
+                                            // exist at all on legacy rows. Skip the fallback if every linked
+                                            // session was cancelled — the booking is genuinely "free for
+                                            // a new client" at that point.
+                                            const allCancelled = allLinkedSessions.length > 0 && linkedSessions.length === 0;
                                             const linkedClient = firstSession
                                                 ? clientById.get(firstSession.clientId)
-                                                : (booking.crmClientId ? clientById.get(booking.crmClientId) : undefined);
+                                                : (booking.crmClientId && !allCancelled ? clientById.get(booking.crmClientId) : undefined);
 
                                             // Multi-client split view
                                             const SEGMENT_COLORS = [
@@ -1748,20 +1843,26 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                 e.preventDefault();
                                                                 handleBookingMoveDown(booking);
                                                             } : undefined}
-                                                            onClick={isMine ? (e) => {
-                                                                // Only treat as click if no drag happened
-                                                                if (dragModeRef.current === 'move' && moveHover) return;
-                                                                e.stopPropagation();
-                                                                setLinkBooking(booking);
-                                                            } : undefined}
+                                                            onClick={isMine
+                                                                ? (e) => {
+                                                                    // Only treat as click if no drag happened
+                                                                    if (dragModeRef.current === 'move' && moveHover) return;
+                                                                    e.stopPropagation();
+                                                                    setLinkBooking(booking);
+                                                                }
+                                                                : (e) => {
+                                                                    // Foreign booking → offer slot-watch
+                                                                    e.stopPropagation();
+                                                                    openWaitlistFor(booking);
+                                                                }}
                                                             className={clsx(
                                                                 'h-8 rounded-md border text-[10px] font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
                                                                 isMine
                                                                     ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-grab active:cursor-grabbing hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
-                                                                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-default',
+                                                                    : 'bg-gray-100 text-gray-500 border-gray-200 cursor-pointer hover:bg-orange-50 hover:border-orange-200 hover:text-orange-700 transition-colors',
                                                                 reschedSaving && 'opacity-60 pointer-events-none'
                                                             )}
-                                                            title={isMine ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента` : undefined}
+                                                            title={isMine ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента` : 'Тап — следить за слотом, уведомим когда освободится'}
                                                         >
                                                             {/* Recurring marker — оранжевая звёздочка ⭐ для серийных
                                                                 броней. Видна и владельцу, и админу/наблюдателю. */}
@@ -1773,6 +1874,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                     ? (linkedClient ? linkedClient.name : '✓ Моё')
                                                                     : 'Занято'}
                                                             </span>
+                                                            {!isMine && <Bell size={10} className="text-orange-500 shrink-0 opacity-70" />}
                                                             {isMine && (
                                                                 <UserPlus
                                                                     size={10}
@@ -1875,6 +1977,48 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     onDeleteBooking={handleDeleteBooking}
                 />
             )}
+
+            {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
+                <CancelBookingChoiceModal
+                    bookingId={seriesCancelTarget.id}
+                    groupId={seriesCancelTarget.recurringGroupId}
+                    onClose={() => setSeriesCancelTarget(null)}
+                    onCompleted={async () => {
+                        setSeriesCancelTarget(null);
+                        await fetchBookings();
+                        await fetchSessions();
+                    }}
+                />
+            )}
+
+            {seriesMoveTarget && (
+                <RescheduleScopeChoiceModal
+                    bookingId={seriesMoveTarget.booking.id}
+                    newDate={seriesMoveTarget.newDate}
+                    newStartTime={seriesMoveTarget.newStartTime}
+                    newResourceId={seriesMoveTarget.newResourceId}
+                    onClose={() => setSeriesMoveTarget(null)}
+                    onCompleted={async () => {
+                        setSeriesMoveTarget(null);
+                        await fetchBookings();
+                        await fetchSessions();
+                    }}
+                />
+            )}
+
+            {/* Slot-watch (waitlist) — shared modal opened from any
+                "Занято" tap in this chessboard, desktop and mobile. */}
+            <WaitlistSubscribeModal
+                isOpen={!!waitlistTarget}
+                onClose={() => setWaitlistTarget(null)}
+                resourceId={waitlistTarget?.resourceId ?? ''}
+                resourceName={waitlistTarget?.resourceName ?? ''}
+                locationName={waitlistTarget?.locationName}
+                date={waitlistTarget?.date ?? new Date()}
+                startTime={waitlistTarget?.startTime ?? ''}
+                endTime={waitlistTarget?.endTime ?? ''}
+                extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+            />
         </div>
     );
 }

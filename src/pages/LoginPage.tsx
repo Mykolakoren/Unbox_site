@@ -43,12 +43,23 @@ export function LoginPage() {
     // user knows why they didn't land on /dashboard. Strip the param from
     // the URL once read so a refresh doesn't keep showing the message.
     const [error, setError] = useState<string | null>(() => {
-        const reason = new URLSearchParams(window.location.search).get('tg_failed');
-        if (!reason) return null;
+        const sp = new URLSearchParams(window.location.search);
+        const tgFailed = sp.get('tg_failed');
+        const tgUnlinked = sp.get('tg_unlinked');
+        if (!tgFailed && !tgUnlinked) return null;
+
         const url = new URL(window.location.href);
         url.searchParams.delete('tg_failed');
+        url.searchParams.delete('tg_unlinked');
         window.history.replaceState({}, document.title, url.pathname + url.search);
-        if (reason === 'storage') {
+
+        // Most explicit case first — owner asked 2026-05-25 to stop auto-
+        // creating ghost accounts for unbound TG OAuth. The new server-side
+        // 403 lands here, and we tell the user exactly how to proceed.
+        if (tgUnlinked) {
+            return 'Telegram не привязан ни к одному аккаунту. Войдите через Google или email — затем привяжите Telegram в профиле, и вход через TG заработает на этом же аккаунте.';
+        }
+        if (tgFailed === 'storage') {
             return 'Браузер заблокировал сохранение токена (приватный режим / отключённый localStorage). Откройте сайт в обычном окне.';
         }
         return 'Не удалось войти через Telegram. Попробуйте ещё раз.';
@@ -61,6 +72,44 @@ export function LoginPage() {
         password: '',
         phone: ''
     });
+
+    /** Post-login routing.
+     *
+     *  Mobile (phone-width / standalone PWA): always → /m. The /m shell
+     *  handles role gating internally (admin/owner sees /m/admin tab in
+     *  bottom bar, specialists see /m/crm, etc.).
+     *
+     *  Desktop: routed по роли — устраняем «упрощённый /dashboard» как
+     *  default для тех, для кого он не основной рабочий стол.
+     *    - admin / owner / senior_admin → /admin (полная админка)
+     *    - specialist                   → /crm (CRM-оператор)
+     *    - user (или роль не указана)   → /dashboard (личный кабинет)
+     *
+     *  Specialist'ы и админы могут зайти в /dashboard вручную (там их
+     *  личный профиль, абонемент, бонусы), но не получают его как первый
+     *  экран после логина. */
+    const postLoginPath = (): string => {
+        try {
+            sessionStorage.removeItem('forceDesktop');
+            const isPhoneWidth = window.matchMedia?.('(max-width: 768px)').matches;
+            const inStandalone = window.matchMedia?.('(display-mode: standalone)').matches
+                || (window.navigator as any).standalone === true;
+            if (isPhoneWidth || inStandalone) return '/m';
+
+            // Desktop — роутим по роли
+            const u = useUserStore.getState().currentUser;
+            const role = u?.role;
+            if (role === 'owner' || role === 'senior_admin' || role === 'admin' || u?.isAdmin) {
+                return '/admin';
+            }
+            if (role === 'specialist') {
+                return '/crm';
+            }
+            return '/dashboard';
+        } catch {
+            return '/dashboard';
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -77,7 +126,7 @@ export function LoginPage() {
             } else {
                 await login(formData.email, formData.password);
             }
-            navigate('/dashboard');
+            navigate(postLoginPath());
         } catch (err: any) {
             console.error(err);
             if (err.response?.status === 400 || err.response?.status === 401) {
@@ -109,7 +158,7 @@ export function LoginPage() {
                 onGoogleSuccess={async (credential: string) => {
                     try {
                         await googleLogin(credential);
-                        navigate('/dashboard');
+                        navigate(postLoginPath());
                     } catch {
                         setError('Ошибка входа через Google');
                     }
