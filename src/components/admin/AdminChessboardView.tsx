@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
-import { LOCATIONS, RESOURCES } from '../../utils/data';
+import { LOCATIONS, RESOURCES, availableExtrasForResource } from '../../utils/data';
 import {
     format, addMinutes, setHours, setMinutes, startOfToday,
     addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval,
@@ -1799,6 +1799,15 @@ function AdminQuickBookingModal({
     const [selectedUser, setSelectedUser] = useState<{ id: string; email: string; name: string } | null>(null);
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
     const [recurringOccurrences, setRecurringOccurrences] = useState(12);
+    // 2026-06-06 owner: формат и допы раньше были захардкожены
+    // (`format = formats[0]`, `extras` не передавались). Теперь
+    // выбор формата показывается если кабинет поддерживает >1
+    // (кабинеты 7/8 — individual/group/intervision). Допы — из
+    // availableExtrasForResource(resource) (кушетка, песочница,
+    // проектор, кофе, флипчарт, столик — каждый для своих кабинетов).
+    const [bookingFormat, setBookingFormat] = useState<string>(resource?.formats?.[0] || 'individual');
+    const [extras, setExtras] = useState<string[]>([]);
+    const availableExtras = availableExtrasForResource(resource);
     const [conflictState, setConflictState] = useState<null | {
         conflicts: ConflictItem[];
         resourceId: string;
@@ -1861,19 +1870,34 @@ function AdminQuickBookingModal({
         const bookResId = overrideResourceId || slot.resId;
         const bookResource = RESOURCES.find(r => r.id === bookResId) || resource;
         try {
+            // Если админ выбрал альтернативный кабинет (overrideResourceId)
+            // — fallback на первый разрешённый формат этого кабинета,
+            // чтобы не уронить запрос если original format не поддерживается
+            // (например админ кликнул в группового кабинете 7, выбрал
+            // 'group', а конфликт-диалог предложил кабинет 1 где только
+            // 'individual').
+            const effectiveFormat = bookResource?.formats?.includes(bookingFormat)
+                ? bookingFormat
+                : (bookResource?.formats?.[0] || 'individual');
+            // Допы — фильтр по тем что доступны в выбранном bookResource
+            // (для override-кабинета может быть меньше или больше).
+            const allowed = new Set(availableExtrasForResource(bookResource).map(e => e.id));
+            const effectiveExtras = extras.filter(eid => allowed.has(eid));
+
             if (recurringPattern) {
                 const result = await bookingsApi.createRecurringBooking({
                     resourceId: bookResId,
                     locationId: bookResource?.locationId || 'unbox_one',
                     startTime: slot.time,
                     duration,
-                    format: bookResource?.formats?.[0] || 'individual',
+                    format: effectiveFormat,
                     paymentMethod: 'balance',
                     firstDate: dateStr,
                     occurrences: effectiveOccurrences,
                     pattern: recurringPattern,
                     targetUserId: selectedUser.email,
-                });
+                    extras: effectiveExtras.length ? effectiveExtras : undefined,
+                } as any);
                 const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
                 toast.success(`Создано ${result.created} бронирований (${patternLabel}) на ${result.totalCost} ₾`);
             } else {
@@ -1882,7 +1906,8 @@ function AdminQuickBookingModal({
                     date: dateStr,
                     startTime: slot.time,
                     duration,
-                    format: bookResource?.formats?.[0] || 'individual',
+                    format: effectiveFormat,
+                    extras: effectiveExtras,
                     locationId: bookResource?.locationId,
                     targetUserId: selectedUser.email,
                 } as any);
@@ -2019,6 +2044,72 @@ function AdminQuickBookingModal({
                         ))}
                     </div>
                 </div>
+
+                {/* Формат — показываем только если кабинет поддерживает >1.
+                    Для индивидуальных (кабинеты 1, 2, 5, 6, 9, капсулы) этот
+                    блок скрыт, чтобы не загромождать форму. */}
+                {(resource?.formats?.length ?? 0) > 1 && (
+                    <div>
+                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Формат</label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                            {(resource?.formats || []).map(f => {
+                                const labels: Record<string, string> = {
+                                    individual: 'Индивид.',
+                                    group: 'Группа',
+                                    intervision: 'Интервиз.',
+                                };
+                                return (
+                                    <button
+                                        key={f}
+                                        type="button"
+                                        onClick={() => setBookingFormat(f)}
+                                        className={`py-2 rounded-xl text-xs font-medium border transition-colors ${
+                                            bookingFormat === f
+                                                ? 'bg-unbox-green text-white border-unbox-green'
+                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        }`}
+                                    >
+                                        {labels[f] || f}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* Допы — фильтрованы по доступным для этого кабинета.
+                    Бесплатные (flipchart_free, table_free) идут без цены.
+                    Платные показывают `+N₾` рядом. Пустой массив — кабинет
+                    не предлагает никаких допов, блок скрывается. */}
+                {availableExtras.length > 0 && (
+                    <div>
+                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Допы</label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {availableExtras.map(extra => {
+                                const checked = extras.includes(extra.id);
+                                return (
+                                    <button
+                                        key={extra.id}
+                                        type="button"
+                                        onClick={() => setExtras(prev =>
+                                            checked
+                                                ? prev.filter(x => x !== extra.id)
+                                                : [...prev, extra.id]
+                                        )}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
+                                            checked
+                                                ? 'bg-unbox-green text-white border-unbox-green'
+                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        }`}
+                                    >
+                                        {extra.name}
+                                        {extra.price > 0 && <span className="opacity-80 ml-1">+{extra.price}₾</span>}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {/* Recurring pattern */}
                 <div className="space-y-2">
