@@ -183,9 +183,17 @@ export function MobileAdminFinance() {
                 gap: 6,
                 marginBottom: 14,
             }}>
+                {/* axios-интерсептор клиента конвертит snake_case → camelCase
+                    автоматически (см. api/client.ts:59). Поэтому реально
+                    прилетает cardTbc/cardBog, а не card_tbc/card_bog. Тип
+                    CashboxBalances в api/cashbox.ts описан в snake_case
+                    (отражает форму бэка), но рантайм-ключи camel.
+                    Тот же fallback-паттерн использует десктопный
+                    BalanceCard.tsx — оставляем оба варианта чтобы код
+                    не сломался если/когда исправим тип. */}
                 <BalanceTile label="Наличные" value={balances.cash} />
-                <BalanceTile label="TBC" value={balances.card_tbc} />
-                <BalanceTile label="BOG" value={balances.card_bog} />
+                <BalanceTile label="TBC" value={(balances as any).cardTbc ?? balances.card_tbc ?? 0} />
+                <BalanceTile label="BOG" value={(balances as any).cardBog ?? balances.card_bog ?? 0} />
             </div>
 
             {/* Period totals strip */}
