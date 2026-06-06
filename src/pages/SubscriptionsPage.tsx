@@ -384,6 +384,50 @@ export function SubscriptionsPage() {
                 </div>
             </motion.div>
 
+            {/* ═══ Hourly price examples (no subscription) ═══ */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.65, duration: 0.5 }}
+                className="space-y-5"
+            >
+                <div className="text-center space-y-2">
+                    <h2 className="text-2xl font-bold text-unbox-dark">Сколько стоит час без абонемента</h2>
+                    <p className="text-sm text-unbox-grey max-w-xl mx-auto">
+                        Базовые ставки за бронь по балансу. Чем длиннее непрерывная бронь — тем дешевле каждый час.
+                    </p>
+                </div>
+                <div className="rounded-2xl overflow-hidden" style={{
+                    background: 'rgba(255,255,255,0.80)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    border: '1px solid rgba(255,255,255,0.60)',
+                    boxShadow: '0 4px 16px rgba(71,109,107,0.06)',
+                }}>
+                    {[
+                        { what: 'Кабинеты 1, 2, 5, 6, 9 — индивидуально',          price: '20 ₾/час' },
+                        { what: 'Капсулы 1 и 2 — индивидуально, для онлайн-сессий', price: '10 ₾/час' },
+                        { what: 'Кабинеты 7 и 8 — индивидуально',                  price: '20 ₾/час' },
+                        { what: 'Кабинеты 7 и 8 — групповой формат (до 20 чел.)',   price: '35 ₾/час' },
+                        { what: '2 часа подряд в одном кабинете',                   price: '−10% к часу' },
+                        { what: '3 часа подряд в одном кабинете',                   price: '−15% к часу' },
+                        { what: '4 часа и больше подряд в одном кабинете',          price: '−20% к часу' },
+                    ].map((row, i, arr) => (
+                        <div
+                            key={row.what}
+                            className="flex items-center justify-between px-5 py-3 text-sm"
+                            style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(71,109,107,0.08)' }}
+                        >
+                            <span className="text-unbox-dark">{row.what}</span>
+                            <span className="font-semibold text-unbox-dark whitespace-nowrap ml-3">{row.price}</span>
+                        </div>
+                    ))}
+                </div>
+                <p className="text-xs text-unbox-grey/80 text-center max-w-xl mx-auto leading-relaxed">
+                    Скидки за длительность не суммируются с прогрессивной скидкой за объём — применяется одна, самая выгодная для вас (см. ниже).
+                </p>
+            </motion.div>
+
             {/* ═══ Pricing & Discounts Infographic ═══ */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -401,39 +445,40 @@ export function SubscriptionsPage() {
                 {/* Discount types */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
-                    {/* 1. Weekly Progressive */}
+                    {/* 1. Peak-hour surcharge (replaced legacy weekly_progressive
+                        2026-05-26 — that mechanism is disabled in backend, so the
+                        public page now shows the surcharge that actually applies). */}
                     <div className="rounded-2xl p-6 space-y-4" style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                                <TrendingUp size={20} />
+                            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                                <Flame size={20} />
                             </div>
                             <div>
-                                <h3 className="font-bold text-unbox-dark">Прогрессивная скидка за объём</h3>
-                                <p className="text-xs text-unbox-grey">Считается автоматически за неделю (Пн–Вс)</p>
+                                <h3 className="font-bold text-unbox-dark">Вечерний тариф</h3>
+                                <p className="text-xs text-unbox-grey">Часы повышенного спроса — небольшая надбавка к часу</p>
                             </div>
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-2.5">
                             {[
-                                { hours: '0–5 ч', percent: '0%', bar: 'w-0', color: 'bg-gray-200' },
-                                { hours: '5–11 ч', percent: '10%', bar: 'w-1/4', color: 'bg-emerald-300' },
-                                { hours: '11–16 ч', percent: '25%', bar: 'w-2/4', color: 'bg-emerald-400' },
-                                { hours: '16+ ч', percent: '50%', bar: 'w-full', color: 'bg-emerald-500' },
-                            ].map(tier => (
-                                <div key={tier.hours} className="flex items-center gap-3">
-                                    <span className="text-xs text-unbox-grey w-14 shrink-0">{tier.hours}</span>
-                                    <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden relative">
-                                        <div className={`h-full ${tier.color} rounded-full transition-all ${tier.bar}`} />
-                                    </div>
-                                    <span className="text-sm font-bold text-unbox-dark w-10 text-right">{tier.percent}</span>
+                                { label: '09:00 – 10:00 (утренний пик)', delta: '+5 ₾/ч' },
+                                { label: '20:00 – 22:00 (вечерний пик)', delta: '+5 ₾/ч' },
+                            ].map(t => (
+                                <div key={t.label} className="flex items-center gap-3 bg-amber-50/50 rounded-xl px-4 py-2.5">
+                                    <Flame size={16} className="text-amber-500 flex-shrink-0" />
+                                    <span className="text-sm text-unbox-dark flex-1">{t.label}</span>
+                                    <span className="text-sm font-bold text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full">{t.delta}</span>
                                 </div>
                             ))}
                         </div>
-                        <p className="text-xs text-unbox-grey italic">
-                            Пример: при 12 часах за неделю каждый час стоит 15 ₾ вместо 20 ₾
+                        <p className="text-xs text-unbox-grey/80 leading-relaxed pt-1">
+                            Пример: бронь 20:00 – 21:00 в индивидуальном кабинете стоит 25 ₾ вместо 20 ₾.
+                            Все остальные часы — по стандартному тарифу.
                         </p>
                     </div>
 
-                    {/* 2. Duration discount */}
+                    {/* 2. Duration discount — values match PricingService:
+                        2-3h → 10%, 3-5h → 15%, 5+h → 20% (NOT 4+h). Owner asked
+                        2026-05-26 to align this with the real rule. */}
                     <div className="rounded-2xl p-6 space-y-4" style={{ background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.60)', boxShadow: '0 4px 16px rgba(71,109,107,0.06)' }}>
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -448,7 +493,7 @@ export function SubscriptionsPage() {
                             {[
                                 { label: '2 часа подряд в одном кабинете', percent: '10%' },
                                 { label: '3 часа подряд в одном кабинете', percent: '15%' },
-                                { label: '4+ часа подряд в одном кабинете', percent: '20%' },
+                                { label: '5+ часов подряд в одном кабинете', percent: '20%' },
                             ].map(tier => (
                                 <div key={tier.label} className="flex items-center gap-3 bg-blue-50/50 rounded-xl px-4 py-2.5">
                                     <Timer size={16} className="text-blue-500 flex-shrink-0" />
@@ -470,7 +515,7 @@ export function SubscriptionsPage() {
                             </div>
                             <div>
                                 <h3 className="font-bold text-unbox-dark">Горячая бронь</h3>
-                                <p className="text-xs text-unbox-grey">Бронь менее чем за 12 часов — требует одобрения</p>
+                                <p className="text-xs text-unbox-grey">Будни — менее 12ч, выходные — менее 24ч до старта требует одобрения</p>
                             </div>
                         </div>
                         <div className="bg-orange-50/60 rounded-xl p-4 space-y-2">
@@ -479,7 +524,7 @@ export function SubscriptionsPage() {
                                 <span className="text-sm text-unbox-dark font-medium">Одобрение администратора</span>
                             </div>
                             <p className="text-xs text-unbox-grey leading-relaxed">
-                                Если до сессии осталось менее 12 часов, бронь требует подтверждения администратора. После одобрения — обычная цена без скидки и без надбавки.
+                                Если до сессии в будний день осталось менее 12 часов (или менее 24 часов на сб/вс), бронь требует подтверждения администратора. После одобрения — обычная цена без скидки и без надбавки.
                             </p>
                         </div>
                     </div>
@@ -526,8 +571,8 @@ export function SubscriptionsPage() {
                             const steps = [
                                 { label: 'Абонемент', desc: 'Фиксированная цена', color: 'bg-violet-100 text-violet-700 border-violet-200' },
                                 { label: 'Персональная', desc: 'Индивидуальный %', color: 'bg-purple-100 text-purple-700 border-purple-200' },
-                                { label: 'За объём', desc: 'Недельные часы', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
                                 { label: 'За длительность', desc: '2+ часа подряд в одном кабинете', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+                                { label: 'Вечерний тариф', desc: '+5 ₾/ч на пиковые часы', color: 'bg-amber-100 text-amber-700 border-amber-200' },
                             ];
                             return steps.map((step, i) => (
                                 <div key={step.label} className="flex items-center gap-2 flex-1">
@@ -623,6 +668,27 @@ function GridHouseSubscriptions() {
                 <p style={{ fontSize: 15, color: GH.ink60, maxWidth: 560, margin: '0 auto' }}>
                     Прозрачная система скидок — до 50%. Абонементы, кофе, массаж и другие бонусы — включены.
                 </p>
+                {/* CTA to the public-offer page — admins repeatedly asked for
+                    a visible link from where users compare tariffs to where
+                    the legal terms live, so the choice doesn't happen blind. */}
+                <Link
+                    to="/booking-rules"
+                    style={{
+                        display: 'inline-block',
+                        marginTop: 16,
+                        padding: '10px 20px',
+                        border: `1px solid ${GH.ink}`,
+                        borderRadius: 999,
+                        textDecoration: 'none',
+                        color: GH.ink,
+                        fontFamily: GH_MONO,
+                        fontSize: 11,
+                        letterSpacing: '0.18em',
+                        textTransform: 'uppercase',
+                    }}
+                >
+                    Правила бронирования →
+                </Link>
             </div>
 
             {/* Standard prices */}
@@ -713,6 +779,15 @@ function GridHouseSubscriptions() {
                 ))}
             </div>
 
+            {/* ═══ Эффективная цена часа — pricing infographic ═══════════════
+                2026-06-06 owner (CLAUDE.md content task #5): абоны показывают
+                свою скидку в %, но пользователь не сразу видит «во сколько
+                мне реально обходится час». Визуализируем — горизонтальные
+                полосы пропорциональные эффективной цене за час. Reference
+                line — стандарт 20 ₾ (для group мастера — 35 ₾, отдельно
+                выделено). */}
+            <EffectivePriceChart />
+
             {/* Discounts — matches the Admin Knowledge Base copy exactly.
                 Four blocks: weekly-progressive, duration (one continuous room),
                 welcome hour, priority-of-charges note. Keep numbers in sync
@@ -721,17 +796,17 @@ function GridHouseSubscriptions() {
                 <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>СКИДКИ</div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: 0, border: ghsubHairline, marginBottom: 16 }}>
-                    {/* Weekly progressive */}
+                    {/* Peak-hour surcharge (replaced legacy weekly_progressive
+                        2026-05-26 — that mechanism is disabled in backend; this
+                        block now reflects the surcharge that actually applies). */}
                     <div style={{ padding: 20, borderRight: ghsubHairline }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Прогрессивная за объём</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Вечерний тариф</div>
                         <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 12 }}>
-                            Чем больше часов за неделю — тем выше процент:
+                            Часы повышенного спроса — небольшая надбавка к часу аренды:
                         </div>
                         {[
-                            ['до 5 часов',     '0%'],
-                            ['5 – 11 часов',   '10%'],
-                            ['11 – 16 часов',  '25%'],
-                            ['16+ часов',      '50%'],
+                            ['09:00 – 10:00',  '+5 ₾/ч'],
+                            ['20:00 – 22:00',  '+5 ₾/ч'],
                         ].map(([lbl, disc], i, arr) => (
                             <div key={i} style={{
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -744,6 +819,9 @@ function GridHouseSubscriptions() {
                                 </strong>
                             </div>
                         ))}
+                        <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', fontStyle: 'italic', lineHeight: 1.5 }}>
+                            Все остальные часы — по стандартному тарифу.
+                        </p>
                     </div>
 
                     {/* Duration — one continuous booking in ONE cabin */}
@@ -755,7 +833,7 @@ function GridHouseSubscriptions() {
                         {[
                             ['2 часа подряд',   '10%'],
                             ['3 часа подряд',   '15%'],
-                            ['4+ часа подряд',  '20%'],
+                            ['5+ часов подряд', '20%'],
                         ].map(([lbl, disc], i, arr) => (
                             <div key={i} style={{
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -805,8 +883,9 @@ function GridHouseSubscriptions() {
                     <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ПРИОРИТЕТ ПРИМЕНЕНИЯ СКИДОК</div>
                     <p style={{ fontSize: 13, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
                         Скидки не суммируются — применяется одна, наиболее выгодная для вас:
-                        {' '}<strong>Абонемент</strong> → <strong>Персональная</strong> → <strong>За объём</strong> → <strong>За длительность</strong>.
-                        Бонусный баланс (включая приветственный час) списывается отдельно, поверх итоговой цены.
+                        {' '}<strong>Абонемент</strong> → <strong>Персональная</strong> → <strong>За длительность</strong>.
+                        Вечерний тариф (+5 ₾/ч) и горячая бронь применяются поверх итоговой цены.
+                        Бонусный баланс (включая приветственный час) списывается отдельно.
                     </p>
                 </div>
 
@@ -814,7 +893,7 @@ function GridHouseSubscriptions() {
                 <div style={{ border: ghsubHairline, padding: '14px 16px', marginTop: 12 }}>
                     <div style={{ ...ghsubMono, color: GH.label, marginBottom: 8 }}>ГОРЯЧАЯ БРОНЬ</div>
                     <p style={{ fontSize: 13, color: GH.ink, margin: 0, lineHeight: 1.6 }}>
-                        Бронь менее чем за 12 часов до начала требует подтверждения администратора. После одобрения — обычная цена, без скидки и без надбавки.
+                        Бронь менее чем за 12 часов до начала (или менее чем за 24 часа на субботу/воскресенье) требует подтверждения администратора. После одобрения — обычная цена, без скидки и без надбавки.
                     </p>
                 </div>
             </div>
@@ -857,6 +936,132 @@ function GridHouseSubscriptions() {
                 <span style={{ ...ghsubMono, color: GH.ink10 }}>GRID HOUSE</span>
             </footer>
             </div>
+        </div>
+    );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Effective price chart — pricing infographic
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Числа в синке с SUBSCRIPTION_PLANS в data.ts.
+ *  Профи+: 40 базовых часов + 2 бонусных = 42 ч; делим 640 на 42.
+ *  Групповой мастер: 16 групповых часов, reference = 35 ₾/час (групповая
+ *  стандартная), а не 20 (индивидуальная). */
+const PRICE_PLANS = [
+    { name: 'Без абонемента',     price: 20,  hours: 1,  ref: 20, format: 'индивид.' },
+    { name: 'Тёплый старт',       price: 180, hours: 10, ref: 20, format: 'индивид.' },
+    { name: 'Регулярный практик', price: 340, hours: 20, ref: 20, format: 'индивид.' },
+    { name: 'Профи+',             price: 640, hours: 42, ref: 20, format: 'индивид.', accent: true },
+    { name: 'Групповой мастер',   price: 420, hours: 16, ref: 35, format: 'групповой' },
+];
+
+function EffectivePriceChart() {
+    // Максимальная эффективная ставка — для пропорциональной ширины полосы.
+    // Используем все ref'ы т.к. в наборе есть и 20 и 35 — берём max,
+    // чтобы 35-полоса (без абонемента группа) не вылетала за границу.
+    const maxPrice = Math.max(...PRICE_PLANS.map(p => p.ref));
+
+    return (
+        <div style={{ marginBottom: 48 }}>
+            <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>
+                ЭФФЕКТИВНАЯ ЦЕНА ЧАСА
+            </div>
+            <p style={{ fontSize: 13, color: GH.ink60, marginBottom: 20, maxWidth: 560 }}>
+                Со скидками часовая ставка получается ниже стандартной.
+                Это — реальная стоимость часа при использовании всех часов
+                из абонемента в срок.
+            </p>
+
+            <div style={{ border: ghsubHairline }}>
+                {PRICE_PLANS.map((p, i) => {
+                    const perHour = p.price / p.hours;
+                    const savingPct = Math.round((1 - perHour / p.ref) * 100);
+                    const barWidth = (perHour / maxPrice) * 100;
+                    const isStandard = savingPct === 0;
+                    const barColor = p.accent
+                        ? GH.accent
+                        : isStandard
+                            ? GH.ink30
+                            : GH.ink;
+
+                    return (
+                        <div
+                            key={p.name}
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'minmax(140px, 1.5fr) 3fr minmax(140px, 1fr)',
+                                gap: 12,
+                                alignItems: 'center',
+                                padding: '14px 16px',
+                                borderTop: i === 0 ? 'none' : ghsubHairline,
+                                background: p.accent ? `${GH.accent}08` : 'transparent',
+                            }}
+                        >
+                            {/* Plan name + format */}
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: GH.ink }}>
+                                    {p.name}
+                                </div>
+                                <div style={{ fontSize: 11, color: GH.ink30, marginTop: 2 }}>
+                                    {p.format}
+                                    {p.hours > 1 && ` · ${p.hours} ч · ${p.price} ₾`}
+                                </div>
+                            </div>
+
+                            {/* Bar */}
+                            <div style={{
+                                position: 'relative',
+                                height: 18,
+                                background: `${GH.ink10}`,
+                                overflow: 'hidden',
+                            }}>
+                                <div style={{
+                                    position: 'absolute',
+                                    left: 0, top: 0, bottom: 0,
+                                    width: `${barWidth}%`,
+                                    background: barColor,
+                                    transition: 'width .3s',
+                                }} />
+                            </div>
+
+                            {/* Effective rate + saving */}
+                            <div style={{ textAlign: 'right' }}>
+                                <div style={{
+                                    fontFamily: GH_MONO,
+                                    fontSize: 18,
+                                    fontWeight: 700,
+                                    color: GH.ink,
+                                    letterSpacing: '-0.01em',
+                                }}>
+                                    {perHour.toFixed(perHour % 1 === 0 ? 0 : 1)}
+                                    <span style={{ fontSize: 11, color: GH.ink30, marginLeft: 4 }}>
+                                        ₾/час
+                                    </span>
+                                </div>
+                                {savingPct > 0 && (
+                                    <div style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 10,
+                                        letterSpacing: '0.08em',
+                                        color: GH.accent,
+                                        marginTop: 2,
+                                    }}>
+                                        −{savingPct}% к ставке
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            <p style={{ fontSize: 11, color: GH.ink30, marginTop: 10, lineHeight: 1.5 }}>
+                Базовая ставка для индивидуального кабинета — 20 ₾/час, для
+                группового — 35 ₾/час. Профи+ включает 2 бонусных часа сверх
+                основных 40. «Групповой мастер» считается по групповой ставке.
+            </p>
         </div>
     );
 }

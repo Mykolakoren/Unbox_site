@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Inbox, AlertTriangle, CheckCircle, Calendar, X, Loader2, Trash2, Clock, ArrowRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen } from 'lucide-react';
+import { Inbox, AlertTriangle, CheckCircle, Calendar, X, Loader2, Trash2, Clock, ArrowRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus } from 'lucide-react';
 import { format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -257,6 +257,29 @@ export function MobileAdminDashboard() {
                     }}
                 />
             )}
+
+            {/* 2026-06-06 owner: тот же FAB что и на /m/admin/bookings — для
+                консистентности «создать бронь» доступно с любого админ-
+                экрана, не только из списка броней. */}
+            <Link
+                to="/m/find"
+                aria-label="Новая бронь"
+                style={{
+                    position: 'fixed',
+                    right: 16,
+                    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+                    width: 56, height: 56,
+                    borderRadius: 28,
+                    background: '#0E0E0E',
+                    color: '#fff',
+                    display: 'grid', placeItems: 'center',
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
+                    textDecoration: 'none',
+                    zIndex: 30,
+                }}
+            >
+                <Plus size={24} strokeWidth={2.4} />
+            </Link>
         </div>
     );
 }
