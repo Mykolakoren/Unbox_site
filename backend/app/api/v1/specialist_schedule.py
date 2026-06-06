@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from typing import List, Optional
 from uuid import UUID
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from app.db.session import get_session
 from app.models.specialist import Specialist
@@ -17,6 +17,7 @@ from app.models.specialist_appointment import (
     SpecialistAppointment, SpecialistAppointmentRead, SpecialistAppointmentCreate,
 )
 from app.models.therapy_session import TherapySession
+from app.models.therapist_client import TherapistClient
 from app.models.location import Location
 from app.api.deps import get_current_user, require_admin
 from app.models.user import User
@@ -224,7 +225,17 @@ def get_available_slots(
         if d_from <= ts.date.date() <= d_to
     ]
 
-    # Build busy times per date
+    # Build busy times per date.
+    # `start_time` on appointments and `start_time/end_time` on the schedule
+    # template are Tbilisi wall-clock strings ("HH:MM"). TherapySession.date
+    # is a naive UTC timestamp by convention (see crm_calendar.py /
+    # tbilisi_naive_to_utc_naive). Mixing the two raw caused the bug where
+    # a 13:30 Tbilisi session (stored as 09:30 UTC) blocked the 10:00 slot
+    # of Mykola's Saturday template — the busy interval was read as
+    # 09:30–10:30 instead of 13:30–14:30.
+    from datetime import timezone as _tz, timedelta as _td
+    _TBILISI_OFFSET_MIN = 4 * 60  # Asia/Tbilisi is UTC+04, no DST.
+
     busy: dict[date, list[tuple[int, int]]] = {}
     for appt in appointments:
         start_m = _time_to_minutes(appt.start_time)
@@ -232,19 +243,30 @@ def get_available_slots(
         busy.setdefault(appt.date, []).append((start_m, end_m))
 
     for ts in therapy_sessions:
-        ts_date = ts.date.date()
-        # TherapySession stores time in the date datetime field
-        start_m = ts.date.hour * 60 + ts.date.minute
-        if start_m == 0:
+        # Promote UTC-naive → Tbilisi wall-clock minute offset, and bucket
+        # against the resulting Tbilisi calendar day (a 21:00 UTC session
+        # rolls over into the next day's morning Tbilisi-side).
+        utc_minutes = ts.date.hour * 60 + ts.date.minute
+        if utc_minutes == 0:
             continue  # No time info
+        tb_total = utc_minutes + _TBILISI_OFFSET_MIN
+        day_offset, start_m = divmod(tb_total, 24 * 60)
+        ts_date = ts.date.date() + _td(days=day_offset)
         end_m = start_m + (ts.duration_minutes or 60)
+        # If a session straddles midnight Tbilisi-side, clamp to the day
+        # so the busy interval doesn't bleed into the next day from here.
+        end_m = min(end_m, 24 * 60)
         busy.setdefault(ts_date, []).append((start_m, end_m))
 
     # Generate available slots
     result = []
     current = d_from
-    today = date.today()
-    now_minutes = datetime.now().hour * 60 + datetime.now().minute
+    # Use Tbilisi-now so "today" / "past slot" matches what the user sees
+    # on the chessboard. Without this, a 10:00 Tbilisi slot would still
+    # be hidden until ~14:00 Tbilisi (10:00 UTC) on the day-of.
+    _now_tb = datetime.now(_tz.utc) + _td(hours=4)
+    today = _now_tb.date()
+    now_minutes = _now_tb.hour * 60 + _now_tb.minute
 
     while current <= d_to:
         dow = current.weekday()  # 0=Mon
@@ -369,7 +391,89 @@ def create_appointment(
     # Notify specialist via Telegram if linked
     _notify_specialist_appointment_created(session, appointment, specialist)
 
+    # 2026-06-06 owner b/b/a: после appointment сразу создаём CRM-клиента
+    # и плановую сессию у специалиста. Кабинет НЕ бронируется
+    # автоматически (b), оплата НЕ списывается (b), но клиент попадает
+    # в CRM-карточки спеца и видит будущую сессию (a). Это даёт
+    # специалисту единое место для работы — раньше appointment жил
+    # отдельно от CRM, спец должен был руками заводить клиента+сессию.
+    #
+    # Tolerant: если спец без user_id (анкета без аккаунта) или любой
+    # этап CRM упадёт — appointment всё равно сохранён, заявка не
+    # теряется. Сессия — best effort.
+    if specialist.user_id:
+        try:
+            _link_appointment_to_crm(session, appointment, specialist)
+        except Exception as e:
+            logger.warning(
+                "[specialist:appt] Не удалось создать CRM-связку для appointment %s: %s",
+                appointment.id, e,
+            )
+
     return appointment
+
+
+def _link_appointment_to_crm(
+    session: Session,
+    appointment: SpecialistAppointment,
+    specialist: Specialist,
+) -> None:
+    """Создать CRM-клиента (если не существует по phone/email)
+    и плановую TherapySession у спеца, привязанную к этому
+    appointment'у по дате+времени.
+    """
+    user_id_str = str(specialist.user_id)
+
+    # Find-or-create клиента в CRM спеца. Матчинг по phone first
+    # (более устойчивый идентификатор), fallback на email.
+    client: Optional[TherapistClient] = None
+    if appointment.client_phone:
+        client = session.exec(
+            select(TherapistClient).where(
+                TherapistClient.specialist_id == user_id_str,
+                TherapistClient.phone == appointment.client_phone,
+                TherapistClient.is_active == True,  # noqa: E712
+            )
+        ).first()
+    if client is None and appointment.client_email:
+        client = session.exec(
+            select(TherapistClient).where(
+                TherapistClient.specialist_id == user_id_str,
+                TherapistClient.email == appointment.client_email,
+                TherapistClient.is_active == True,  # noqa: E712
+            )
+        ).first()
+
+    if client is None:
+        client = TherapistClient(
+            specialist_id=user_id_str,
+            name=appointment.client_name,
+            phone=appointment.client_phone,
+            email=appointment.client_email,
+            pipeline_status="LEAD",  # новый лид с публичного сайта
+            notes_text="Записался через публичную страницу /specialists",
+        )
+        session.add(client)
+        session.commit()
+        session.refresh(client)
+
+    # Создаём плановую сессию в CRM. is_booked=False — спец сам потом
+    # забронирует кабинет (если нужен). is_paid=False — оплата вне сайта.
+    h, m = appointment.start_time.split(":")
+    session_dt = datetime.combine(appointment.date, time(int(h), int(m)))
+
+    therapy = TherapySession(
+        specialist_id=user_id_str,
+        client_id=client.id,
+        date=session_dt,
+        duration_minutes=appointment.duration,
+        status="PLANNED",
+        is_booked=False,
+        is_paid=False,
+        notes="Заявка через публичный сайт. Кабинет и оплата — отдельно.",
+    )
+    session.add(therapy)
+    session.commit()
 
 
 @router.delete("/{specialist_id}/appointments/{appointment_id}")
