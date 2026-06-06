@@ -20,6 +20,9 @@ SPECIALISTS = [
         "formats": ["OFFLINE_ROOM", "ONLINE"],
         "base_price_gel": 80,
         "category": "psychology",
+        # Партнёр Unbox, в публичный каталог не выводим — не принимает
+        # новых клиентов через сайт. is_verified=True остаётся (работает в CRM).
+        "is_public": False,
     },
     {
         "first_name": "Николай", "last_name": "Корень",
@@ -146,6 +149,9 @@ SPECIALISTS = [
         "formats": ["OFFLINE_ROOM", "ONLINE"],
         "base_price_gel": 100,
         "category": "coaching",
+        # Сооснователь, в публичный каталог не выводим — фокус на UnboxCenter
+        # и партнёрстве, индивидуальные сессии не масштабирует. is_verified=True.
+        "is_public": False,
     },
     {
         "first_name": "Мария", "last_name": "Августовских",

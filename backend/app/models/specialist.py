@@ -20,6 +20,17 @@ class SpecialistBase(SQLModel):
 
     base_price_gel: int = Field(default=0)
     is_verified: bool = Field(default=False)
+    # Visibility in PUBLIC catalog (/specialists). Separate from is_verified
+    # which gates "can this profile work in CRM at all" (KYC/approval).
+    # Owner 2026-06-06: Яна Педан и Юлия Рожек — verified, работают,
+    # но в публичном каталоге не показываются (Яна — партнёр,
+    # Юлия — сооснователь, не принимают по записи через сайт).
+    is_public: bool = Field(default=True)
+    # Self-service application status: NULL = legacy/admin-created (skip queue),
+    # "pending" = user-submitted, awaiting admin review,
+    # "approved" / "rejected" = post-decision.
+    # NULL is intentional so existing rows keep working unchanged.
+    application_status: Optional[str] = Field(default=None, index=True)
     # Category for public catalog filtering
     # Values: psychology | psychiatry | narcology | coaching | education
     category: Optional[str] = Field(default=None)
@@ -57,6 +68,8 @@ class SpecialistUpdate(SQLModel):
     formats: Optional[List[str]] = None
     base_price_gel: Optional[int] = None
     is_verified: Optional[bool] = None
+    is_public: Optional[bool] = None
+    application_status: Optional[str] = None
     category: Optional[str] = None
     user_id: Optional[UUID] = None
     payment_accounts: Optional[List[dict]] = None
@@ -66,3 +79,6 @@ class SpecialistRead(SpecialistBase):
     id: UUID
     user_id: Optional[UUID] = None
     sort_order: int = 0
+    # True when the linked user has role 'owner' — that card is pinned to
+    # the top of the catalogue and cannot be reordered below others.
+    is_owner: bool = False

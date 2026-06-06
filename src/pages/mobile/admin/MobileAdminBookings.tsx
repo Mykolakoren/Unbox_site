@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Check, X, Clock, AlertTriangle, Loader2, Sparkles, CalendarClock, Repeat, DollarSign } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Search, Check, X, Clock, AlertTriangle, Loader2, Sparkles, CalendarClock, Repeat, DollarSign, Plus } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -493,6 +493,32 @@ export function MobileAdminBookings() {
                     onOpenUser={() => navigate(`/m/admin/users/${encodeURIComponent(sheet.userId)}`)}
                 />
             )}
+
+            {/* 2026-06-06 owner: FAB «+ Новая бронь» для админа.
+                Ведёт на /m/find — общий клиентский flow поиска слота, но
+                MobileCheckout автоматически активирует admin user-picker
+                «За кого бронируешь?» по isAdminActor-чеку (см. MobileCheckout
+                lines 401-430). Минимум кода, переиспользует существующее. */}
+            <Link
+                to="/m/find"
+                aria-label="Новая бронь"
+                style={{
+                    position: 'fixed',
+                    right: 16,
+                    // Над bottom-nav (72px высота + 8px зазор + safe-area).
+                    bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+                    width: 56, height: 56,
+                    borderRadius: 28,
+                    background: '#0E0E0E',
+                    color: '#fff',
+                    display: 'grid', placeItems: 'center',
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
+                    textDecoration: 'none',
+                    zIndex: 30,
+                }}
+            >
+                <Plus size={24} strokeWidth={2.4} />
+            </Link>
         </div>
     );
 }
