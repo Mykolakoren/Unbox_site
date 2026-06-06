@@ -9,6 +9,7 @@ import { useBookingStore } from '../../store/bookingStore';
 import { bookingsApi } from '../../api/bookings';
 import { crmApi } from '../../api/crm';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
+import { tbilisiNow } from '../../utils/dateUtils';
 import { getFavoriteCabinet } from './favoriteCabinet';
 import type { BookingHistoryItem } from '../../store/types';
 
@@ -149,8 +150,11 @@ export function MobileFind() {
     }, [dayOffset, customDate]);
 
     const slots = useMemo(
-        () => buildFreeWindows(bookings, targetDate, duration, locs, spaces, favCab),
-        [bookings, targetDate, duration, locs, spaces, favCab],
+        // dayOffset === 0 → сегодня. Скрываем стартовые точки которые
+        // уже прошли по Тбилисскому времени. Для завтра+ — все 09:00-21:30
+        // легальны.
+        () => buildFreeWindows(bookings, targetDate, duration, locs, spaces, favCab, dayOffset === 0),
+        [bookings, targetDate, duration, locs, spaces, favCab, dayOffset],
     );
 
     const toggleLoc = (id: string) => {
@@ -819,6 +823,7 @@ function buildFreeWindows(
     locs: Set<string>,
     spaces: Set<SpaceType>,
     favCab: string | null,
+    isToday: boolean,
 ): FreeWindow[] {
     if (locs.size === 0 || spaces.size === 0) return [];
 
@@ -861,11 +866,20 @@ function buildFreeWindows(
     const out: FreeWindow[] = [];
     const dayStart = 9 * 60;
     const dayEnd = 22 * 60;
+    // 2026-06-06 owner: для сегодня скрываем все стартовые точки
+    // которые УЖЕ прошли по Тбилисскому wall-clock. Раньше /m/find
+    // показывал 9:00 как «свободный» в 15:56 — пользователь жал, потом
+    // не мог забронировать. tbilisiNow() не зависит от браузерного TZ
+    // (важно — клиент может быть на UK VPN).
+    const minStartMin = isToday ? tbilisiNow().totalMins : 0;
     // Step by 30 minutes — owner 2026-05-31 (Микола): нужны полу-часовые
     // старты (19:30 на 1.5ч). Раньше шаг был 60 «для коротких списков»,
     // но это резало половину легальных слотов. Список вырос вдвое, но
     // покрытие — все возможные стартовые точки.
     for (let t = dayStart; t + durationMin <= dayEnd; t += 30) {
+        // <= вместо < — слот «прямо сейчас» забронировать тоже нельзя
+        // (физически не успеешь быть в кабинете).
+        if (t <= minStartMin) continue;
         const free: string[] = [];
         for (const r of candidates) {
             let ok = true;
