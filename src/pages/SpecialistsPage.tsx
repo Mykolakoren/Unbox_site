@@ -48,47 +48,34 @@ export function SpecialistsPage() {
         fetchSpecialists();
     }, []);
 
-    // Excel #21 — always show the canonical role tabs even when the current
-    // roster doesn't have anyone in a category yet. Extra roles found in
-    // taglines are appended so we don't hide new professions.
+    // 2026-06-06 owner: показываем ТОЛЬКО канонические роли, без
+    // auto-discovery из tagline. Раньше брали `tagline.split(',')[0]`,
+    // но реальные tagline'ы не имеют запятой — целиком становились
+    // «ролью»: «Психолог · в профессии с 2023», «КПТ-психолог · сексолог
+    // · в профессии с 2022» и тд. Шум. Полные подробности живут в
+    // карточке спеца, не в фильтре.
     const CORE_ROLES = ['Психолог', 'Коуч', 'Педагог', 'Тренер', 'Терапевт'];
+    const roleFilters = CORE_ROLES;
 
-    const roleFilters = useMemo(() => {
-        const found = new Map<string, number>();
-        specialists.forEach(s => {
-            const role = s.tagline?.split(',')[0]?.trim();
-            if (role) found.set(role, (found.get(role) || 0) + 1);
-        });
-        // Start with core roles (always visible), then append discovered ones.
-        const seen = new Set<string>();
-        const ordered: string[] = [];
-        for (const r of CORE_ROLES) {
-            ordered.push(r);
-            seen.add(r.toLowerCase());
-        }
-        Array.from(found.entries())
-            .sort((a, b) => b[1] - a[1])
-            .forEach(([r]) => {
-                if (!seen.has(r.toLowerCase())) {
-                    ordered.push(r);
-                    seen.add(r.toLowerCase());
-                }
-            });
-        return ordered;
-    }, [specialists]);
-
-    // Excel #56 — collect all specialisations across the roster for the
-    // chip filter row. Sorted by popularity.
+    // 2026-06-06 owner: чистим направления.
+    // 1. Дроп всё что содержит «в профессии» — это suffix а не направление.
+    // 2. Дроп raw-ключи типа «general_psychology», «gestalt», «cbt» —
+    //    латиница без пробелов = техно-данные, не для UI.
+    // 3. Топ-15 по популярности — больше становится визуальной свалкой.
+    const SPEC_BLOCKLIST_RE = /в профессии|^[a-z][a-z0-9_]*$/i;
     const allSpecializations = useMemo(() => {
         const counts = new Map<string, number>();
         specialists.forEach(s => {
             (s.specializations || []).forEach(spec => {
                 const clean = spec.trim();
-                if (clean) counts.set(clean, (counts.get(clean) || 0) + 1);
+                if (!clean || clean.length < 3) return;
+                if (SPEC_BLOCKLIST_RE.test(clean)) return;
+                counts.set(clean, (counts.get(clean) || 0) + 1);
             });
         });
         return Array.from(counts.entries())
             .sort((a, b) => b[1] - a[1])
+            .slice(0, 15)
             .map(([spec]) => spec);
     }, [specialists]);
 
@@ -159,6 +146,16 @@ function GridHouseSpecialistsPage({
     const { currentUser, logout } = useUserStore();
     const navigate = useNavigate();
     const isAdmin = Boolean(currentUser && ['admin', 'senior_admin', 'owner'].includes(currentUser.role ?? ''));
+    // Mirror useNarrow from GridHouseLanding so the header collapses to
+    // logo + current page + login on phones (the full nav overflowed
+    // 375 px viewports — same bug we just fixed in the landing header).
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 760);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 760);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+    const dot = <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>;
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', background: GH.paper }}>
@@ -168,22 +165,30 @@ function GridHouseSpecialistsPage({
                     <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
                     <nav style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
                         <span style={{ ...ghspMono, padding: '4px 12px', color: GH.ink, fontWeight: 700 }}>Специалисты</span>
-                        <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
-                        <Link to="/#cabinets" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Кабинеты</Link>
-                        <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
-                        <Link to="/subscriptions" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Тарифы</Link>
-                        {isAdmin && (
+                        {!narrow && (
                             <>
-                                <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
-                                <Link to="/admin" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Админ</Link>
+                                {dot}
+                                <Link to="/#cabinets" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Кабинеты</Link>
+                                {dot}
+                                <Link to="/subscriptions" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Тарифы</Link>
+                                {isAdmin && (
+                                    <>
+                                        {dot}
+                                        <Link to="/admin" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Админ</Link>
+                                    </>
+                                )}
                             </>
                         )}
-                        <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
+                        {dot}
                         {currentUser ? (
                             <>
                                 <Link to="/dashboard" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>{currentUser.name ?? 'Кабинет'}</Link>
-                                <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>
-                                <button onClick={() => { logout(); navigate('/'); }} style={{ ...ghspMono, padding: '4px 12px', color: GH.danger, background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 400 }}>Выйти</button>
+                                {!narrow && (
+                                    <>
+                                        {dot}
+                                        <button onClick={() => { logout(); navigate('/'); }} style={{ ...ghspMono, padding: '4px 12px', color: GH.danger, background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 400 }}>Выйти</button>
+                                    </>
+                                )}
                             </>
                         ) : (
                             <Link to="/login" style={{ ...ghspMono, padding: '4px 12px', color: GH.ink60, textDecoration: 'none', fontWeight: 400 }}>Войти</Link>
@@ -276,43 +281,16 @@ function GridHouseSpecialistsPage({
                     </div>
                 )}
 
-                {/* Excel #56 — specialisation tags as a second filter row. */}
+                {/* Excel #56 — specialisation tags. Collapsed by default to
+                    a compact "Направления (N)" button to keep the page above
+                    the fold; expands inline on click. Active filter pill also
+                    visible above the toggle so the user always sees what's on. */}
                 {allSpecializations.length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-                        <div style={{ ...ghspMono, color: GH.ink30, alignSelf: 'center', marginRight: 6 }}>Направление:</div>
-                        <button
-                            onClick={() => setSpecFilter(null)}
-                            style={{
-                                padding: '4px 10px', fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
-                                cursor: 'pointer',
-                                border: specFilter === null ? `1px solid ${GH.ink}` : ghspHairline,
-                                background: specFilter === null ? GH.ink : 'transparent',
-                                color: specFilter === null ? GH.paper : GH.ink60,
-                                textTransform: 'uppercase' as const,
-                            }}
-                        >
-                            Все
-                        </button>
-                        {allSpecializations.map(spec => {
-                            const active = specFilter === spec;
-                            return (
-                                <button
-                                    key={spec}
-                                    onClick={() => setSpecFilter(active ? null : spec)}
-                                    style={{
-                                        padding: '4px 10px', fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
-                                        cursor: 'pointer',
-                                        border: active ? `1px solid ${GH.ink}` : ghspHairline,
-                                        background: active ? GH.ink : 'transparent',
-                                        color: active ? GH.paper : GH.ink60,
-                                        textTransform: 'uppercase' as const,
-                                    }}
-                                >
-                                    {spec}
-                                </button>
-                            );
-                        })}
-                    </div>
+                    <SpecFilterCompact
+                        all={allSpecializations}
+                        value={specFilter}
+                        onChange={setSpecFilter}
+                    />
                 )}
 
                 <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -355,6 +333,91 @@ function GridHouseSpecialistsPage({
                 <span style={{ ...ghspMono, color: GH.ink30 }}>UNBOX · 2026</span>
                 <span style={{ ...ghspMono, color: GH.ink10 }}>GRID HOUSE</span>
             </footer>
+        </div>
+    );
+}
+
+
+/**
+ * Specialisation filter — compact mode.
+ *
+ * Old version dumped all 60+ direction tags inline; on desktop it took 4
+ * rows and pushed actual specialist cards below the fold. New: just a single
+ * "Направления (N)" toggle. When folded, the currently-active tag (if any)
+ * is shown inline as a chip so the user always sees the filter state. When
+ * expanded, the full tag cloud appears.
+ */
+function SpecFilterCompact({ all, value, onChange }: {
+    all: string[];
+    value: string | null;
+    onChange: (s: string | null) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    // Auto-expand when a tag is picked and that tag wasn't already in view.
+    // No interaction trickery — just keep the user oriented.
+
+    return (
+        <div style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                    onClick={() => setOpen(o => !o)}
+                    style={{
+                        padding: '4px 10px',
+                        fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                        cursor: 'pointer',
+                        border: ghspHairline,
+                        background: 'transparent',
+                        color: GH.ink60,
+                        textTransform: 'uppercase' as const,
+                    }}
+                >
+                    {open ? '× Направления' : `+ Направления (${all.length})`}
+                </button>
+                {/* Always-visible active filter pill */}
+                {value && (
+                    <button
+                        onClick={() => onChange(null)}
+                        style={{
+                            padding: '4px 10px',
+                            fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                            cursor: 'pointer',
+                            border: `1px solid ${GH.ink}`,
+                            background: GH.ink,
+                            color: GH.paper,
+                            textTransform: 'uppercase' as const,
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                        }}
+                        aria-label="Сбросить фильтр направления"
+                    >
+                        {value} ×
+                    </button>
+                )}
+            </div>
+
+            {open && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
+                    {all.map(spec => {
+                        const active = value === spec;
+                        return (
+                            <button
+                                key={spec}
+                                onClick={() => onChange(active ? null : spec)}
+                                style={{
+                                    padding: '4px 10px',
+                                    fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                                    cursor: 'pointer',
+                                    border: active ? `1px solid ${GH.ink}` : ghspHairline,
+                                    background: active ? GH.ink : 'transparent',
+                                    color: active ? GH.paper : GH.ink60,
+                                    textTransform: 'uppercase' as const,
+                                }}
+                            >
+                                {spec}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }
