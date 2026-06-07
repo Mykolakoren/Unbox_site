@@ -947,14 +947,21 @@ function GridHouseSubscriptions() {
 
 /** Числа в синке с SUBSCRIPTION_PLANS в data.ts.
  *  Профи+: 40 базовых часов + 2 бонусных = 42 ч; делим 640 на 42.
- *  Групповой мастер: 16 групповых часов, reference = 35 ₾/час (групповая
- *  стандартная), а не 20 (индивидуальная). */
-const PRICE_PLANS = [
-    { name: 'Без абонемента',     price: 20,  hours: 1,  ref: 20, format: 'индивид.' },
-    { name: 'Тёплый старт',       price: 180, hours: 10, ref: 20, format: 'индивид.' },
-    { name: 'Регулярный практик', price: 340, hours: 20, ref: 20, format: 'индивид.' },
-    { name: 'Профи+',             price: 640, hours: 42, ref: 20, format: 'индивид.', accent: true },
-    { name: 'Групповой мастер',   price: 420, hours: 16, ref: 35, format: 'групповой' },
+ *  «Без абонемента» появляется в обеих группах как 100% — точка отсчёта
+ *  для своего тарифа.
+ *  2026-06-07 owner: разделено на 2 шкалы по формату. Раньше мешали
+ *  индивид. + группу в один список, и визуально групповая полоса
+ *  казалась длиннее «без абонемента» индивид. */
+const INDIVIDUAL_PLANS = [
+    { name: 'Без абонемента',     price: 20,  hours: 1,  ref: 20 },
+    { name: 'Тёплый старт',       price: 180, hours: 10, ref: 20 },
+    { name: 'Регулярный практик', price: 340, hours: 20, ref: 20 },
+    { name: 'Профи+',             price: 640, hours: 42, ref: 20, accent: true },
+];
+
+const GROUP_PLANS = [
+    { name: 'Без абонемента',     price: 35,  hours: 1,  ref: 35 },
+    { name: 'Групповой мастер',   price: 420, hours: 16, ref: 35, accent: true },
 ];
 
 function EffectivePriceChart() {
@@ -963,21 +970,64 @@ function EffectivePriceChart() {
             <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>
                 ЭФФЕКТИВНАЯ ЦЕНА ЧАСА
             </div>
-            <p style={{ fontSize: 13, color: GH.ink60, marginBottom: 20, maxWidth: 560 }}>
-                Полная шкала — базовая ставка без скидки (20 ₾/ч индивидуально,
-                35 ₾/ч группа). Чем короче заполненная часть — тем приятнее
-                реальная цена часа с абонементом.
+            <p style={{ fontSize: 13, color: GH.ink60, marginBottom: 24, maxWidth: 560 }}>
+                Полная шкала — базовая ставка без скидки. Чем короче
+                заполненная полоса, тем приятнее реальная цена часа
+                с абонементом.
             </p>
 
+            <PriceScale
+                title="Индивидуальный кабинет"
+                baseRate={20}
+                plans={INDIVIDUAL_PLANS}
+            />
+
+            <div style={{ height: 24 }} />
+
+            <PriceScale
+                title="Групповой формат"
+                baseRate={35}
+                plans={GROUP_PLANS}
+            />
+
+            <p style={{ fontSize: 11, color: GH.ink30, marginTop: 16, lineHeight: 1.5 }}>
+                Профи+ включает 2 бонусных часа сверх основных 40, поэтому
+                эффективная скидка получается ~24%, а не «голые» 20% из
+                карточки. «Групповой мастер» считается по групповой ставке.
+            </p>
+        </div>
+    );
+}
+
+function PriceScale({
+    title, baseRate, plans,
+}: {
+    title: string;
+    baseRate: number;
+    plans: Array<{ name: string; price: number; hours: number; ref: number; accent?: boolean }>;
+}) {
+    return (
+        <div>
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                marginBottom: 8,
+                paddingBottom: 6,
+                borderBottom: `1px solid ${GH.ink}`,
+            }}>
+                <div style={{ ...ghsubMono, color: GH.ink, fontSize: 11, letterSpacing: '0.14em' }}>
+                    {title}
+                </div>
+                <div style={{ ...ghsubMono, color: GH.ink60, fontSize: 10 }}>
+                    база {baseRate} ₾/час
+                </div>
+            </div>
+
             <div style={{ border: ghsubHairline }}>
-                {PRICE_PLANS.map((p, i) => {
+                {plans.map((p, i) => {
                     const perHour = p.price / p.hours;
                     const savingPct = Math.round((1 - perHour / p.ref) * 100);
-                    // 2026-06-07 owner: каждый план относительно своей базовой
-                    // ставки. «Без абонемента» = 100% (точка отсчёта). Платные
-                    // планы — заполнение пропорционально perHour/ref, остаток
-                    // справа визуально = скидка. Раньше делили на max(refs)
-                    // = 35, и 20-полоса была 57% — диссонанс.
                     const fillPct = Math.min(100, (perHour / p.ref) * 100);
                     const isStandard = savingPct === 0;
                     const barColor = p.accent
@@ -999,20 +1049,17 @@ function EffectivePriceChart() {
                                 background: p.accent ? `${GH.accent}08` : 'transparent',
                             }}
                         >
-                            {/* Plan name + format */}
                             <div>
                                 <div style={{ fontWeight: 700, fontSize: 14, color: GH.ink }}>
                                     {p.name}
                                 </div>
-                                <div style={{ fontSize: 11, color: GH.ink30, marginTop: 2 }}>
-                                    {p.format}
-                                    {p.hours > 1 && ` · ${p.hours} ч · ${p.price} ₾`}
-                                </div>
+                                {p.hours > 1 && (
+                                    <div style={{ fontSize: 11, color: GH.ink30, marginTop: 2 }}>
+                                        {p.hours} ч · {p.price} ₾
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Bar: фон = базовая ставка (полная шкала),
-                                заливка = эффективная цена. Пустая правая
-                                часть визуально = экономия. */}
                             <div style={{
                                 position: 'relative',
                                 height: 18,
@@ -1026,9 +1073,6 @@ function EffectivePriceChart() {
                                     background: barColor,
                                     transition: 'width .3s',
                                 }} />
-                                {/* Subtle reference tick: вертикальная
-                                    риска на 100% помогает читать «вот
-                                    тут была бы база» при сильной скидке. */}
                                 {!isStandard && (
                                     <div style={{
                                         position: 'absolute',
@@ -1039,7 +1083,6 @@ function EffectivePriceChart() {
                                 )}
                             </div>
 
-                            {/* Effective rate + saving */}
                             <div style={{ textAlign: 'right' }}>
                                 <div style={{
                                     fontFamily: GH_MONO,
@@ -1069,12 +1112,6 @@ function EffectivePriceChart() {
                     );
                 })}
             </div>
-
-            <p style={{ fontSize: 11, color: GH.ink30, marginTop: 10, lineHeight: 1.5 }}>
-                Базовая ставка для индивидуального кабинета — 20 ₾/час, для
-                группового — 35 ₾/час. Профи+ включает 2 бонусных часа сверх
-                основных 40. «Групповой мастер» считается по групповой ставке.
-            </p>
         </div>
     );
 }
