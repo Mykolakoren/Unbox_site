@@ -958,27 +958,27 @@ const PRICE_PLANS = [
 ];
 
 function EffectivePriceChart() {
-    // Максимальная эффективная ставка — для пропорциональной ширины полосы.
-    // Используем все ref'ы т.к. в наборе есть и 20 и 35 — берём max,
-    // чтобы 35-полоса (без абонемента группа) не вылетала за границу.
-    const maxPrice = Math.max(...PRICE_PLANS.map(p => p.ref));
-
     return (
         <div style={{ marginBottom: 48 }}>
             <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>
                 ЭФФЕКТИВНАЯ ЦЕНА ЧАСА
             </div>
             <p style={{ fontSize: 13, color: GH.ink60, marginBottom: 20, maxWidth: 560 }}>
-                Со скидками часовая ставка получается ниже стандартной.
-                Это — реальная стоимость часа при использовании всех часов
-                из абонемента в срок.
+                Полная шкала — базовая ставка без скидки (20 ₾/ч индивидуально,
+                35 ₾/ч группа). Чем короче заполненная часть — тем приятнее
+                реальная цена часа с абонементом.
             </p>
 
             <div style={{ border: ghsubHairline }}>
                 {PRICE_PLANS.map((p, i) => {
                     const perHour = p.price / p.hours;
                     const savingPct = Math.round((1 - perHour / p.ref) * 100);
-                    const barWidth = (perHour / maxPrice) * 100;
+                    // 2026-06-07 owner: каждый план относительно своей базовой
+                    // ставки. «Без абонемента» = 100% (точка отсчёта). Платные
+                    // планы — заполнение пропорционально perHour/ref, остаток
+                    // справа визуально = скидка. Раньше делили на max(refs)
+                    // = 35, и 20-полоса была 57% — диссонанс.
+                    const fillPct = Math.min(100, (perHour / p.ref) * 100);
                     const isStandard = savingPct === 0;
                     const barColor = p.accent
                         ? GH.accent
@@ -1010,20 +1010,33 @@ function EffectivePriceChart() {
                                 </div>
                             </div>
 
-                            {/* Bar */}
+                            {/* Bar: фон = базовая ставка (полная шкала),
+                                заливка = эффективная цена. Пустая правая
+                                часть визуально = экономия. */}
                             <div style={{
                                 position: 'relative',
                                 height: 18,
                                 background: `${GH.ink10}`,
                                 overflow: 'hidden',
-                            }}>
+                            }} title={`База: ${p.ref} ₾/ч · реально: ${perHour.toFixed(2)} ₾/ч`}>
                                 <div style={{
                                     position: 'absolute',
                                     left: 0, top: 0, bottom: 0,
-                                    width: `${barWidth}%`,
+                                    width: `${fillPct}%`,
                                     background: barColor,
                                     transition: 'width .3s',
                                 }} />
+                                {/* Subtle reference tick: вертикальная
+                                    риска на 100% помогает читать «вот
+                                    тут была бы база» при сильной скидке. */}
+                                {!isStandard && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        right: 0, top: 0, bottom: 0,
+                                        width: 2,
+                                        background: GH.ink30,
+                                    }} />
+                                )}
                             </div>
 
                             {/* Effective rate + saving */}
