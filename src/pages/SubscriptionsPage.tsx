@@ -964,6 +964,17 @@ const GROUP_PLANS = [
     { name: 'Групповой мастер',   price: 420, hours: 16, ref: 35, accent: true },
 ];
 
+/** Скидка за длительность непрерывной брони в ОДНОМ кабинете.
+ *  Проценты должны совпадать с backend PricingService:
+ *  2h → 10%, 3h → 15%, 5+h → 20%. Считаем total cost = base*hours*(1-disc),
+ *  чтобы PriceScale корректно вычислил perHour=total/hours = effective rate. */
+const DURATION_INDIVIDUAL = [
+    { name: '1 час',          price: 20,  hours: 1, ref: 20 },
+    { name: '2 часа подряд',  price: 36,  hours: 2, ref: 20 },
+    { name: '3 часа подряд',  price: 51,  hours: 3, ref: 20 },
+    { name: '5+ часов подряд', price: 80, hours: 5, ref: 20, accent: true },
+];
+
 function EffectivePriceChart() {
     return (
         <div style={{ marginBottom: 48 }}>
@@ -990,10 +1001,24 @@ function EffectivePriceChart() {
                 plans={GROUP_PLANS}
             />
 
+            {/* 2026-06-07 owner: длительность — альтернативный способ
+                сэкономить без покупки абонемента. Шкала индивид. 20 ₾/ч,
+                те же проценты что и в backend PricingService. */}
+            <div style={{ height: 24 }} />
+
+            <PriceScale
+                title="Скидка за длительность (без абонемента)"
+                baseRate={20}
+                plans={DURATION_INDIVIDUAL}
+            />
+
             <p style={{ fontSize: 11, color: GH.ink30, marginTop: 16, lineHeight: 1.5 }}>
-                Профи+ включает 2 бонусных часа сверх основных 40, поэтому
-                эффективная скидка получается ~24%, а не «голые» 20% из
-                карточки. «Групповой мастер» считается по групповой ставке.
+                Профи+ включает 2 бонусных часа сверх основных 40 — эффективная
+                скидка ~24%, не «голые» 20% из карточки. «Групповой мастер»
+                считается по групповой ставке (35 ₾/ч). Скидки за длительность
+                применяются к непрерывной брони в ОДНОМ кабинете; разорванные
+                или параллельные брони не складываются. С абонементной скидкой
+                не суммируются — применяется самая выгодная.
             </p>
         </div>
     );
