@@ -975,6 +975,17 @@ const DURATION_INDIVIDUAL = [
     { name: '5+ часов подряд', price: 80, hours: 5, ref: 20, accent: true },
 ];
 
+/** Недельная скидка — накопительная по календарной неделе (пн-вс).
+ *  Тиры идентичны backend PRICING_CONFIG.weekly_progressive (2026-06-07
+ *  восстановлены). subtitle вместо "ч · ₾" — поскольку «5 ч × 18 ₾ = 90»
+ *  для тира 5-10 ч бессмысленно (тир, не фикс-цена). */
+const WEEKLY_TIERS = [
+    { name: '1–4 ч / неделю',  price: 20,  hours: 1,  ref: 20, subtitle: 'базовая ставка' },
+    { name: '5–10 ч / неделю', price: 90,  hours: 5,  ref: 20, subtitle: 'все часы недели' },
+    { name: '11–15 ч / неделю', price: 165, hours: 11, ref: 20, subtitle: 'все часы недели' },
+    { name: '16+ ч / неделю',  price: 160, hours: 16, ref: 20, subtitle: 'все часы недели', accent: true },
+];
+
 function EffectivePriceChart() {
     return (
         <div style={{ marginBottom: 48 }}>
@@ -1012,13 +1023,27 @@ function EffectivePriceChart() {
                 plans={DURATION_INDIVIDUAL}
             />
 
+            {/* 2026-06-07 owner: недельная скидка восстановлена в backend
+                — нужен маркетинг-аргумент «чем больше практикуешь, тем
+                дешевле час». Тиры синхронизированы с
+                PRICING_CONFIG.weekly_progressive. */}
+            <div style={{ height: 24 }} />
+
+            <PriceScale
+                title="Недельная скидка (накопительная)"
+                baseRate={20}
+                plans={WEEKLY_TIERS}
+            />
+
             <p style={{ fontSize: 11, color: GH.ink30, marginTop: 16, lineHeight: 1.5 }}>
                 Профи+ включает 2 бонусных часа сверх основных 40 — эффективная
                 скидка ~24%, не «голые» 20% из карточки. «Групповой мастер»
                 считается по групповой ставке (35 ₾/ч). Скидки за длительность
                 применяются к непрерывной брони в ОДНОМ кабинете; разорванные
-                или параллельные брони не складываются. С абонементной скидкой
-                не суммируются — применяется самая выгодная.
+                или параллельные брони не складываются. Недельная скидка
+                считается по сумме часов в календарной неделе (пн-вс), сразу
+                по новой ставке к ВСЕМ часам этой недели. Скидки не
+                суммируются — применяется самая выгодная.
             </p>
         </div>
     );
@@ -1029,7 +1054,17 @@ function PriceScale({
 }: {
     title: string;
     baseRate: number;
-    plans: Array<{ name: string; price: number; hours: number; ref: number; accent?: boolean }>;
+    plans: Array<{
+        name: string;
+        price: number;
+        hours: number;
+        ref: number;
+        accent?: boolean;
+        /** Override дефолтного «${hours} ч · ${price} ₾» подзаголовка.
+         *  Нужно для weekly-тиров где price = total cost для нижней
+         *  границы тира — отдельно отображать его бессмысленно. */
+        subtitle?: string;
+    }>;
 }) {
     return (
         <div>
@@ -1078,9 +1113,13 @@ function PriceScale({
                                 <div style={{ fontWeight: 700, fontSize: 14, color: GH.ink }}>
                                     {p.name}
                                 </div>
-                                {p.hours > 1 && (
+                                {(p.subtitle !== undefined
+                                    ? p.subtitle
+                                    : (p.hours > 1 ? `${p.hours} ч · ${p.price} ₾` : null)) && (
                                     <div style={{ fontSize: 11, color: GH.ink30, marginTop: 2 }}>
-                                        {p.hours} ч · {p.price} ₾
+                                        {p.subtitle !== undefined
+                                            ? p.subtitle
+                                            : `${p.hours} ч · ${p.price} ₾`}
                                     </div>
                                 )}
                             </div>
