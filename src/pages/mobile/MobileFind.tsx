@@ -851,10 +851,17 @@ function buildFreeWindows(
     );
 
     // Build occupied sets per resource: minutes-of-day where the slot is busy.
+    // 2026-06-07 owner: брони с isReRentListed=true НЕ помечаем как busy —
+    // владелец выставил их в пересдачу, любой может забрать. Backend при
+    // создании новой брони на этот слот авто-отменяет переарендованную
+    // с возвратом 50% оригиналу (см. find_re_rent_conflicts в bookings/
+    // routes.py). Десктоп показывал такие слоты как dashed-amber, мобильный
+    // же блокировал — это и есть «слотов на переаренде не видно».
     const busy: Record<string, Set<number>> = {};
     for (const r of candidates) busy[r.id] = new Set();
     for (const b of dayBookings) {
         if (!b.resourceId || !b.startTime || !busy[b.resourceId]) continue;
+        if (b.isReRentListed) continue; // slot открыт для пересдачи
         const [h, m] = b.startTime.split(':').map(Number);
         const start = h * 60 + m;
         const end = start + (b.duration ?? 60);
