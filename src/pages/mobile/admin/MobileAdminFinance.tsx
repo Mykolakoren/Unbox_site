@@ -311,8 +311,10 @@ export function MobileAdminFinance() {
                     onClosed={async () => {
                         setCloseShiftOpen(false);
                         // После закрытия — рефреш балансов и транзакций.
+                        // branch здесь гарантированно не 'all' (sheet рендерится
+                        // только при branch !== 'all'), поэтому передаём напрямую.
                         await Promise.all([
-                            fetchBalance(branch === 'all' ? undefined : branch),
+                            fetchBalance(branch),
                             fetchTransactions({
                                 dateFrom: range.from.toISOString(),
                                 dateTo: range.to.toISOString(),

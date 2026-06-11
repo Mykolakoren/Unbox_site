@@ -335,6 +335,86 @@ def update_personal_discount(
     return user
 
 
+# ── Balance correction ──────────────────────────────────────────────────────
+# Owner + Egor 2026-05-27: admins need a fast way to set User.balance to an
+# exact value (e.g. matching the Excel reconciliation) without having to add
+# a one-off cashbox transaction and remember to flip credit_user_balance.
+# This endpoint takes the new absolute balance + a reason, and writes BOTH:
+#   1. The User.balance field directly.
+#   2. A CashboxTransaction(type="adjustment") capturing the delta + reason,
+#      so the change is visible in audit history alongside regular payments.
+@router.post("/{user_id}/balance-correction", response_model=UserRead)
+def correct_user_balance(
+    *,
+    user_id: str,
+    payload: dict,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    user = _resolve_user(session, user_id)
+
+    new_balance = payload.get("new_balance")
+    reason = (payload.get("reason") or "").strip()
+
+    if new_balance is None:
+        raise HTTPException(status_code=400, detail="new_balance required")
+    if not reason:
+        raise HTTPException(status_code=400, detail="reason required")
+
+    try:
+        new_balance = float(new_balance)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="new_balance must be a number")
+
+    old_balance = float(user.balance or 0)
+    delta = round(new_balance - old_balance, 2)
+    if abs(delta) < 0.01:
+        raise HTTPException(status_code=400, detail="Новое значение совпадает с текущим балансом")
+
+    user.balance = round(new_balance, 2)
+    session.add(user)
+
+    # Audit row in cashbox so the change shows up in finance history (positive
+    # delta → income, negative → expense). adjustment is its own type so it
+    # never gets re-categorised by future reports.
+    from app.models.cashbox_transaction import CashboxTransaction
+    tx = CashboxTransaction(
+        type="income" if delta > 0 else "expense",
+        amount=abs(delta),
+        currency="GEL",
+        payment_method="adjustment",
+        description=f"Корректировка баланса {old_balance:.2f} → {new_balance:.2f}. {reason}",
+        branch=None,
+        date=datetime.now(),
+        admin_id=str(current_user.id),
+        admin_name=current_user.name or current_user.email or "admin",
+        client_id=str(user.id),
+        client_name=user.name,
+        credited_user_id=str(user.id) if delta > 0 else None,
+    )
+    session.add(tx)
+    session.commit()
+    session.refresh(user)
+
+    from app.services.timeline import timeline_service
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(user.id),
+        target_type="user",
+        event_type="balance_correction",
+        description=f"Balance {old_balance:.2f} → {new_balance:.2f} (Δ {delta:+.2f}). {reason}",
+        metadata={
+            "old_balance": old_balance,
+            "new_balance": new_balance,
+            "delta": delta,
+            "reason": reason,
+        },
+    )
+    return user
+
+
 # ── Change password ──────────────────────────────────────────────────────────
 
 @router.post("/{user_id}/change-password")

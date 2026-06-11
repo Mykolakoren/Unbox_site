@@ -95,3 +95,42 @@ def update_user_me(
         return current_user
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/me/vacation", response_model=UserRead)
+def set_vacation(
+    *,
+    session: Session = Depends(get_session),
+    payload: dict,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Set/clear the 'I'm on vacation until X' marker on own profile.
+
+    Owner 2026-05-27: specialists going on holiday previously had to
+    manually cancel each booking and ping every client. With this flag
+    set, the mobile CRM banner + Today screen surface their absence so
+    they don't accidentally take new sessions, and admins see who's out
+    when triaging hot-bookings. Stored in `crm_data.vacation_until` as
+    a YYYY-MM-DD ISO date or None.
+
+    Payload: {"until": "YYYY-MM-DD"}  or  {"until": null} to clear.
+    """
+    raw = payload.get("until")
+    crm_data = dict(current_user.crm_data or {})
+    if raw in (None, "", False):
+        crm_data.pop("vacation_until", None)
+    else:
+        # Validate format — reject garbage so the UI doesn't get bricked
+        try:
+            datetime.strptime(str(raw), "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="until must be YYYY-MM-DD")
+        crm_data["vacation_until"] = str(raw)
+
+    current_user.crm_data = crm_data
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(current_user, "crm_data")
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user

@@ -430,7 +430,7 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                         alignItems: 'stretch',
                         gap: 0,
                         background: '#fff',
-                        border: '1px solid ' + GH.ink20,
+                        border: '1px solid ' + GH.ink10,
                     }}>
                         <code style={{
                             flex: 1,

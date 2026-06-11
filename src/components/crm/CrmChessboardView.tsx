@@ -744,7 +744,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
         }
         const res = RESOURCES.find(r => r.id === b.resourceId);
         const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
-        const endTimeStr = _minToTime(_timeToMin(b.startTime) + b.duration);
+        const endTimeStr = _minToTime(timeToMin(b.startTime) + b.duration);
         setWaitlistTarget({
             resourceId: b.resourceId,
             resourceName: res?.name || b.resourceId,

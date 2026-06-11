@@ -96,9 +96,10 @@ export function MobileAdminBookings() {
         const q = query.trim().toLowerCase();
         return bookings
             .filter(b => {
-                const bDay = typeof b.date === 'string'
-                    ? b.date.slice(0, 10)
-                    : fmtDate(new Date(b.date as any), 'yyyy-MM-dd');
+                const _d = b.date as any;
+                const bDay = typeof _d === 'string'
+                    ? _d.slice(0, 10)
+                    : fmtDate(new Date(_d), 'yyyy-MM-dd');
                 if (bDay !== dayKey) return false;
                 if (!showPast && PAST_STATUSES.has(b.status)) return false;
                 if (loc !== 'all' && b.locationId !== loc) return false;
@@ -115,9 +116,10 @@ export function MobileAdminBookings() {
 
     const counts = useMemo(() => {
         const dayAll = bookings.filter(b => {
-            const bDay = typeof b.date === 'string'
-                ? b.date.slice(0, 10)
-                : fmtDate(new Date(b.date as any), 'yyyy-MM-dd');
+            const _d = b.date as any;
+            const bDay = typeof _d === 'string'
+                ? _d.slice(0, 10)
+                : fmtDate(new Date(_d), 'yyyy-MM-dd');
             return bDay === dayKey;
         });
         return {

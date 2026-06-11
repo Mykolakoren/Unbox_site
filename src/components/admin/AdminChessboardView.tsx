@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
+import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
@@ -62,7 +63,7 @@ export function AdminChessboardView() {
         if (!b.startTime || !b.duration || !b.resourceId) return;
         const res = RESOURCES.find(r => r.id === b.resourceId);
         const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
-        const endTimeStr = _adminMinToTime(_adminTimeToMin(b.startTime) + b.duration);
+        const endTimeStr = _adminMinToTime(timeToMin(b.startTime) + b.duration);
         setWaitlistTarget({
             resourceId: b.resourceId,
             resourceName: res?.name || b.resourceId,
@@ -1876,9 +1877,9 @@ function AdminQuickBookingModal({
             // (например админ кликнул в группового кабинете 7, выбрал
             // 'group', а конфликт-диалог предложил кабинет 1 где только
             // 'individual').
-            const effectiveFormat = bookResource?.formats?.includes(bookingFormat)
+            const effectiveFormat = (bookResource?.formats?.includes(bookingFormat as Format)
                 ? bookingFormat
-                : (bookResource?.formats?.[0] || 'individual');
+                : (bookResource?.formats?.[0] || 'individual')) as Format;
             // Допы — фильтр по тем что доступны в выбранном bookResource
             // (для override-кабинета может быть меньше или больше).
             const allowed = new Set(availableExtrasForResource(bookResource).map(e => e.id));
