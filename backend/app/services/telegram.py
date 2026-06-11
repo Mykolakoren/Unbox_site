@@ -11,7 +11,7 @@ with a user". This is expected — we log and return False without raising.
 import logging
 from datetime import datetime, timedelta
 from html import escape
-from typing import Optional
+from typing import Optional, List
 
 import requests
 
@@ -65,11 +65,17 @@ class TelegramService:
         final_price: float,
         payment_method: str,
         booking_id: str,
+        extras: Optional[List[str]] = None,
     ) -> bool:
         """Send confirmation message to user's Telegram.
 
         Returns True if delivered, False otherwise (user hasn't /started, bot blocked, etc.).
         Never raises — errors are logged.
+
+        Owner 2026-05-29: `extras` is now itemised below the total so the
+        user sees what the +N ₾ paid for (e.g. кофе +3 ₾, песочница +5 ₾).
+        Previously the total already included extras but they were invisible
+        in the message, which made admins suspect a pricing bug.
         """
         if not chat_id:
             return False
@@ -88,6 +94,37 @@ class TelegramService:
         payment_label = "Абонемент" if payment_method == "subscription" else "Баланс"
         address_line = f"\n   <i>{escape(location_address)}</i>" if location_address else ""
 
+        # ── Extras line (only shown when present) ──
+        extras_line = ""
+        if extras:
+            from app.services.pricing import PricingService
+            extra_names = {
+                "sandbox": "песочница",
+                "projector": "проектор",
+                "couch": "кушетка",
+                "coffee_meama": "кофе Меама",
+                "flipchart_free": "флипчарт",
+                "table_free": "столик",
+            }
+            paid_parts = []
+            free_parts = []
+            for eid in extras:
+                price = PricingService.EXTRAS_PRICES.get(eid, 0.0)
+                name = extra_names.get(eid, eid)
+                if price > 0:
+                    paid_parts.append(f"{escape(name)} +{int(price)} ₾")
+                else:
+                    free_parts.append(escape(name))
+            chunks = []
+            if paid_parts:
+                chunks.append(", ".join(paid_parts))
+            if free_parts:
+                # 2026-06-02 owner: бесплатные опции (flipchart_free /
+                # table_free) тоже видны персоналу, без «+0 ₾».
+                chunks.append(", ".join(free_parts))
+            if chunks:
+                extras_line = f"\n➕ {' · '.join(chunks)}"
+
         text = (
             f"{greeting}\n"
             f"\n"
@@ -95,13 +132,61 @@ class TelegramService:
             f"\n"
             f"📅 <b>{escape(date_label)}</b>, {escape(start_time)} — {escape(end_time)} ({escape(duration_label)})\n"
             f"📍 {escape(resource_name)} — {escape(location_name)}{address_line}\n"
-            f"👥 {escape(format_label)}\n"
+            f"👥 {escape(format_label)}"
+            f"{extras_line}\n"
             f"💰 {price_label} ₾ — {escape(payment_label)}\n"
             f"\n"
             f"Отменить или перенести: https://unbox.com.ge/bookings\n"
             f"<code>#{booking_id[:8]}</code>"
         )
 
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
+    def send_booking_pending_approval(
+        self,
+        *,
+        chat_id: str,
+        user_name: Optional[str],
+        resource_name: str,
+        location_name: str,
+        date: datetime,
+        start_time: str,
+        duration_minutes: int,
+        final_price: float,
+        booking_id: str,
+    ) -> bool:
+        """Notify the client that their hot booking is awaiting admin approval.
+
+        Triggered when a booking is created within the approval window
+        (12h weekday / 24h weekend) and the user isn't an admin. Without
+        this message clients see "Заявка отправлена" toast on the website
+        and then radio silence — Марина Бусина reported 2026-05-17 not
+        knowing whether the booking was actually being processed.
+        """
+        if not chat_id:
+            return False
+        greeting = (
+            f"Здравствуйте, <b>{escape(user_name)}</b>!" if user_name
+            else "Здравствуйте!"
+        )
+        end_time = self._compute_end(start_time, duration_minutes)
+        date_label = self._fmt_date(date)
+        duration_label = self._fmt_duration(duration_minutes)
+        price_label = (
+            f"{int(final_price)}" if final_price == int(final_price) else f"{final_price:.2f}"
+        )
+        text = (
+            f"{greeting}\n\n"
+            f"⏳ <b>Заявка на бронь отправлена администратору</b>\n\n"
+            f"📅 <b>{escape(date_label)}</b>, {escape(start_time)} — {escape(end_time)} ({escape(duration_label)})\n"
+            f"📍 {escape(resource_name)} — {escape(location_name)}\n"
+            f"💰 {price_label} ₾\n\n"
+            f"Это срочное бронирование (менее 12ч в будни / 24ч в выходные до начала). "
+            f"Слот закрепится за вами только после подтверждения админа — обычно в течение часа. "
+            f"Если админ откажет, деньги/часы не спишутся.\n\n"
+            f"Проверить статус: https://unbox.com.ge/bookings\n"
+            f"<code>#{booking_id[:8]}</code>"
+        )
         return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
     def send_specialist_appointment_new(
@@ -197,6 +282,50 @@ class TelegramService:
 
         return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
+    def send_waitlist_subscribed(
+        self,
+        *,
+        chat_id: str,
+        user_name: Optional[str],
+        resource_name: str,
+        location_name: Optional[str],
+        date: datetime,
+        start_time: str,
+        end_time: str,
+    ) -> bool:
+        """Confirm to the user that their waitlist subscription is active.
+
+        Shipped together with `send_slot_available`: subscribe-confirmation +
+        slot-freed-alert form a closed loop so the user never wonders "did
+        the bot register me?". Mirrors the `send_slot_available` formatting
+        on purpose — same fields, same place, just a different verb at the
+        top so it scans identically in the chat history.
+        """
+        if not chat_id:
+            return False
+
+        greeting = (
+            f"Здравствуйте, <b>{escape(user_name)}</b>!" if user_name
+            else "Здравствуйте!"
+        )
+        date_label = self._fmt_date(date)
+        loc_line = f" · {escape(location_name)}" if location_name else ""
+
+        text = (
+            f"{greeting}\n"
+            f"\n"
+            f"👀 <b>Вы отслеживаете слот</b>\n"
+            f"\n"
+            f"📅 <b>{escape(date_label)}</b>, {escape(start_time)} — {escape(end_time)}\n"
+            f"📍 {escape(resource_name)}{loc_line}\n"
+            f"\n"
+            f"Как только в этом центре освободится любой кабинет на это время — пришлю уведомление сюда же.\n"
+            f"\n"
+            f"Отписаться от слота: https://unbox.com.ge/dashboard/waitlist"
+        )
+
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
     def send_specialist_appointment_cancelled(
         self,
         *,
@@ -243,6 +372,7 @@ class TelegramService:
     def _send_message(
         self, *, chat_id: str, text: str, parse_mode: Optional[str] = None,
         disable_web_page_preview: bool = True,
+        reply_markup: Optional[dict] = None,
     ) -> bool:
         if not self.enabled:
             logger.info("[tg:disabled] chat_id=%s text_len=%d", chat_id, len(text))
@@ -256,6 +386,8 @@ class TelegramService:
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
 
         try:
             r = requests.post(url, json=payload, timeout=self.TIMEOUT)
@@ -290,6 +422,75 @@ class TelegramService:
             logger.debug("[tg:admin-alert] TELEGRAM_ADMIN_CHAT_ID unset, skipping")
             return False
         return self._send_message(chat_id=str(chat_id), text=text, parse_mode=parse_mode)
+
+    def send_owner_summary(self, text: str, parse_mode: str = "HTML") -> bool:
+        """Post to the owner-only chat (TELEGRAM_OWNER_CHAT_ID).
+
+        Used for the daily money/hours rollup that goes to the founder
+        instead of every admin. Falls back to the admin group when the
+        owner chat isn't configured — that preserves the legacy
+        behaviour for environments that haven't set it yet.
+        """
+        chat_id = settings.TELEGRAM_OWNER_CHAT_ID or settings.TELEGRAM_ADMIN_CHAT_ID
+        if not chat_id:
+            logger.debug("[tg:owner-summary] no chat id configured, skipping")
+            return False
+        return self._send_message(chat_id=str(chat_id), text=text, parse_mode=parse_mode)
+
+    # ── Structured per-event admin notifications ─────────────────────────────
+    #
+    # Single entry point so callers don't have to format markup themselves —
+    # they pass the event type and a dict of fields, we compose the message.
+    # All times are stamped Tbilisi (UTC+4) so admins see what their phone
+    # would naturally show.
+    EVENT_TITLES = {
+        "booking_created":           ("🆕", "Новая бронь"),
+        "booking_series_created":    ("🔁", "Новая серия броней"),
+        "booking_pending_approval":  ("⏳", "Бронь &lt;12 ч — нужно подтвердить"),
+        "booking_cancelled":         ("✖",  "Отмена брони"),
+        "booking_rescheduled":       ("↻",  "Перенос брони"),
+        "booking_re_rent_listed":    ("🔄", "Выставлена на переаренду"),
+        "booking_re_rent_taken":     ("✓",  "Переаренда состоялась"),
+        "crm_access_request":        ("🔑", "Заявка на доступ к CRM"),
+        "specialist_application":    ("👤", "Заявка специалиста в каталог"),
+        "booking_charge_waived":     ("🩹", "Штраф за бронь снят"),
+        "booking_format_changed":    ("🔄", "Изменён формат брони"),
+        "credit_limit_exceeded":     ("🚨", "Превышен кредитный лимит"),
+        "future_booking_overload":   ("📊", "Много будущих броней у клиента"),
+        "waitlist_user_no_tg":       ("📞", "Слот освободился — клиент без TG"),
+        "booking_price_changed":     ("💰", "Изменена цена брони"),
+        "booking_with_extras":       ("🧰", "Бронь с допуслугами — нужно подготовить"),
+    }
+
+    def send_admin_event(self, *, event: str, fields: dict, reply_markup: Optional[dict] = None) -> bool:
+        """Structured admin alert. `fields` is rendered as `key: value` lines
+        in insertion order. Falsy values are skipped so optional keys can be
+        passed unconditionally without producing empty rows.
+
+        `reply_markup` (optional) — inline keyboard JSON dict, e.g. for
+        approve/reject buttons on hot-bookings. Forwarded as-is to TG API.
+        """
+        chat_id = settings.TELEGRAM_ADMIN_CHAT_ID
+        if not chat_id:
+            return False
+        emoji, title = self.EVENT_TITLES.get(event, ("🔔", event))
+        lines = [f"{emoji} <b>{title}</b>", ""]
+        for key, val in fields.items():
+            if val is None or val == "":
+                continue
+            lines.append(f"<b>{escape(str(key))}:</b> {val}")
+        # Footer: when the event happened, in Tbilisi local — admins always
+        # operate in this tz and don't care about UTC.
+        from datetime import timezone as _tz, timedelta as _td
+        tb_now = datetime.now(_tz.utc) + _td(hours=4)
+        lines.append("")
+        lines.append(f"<i>{tb_now.strftime('%H:%M · %d.%m.%Y')} (Тбилиси)</i>")
+        return self._send_message(
+            chat_id=str(chat_id),
+            text="\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
 
     # ─── Excel #58 — cancel / reschedule / reminder ──────────────────────────
 
@@ -328,6 +529,39 @@ class TelegramService:
             f"📅 {escape(date_label)}, {escape(start_time)}\n"
             f"📍 {escape(resource_name)}{loc_line}\n"
             f"💰 {refund_label}{reason_line}{id_line}"
+        )
+        return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
+    def send_rerent_taken(
+        self,
+        *,
+        chat_id: str,
+        resource_name: str,
+        location_name: Optional[str],
+        date: datetime,
+        start_time: str,
+        refund_amount: float,
+        new_balance: float,
+        booking_id: Optional[str] = None,
+    ) -> bool:
+        """Notify the original owner that their re-rent-listed slot was
+        taken by someone else. They get the refund (50% by policy) and a
+        balance update line."""
+        if not chat_id:
+            return False
+        date_label = self._fmt_date(date)
+        loc_line = f" · {escape(location_name)}" if location_name else ""
+        bal_line = (
+            f"💰 Возвращено: <b>+{refund_amount:.2f} ₾</b> (50%)\n"
+            f"💼 Баланс: <b>{new_balance:+.2f} ₾</b>"
+        )
+        id_line = f"\n<code>#{booking_id[:8]}</code>" if booking_id else ""
+        text = (
+            f"♻️ <b>Слот переарендован</b>\n\n"
+            f"📅 {escape(date_label)}, {escape(start_time)}\n"
+            f"📍 {escape(resource_name)}{loc_line}\n\n"
+            f"{bal_line}"
+            f"{id_line}"
         )
         return self._send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 

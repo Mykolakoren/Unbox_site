@@ -37,6 +37,14 @@ class PricingService:
     def __init__(self, session: Session):
         self.session = session
 
+    # Comp-аккаунты — 100% бесплатно на всё, включая пиковые часы и надбавку.
+    # Применяется в calculate_price() до тарифной логики. Email в нижнем
+    # регистре. Добавить человека = добавить email в этот set.
+    COMP_ACCOUNTS: set[str] = {
+        "koren.nikolas@gmail.com",   # Николай Корень — владелец
+        "irina.cbtpsy@gmail.com",    # Ирина Корень
+    }
+
     # Extras price registry (server-side source of truth, mirrors frontend EXTRAS).
     # 2026-05-06: bundled sandbox+toys to 5 GEL, projector / couch / coffee
     # rebalanced to current Unbox pricing. Legacy IDs (sandbox_toys, flipchart)
@@ -225,6 +233,20 @@ class PricingService:
 
         # If user is anonymous — return base price without discounts
         if user is None:
+            return breakdown
+
+        # Comp-аккаунты (владелец + ключевой персонал): 100% бесплатно НА ВСЁ,
+        # включая пиковую базу И пиковую надбавку (+5₾/ч). Обычный
+        # personal_discount_percent=100 надбавку НЕ снимает — поэтому этим
+        # аккаунтам цена форсится в 0 здесь, до всякой тарифной логики.
+        # Список в коде (а не в БД), чтобы его нельзя было случайно перезаписать
+        # через админку. Чтобы добавить человека — впиши его email строчкой ниже.
+        if (user.email or "").strip().lower() in self.COMP_ACCOUNTS:
+            breakdown.final_price = 0.0
+            breakdown.discount_amount = breakdown.base_price
+            breakdown.discount_percent = 100
+            breakdown.peak_surcharge = 0.0
+            breakdown.applied_rule = "COMP_ACCOUNT"
             return breakdown
 
         # 3. Apply Hierarchy

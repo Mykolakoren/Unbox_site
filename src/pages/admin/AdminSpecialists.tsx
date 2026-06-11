@@ -1,17 +1,18 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     Pencil, X, Clock, Check, XCircle, Loader2, Eye, EyeOff, Trash2,
-    LayoutGrid, List, GripVertical, User, Video, MapPin,
+    LayoutGrid, List, GripVertical, User, Video, MapPin, Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../api/client';
+import { api, API_URL } from '../../api/client';
 import { crmApi, type CrmAccessRequest } from '../../api/crm';
 import { useUserStore } from '../../store/userStore';
 import { hasPermission } from '../../utils/permissions';
 import type { Specialist } from '../../components/Specialists/SpecialistCard';
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { compressImage } from '../../utils/imageCompress';
 import {
     DndContext, PointerSensor, TouchSensor,
     KeyboardSensor, useSensor, useSensors, type DragEndEvent,
@@ -27,9 +28,10 @@ const CATEGORIES = [
     { value: '', label: 'Без категории' },
     { value: 'psychology', label: 'Психологи и психотерапевты' },
     { value: 'psychiatry', label: 'Психиатры' },
-    { value: 'narcology', label: 'Наркология / Неврология' },
-    { value: 'coaching', label: 'Коучи и консультанты' },
-    { value: 'education', label: 'Игропрактики / Педагоги' },
+    { value: 'neurology',  label: 'Неврологи' },
+    { value: 'narcology',  label: 'Наркология' },
+    { value: 'coaching',   label: 'Коучи и консультанты' },
+    { value: 'education',  label: 'Игропрактики / Педагоги' },
 ];
 
 // All fields in camelCase (after axios interceptor transforms snake_case → camelCase)
@@ -38,6 +40,11 @@ interface SpecialistExtended extends Specialist {
     isVerified?: boolean;
     userId?: string;
     sortOrder?: number;
+    /** Owner's card — pinned to the top, not draggable. */
+    isOwner?: boolean;
+    // Self-service application flow tag. NULL = legacy/admin-created (skip
+    // queue). "pending" rows show up in the Заявки tab waiting for review.
+    applicationStatus?: 'pending' | 'approved' | 'rejected' | null;
 }
 
 interface EditModalProps {
@@ -142,14 +149,16 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                                 )}
                             </div>
                             <div className="flex-1">
-                                <label className="block text-xs text-unbox-grey mb-1">URL фото</label>
+                                <label className="block text-xs text-unbox-grey mb-1">Фото профиля</label>
+                                <SpecialistPhotoUpload onUploaded={setPhotoUrl} />
                                 <input
                                     type="url"
                                     value={photoUrl}
                                     onChange={e => setPhotoUrl(e.target.value)}
-                                    placeholder="https://..."
-                                    className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
+                                    placeholder="…или вставьте ссылку https://..."
+                                    className="w-full mt-2 px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                 />
+                                <div className="text-[10px] text-unbox-grey mt-1">jpg, png · до 2 МБ</div>
                             </div>
                         </div>
 
@@ -410,7 +419,7 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
     onSpecClick?: (spec: string) => void;
     activeSpec?: string;
 }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id, disabled: specialist.isOwner });
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, zIndex: isDragging ? 50 : 'auto' as any };
 
     const hasOnline = specialist.formats?.includes('ONLINE');
@@ -424,14 +433,23 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                 !specialist.isVerified && 'opacity-60'
             )}
         >
-            {/* Drag handle + order badge */}
+            {/* Drag handle + order badge. Owner card is pinned — no handle,
+                a lock label instead. */}
             <div className="absolute top-2 left-2 z-10 flex items-center gap-1">
-                <div {...listeners} className="bg-white/90 backdrop-blur-sm rounded-lg p-1.5 cursor-grab active:cursor-grabbing shadow-sm border border-white/50 hover:bg-white transition-colors">
-                    <GripVertical size={14} className="text-gray-400" />
-                </div>
-                <span className="bg-white/90 backdrop-blur-sm text-[10px] font-bold text-unbox-dark/50 px-2 py-1 rounded-lg shadow-sm border border-white/50">
-                    #{(specialist.sortOrder ?? 0) + 1}
-                </span>
+                {specialist.isOwner ? (
+                    <span className="bg-unbox-dark text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm">
+                        Закреплено
+                    </span>
+                ) : (
+                    <>
+                        <div {...listeners} className="bg-white/90 backdrop-blur-sm rounded-lg p-1.5 cursor-grab active:cursor-grabbing shadow-sm border border-white/50 hover:bg-white transition-colors">
+                            <GripVertical size={14} className="text-gray-400" />
+                        </div>
+                        <span className="bg-white/90 backdrop-blur-sm text-[10px] font-bold text-unbox-dark/50 px-2 py-1 rounded-lg shadow-sm border border-white/50">
+                            #{(specialist.sortOrder ?? 0) + 1}
+                        </span>
+                    </>
+                )}
             </div>
 
             {/* Visibility badge */}
@@ -548,7 +566,7 @@ function SortableTableRow({ specialist, index, onEdit, onToggleVisibility, onDel
     toggling: boolean;
     deleting: boolean;
 }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id, disabled: specialist.isOwner });
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
 
     const categoryLabel = CATEGORIES.find(c => c.value === (specialist.category ?? ''))?.label ?? '—';
@@ -673,6 +691,134 @@ function DragOverlayRow({ specialist }: { specialist: SpecialistExtended }) {
     );
 }
 
+// ── Applications Panel ───────────────────────────────────────────────────────
+// Self-service specialist applications — anything with applicationStatus
+// set goes here. "Approve" flips is_verified=True (catalog-visible) and the
+// row drops out of the queue. "Reject" keeps the row so the user sees the
+// decision in /become-specialist and can iterate.
+
+function ApplicationsPanel({
+    specialists, onChange, onEdit,
+}: {
+    specialists: SpecialistExtended[];
+    onChange: () => void | Promise<void>;
+    onEdit: (s: SpecialistExtended) => void;
+}) {
+    const [busyId, setBusyId] = useState<string | null>(null);
+    const pending = specialists.filter(s => s.applicationStatus === 'pending');
+    const decided = specialists.filter(s => s.applicationStatus === 'approved' || s.applicationStatus === 'rejected');
+
+    const act = async (s: SpecialistExtended, kind: 'approve' | 'reject') => {
+        setBusyId(s.id);
+        try {
+            await api.post(`/specialists/admin/${s.id}/${kind}`);
+            toast.success(kind === 'approve' ? 'Заявка одобрена — специалист в каталоге' : 'Заявка отклонена');
+            await onChange();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Ошибка');
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    const renderRow = (s: SpecialistExtended) => (
+        <div key={s.id} style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr 110px 90px 230px',
+            alignItems: 'center', padding: '14px 0', borderBottom: ghaHairline, gap: 12,
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {s.photoUrl
+                    ? <img src={s.photoUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: '50%' }} />
+                    : <div style={{ width: 36, height: 36, background: GH.ink10, borderRadius: '50%' }} />}
+                <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{s.firstName} {s.lastName}</div>
+                    <div style={{ ...ghaMono, fontSize: 9, color: GH.ink60 }}>{s.category || '—'}</div>
+                </div>
+            </div>
+            <div style={{ fontSize: 13, color: GH.ink60, lineHeight: 1.4 }}>
+                {s.tagline || <span style={{ fontStyle: 'italic' }}>—</span>}
+            </div>
+            <div style={{ ...ghaMono, fontSize: 10 }}>
+                {(s.formats || []).length} формат{(s.formats || []).length === 1 ? '' : 'а'}
+            </div>
+            <div style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                {s.basePriceGel ? `${s.basePriceGel}₾` : '—'}
+            </div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => onEdit(s)}
+                    style={{
+                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+                        padding: '6px 10px', background: 'transparent', border: ghaHairline, cursor: 'pointer', color: GH.ink60,
+                    }}>
+                    Открыть
+                </button>
+                {s.applicationStatus === 'pending' ? (
+                    <>
+                        <button onClick={() => act(s, 'reject')} disabled={busyId === s.id}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+                                padding: '6px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer',
+                                opacity: busyId === s.id ? 0.5 : 1,
+                            }}>
+                            Отклонить
+                        </button>
+                        <button onClick={() => act(s, 'approve')} disabled={busyId === s.id}
+                            style={{
+                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+                                padding: '6px 12px', background: GH.ink, border: 'none', color: GH.paper, cursor: 'pointer',
+                                opacity: busyId === s.id ? 0.5 : 1,
+                            }}>
+                            Одобрить
+                        </button>
+                    </>
+                ) : (
+                    <span style={{
+                        ...ghaMono, fontSize: 9,
+                        padding: '6px 10px',
+                        background: s.applicationStatus === 'approved' ? '#D1FAE5' : '#FEE2E2',
+                        color: s.applicationStatus === 'approved' ? '#065F46' : '#991B1B',
+                    }}>
+                        {s.applicationStatus === 'approved' ? 'Одобрено' : 'Отклонено'}
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+
+    return (
+        <div>
+            {pending.length === 0 && decided.length === 0 ? (
+                <div style={{ padding: '64px 0', textAlign: 'center' }}>
+                    <div style={{ ...ghaMono, color: GH.ink30 }}>Заявок пока нет</div>
+                    <div style={{ fontSize: 13, color: GH.ink60, marginTop: 8 }}>
+                        Специалисты подают заявки через <code>/become-specialist</code>
+                    </div>
+                </div>
+            ) : (
+                <>
+                    {pending.length > 0 && (
+                        <div style={{ marginBottom: 32 }}>
+                            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
+                                На рассмотрении <span style={{ color: GH.ink60, fontWeight: 500 }}>· {pending.length}</span>
+                            </h3>
+                            {pending.map(renderRow)}
+                        </div>
+                    )}
+                    {decided.length > 0 && (
+                        <div>
+                            <h3 style={{ fontSize: 14, fontWeight: 600, color: GH.ink60, marginBottom: 12 }}>
+                                История решений · {decided.length}
+                            </h3>
+                            {decided.map(renderRow)}
+                        </div>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function AdminSpecialists() {
@@ -680,8 +826,12 @@ export function AdminSpecialists() {
     const [editing, setEditing] = useState<SpecialistExtended | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchParams] = useSearchParams();
-    const initialTab = searchParams.get('tab') === 'crm-requests' ? 'crm-requests' : 'specialists';
-    const [activeTab, setActiveTab] = useState<'specialists' | 'crm-requests'>(initialTab);
+    const tabFromQuery = searchParams.get('tab');
+    const initialTab: 'specialists' | 'crm-requests' | 'applications' =
+        tabFromQuery === 'crm-requests' ? 'crm-requests'
+        : tabFromQuery === 'applications' ? 'applications'
+        : 'specialists';
+    const [activeTab, setActiveTab] = useState<'specialists' | 'crm-requests' | 'applications'>(initialTab);
     const currentUser = useUserStore(s => s.currentUser);
     const canAcceptRequests = currentUser ? hasPermission(currentUser, 'admin.accept_requests') : false;
 
@@ -700,9 +850,10 @@ export function AdminSpecialists() {
     const load = async () => {
         try {
             const r = await api.get('/specialists/admin/all');
-            const data: SpecialistExtended[] = r.data;
-            data.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-            setSpecialists(data);
+            // Backend already returns the canonical order: owner pinned,
+            // then complete cards, then incomplete (no photo / empty bio).
+            // Don't re-sort by sortOrder here or that grouping is lost.
+            setSpecialists(r.data as SpecialistExtended[]);
         } catch {
             toast.error('Не удалось загрузить специалистов');
         } finally {
@@ -748,14 +899,29 @@ export function AdminSpecialists() {
         const { active, over } = event;
         if (!over || active.id === over.id) return;
 
+        // The owner card is pinned — refuse to move it, and refuse to drop
+        // anything above it.
+        const dragged = specialists.find(s => s.id === active.id);
+        if (dragged?.isOwner) {
+            toast.info('Анкета владельца закреплена первой');
+            return;
+        }
+
         const oldIndex = specialists.findIndex(s => s.id === active.id);
         const newIndex = specialists.findIndex(s => s.id === over.id);
         if (oldIndex === -1 || newIndex === -1) return;
 
-        const reordered = arrayMove(specialists, oldIndex, newIndex).map((s, i) => ({ ...s, sortOrder: i }));
+        let reordered = arrayMove(specialists, oldIndex, newIndex);
+        // Force the owner back to index 0 no matter where the drag landed.
+        const ownerIdx = reordered.findIndex(s => s.isOwner);
+        if (ownerIdx > 0) {
+            const [owner] = reordered.splice(ownerIdx, 1);
+            reordered = [owner, ...reordered];
+        }
+        // Re-index: owner stays 0, everyone else 1…N.
+        reordered = reordered.map((s, i) => ({ ...s, sortOrder: i }));
         setSpecialists(reordered);
 
-        // Save to backend
         api.post('/specialists/admin/reorder', {
             items: reordered.map(s => ({ id: s.id, sortOrder: s.sortOrder })),
         }).catch(() => {
@@ -815,8 +981,8 @@ const ghaHairline = `1px solid ${GH.ink10}`;
 interface GHAdminSpecialistsProps {
     specialists: SpecialistExtended[];
     loading: boolean;
-    activeTab: 'specialists' | 'crm-requests';
-    setActiveTab: (t: 'specialists' | 'crm-requests') => void;
+    activeTab: 'specialists' | 'crm-requests' | 'applications';
+    setActiveTab: (t: 'specialists' | 'crm-requests' | 'applications') => void;
     viewMode: 'table' | 'cards';
     setViewMode: (m: 'table' | 'cards') => void;
     canAcceptRequests: boolean;
@@ -907,9 +1073,16 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
             </div>
 
             {/* ── Tabs ── */}
-            {canAcceptRequests && (
-                <div style={{ display: 'flex', gap: 0, borderBottom: ghaHairline, marginBottom: 24 }}>
-                    {(['specialists', 'crm-requests'] as const).map(tab => (
+            {/* "Заявки" appears unconditionally — every admin should be able
+                to review specialist applications, even ones without the
+                CRM-access permission. The number badge surfaces the queue
+                size so it's not invisible. */}
+            <div style={{ display: 'flex', gap: 0, borderBottom: ghaHairline, marginBottom: 24 }}>
+                {(['specialists', 'applications', ...(canAcceptRequests ? ['crm-requests' as const] : [])] as const).map(tab => {
+                    const pendingCount = tab === 'applications'
+                        ? specialists.filter(s => s.applicationStatus === 'pending').length
+                        : 0;
+                    return (
                         <button key={tab} onClick={() => setActiveTab(tab)}
                             style={{
                                 padding: '10px 20px', border: 'none', cursor: 'pointer',
@@ -918,16 +1091,33 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                 color: activeTab === tab ? GH.ink : GH.ink30,
                                 borderBottom: activeTab === tab ? `2px solid ${GH.ink}` : '2px solid transparent',
                                 marginBottom: -1,
+                                display: 'inline-flex', alignItems: 'center', gap: 8,
                             }}>
-                            {tab === 'specialists' ? 'Специалисты' : 'Запросы CRM'}
+                            {tab === 'specialists' ? 'Специалисты' : tab === 'crm-requests' ? 'Запросы CRM' : 'Заявки'}
+                            {tab === 'applications' && pendingCount > 0 && (
+                                <span style={{
+                                    fontFamily: GH_MONO, fontSize: 10, fontWeight: 700,
+                                    background: GH.danger, color: GH.paper,
+                                    padding: '2px 7px', borderRadius: 999,
+                                    letterSpacing: '0.06em',
+                                }}>
+                                    {pendingCount}
+                                </span>
+                            )}
                         </button>
-                    ))}
-                </div>
-            )}
+                    );
+                })}
+            </div>
 
             {/* ── Content ── */}
             {activeTab === 'crm-requests' && canAcceptRequests ? (
                 <CrmAccessRequests />
+            ) : activeTab === 'applications' ? (
+                <ApplicationsPanel
+                    specialists={specialists}
+                    onChange={load}
+                    onEdit={setEditing}
+                />
             ) : (
                 <>
                     {/* Specialization filter tags (GH) */}
@@ -1048,7 +1238,7 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
     /** Currently-active filter; matching chips render highlighted. */
     activeSpec?: string;
 }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id, disabled: specialist.isOwner });
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform), transition,
         opacity: isDragging ? 0.3 : specialist.isVerified ? 1 : 0.45,
@@ -1152,5 +1342,53 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
                 </button>
             </div>
         </div>
+    );
+}
+
+/** File-pick upload, same pattern as CrmProfile.PhotoUpload but in
+ *  Tailwind classes to fit the admin modal's visual language. Hits
+ *  /upload, which already does 2MB server-side guard + image-only check. */
+function SpecialistPhotoUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const [busy, setBusy] = useState(false);
+    const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setBusy(true);
+        try {
+            const upload = await compressImage(file);
+            if (upload.size > 2 * 1024 * 1024) {
+                toast.error('Фото слишком большое даже после сжатия — попробуйте другое.');
+                return;
+            }
+            const data = new FormData();
+            data.append('file', upload);
+            const res = await api.post<{ url: string }>('/upload/', data, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            const baseUrl = (API_URL || '').replace('/api/v1', '');
+            onUploaded(`${baseUrl}${res.data.url}`);
+            toast.success('Фото загружено — не забудьте «Сохранить»');
+        } catch (err: unknown) {
+            const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить фото');
+        } finally {
+            setBusy(false);
+            e.target.value = '';
+        }
+    };
+    return (
+        <>
+            <input ref={inputRef} type="file" accept="image/*" onChange={handlePick} className="hidden" />
+            <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                disabled={busy}
+                className="w-full px-3 py-2 rounded-lg bg-unbox-dark text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {busy ? 'Загружаем…' : 'Загрузить с устройства'}
+            </button>
+        </>
     );
 }

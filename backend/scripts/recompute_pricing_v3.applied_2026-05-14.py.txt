@@ -1,0 +1,325 @@
+"""[APPLIED 2026-05-14 — DO NOT RUN AGAIN]
+
+This file was renamed from recompute_pricing_v3.py + .txt extension and
+moved out of *.py glob deliberately. The script is NOT idempotent —
+re-running --apply would double-charge every affected user. The +peak_base
+delta has already been added to those bookings' final_price + the matching
+balance debits were posted.
+
+If you somehow need to revisit pricing for the same window, write a fresh
+script that filters by `final_price` already-corrected markers.
+
+Original docstring below.
+
+Narrow recompute: ONLY the peak-base bug (2026-05-13).
+
+Earlier versions of pricing.py dropped the base_rate for peak hours and
+charged just the 5 ₾/h surcharge. So a 1-hour 09:00–10:00 booking in a
+20 ₾/h cabinet ended up at 5 ₾ instead of 25 ₾. This script adds
+`peak_hours × base_rate` to every affected future booking — the exact
+amount we under-charged due to that bug.
+
+What this script does NOT touch (different from v2):
+  * Does NOT re-run the full PricingService. Re-quoting with the user's
+    CURRENT state would re-apply discounts they didn't earn at booking
+    time (heavy users would suddenly hit weekly_progressive 50%).
+  * Does NOT re-apply the new duration-tier boundaries (admin explicitly
+    asked to keep retroactive cost honest — only fix our server-side bug).
+  * Does NOT touch subscription / bonus bookings (their hours stay).
+  * Does NOT touch past bookings or no-owner ones.
+
+Math:
+    peak_hours = (# of 30-min slots in 09:00–10:00 or 21:00–22:00) / 2
+    base_rate  = standard rate of resource × format (no per-cabinet tweaks
+                 beyond what the booking originally used)
+    delta      = peak_hours × base_rate
+    new_price  = old_price + delta
+
+For paid rows: balance -= delta (user pays the missing amount).
+For pending rows: just stamp new final_price — cron at T-24h will charge
+the corrected amount.
+
+Run:
+    cd /var/www/unbox/backend
+    ./venv/bin/python3.12 -m scripts.recompute_pricing_v3            # dry-run
+    ./venv/bin/python3.12 -m scripts.recompute_pricing_v3 --apply    # commit
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from collections import defaultdict
+from datetime import datetime, timedelta
+from typing import List
+
+from sqlmodel import Session, select
+
+sys.path.insert(0, "/var/www/unbox/backend")
+
+from app.db.session import engine  # noqa: E402
+from app.models.booking import Booking  # noqa: E402
+from app.models.resource import Resource  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.services.pricing import PricingService  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("recompute-v3")
+
+_TBS = timedelta(hours=4)
+PEAK_RANGES = [("09:00", "10:00"), ("21:00", "22:00")]
+
+
+def _start_tb(b: Booking) -> datetime | None:
+    if not b.date or not b.start_time:
+        return None
+    try:
+        h, m = b.start_time.split(":")
+        return b.date.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+    except Exception:
+        return None
+
+
+def _peak_hours(start_time: str, duration_min: int) -> float:
+    """Count peak hours by walking 30-min slots — same approach pricing.py uses."""
+    h, m = start_time.split(":")
+    start_total = int(h) * 60 + int(m)
+    peak_count = 0
+    for slot in range(start_total, start_total + duration_min, 30):
+        sh = slot // 60
+        sm = slot % 60
+        slot_str = f"{sh:02d}:{sm:02d}"
+        slot_mins = sh * 60 + sm
+        for ps, pe in PEAK_RANGES:
+            psh, psm = ps.split(":")
+            peh, pem = pe.split(":")
+            start_p = int(psh) * 60 + int(psm)
+            end_p = int(peh) * 60 + int(pem)
+            if start_p <= slot_mins < end_p:
+                peak_count += 1
+                break
+    return peak_count * 0.5  # each slot = 0.5 hour
+
+
+def _resolve_base_rate(b: Booking, resource: Resource) -> float:
+    """Same base-rate logic as PricingService.calculate_price.
+
+    Mirroring the rules exactly so admin booking pages and this script
+    don't diverge — duplication is the lesser evil here, the script is
+    a one-shot.
+    """
+    space_type = "CAP" if resource.type == "capsule" else "ROOM"
+    format_code = PricingService.FORMAT_CODES.get(b.format or "individual", "IND")
+    if resource.location_id == "neo_school":
+        return float(resource.hourly_rate)
+    if resource.id == "unbox_one_room_2":
+        rate_table = PricingService.BASE_RATES.get(space_type, {})
+        return float(rate_table.get("IND", resource.hourly_rate))
+    rate_table = PricingService.BASE_RATES.get(space_type, {})
+    return float(rate_table.get(format_code, resource.hourly_rate))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--apply", action="store_true", help="Commit changes")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--report", type=str, default=None,
+        help="Write per-user report to this file (default: stdout only)",
+    )
+    args = parser.parse_args()
+    apply_changes = args.apply
+
+    log.info("Mode: %s", "APPLY (writes!)" if apply_changes else "DRY-RUN")
+
+    now_tb = datetime.utcnow() + _TBS
+    log.info("Tbilisi-now: %s", now_tb)
+
+    with Session(engine) as session:
+        rows: List[Booking] = session.exec(
+            select(Booking).where(
+                Booking.status.in_(["confirmed", "pending_approval"]),  # type: ignore
+            )
+        ).all()
+        log.info("Loaded %d confirmed/pending_approval bookings", len(rows))
+
+        # (booking, owner, old_price, new_price, peak_hours, base_rate)
+        targets: list[tuple[Booking, User, float, float, float, float]] = []
+        skipped_past = 0
+        skipped_sub = 0
+        skipped_bonus = 0
+        skipped_no_owner = 0
+        skipped_no_resource = 0
+        skipped_no_peak = 0
+        skipped_zero = 0
+
+        for b in rows:
+            start = _start_tb(b)
+            if start is None or start <= now_tb:
+                skipped_past += 1
+                continue
+            method = (b.payment_method or "").lower()
+            if method == "subscription":
+                skipped_sub += 1
+                continue
+            if method == "bonus":
+                skipped_bonus += 1
+                continue
+            if method == "service":
+                # Cleaning / maintenance blocks — never paid revenue, so the
+                # peak-base bug doesn't apply.
+                skipped_bonus += 1
+                continue
+            if not b.user_uuid:
+                skipped_no_owner += 1
+                continue
+            owner = session.get(User, b.user_uuid)
+            if not owner:
+                skipped_no_owner += 1
+                continue
+            resource = session.get(Resource, b.resource_id)
+            if not resource:
+                skipped_no_resource += 1
+                continue
+
+            peak_hours = _peak_hours(b.start_time, b.duration or 60)
+            if peak_hours <= 0:
+                skipped_no_peak += 1
+                continue
+
+            base_rate = _resolve_base_rate(b, resource)
+            delta = round(peak_hours * base_rate, 2)
+            old_price = float(b.final_price or 0)
+            if old_price <= 0:
+                # Zero-priced rows = bonus / admin freebies — don't touch.
+                skipped_zero += 1
+                continue
+            new_price = round(old_price + delta, 2)
+            targets.append((b, owner, old_price, new_price, peak_hours, base_rate))
+
+            if args.limit and len(targets) >= args.limit:
+                break
+
+        # Aggregate per user
+        by_user: dict[str, dict] = defaultdict(lambda: {
+            "owner": None, "items": [],
+            "sum_old": 0.0, "sum_new": 0.0,
+            "pending_delta": 0.0, "paid_delta": 0.0,
+        })
+        for b, owner, old, new, peak_h, base_r in targets:
+            uid = str(owner.id)
+            by_user[uid]["owner"] = owner
+            by_user[uid]["items"].append((b, old, new, peak_h, base_r))
+            by_user[uid]["sum_old"] += old
+            by_user[uid]["sum_new"] += new
+            delta = round(new - old, 2)  # positive = extra charge (we under-charged before)
+            if b.payment_status == "paid":
+                by_user[uid]["paid_delta"] += delta
+            else:
+                by_user[uid]["pending_delta"] += delta
+
+        log.info("=" * 80)
+        log.info(
+            "TOTALS: %d bookings will change across %d users.",
+            len(targets), len(by_user),
+        )
+        log.info(
+            "  Skipped: past=%d, subscription=%d, bonus=%d, no-owner=%d, "
+            "no-resource=%d, no-peak=%d, zero-price=%d",
+            skipped_past, skipped_sub, skipped_bonus, skipped_no_owner,
+            skipped_no_resource, skipped_no_peak, skipped_zero,
+        )
+        total_paid_extra = sum(u["paid_delta"] for u in by_user.values())
+        total_pending_extra = sum(u["pending_delta"] for u in by_user.values())
+        log.info(
+            "PAID rows (balance moves now): -%.2f₾ extra charged to users",
+            total_paid_extra,
+        )
+        log.info(
+            "PENDING rows (just future-charge update): +%.2f₾ more to charge later",
+            total_pending_extra,
+        )
+
+        # Per-user report
+        lines: list[str] = []
+        lines.append("# Перерасчёт цен — фикс peak-base bug (2026-05-13)")
+        lines.append("")
+        lines.append(f"Затронуто бронь: **{len(targets)}**, клиентов: **{len(by_user)}**.")
+        lines.append("")
+        lines.append("**Что меняем**: peak часы (09:00–10:00 и 21:00–22:00) теперь")
+        lines.append("включают `base_rate × часы + 5 ₾/час` вместо только `5 ₾/час`.")
+        lines.append("Прибавка для каждой брони = `peak_hours × base_rate`.")
+        lines.append("")
+        lines.append("Прочие скидки (personal, weekly, duration) и tier-границы НЕ трогаем —")
+        lines.append("они остались на условиях, согласованных в момент бронирования.")
+        lines.append("")
+        lines.append("Pending брони — деньги не списаны (за 24ч до). Обновим сумму.")
+        lines.append("Paid брони — корректируем баланс на дельту.")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        sorted_users = sorted(
+            by_user.values(),
+            key=lambda u: abs(u["paid_delta"] + u["pending_delta"]),
+            reverse=True,
+        )
+        for u in sorted_users:
+            owner = u["owner"]
+            name = owner.name or owner.email or str(owner.id)
+            n = len(u["items"])
+            d = round(u["paid_delta"] + u["pending_delta"], 2)
+            lines.append(f"### {name}  ({n} бронь, доплата +{d:.2f}₾)")
+            if u["paid_delta"] != 0:
+                lines.append(f"- _Paid_: доп.списание {u['paid_delta']:.2f}₾")
+            if u["pending_delta"] != 0:
+                lines.append(f"- _Pending_: будущее списание +{u['pending_delta']:.2f}₾")
+            lines.append("")
+            for b, old, new, peak_h, base_r in u["items"]:
+                date_str = b.date.date() if b.date else "?"
+                status_tag = "[paid]" if b.payment_status == "paid" else "[pending]"
+                lines.append(
+                    f"  - {date_str} {b.start_time} {b.resource_id} "
+                    f"({b.format}, {(b.duration or 0)/60:.1f}h) {status_tag}: "
+                    f"{old:.2f} → {new:.2f}₾ "
+                    f"(+{new - old:.2f}₾ = {peak_h:g}h peak × {base_r:g}₾)"
+                )
+            lines.append("")
+
+        report = "\n".join(lines)
+        if args.report:
+            with open(args.report, "w", encoding="utf-8") as f:
+                f.write(report)
+            log.info("Report written to %s", args.report)
+        else:
+            print(report)
+
+        if not apply_changes:
+            log.info("DRY-RUN — no DB writes. Run with --apply to commit.")
+            return 0
+
+        # Apply
+        balance_adjusted_users = 0
+        for b, owner, old, new, _peak_h, _base_r in targets:
+            b.final_price = new
+            if b.payment_status == "paid":
+                # Already charged — user owes us the missing amount.
+                delta = round(new - old, 2)
+                if delta != 0:
+                    owner.balance = round((owner.balance or 0) - delta, 2)
+                    session.add(owner)
+                    balance_adjusted_users += 1
+                b.charge_amount = new
+            session.add(b)
+
+        session.commit()
+        log.info(
+            "APPLIED: %d bookings recomputed; balance touches on %d paid rows.",
+            len(targets), balance_adjusted_users,
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

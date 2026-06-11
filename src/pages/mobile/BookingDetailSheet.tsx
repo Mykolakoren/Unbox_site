@@ -34,6 +34,14 @@ export function BookingDetailSheet({ booking, onClose }: {
     const [busy, setBusy] = useState<'cancel' | 'extend' | 'rerent' | 'link' | 'cancel_tail' | 'cancel_all_future' | 'extend_series' | 'dismiss_series_reminder' | null>(null);
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
 
+    // Lock body scroll while the sheet is open so the background doesn't
+    // scroll-chain under the overlay. Mirrors OnboardingTour's pattern.
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+
     useEffect(() => {
         // Lazy-load CRM clients only when the user opens the picker. Avoids
         // hammering /crm/clients every time someone opens a detail sheet.
@@ -197,6 +205,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                     gap: 14,
                     maxHeight: '85vh',
                     overflow: 'auto',
+                    overscrollBehavior: 'contain',
                 }}
             >
                 {mode === 'pickClient' ? (

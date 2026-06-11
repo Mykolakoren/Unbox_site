@@ -101,6 +101,14 @@ export interface BookingHistoryItem extends BookingState {
     status: 'confirmed' | 'cancelled' | 'completed' | 're-rented' | 'rescheduled' | 'no_show' | 'pending_approval';
     createdAt: string;
     finalPrice: number;
+    // Pricing breakdown — server populates these on every booking, but
+    // BookingState (frontend store) only carries selection fields. Surfaced
+    // here so admin UI can show the applied discount rule + percent (Excel
+    // 2026-05-20: «не можем сами высчитывать у кого сколько часов»).
+    basePrice?: number;
+    appliedRule?: string;
+    discountPercent?: number;
+    discountAmount?: number;
     paymentSource?: 'subscription' | 'deposit' | 'credit';
     hoursDeducted?: number;
     isReRentListed?: boolean;
@@ -127,6 +135,16 @@ export interface BookingHistoryItem extends BookingState {
      */
     recurringGroupId?: string;
     updatedAt?: string;
+
+    // Deferred-billing state (24h-before-start charge model).
+    // - `pending` — money/hours not yet deducted, cron will at T-24h
+    // - `paid`    — already deducted (or legacy upfront-paid row)
+    // - `waived`  — admin cancelled the charge with `waiverReason`
+    paymentStatus?: 'pending' | 'paid' | 'waived' | null;
+    chargedAt?: string | null;
+    chargeAmount?: number | null;
+    waiverReason?: string | null;
+    waivedAt?: string | null;
 }
 
 export interface WaitlistEntry {

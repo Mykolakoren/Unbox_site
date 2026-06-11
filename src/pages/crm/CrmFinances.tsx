@@ -288,7 +288,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
 
     return (
         <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
-            <div style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
+            <div style={{ maxWidth: 1280, margin: '0 auto', padding: 'clamp(16px, 4vw, 48px)' }}>
                 {/* HEAD */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 20, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 32, marginBottom: 40 }}>
                     <div>
@@ -363,20 +363,24 @@ function GridHouseCrmFinances(p: GHFinProps) {
                     )}
                 </div>
 
-                {/* KPI strip */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
+                {/* KPI strip — auto-fit columns: 4-up на десктопе, 2-up на
+                    узком mobile (≤~600px). Раньше было `repeat(4, 1fr)`,
+                    из-за чего на телефоне колонки были по ~80px и числа вроде
+                    "GEL · 14500 RUB · 60 USDT" складывались вертикально и
+                    плохо читались. */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
                     {[
                         { label: 'Получено', value: p.stats.revenueLabel, sub: p.stats.revenueGel },
                         { label: 'Общий долг', value: p.stats.debtLabel, sub: `${p.stats.unpaidCount} сессий${p.stats.debtGel ? ' · ' + p.stats.debtGel : ''}`, danger: p.stats.unpaidCount > 0 },
                         { label: 'Платежей', value: String(p.stats.totalPayments), sub: null },
                         { label: 'Сессий', value: String(p.stats.held), sub: null },
                     ].map((k, i) => (
-                        <div key={k.label} style={{ padding: '24px 20px', borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none' }}>
+                        <div key={k.label} style={{ padding: '20px 16px', borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none', minWidth: 0 }}>
                             <div style={{ ...eyebrow, marginBottom: 10 }}>{k.label}</div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(22px, 2.6vw, 32px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1, color: k.danger ? GH.danger : GH.ink }}>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(18px, 2.6vw, 32px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color: k.danger ? GH.danger : GH.ink, wordBreak: 'break-word' }}>
                                 {k.value}
                             </div>
-                            {k.sub && <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 8, textTransform: 'uppercase' }}>{k.sub}</div>}
+                            {k.sub && <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 8, textTransform: 'uppercase', wordBreak: 'break-word' }}>{k.sub}</div>}
                         </div>
                     ))}
                 </div>
@@ -408,27 +412,34 @@ function GridHouseCrmFinances(p: GHFinProps) {
                         </div>
                         <div>
                             {p.debtByClient.map(({ client, count, total }, i) => (
+                                // Раньше grid с `60px 1fr 100px 160px` фиксированной
+                                // суммой ~336px не оставлял места имени на узком
+                                // экране, а сумма "2100 GEL" на правом краю
+                                // обрезалась до "2100 GE". Сейчас flex с
+                                // wrap'ом: имя гибкое, сумма всегда видна
+                                // справа на десктопе или в новой строке снизу
+                                // на узком экране.
                                 <div
                                     key={client.id}
                                     onClick={() => p.navigate(`/crm/clients/${client.id}`)}
                                     style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: '60px 1fr 100px 160px',
+                                        display: 'flex',
                                         alignItems: 'center',
-                                        gap: 16,
-                                        padding: '18px 0',
+                                        flexWrap: 'wrap',
+                                        gap: '8px 14px',
+                                        padding: '14px 0',
                                         borderBottom: `1px solid ${GH.ink10}`,
                                         cursor: 'pointer',
                                     }}
                                 >
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60, minWidth: 28 }}>
                                         {String(i + 1).padStart(2, '0')}
                                     </span>
-                                    <div style={{ fontFamily: GH_SANS, fontSize: 16, fontWeight: 600, color: GH.ink }}>{client.name}</div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>
+                                    <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: '1 1 140px', minWidth: 0, wordBreak: 'break-word' }}>{client.name}</div>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap' }}>
                                         {count} сессий
                                     </div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, textAlign: 'right' }}>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
                                         {total} {client.currency}
                                     </div>
                                 </div>
@@ -467,32 +478,36 @@ function GridHouseCrmFinances(p: GHFinProps) {
                             {p.payments.map((pay, i) => {
                                 const client = p.clientMap.get(pay.clientId);
                                 return (
+                                    // Тот же fix что и для debt-rows: flex
+                                    // вместо фиксированного 60+1fr+200+140 grid,
+                                    // который на мобильном съедал имя клиента
+                                    // и обрезал сумму справа.
                                     <div
                                         key={pay.id}
                                         style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: '60px 1fr 200px 140px',
+                                            display: 'flex',
                                             alignItems: 'center',
-                                            gap: 16,
-                                            padding: '16px 0',
+                                            flexWrap: 'wrap',
+                                            gap: '8px 14px',
+                                            padding: '14px 0',
                                             borderBottom: `1px solid ${GH.ink10}`,
                                         }}
                                     >
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60, minWidth: 32 }}>
                                             {String(i + 1).padStart(3, '0')}
                                         </span>
-                                        <div>
-                                            <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600 }}>{client?.name || 'Неизвестный'}</div>
+                                        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                                            <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, wordBreak: 'break-word' }}>{client?.name || 'Неизвестный'}</div>
                                             {pay.account && (
                                                 <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 3, textTransform: 'uppercase' }}>
                                                     {pay.account}
                                                 </div>
                                             )}
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: GH.ink60, whiteSpace: 'nowrap' }}>
                                             {format(parseUTC(pay.date), 'dd.MM.yyyy · HH:mm')}
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink, textAlign: 'right' }}>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
                                             +{pay.amount} {pay.currency}
                                         </div>
                                     </div>

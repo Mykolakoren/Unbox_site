@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { toast } from 'sonner';
 import type { BookingState, Format, PricingResult, GroupSize } from '../types';
 import { resourcesApi } from '../api/resources';
@@ -51,6 +52,12 @@ export interface BookingStore extends BookingState {
     editBookingId: string | null;
     mode: 'create' | 'edit' | 'reschedule';
     bookingForUser: string | null; // ID/Email of user being booked for (Admin only)
+    // True right after startEditing(_, 'reschedule') and until the user picks
+    // ANY slot. While true, toggleSlot/setSlotRange wipe the pre-populated
+    // OLD slots before applying the new pick — so the cart never contains
+    // both old + new (which caused cartDetails[0] = old → reschedule no-op +
+    // duplicate-looking row in the chessboard).
+    rescheduleAwaitingFreshPick: boolean;
 
     startEditing: (booking: BookingState & { id: string }, mode?: 'edit' | 'reschedule') => void;
     setBookingForUser: (userId: string | null) => void;
@@ -81,7 +88,7 @@ const INITIAL_STATE: BookingState = {
     bookingForUser: null,
 };
 
-export const useBookingStore = create<BookingStore>((set, get) => ({
+export const useBookingStore = create<BookingStore>()(persist((set, get) => ({
     ...INITIAL_STATE,
     resources: RESOURCES, // Initial static data
     locations: [],
@@ -115,6 +122,7 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     editBookingId: null,
     mode: 'create',
     bookingForUser: null,
+    rescheduleAwaitingFreshPick: false,
 
     startEditing: (booking: BookingState & { id: string }, mode = 'edit') => {
         // Excel #27 fix: pre-populate selectedSlots from the existing booking
@@ -149,6 +157,9 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
             extras: booking.extras,
             editBookingId: booking.id,
             mode: mode as any,
+            // Arm the "wipe-on-first-pick" guard only for reschedule. Edit
+            // mode keeps slots as-is — the user is tweaking the same booking.
+            rescheduleAwaitingFreshPick: mode === 'reschedule',
         });
     },
 
@@ -208,6 +219,11 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
 
     toggleSlot: (resourceId, time) => set((state) => {
         const slotId = `${resourceId}|${time}`;
+        // Reschedule first-pick: drop everything pre-populated by
+        // startEditing, then accept this single new slot.
+        if (state.rescheduleAwaitingFreshPick) {
+            return { selectedSlots: [slotId], rescheduleAwaitingFreshPick: false };
+        }
         const exists = state.selectedSlots.includes(slotId);
         const newSlots = exists
             ? state.selectedSlots.filter(s => s !== slotId)
@@ -217,6 +233,12 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
     }),
 
     setSlotRange: (resourceId, timeSlots) => set((state) => {
+        // Reschedule first-pick: wipe ALL prior slots (any resource) so the
+        // new range is the only entry in the cart.
+        if (state.rescheduleAwaitingFreshPick) {
+            const newSlots = timeSlots.map(time => `${resourceId}|${time}`);
+            return { selectedSlots: newSlots, rescheduleAwaitingFreshPick: false };
+        }
         // Remove all slots for this resource first to replace them cleanly
         const otherSlots = state.selectedSlots.filter(s => !s.startsWith(`${resourceId}|`));
         const newSlots = timeSlots.map(time => `${resourceId}|${time}`);
@@ -275,11 +297,24 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
         get().fetchQuote();
     },
 
-    reset: () => set({
-        ...INITIAL_STATE,
-        editBookingId: null, mode: 'create', bookingForUser: null, quote: null,
-        pendingAddResourceId: null, preservedResourceSlots: [],
-    }),
+    reset: () => {
+        set({
+            ...INITIAL_STATE,
+            date: new Date(),
+            editBookingId: null, mode: 'create', bookingForUser: null, quote: null,
+            pendingAddResourceId: null, preservedResourceSlots: [],
+            rescheduleAwaitingFreshPick: false,
+        });
+        // Drop the persisted wizard draft too — otherwise a refresh right
+        // after reset() would rehydrate the just-cleared cart. The set() above
+        // already rewrites storage with the initial draft, but clearStorage()
+        // makes the intent explicit and removes the key entirely.
+        try {
+            (useBookingStore as any).persist?.clearStorage?.();
+        } catch {
+            // persist API not ready (e.g. during early init) — non-fatal.
+        }
+    },
 
     fetchQuote: async () => {
         const { resourceId, date, startTime, duration, format } = get();
@@ -324,5 +359,44 @@ export const useBookingStore = create<BookingStore>((set, get) => ({
             // Silent for quote — user sees empty price, no need to spam toast
             set({ quote: null });
         }
+    },
+}), {
+    // Lightweight wizard-draft persistence so a hard refresh on /checkout
+    // doesn't dump the user back to step 1 / the landing page, losing their
+    // picked slots, format and date. Scoped to sessionStorage (per-tab,
+    // cleared on tab close) — this is transient checkout state, not a
+    // long-lived preference.
+    name: 'unbox-booking-draft',
+    storage: createJSONStorage(() => sessionStorage),
+    // Persist ONLY the wizard draft. Server-derived data (resources,
+    // locations, price, quote) and transient UI flags are intentionally
+    // excluded so we never resurrect stale server state or cause hydration
+    // mismatches.
+    partialize: (state) => ({
+        step: state.step,
+        locationId: state.locationId,
+        resourceId: state.resourceId,
+        format: state.format,
+        groupSize: state.groupSize,
+        date: state.date,
+        startTime: state.startTime,
+        duration: state.duration,
+        selectedSlots: state.selectedSlots,
+        extras: state.extras,
+        paymentMethod: state.paymentMethod,
+        editBookingId: state.editBookingId,
+        mode: state.mode,
+        bookingForUser: state.bookingForUser,
+    }),
+    // `date` round-trips through JSON as a string — revive it to a Date so
+    // downstream format()/setHours() calls don't blow up after rehydration.
+    merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<BookingState>;
+        const revivedDate = p.date ? new Date(p.date as any) : current.date;
+        return {
+            ...current,
+            ...p,
+            date: isNaN(revivedDate.getTime()) ? current.date : revivedDate,
+        };
     },
 }));

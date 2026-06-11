@@ -12,6 +12,54 @@ import { SpecialistBookingChessboardGrid } from '../components/Specialists/Speci
 import { NextAvailableSlots } from '../components/Specialists/NextAvailableSlots';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
+/** Render the specialist bio as styled sections.
+ *
+ * Bios are stored as plain text with markdown-style headings prefixed by
+ * "## " (e.g. "## Запросы\n…\n\n## Метод\n…"). Splitting on the marker
+ * lets us paint each section with its own heading band — cleaner than a
+ * single 600-char wall of text, and matches the structure unbox.center
+ * had on the source pages we imported from. Lines starting with "_..._"
+ * are rendered as muted italic captions ("В профессии с 2019 года.").
+ */
+function renderStructuredBio(bio: string): React.ReactNode {
+    // Backward-compat: legacy bios without "## " markers still render
+    // as a single block, preserving line breaks.
+    if (!bio.includes('## ')) {
+        return <div style={{ whiteSpace: 'pre-wrap' }}>{bio}</div>;
+    }
+    const blocks = bio.split(/\n*##\s+/).map(b => b.trim()).filter(Boolean);
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {blocks.map((block, idx) => {
+                const nl = block.indexOf('\n');
+                if (nl === -1) {
+                    // No body — italic caption like "_В профессии с 2019_"
+                    const t = block.replace(/^_+|_+$/g, '');
+                    return (
+                        <div key={idx} style={{ fontStyle: 'italic', fontSize: 14, color: '#6b7280' }}>
+                            {t}
+                        </div>
+                    );
+                }
+                const heading = block.slice(0, nl).trim();
+                const body = block.slice(nl + 1).trim();
+                return (
+                    <div key={idx}>
+                        <div style={{
+                            fontFamily: GH_MONO, fontSize: 11,
+                            letterSpacing: '0.18em', textTransform: 'uppercase',
+                            color: GH.ink60, marginBottom: 6,
+                        }}>
+                            {heading}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{body}</div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 export function SpecialistProfilePage() {
     const { id } = useParams<{ id: string }>();
     const [specialist, setSpecialist] = useState<Specialist | null>(null);
@@ -66,6 +114,16 @@ export function SpecialistProfilePage() {
     const hasOnline = specialist.formats.includes('ONLINE');
     const hasOfflineRoom = specialist.formats.includes('OFFLINE_ROOM');
     const hasOfflineCapsule = specialist.formats.includes('OFFLINE_CAPSULE');
+    // Per-center offline tags (new in May 2026 — see CrmProfile FormatCheckbox).
+    // If specialist hasn't migrated yet, legacy `OFFLINE_ROOM/_CAPSULE` keep
+    // surfacing them as "офлайн в центрах Unbox" without a specific link.
+    const PROFILE_LOCATIONS = [
+        { tag: 'OFFLINE_UNBOX_ONE',  id: 'unbox_one',  label: 'Unbox One' },
+        { tag: 'OFFLINE_UNBOX_UNI',  id: 'unbox_uni',  label: 'Unbox Uni' },
+        { tag: 'OFFLINE_NEO_SCHOOL', id: 'neo_school', label: 'Neo School' },
+    ];
+    const selectedCenters = PROFILE_LOCATIONS.filter(l => specialist.formats.includes(l.tag));
+    const hasAnyOffline = selectedCenters.length > 0 || hasOfflineRoom || hasOfflineCapsule;
 
     // ─────────────────────────────────────────────────────────────────────
     // GRID HOUSE — экспериментальный вид всей страницы профиля.
@@ -230,12 +288,24 @@ export function SpecialistProfilePage() {
                                     textAlign: 'right',
                                     color: GH.ink30,
                                 }}>
-                                    55<br />МИН
+                                    50<br />МИН
                                 </div>
                             </div>
 
-                            {/* CTA */}
-                            <Link to="/checkout" onClick={() => setStep(1)} style={{ textDecoration: 'none', display: 'block' }}>
+                            {/* CTA — scroll to the slot picker that lives lower
+                                on this same page (#specialist-slots). Used to
+                                navigate to /checkout (the cabinet-rental wizard)
+                                which dropped users onto the specialist list — they
+                                lost context entirely and asked "где же слоты?". */}
+                            <a
+                                href="#specialist-slots"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    const el = document.getElementById('specialist-slots');
+                                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }}
+                                style={{ textDecoration: 'none', display: 'block' }}
+                            >
                                 <div
                                     style={{
                                         marginTop: '16px',
@@ -270,7 +340,7 @@ export function SpecialistProfilePage() {
                                         Забронировать время
                                     </span>
                                 </div>
-                            </Link>
+                            </a>
 
                             <p style={{
                                 marginTop: '14px',
@@ -282,7 +352,7 @@ export function SpecialistProfilePage() {
                                 color: GH.ink30,
                                 lineHeight: 1.7,
                             }}>
-                                Вы будете перенаправлены в мастер<br />бронирования пространств Unbox.
+                                Доступные слоты — ниже на странице.
                             </p>
                         </aside>
 
@@ -331,7 +401,7 @@ export function SpecialistProfilePage() {
                                             fontWeight: 500,
                                             marginTop: '4px',
                                         }}>
-                                            {[hasOnline && 'Онлайн', (hasOfflineRoom || hasOfflineCapsule) && 'Очно'].filter(Boolean).join(' · ')}
+                                            {[hasOnline && 'Онлайн', hasAnyOffline && 'Очно'].filter(Boolean).join(' · ') || '—'}
                                         </div>
                                     </div>
                                     <div style={{ padding: '18px 16px', borderRight: `1px solid ${GH.ink10}` }}>
@@ -342,7 +412,21 @@ export function SpecialistProfilePage() {
                                             fontWeight: 500,
                                             marginTop: '4px',
                                         }}>
-                                            {(hasOfflineRoom || hasOfflineCapsule) ? 'Тбилиси' : '—'}
+                                            {selectedCenters.length > 0 ? (
+                                                selectedCenters.map((loc, i) => (
+                                                    <span key={loc.id}>
+                                                        <Link
+                                                            to={`/location/${loc.id}`}
+                                                            style={{ color: GH.ink, textDecoration: 'underline', textUnderlineOffset: 2 }}
+                                                        >
+                                                            {loc.label}
+                                                        </Link>
+                                                        {i < selectedCenters.length - 1 ? ', ' : ''}
+                                                    </span>
+                                                ))
+                                            ) : hasAnyOffline ? (
+                                                'Батуми'
+                                            ) : '—'}
                                         </div>
                                     </div>
                                     <div style={{ padding: '18px 0 18px 16px' }}>
@@ -353,7 +437,7 @@ export function SpecialistProfilePage() {
                                             fontWeight: 500,
                                             marginTop: '4px',
                                         }}>
-                                            55 минут
+                                            50 минут
                                         </div>
                                     </div>
                                 </div>
@@ -432,17 +516,20 @@ export function SpecialistProfilePage() {
                                     fontSize: '17px',
                                     lineHeight: 1.7,
                                     color: GH.ink,
-                                    whiteSpace: 'pre-wrap',
                                     maxWidth: '640px',
                                 }}>
-                                    {specialist.bio || 'Специалист пока не добавил описание о себе.'}
+                                    {specialist.bio
+                                        ? renderStructuredBio(specialist.bio)
+                                        : 'Специалист пока не добавил описание о себе.'}
                                 </div>
                             </section>
                         </div>
                     </div>
 
-                    {/* Chessboard (already in Grid House language) */}
-                    <div style={{ marginTop: '104px' }}>
+                    {/* Chessboard (already in Grid House language). The
+                        ``id`` is the scroll target for the "Забронировать
+                        время" CTA at the top of the page. */}
+                    <div id="specialist-slots" style={{ marginTop: '104px', scrollMarginTop: '24px' }}>
                         <SpecialistBookingChessboardGrid
                             specialistId={specialist.id}
                             specialistName={`${specialist.firstName} ${specialist.lastName}`}
@@ -451,33 +538,19 @@ export function SpecialistProfilePage() {
                         />
                     </div>
 
-                    {/* Footer: experiment strip */}
+                    {/* Footer strip — A/B-test toggle removed (Grid House is
+                        the only live design now). */}
                     <div style={{
                         marginTop: '80px',
                         borderTop: `1px solid ${GH.ink}`,
                         paddingTop: '20px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
                         fontFamily: MONO,
                         fontSize: '10px',
                         letterSpacing: '0.2em',
                         textTransform: 'uppercase',
                         color: GH.ink60,
-                        flexWrap: 'wrap',
-                        gap: '16px',
                     }}>
                         <span>UNBOX · ПРОФИЛЬ СПЕЦИАЛИСТА</span>
-                        <Link
-                            to={`/specialists/${id}`}
-                            style={{
-                                color: GH.ink,
-                                textDecoration: 'underline',
-                                textUnderlineOffset: '4px',
-                            }}
-                        >
-                            ← ВЕРНУТЬСЯ К ОБЫЧНОМУ ДИЗАЙНУ
-                        </Link>
                     </div>
                 </div>
             </div>

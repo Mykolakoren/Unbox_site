@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { api } from '../../api/client';
+import { useEffect, useRef, useState } from 'react';
+import { api, API_URL } from '../../api/client';
 import { toast } from 'sonner';
-import { Loader2, Save, Plus, X } from 'lucide-react';
+import { Loader2, Save, Plus, X, Upload } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { compressImage } from '../../utils/imageCompress';
 
 const SPECIALIZATION_SUGGESTIONS = [
     'Тревога', 'Депрессия', 'Отношения', 'Самооценка', 'Стресс', 'Горе и утрата',
@@ -11,9 +12,21 @@ const SPECIALIZATION_SUGGESTIONS = [
     'Личностный рост', 'Профессиональное выгорание', 'Сексуальность', 'Возрастные кризисы',
 ];
 
-const FORMAT_OPTIONS = [
-    { value: 'ONLINE', label: 'Онлайн' },
-    { value: 'OFFLINE', label: 'Оффлайн (в кабинете)' },
+/** Single source of truth for format/location flags stored in
+ *  Specialist.formats (JSON list of strings).
+ *  - ONLINE                — works online.
+ *  - OFFLINE_UNBOX_ONE     — works in Unbox One (Палиашвили 4).
+ *  - OFFLINE_UNBOX_UNI     — works in Unbox Uni (Тбел Абусеридзе 38).
+ *  - OFFLINE_NEO_SCHOOL    — works in Neo School (Сулаберидзе 80).
+ *  Legacy values (OFFLINE, OFFLINE_ROOM, OFFLINE_CAPSULE) are treated as
+ *  "OFFLINE without specific location" — interpreted at render time as
+ *  "in any Unbox center" until the specialist edits and saves. */
+const ONLINE_FLAG = 'ONLINE';
+const OFFLINE_LEGACY = ['OFFLINE', 'OFFLINE_ROOM', 'OFFLINE_CAPSULE'];
+const LOCATION_OPTIONS = [
+    { value: 'OFFLINE_UNBOX_ONE',  id: 'unbox_one',  label: 'Unbox One',  address: 'Палиашвили 4' },
+    { value: 'OFFLINE_UNBOX_UNI',  id: 'unbox_uni',  label: 'Unbox Uni',  address: 'Тбел Абусеридзе 38' },
+    { value: 'OFFLINE_NEO_SCHOOL', id: 'neo_school', label: 'Neo School', address: 'Сулаберидзе 80' },
 ];
 
 interface ProfileData {
@@ -255,16 +268,12 @@ function GridHouseCrmProfile({
                     </div>
 
                     <div>
-                        <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>URL фото</div>
-                        <input
-                            type="url"
-                            value={profile.photoUrl ?? ''}
-                            onChange={(e) => setProfile((p) => (p ? { ...p, photoUrl: e.target.value } : p))}
-                            placeholder="https://..."
-                            style={inputStyle}
+                        <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Фото профиля</div>
+                        <PhotoUpload
+                            onUploaded={(url) => setProfile((p) => (p ? { ...p, photoUrl: url } : p))}
                         />
                         <div style={{ ...GHP_MONO_LABEL, color: GH.ink30, marginTop: 8 }}>
-                            Прямая ссылка на изображение · jpg, png
+                            jpg, png · до 2 МБ
                         </div>
                     </div>
                 </div>
@@ -424,41 +433,31 @@ function GridHouseCrmProfile({
             <GHPSection num={4} title="Формат и стоимость">
                 <div style={{ marginBottom: 28 }}>
                     <div style={{ ...GHP_MONO_LABEL, marginBottom: 12 }}>Формат работы</div>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                        {FORMAT_OPTIONS.map((opt) => {
-                            const active = profile.formats.includes(opt.value);
-                            return (
-                                <button
-                                    key={opt.value}
-                                    onClick={() => onToggleFormat(opt.value)}
-                                    style={{
-                                        fontFamily: GH_MONO,
-                                        fontSize: 11,
-                                        letterSpacing: '0.12em',
-                                        textTransform: 'uppercase',
-                                        padding: '12px 20px',
-                                        background: active ? GH.ink : 'transparent',
-                                        color: active ? GH.paper : GH.ink,
-                                        border: `1px solid ${GH.ink}`,
-                                        cursor: 'pointer',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 10,
-                                    }}
-                                >
-                                    <span
-                                        style={{
-                                            width: 10,
-                                            height: 10,
-                                            border: `1px solid ${active ? GH.paper : GH.ink}`,
-                                            background: active ? GH.paper : 'transparent',
-                                        }}
-                                    />
-                                    {opt.label}
-                                </button>
-                            );
-                        })}
+
+                    {/* Onlne checkbox */}
+                    <FormatCheckbox
+                        checked={profile.formats.includes(ONLINE_FLAG)}
+                        onToggle={() => onToggleFormat(ONLINE_FLAG)}
+                        label="Онлайн"
+                        sub="Сессии через видеосвязь"
+                    />
+
+                    {/* Center checkboxes */}
+                    <div style={{ ...GHP_MONO_LABEL, marginTop: 24, marginBottom: 10 }}>Очно — в каких центрах</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {LOCATION_OPTIONS.map((loc) => (
+                            <FormatCheckbox
+                                key={loc.value}
+                                checked={profile.formats.includes(loc.value)}
+                                onToggle={() => onToggleFormat(loc.value)}
+                                label={loc.label}
+                                sub={loc.address}
+                            />
+                        ))}
                     </div>
+
+                    {/* Live preview — same text the public profile will show */}
+                    <FormatPreview formats={profile.formats} />
                 </div>
 
                 <div>
@@ -524,5 +523,201 @@ function GHPSection({ num, title, children }: { num: number; title: string; chil
             </div>
             <div style={{ paddingLeft: 80 }}>{children}</div>
         </section>
+    );
+}
+
+// ── Format / location checkbox row (Vignelli-flat, full-width) ─────────
+function FormatCheckbox({
+    checked, onToggle, label, sub,
+}: { checked: boolean; onToggle: () => void; label: string; sub?: string }) {
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '12px 16px',
+                background: checked ? GH.ink5 : 'transparent',
+                border: `1px solid ${checked ? GH.ink : GH.ink10}`,
+                cursor: 'pointer',
+                width: '100%',
+                textAlign: 'left',
+                fontFamily: GH_SANS,
+                color: GH.ink,
+                transition: 'background 120ms, border-color 120ms',
+            }}
+            aria-pressed={checked}
+        >
+            <span
+                aria-hidden
+                style={{
+                    width: 18, height: 18,
+                    flex: '0 0 18px',
+                    border: `1.5px solid ${checked ? GH.ink : GH.ink30}`,
+                    background: checked ? GH.ink : 'transparent',
+                    display: 'inline-flex',
+                    alignItems: 'center', justifyContent: 'center',
+                }}
+            >
+                {checked && (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                        stroke={GH.paper} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                )}
+            </span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
+                {sub && (
+                    <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>
+                        {sub}
+                    </span>
+                )}
+            </span>
+        </button>
+    );
+}
+
+// ── Live preview "Ведёт приём…" — same text the public profile renders ──
+function FormatPreview({ formats }: { formats: string[] }) {
+    const has = (v: string) => formats.includes(v);
+    const online = has(ONLINE_FLAG);
+    const centers = LOCATION_OPTIONS.filter(loc => has(loc.value));
+    const legacyOffline = !centers.length && OFFLINE_LEGACY.some(has);
+
+    if (!online && !centers.length && !legacyOffline) {
+        return (
+            <div style={{
+                marginTop: 16,
+                padding: '12px 16px',
+                background: GH.ink5,
+                fontFamily: GH_SANS,
+                fontSize: 13,
+                color: GH.ink60,
+                fontStyle: 'italic',
+            }}>
+                Отметь хотя бы один формат — клиенты увидят, как с тобой можно работать.
+            </div>
+        );
+    }
+
+    const parts: React.ReactNode[] = [];
+    if (online) parts.push(<span key="on">онлайн</span>);
+    if (centers.length) {
+        parts.push(
+            <span key="off">
+                {online ? 'и ' : ''}очно в&nbsp;
+                {centers.map((loc, i) => (
+                    <span key={loc.id}>
+                        <a
+                            href={`/location/${loc.id}`}
+                            target="_blank" rel="noopener noreferrer"
+                            style={{ color: GH.ink, textDecoration: 'underline', textUnderlineOffset: 2 }}
+                        >
+                            {loc.label}
+                        </a>
+                        {i < centers.length - 1 ? ', ' : ''}
+                    </span>
+                ))}
+            </span>
+        );
+    } else if (legacyOffline) {
+        parts.push(<span key="legacy">{online ? 'и ' : ''}очно <em style={{ color: GH.ink60 }}>(уточни конкретные центры выше)</em></span>);
+    }
+
+    return (
+        <div style={{
+            marginTop: 16,
+            padding: '14px 16px',
+            background: GH.ink5,
+            border: `1px solid ${GH.ink10}`,
+            fontFamily: GH_SANS,
+            fontSize: 14,
+            lineHeight: 1.5,
+            color: GH.ink,
+        }}>
+            <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Так клиенты увидят формат</div>
+            Ведёт приём{' '}{parts.flatMap((p, i) => i === 0 ? [p] : [' ', p])}.
+        </div>
+    );
+}
+
+
+/** File-pick → POST /upload → return absolute URL.
+ *
+ * Backend response is a relative path (/uploads/<uuid>.jpg). We expand it to
+ * an absolute URL so the saved photoUrl works regardless of where the asset
+ * is later loaded from (admin marketplace lists the URL in <img src>).
+ */
+function PhotoUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const [busy, setBusy] = useState(false);
+
+    const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setBusy(true);
+        try {
+            // Downscale + re-encode to JPEG so PNG phone photos don't blow
+            // past the 2 MB cap. Server still guards 2 MB as a backstop.
+            const upload = await compressImage(file);
+            if (upload.size > 2 * 1024 * 1024) {
+                toast.error('Фото слишком большое даже после сжатия — попробуйте другое.');
+                return;
+            }
+            const data = new FormData();
+            data.append('file', upload);
+            const res = await api.post<{ url: string }>('/upload/', data, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            const baseUrl = (API_URL || '').replace('/api/v1', '');
+            const fullUrl = `${baseUrl}${res.data.url}`;
+            onUploaded(fullUrl);
+            toast.success('Фото загружено — не забудьте сохранить профиль');
+        } catch (err: unknown) {
+            const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить фото');
+        } finally {
+            setBusy(false);
+            e.target.value = '';
+        }
+    };
+
+    return (
+        <>
+            <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePick}
+                style={{ display: 'none' }}
+            />
+            <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                disabled={busy}
+                style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    background: GH.ink,
+                    color: GH.paper,
+                    border: 'none',
+                    fontFamily: GH_SANS,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: busy ? 'wait' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    opacity: busy ? 0.7 : 1,
+                }}
+            >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                {busy ? 'Загружаем…' : 'Загрузить с устройства'}
+            </button>
+        </>
     );
 }

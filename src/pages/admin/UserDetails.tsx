@@ -3,7 +3,8 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet } from 'lucide-react';
+import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrectionModal';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
@@ -58,6 +59,7 @@ export function AdminUserDetails() {
     const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
     const [isAssignSubOpen, setIsAssignSubOpen] = useState(false);
     const [isEditLimitOpen, setIsEditLimitOpen] = useState(false);
+    const [isBalanceCorrectionOpen, setIsBalanceCorrectionOpen] = useState(false);
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
     const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
     const [adminPickerType, setAdminPickerType] = useState<'responsible' | 'attracted' | null>(null);
@@ -340,6 +342,14 @@ export function AdminUserDetails() {
                 currentLimit={user.creditLimit || 0}
                 onConfirm={handleUpdateCreditLimit}
             />
+            <BalanceCorrectionModal
+                isOpen={isBalanceCorrectionOpen}
+                userId={user.id}
+                userName={user.name}
+                currentBalance={Number(user.balance || 0)}
+                onClose={() => setIsBalanceCorrectionOpen(false)}
+                onSaved={async () => { await useUserStore.getState().fetchUsers(); }}
+            />
 
             {/* Header */}
             {
@@ -449,9 +459,21 @@ export function AdminUserDetails() {
                 </div>
             }
 
-            {/* Tabs */}
+            {/* Tabs — раньше 4 кнопки с padding 18px не влезали на узкий
+                мобильный экран, правые БРОНИРОВАНИЯ/ФИНАНСЫ/ИСТОРИЯ
+                уезжали за край и не тапались. Фикс: горизонтальный скролл +
+                компактнее padding на мобильном (фактически tabs shrink to
+                content и scroll если всё равно не влезает). */}
             {
-                <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 24 }}>
+                <div style={{
+                    display: 'flex',
+                    gap: 0,
+                    borderBottom: `1px solid ${GH.ink10}`,
+                    marginBottom: 24,
+                    overflowX: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                    scrollbarWidth: 'thin',
+                }}>
                     {([
                         ['overview', 'ОБЗОР'],
                         ['bookings', 'БРОНИРОВАНИЯ'],
@@ -460,12 +482,14 @@ export function AdminUserDetails() {
                     ] as const).map(([key, label]) => (
                         <button key={key} onClick={() => setActiveTab(key as any)}
                             style={{
-                                padding: '10px 18px', border: 'none', cursor: 'pointer',
+                                padding: '10px 14px', border: 'none', cursor: 'pointer',
                                 fontFamily: GH_SANS, fontSize: 12, fontWeight: 600,
                                 background: 'transparent',
                                 color: activeTab === key ? GH.ink : GH.ink30,
                                 borderBottom: activeTab === key ? `2px solid ${GH.ink}` : '2px solid transparent',
                                 marginBottom: -1, letterSpacing: '0.04em',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
                             }}>
                             {label}
                         </button>
@@ -522,19 +546,74 @@ export function AdminUserDetails() {
                                 <Mail size={16} className="text-unbox-grey" />
                                 <a href={`mailto:${user.email}`} className="text-unbox-green hover:underline">{user.email}</a>
                             </div>
-                            <div className="flex items-center gap-3 text-sm">
+                            {/* Phone field — clickable to edit. Mirrors the
+                                Telegram ID editor pattern below: prompt with
+                                current value, save via updateUserById. Empty
+                                string clears the phone. Light validation
+                                (only digits, + and spaces) — серверная
+                                сторона хранит как есть, формата нет. */}
+                            <div className="flex items-center gap-3 text-sm group/phone cursor-pointer" onClick={() => {
+                                const next = prompt('Телефон клиента (например, +995 555 12 34 56):', user.phone || '');
+                                if (next === null) return; // cancel
+                                const trimmed = next.trim();
+                                if (trimmed && !/^[+\d\s()-]+$/.test(trimmed)) {
+                                    toast.error('Только цифры, пробелы и + ()-');
+                                    return;
+                                }
+                                updateUserById(user.email, { phone: trimmed || undefined });
+                            }}>
                                 <Phone size={16} className="text-unbox-grey" />
-                                <span>{user.phone || 'Не указан'}</span>
+                                <span className={user.phone ? 'text-unbox-dark' : 'text-unbox-grey'}>
+                                    {user.phone || 'Не указан'}
+                                </span>
+                                <span className="opacity-0 group-hover/phone:opacity-100 text-xs text-blue-500">Изменить</span>
                             </div>
 
-                            {/* Telegram ID Field */}
-                            <div className="flex items-center gap-3 text-sm group/tg cursor-pointer" onClick={() => {
-                                const tgId = prompt('Введите Telegram ID:', user.telegramId || '');
-                                if (tgId !== null) updateUserById(user.email, { telegramId: tgId });
+                            {/* Telegram Field — принимает @username ИЛИ числовой
+                                chat_id. На вводе с @ резолвим через бэкенд
+                                (Telegram getChat). Если бот ещё не виделся
+                                с пользователем (нет общего чата) — выдадим
+                                админу понятный текст что нужно сделать. */}
+                            <div className="flex items-center gap-3 text-sm group/tg cursor-pointer" onClick={async () => {
+                                const raw = prompt(
+                                    'Введите @username или числовой Telegram ID:',
+                                    user.telegramId || ''
+                                );
+                                if (raw === null) return;
+                                const trimmed = raw.trim();
+                                if (!trimmed) {
+                                    // Очистить
+                                    updateUserById(user.email, { telegramId: '' });
+                                    return;
+                                }
+                                // Чистый numeric → сохраняем как есть.
+                                if (/^-?\d+$/.test(trimmed)) {
+                                    updateUserById(user.email, { telegramId: trimmed });
+                                    toast.success('Telegram ID сохранён');
+                                    return;
+                                }
+                                // Иначе — @username, пробуем резолвить.
+                                try {
+                                    const resp = await api.post<{ chat_id: string; name?: string | null }>(
+                                        '/telegram/resolve-username',
+                                        { username: trimmed },
+                                    );
+                                    const chatId = resp.data.chat_id;
+                                    updateUserById(user.email, { telegramId: chatId });
+                                    toast.success(
+                                        resp.data.name
+                                            ? `Привязан Telegram: ${resp.data.name} (${chatId})`
+                                            : `Привязан Telegram ID ${chatId}`
+                                    );
+                                } catch (e: any) {
+                                    const msg = e?.response?.data?.detail
+                                        || 'Не удалось распознать @username';
+                                    toast.error(msg, { duration: 8000 });
+                                }
                             }}>
                                 <div className="text-unbox-grey"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-send"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></div>
                                 <span className={user.telegramId ? 'text-unbox-dark' : 'text-unbox-grey dashed underline'}>
-                                    {user.telegramId || 'Telegram ID не указан'}
+                                    {user.telegramId || 'Telegram не указан'}
                                 </span>
                                 <span className="opacity-0 group-hover/tg:opacity-100 text-xs text-blue-500">Изменить</span>
                             </div>
@@ -691,8 +770,14 @@ export function AdminUserDetails() {
                                             try {
                                                 const { usersApi } = await import('../../api/users');
                                                 await usersApi.changeEmail(user.id, trimmed);
-                                                toast.success(`Email изменён на ${trimmed}. Обновите страницу для актуализации.`);
-                                                // Navigate to the new canonical URL
+                                                // Refresh the users store BEFORE navigating to the new URL.
+                                                // Without this the destination page does
+                                                // `users.find(u => u.email === <new>)` against a stale
+                                                // store containing the old email — it'd render
+                                                // "Клиент не найден" until a manual reload, exactly
+                                                // the bug admins reported when changing email.
+                                                await fetchUsers();
+                                                toast.success(`Email изменён на ${trimmed}`);
                                                 navigate(`/admin/users/${encodeURIComponent(trimmed)}`, { replace: true });
                                             } catch (err: any) {
                                                 toast.error(err.response?.data?.detail || 'Ошибка смены email');
@@ -1025,7 +1110,14 @@ export function AdminUserDetails() {
                                                 return realMoneyTransactions;
                                             })()} ₾
                                         </div>
-                                        <div className="text-xs text-unbox-grey mt-1">Баланс: {user.balance} ₾</div>
+                                        <div
+                                            className="text-xs text-unbox-grey mt-1 flex items-center gap-1.5 cursor-pointer group/balance"
+                                            onClick={() => setIsBalanceCorrectionOpen(true)}
+                                            title="Скорректировать баланс (вручную, с указанием причины)"
+                                        >
+                                            <Wallet size={11} className="text-unbox-grey/70 group-hover/balance:text-unbox-green transition-colors" />
+                                            <span>Баланс: <span className="font-semibold border-b border-dashed border-unbox-light group-hover/balance:border-unbox-green group-hover/balance:text-unbox-green transition-colors">{user.balance} ₾</span></span>
+                                        </div>
                                         {/* Credit Limit UI */}
                                         <div
                                             className="text-xs text-unbox-grey mt-1 flex items-center gap-1 group/limit cursor-pointer"

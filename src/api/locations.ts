@@ -9,5 +9,9 @@ export const locationsApi = {
     getLocation: async (id: string): Promise<Location> => {
         const response = await api.get(`/locations/${id}`);
         return response.data;
-    }
+    },
+    update: async (id: string, payload: Partial<Location>): Promise<Location> => {
+        const response = await api.put(`/locations/${id}`, payload);
+        return response.data;
+    },
 };

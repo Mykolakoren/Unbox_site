@@ -76,13 +76,20 @@ class UserUpdate(SQLModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
-    telegram_id: Optional[str] = None  # @username or numeric chat_id
-    
+    # SECURITY: telegram_id deliberately NOT patchable here. It is indexed but
+    # NOT unique, so a self-service PATCH /users/me could let a user set their
+    # telegram_id to a victim's chat_id and hijack notifications/balance
+    # routing. The only legitimate way to bind a telegram_id is the token-based
+    # /telegram/link-token flow. (DB unique constraint on User.telegram_id is
+    # also recommended — see migration TODO.)
+
     # User settable? Or Admin only?
     # Let's start with basic profile fields.
     # Advanced fields (balance, role, subscription) should probably be separate or protected.
     
 class UserUpdateAdmin(UserUpdate):
+    # Admins (not self-service users) may bind a telegram_id directly.
+    telegram_id: Optional[str] = None  # @username or numeric chat_id
     role: Optional[str] = None
     balance: Optional[float] = None
     subscription: Optional[dict] = None

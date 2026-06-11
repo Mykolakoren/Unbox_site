@@ -84,6 +84,18 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   }
 }
 
+// PWA service worker registration. Required for Chrome/Edge/Samsung Browser
+// to install the mobile cabinet as a real WebAPK on Android (without it
+// they fall back to a malformed shortcut that Play Protect flags). The SW
+// itself does minimal work — see public/sw.js.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.warn('SW registration failed:', err);
+        });
+    });
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>

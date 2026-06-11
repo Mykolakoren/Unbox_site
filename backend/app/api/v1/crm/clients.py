@@ -124,9 +124,33 @@ def list_clients(
     current_user: User = Depends(deps.require_specialist),
     active_only: bool = Query(False),
     with_stats: bool = Query(False),
+    specialist_id: Optional[str] = Query(
+        None,
+        description="Admin-proxy only: scope to a specific specialist's CRM. "
+                    "Admins use this when booking on behalf of a specialist; "
+                    "non-admins always see only their own clients regardless of this param.",
+    ),
 ):
+    """List CRM clients — strictly per-specialist.
+
+    Visibility:
+      - specialists → only their own (specialist_id param ignored, privacy).
+      - admins/owner/senior_admin → their own by default. Can pass
+        `specialist_id` to view a specific specialist's roster (used by the
+        admin-proxy booking flow where admin attaches a session to a CRM
+        client of the target specialist).
+
+    There is **no global cross-specialist listing** — therapy notes are
+    sensitive and admins must explicitly choose whose CRM they're acting on.
+    """
     uid = str(current_user.id)
-    stmt = select(TherapistClient).where(TherapistClient.specialist_id == uid)
+    is_admin = current_user.role in ("owner", "senior_admin", "admin")
+
+    # Admin-proxy: view a specific specialist's CRM.
+    # Plain specialist: always pinned to their own data.
+    target_uid = specialist_id if (is_admin and specialist_id) else uid
+
+    stmt = select(TherapistClient).where(TherapistClient.specialist_id == target_uid)
     if active_only:
         stmt = stmt.where(TherapistClient.is_active == True)
     stmt = stmt.order_by(TherapistClient.name)
@@ -135,7 +159,9 @@ def list_clients(
     if not with_stats:
         return clients
 
-    # Enrich with stats: sessionCount, totalPaid, unpaidSum
+    # Enrich with stats: sessionCount, totalPaid, unpaidSum.
+    # Stats key off `target_uid` so admin-proxy views read the right specialist's
+    # session/payment rows (using current_user.id would zero out everything).
     result = []
     for c in clients:
         c_dict = TherapistClientRead.model_validate(c).model_dump()
@@ -144,7 +170,7 @@ def list_clients(
         # Session count (non-cancelled)
         sessions_all = session.exec(
             select(TherapySession).where(
-                TherapySession.specialist_id == uid,
+                TherapySession.specialist_id == target_uid,
                 TherapySession.client_id == str(c.id),
                 TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
             )
@@ -172,7 +198,7 @@ def list_clients(
         from app.models.therapist_payment import TherapistPayment as _TP
         client_payments = session.exec(
             select(_TP).where(
-                _TP.specialist_id == uid,
+                _TP.specialist_id == target_uid,
                 _TP.client_id == str(c.id),
             )
         ).all()

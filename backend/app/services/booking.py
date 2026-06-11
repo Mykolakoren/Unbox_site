@@ -44,6 +44,7 @@ def check_availability(
     duration: int,
     exclude_booking_id: str = None,
     lock_rows: bool = False,
+    requester_user_uuid=None,
 ) -> tuple[bool, str | None]:
     """
     Check if a slot is available.
@@ -55,6 +56,21 @@ def check_availability(
     This fixes the phantom-row race where SELECT FOR UPDATE alone would let both
     transactions see an empty slot and both insert.
     """
+    # Resource-level access-window check (e.g. Neo School weekdays 18–22).
+    # The frontend greys out forbidden slots, but the backend is the
+    # enforcing authority. `is_within_window` returns (True, None) for any
+    # resource without a window config, so unconstrained resources are
+    # unaffected.
+    new_start_mins = time_to_minutes(start_time)
+    if new_start_mins < 0:
+        return False, f"Некорректный формат времени: {start_time}"
+    from app.services.resource_windows import is_within_window
+    within, win_reason = is_within_window(
+        resource_id, date.weekday(), start_time, duration
+    )
+    if not within:
+        return False, win_reason
+
     # Take the day-scope advisory lock FIRST — before any reads.
     # This is what actually prevents the race (SELECT FOR UPDATE alone cannot).
     if lock_rows:
@@ -88,7 +104,21 @@ def check_availability(
 
         # Overlap: (StartA < EndB) and (EndA > StartB)
         if new_start < existing_end and new_end > existing_start:
-            return False, f"Conflict with booking {b.id} ({b.start_time}-{existing_end // 60}:{existing_end % 60:02d})"
+            end_str = f"{existing_end // 60:02d}:{existing_end % 60:02d}"
+            # Friendlier message: tell the client whether the conflicting
+            # row is their own (very common path — they already booked
+            # this slot from another tab) vs someone else's. Falls back to
+            # the neutral "слот занят" wording for unknown owners.
+            is_own = (
+                requester_user_uuid is not None
+                and b.user_uuid is not None
+                and str(b.user_uuid) == str(requester_user_uuid)
+            )
+            if is_own:
+                msg = f"У вас уже есть бронь в это время ({b.start_time}–{end_str})"
+            else:
+                msg = f"Слот занят ({b.start_time}–{end_str})"
+            return False, msg
 
     return True, None
 

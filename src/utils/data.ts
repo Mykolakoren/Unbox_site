@@ -1,8 +1,9 @@
 import type { Location, Resource, ExtraOption } from '../types';
 
 export const LOCATIONS: Location[] = [
-    { id: 'unbox_uni', name: 'Unbox Uni', address: 'Тбел Абусеридзе, 38' },
+    // 2026-05-06: One ставим первым (логично — «One» = первый филиал, открыт раньше).
     { id: 'unbox_one', name: 'Unbox One', address: 'Палиашвили, 4' },
+    { id: 'unbox_uni', name: 'Unbox Uni', address: 'Тбел Абусеридзе, 38' },
     { id: 'neo_school', name: 'Neo School', address: 'Алесандра Сулаберидзе, 80' },
 ];
 
@@ -18,8 +19,13 @@ export const RESOURCES: Resource[] = [
         area: 9,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Уютный кабинет с песочной терапией для индивидуальной, детской и семейной работы. Тёплые тона, мягкое освещение, полная звукоизоляция.',
-        photos: ['/img/offices/miniature_cab_1_pal.jpg'],
+        description: 'Камерный кабинет 9 м² с профессиональной песочницей — для индивидуальной, детской и семейной терапии. Тёплое освещение, мягкий диван, полная звукоизоляция. Кондиционер, Wi-Fi, бесплатный чай и кофе.',
+        photos: [
+            '/img/cabinets/one/cab1/01.jpg',
+            '/img/cabinets/one/cab1/02.jpg',
+            '/img/cabinets/one/cab1/03.jpg',
+            '/img/cabinets/one/cab1/04.jpg',
+        ],
         services: ['sandbox', 'soundproof', 'climate_control', 'wifi'],
         sortOrder: 1,
     },
@@ -33,9 +39,18 @@ export const RESOURCES: Resource[] = [
         area: 12,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Кабинет в нейтральных тонах для индивидуальной терапии и семейных консультаций. Спокойная атмосфера, кондиционер, естественный свет.',
-        photos: ['/img/offices/miniature_cab_2_pal.jpg'],
-        services: ['natural_light', 'soundproof', 'couch', 'climate_control', 'wifi'],
+        description: 'Просторный кабинет 12 м² в нейтральных тонах — спокойная атмосфера для индивидуальных сессий, парной и семейной терапии. Естественный свет, комфортный диван, звукоизоляция. Кондиционер, Wi-Fi, чай-кофе.',
+        photos: [
+            '/img/cabinets/one/cab2/01.jpg',
+            '/img/cabinets/one/cab2/02.jpg',
+            '/img/cabinets/one/cab2/03.jpg',
+            '/img/cabinets/one/cab2/04.jpg',
+            '/img/cabinets/one/cab2/05.jpg',
+            '/img/cabinets/one/cab2/06.jpg',
+        ],
+        // 2026-06-02 owner: в Unbox One кушетку (extras +5 ₾) не предоставляем —
+        // убрал из services чтобы availableExtrasForResource не показывал её.
+        services: ['natural_light', 'soundproof', 'climate_control', 'wifi'],
         sortOrder: 2,
     },
     // Unbox Uni (Тбел Абусеридзе 38, Батуми)
@@ -49,8 +64,12 @@ export const RESOURCES: Resource[] = [
         area: 10,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Светлый кабинет для индивидуальной, детской и семейной терапии. Удобная мебель, приятная цветовая гамма.',
-        photos: ['/img/offices/cabinet_5_ira.jpg'],
+        description: 'Светлый кабинет 10 м² с большим окном — для индивидуальной, детской и семейной работы. Удобная мебель, мягкая цветовая гамма, кондиционер, Wi-Fi. Общая кухня с водой, чаем и кофе.',
+        photos: [
+            '/img/cabinets/uni/cab5/01.jpg',
+            '/img/cabinets/uni/cab5/02.jpg',
+            '/img/cabinets/uni/cab5/03.jpg',
+        ],
         services: ['natural_light', 'couch', 'climate_control', 'wifi'],
         sortOrder: 3,
     },
@@ -64,9 +83,15 @@ export const RESOURCES: Resource[] = [
         area: 16,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Просторный кабинет с песочной терапией. Подходит для индивидуальной работы, работы с детьми и семейных консультаций.',
-        photos: ['/img/offices/cabinet_6_ira.jpg'],
-        services: ['sandbox', 'natural_light', 'couch', 'climate_control', 'wifi'],
+        // 2026-06-03 owner: убрали песочницу — Яна больше не предоставляет
+        // игрушки другим специалистам.
+        description: 'Просторный кабинет 16 м² — индивидуальная, детская и семейная терапия, работа с подростками. Естественный свет, диван, кондиционер, Wi-Fi.',
+        photos: [
+            '/img/cabinets/uni/cab6/01.jpg',
+            '/img/cabinets/uni/cab6/02.jpg',
+            '/img/cabinets/uni/cab6/03.jpg',
+        ],
+        services: ['natural_light', 'couch', 'climate_control', 'wifi'],
         sortOrder: 4,
     },
     {
@@ -80,9 +105,15 @@ export const RESOURCES: Resource[] = [
         area: 25,
         minBookingHours: 1,
         formats: ['individual', 'group', 'intervision'],
-        description: 'Большой групповой кабинет для тренингов, лекций, супервизий и мероприятий. Флипчарт, проектор, маркерная доска.',
-        photos: ['/img/offices/cabinet_7_liza.webp'],
-        services: ['flipchart', 'projector', 'whiteboard', 'climate_control', 'wifi', 'natural_light'],
+        description: 'Самый большой зал — 25 м² на 20 человек — для тренингов, лекций, групповой терапии, интервизий и мероприятий. Флипчарт, проектор, маркерная доска, естественный свет, кондиционер, Wi-Fi.',
+        photos: [
+            '/img/cabinets/uni/cab7/01.jpg',
+            '/img/cabinets/uni/cab7/02.jpg',
+            '/img/cabinets/uni/cab7/03.jpg',
+            '/img/cabinets/uni/cab7/04.jpg',
+            '/img/cabinets/uni/cab7/05.jpg',
+        ],
+        services: ['flipchart', 'projector', 'whiteboard', 'couch', 'climate_control', 'wifi', 'natural_light'],
         sortOrder: 5,
     },
     {
@@ -96,9 +127,17 @@ export const RESOURCES: Resource[] = [
         area: 20,
         minBookingHours: 1,
         formats: ['individual', 'group', 'intervision'],
-        description: 'Просторный групповой кабинет для групповой терапии, воркшопов и обучения. Современное оснащение.',
-        photos: ['/img/offices/cabinet_8_liza.webp'],
-        services: ['flipchart', 'whiteboard', 'climate_control', 'wifi'],
+        // 2026-06-03 owner: новое описание — пространство с приглушённым
+        // дневным светом, подходит под презентации с проектором.
+        description: 'Пространство 20 м² на 20 человек с приглушённым дневным светом — идеально для мероприятий с использованием проектора, групповой терапии и воркшопов. Флипчарт, маркерная доска, кондиционер, Wi-Fi.',
+        photos: [
+            '/img/cabinets/uni/cab8/01.jpg',
+            '/img/cabinets/uni/cab8/02.jpg',
+            '/img/cabinets/uni/cab8/03.jpg',
+            '/img/cabinets/uni/cab8/04.jpg',
+            '/img/cabinets/uni/cab8/05.jpg',
+        ],
+        services: ['flipchart', 'whiteboard', 'natural_light', 'couch', 'climate_control', 'wifi'],
         sortOrder: 6,
     },
     {
@@ -112,9 +151,13 @@ export const RESOURCES: Resource[] = [
         area: 16,
         minBookingHours: 1,
         formats: ['individual', 'group', 'intervision'],
-        description: 'Уютный кабинет для индивидуальной и групповой работы. Отдельный вход, кондиционер.',
+        description: 'Уютный кабинет 16 м² с отдельным входом — подходит и для индивидуальной, и для камерной групповой работы до 10 человек. Удобный диван, кондиционер, Wi-Fi.',
         services: ['private_entrance', 'couch', 'climate_control', 'wifi'],
         sortOrder: 7,
+        // Сейчас кабинет не сдаётся — скрыт из выбора, но строка нужна
+        // для рендера старых бронь по этому id. Включить обратно: убрать
+        // эту строку или поставить `true`.
+        isActive: false,
     },
     {
         id: 'unbox_uni_capsule_1',
@@ -126,8 +169,12 @@ export const RESOURCES: Resource[] = [
         area: 2,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы. Полная звукоизоляция, удобное кресло, монитор.',
-        photos: ['/img/offices/miniature_capsule.jpeg'],
+        description: 'Индивидуальная звукоизолированная капсула на одного — для онлайн-сессий, созвонов и сосредоточенной работы. Удобное кресло, монитор, Wi-Fi, кондиционер.',
+        photos: [
+            '/img/cabinets/uni/capsule/01.jpg',
+            '/img/cabinets/uni/capsule/02.jpg',
+            '/img/cabinets/uni/capsule/03.jpg',
+        ],
         services: ['soundproof', 'wifi', 'climate_control'],
         sortOrder: 8,
     },
@@ -141,8 +188,12 @@ export const RESOURCES: Resource[] = [
         area: 2,
         minBookingHours: 1,
         formats: ['individual'],
-        description: 'Индивидуальная капсула для онлайн-сессий и сосредоточенной работы. Полная звукоизоляция, удобное кресло, монитор.',
-        photos: ['/img/offices/miniature_capsule.jpeg'],
+        description: 'Индивидуальная звукоизолированная капсула на одного — для онлайн-сессий, созвонов и сосредоточенной работы. Удобное кресло, монитор, Wi-Fi, кондиционер.',
+        photos: [
+            '/img/cabinets/uni/capsule/01.jpg',
+            '/img/cabinets/uni/capsule/02.jpg',
+            '/img/cabinets/uni/capsule/03.jpg',
+        ],
         services: ['soundproof', 'wifi', 'climate_control'],
         sortOrder: 9,
     },
@@ -164,13 +215,57 @@ export const CABINET_SERVICES: { id: string; label: string; emoji: string }[] = 
     { id: 'wifi',            label: 'Wi-Fi',               emoji: '📶' },
 ];
 
-/** Extras — fallback, fetched from API at runtime */
+/** Extras — fallback, fetched from API at runtime.
+ *
+ * Prices updated 2026-05-06: bundled sandbox+toys at 5 GEL, projector & couch
+ * each at 5 GEL, Meama coffee at 3 GEL. Old `sandbox_toys` id stays valid in
+ * the backend registry so historical bookings render correctly, but it's
+ * dropped from the public list — sandbox now ships with toys included.
+ */
 export let EXTRAS: ExtraOption[] = [
-    { id: 'sandbox', name: 'Песочница', price: 15 },
-    { id: 'sandbox_toys', name: 'Игрушки для песочной терапии', price: 10 },
-    { id: 'flipchart', name: 'Флипчарт', price: 10 },
-    { id: 'projector', name: 'Проектор', price: 20 },
+    { id: 'sandbox', name: 'Песочница с игрушками', price: 5 },
+    { id: 'projector', name: 'Проектор', price: 5 },
+    { id: 'couch', name: 'Кушетка', price: 5 },
+    { id: 'coffee_meama', name: 'Кофе Меама', price: 3 },
+    // 2026-06-02 owner: бесплатные опции для пред-заказа специалистом —
+    // флипчарт и столик. Цена 0 ₾, но всё равно в extras чтобы попасть
+    // в TG-уведомление и в чек-лист подготовки кабинета.
+    { id: 'flipchart_free', name: 'Флипчарт', price: 0 },
+    { id: 'table_free', name: 'Столик', price: 0 },
 ];
+
+/** Filter EXTRAS list to those that make sense for the given resource.
+ *
+ *  Rules (owner 2026-05-29):
+ *  - Capsule is a 2m² solo-online booth — only `coffee_meama` is offered;
+ *    sandbox/projector/couch are physically impossible there.
+ *  - For cabinets, an extra is offered only if the cabinet's `services`
+ *    array advertises the same capability (e.g. sandbox → must have
+ *    'sandbox' service). Coffee is offered everywhere.
+ *  - Couch is treated as a per-resource feature too: only cabinets with
+ *    a `couch` service can offer the extra (matches admin's intent —
+ *    don't promise a couch in cabinets that don't have one).
+ *
+ *  If `resource` is null/undefined, returns the full list (defensive — we
+ *  shouldn't filter blindly when we don't know what we're filtering for).
+ */
+export function availableExtrasForResource(
+    resource: Resource | null | undefined,
+): ExtraOption[] {
+    if (!resource) return EXTRAS;
+    const isCapsule = resource.type === 'capsule';
+    return EXTRAS.filter(e => {
+        if (isCapsule) return e.id === 'coffee_meama';
+        if (e.id === 'sandbox') return resource.services?.includes('sandbox');
+        if (e.id === 'projector') return resource.services?.includes('projector');
+        if (e.id === 'couch') return resource.services?.includes('couch');
+        // 2026-06-02: flipchart_free и table_free доступны во всех
+        // кабинетах One и Uni (бесплатные опции для пред-заказа).
+        // На капсуле уже отсечено выше.
+        if (e.id === 'flipchart_free' || e.id === 'table_free') return true;
+        return true;
+    });
+}
 
 /** Subscription plans — fallback, fetched from API at runtime */
 export let SUBSCRIPTION_PLANS = [
@@ -216,25 +311,11 @@ export let SUBSCRIPTION_PLANS = [
     },
 ];
 
-/** Fetch extras and subscription plans from backend */
-import { api } from '../api/client';
-
-export async function fetchAppSettings(): Promise<void> {
-    try {
-        const [extrasRes, plansRes] = await Promise.allSettled([
-            api.get('/settings/extras'),
-            api.get('/settings/subscription_plans'),
-        ]);
-        if (extrasRes.status === 'fulfilled' && Array.isArray(extrasRes.value.data)) {
-            EXTRAS = extrasRes.value.data;
-        }
-        if (plansRes.status === 'fulfilled' && Array.isArray(plansRes.value.data)) {
-            SUBSCRIPTION_PLANS = plansRes.value.data;
-        }
-    } catch {
-        // Use hardcoded fallbacks
-    }
-}
-
-// Auto-fetch on module load (non-blocking)
-fetchAppSettings();
+// Note: previously this module fetched `/settings/extras` and
+// `/settings/subscription_plans` from the backend on import to allow
+// runtime overrides. Those endpoints were never implemented — every page
+// load fired two 404s (~2300/h on prod) that polluted the access log and
+// showed red errors in the user's console. The hardcoded EXTRAS and
+// SUBSCRIPTION_PLANS above are the single source of truth; if we need
+// dynamic plans later, add a real /settings endpoint and re-introduce a
+// fetch helper that only runs after the response is verified.

@@ -222,7 +222,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                             uploadData.append('file', file);
                                             try {
                                                 const { api } = await import('../../api/client');
-                                                const res = await api.post('/upload', uploadData, {
+                                                const res = await api.post('/upload/', uploadData, {
                                                     headers: { 'Content-Type': 'multipart/form-data' }
                                                 });
                                                 const { API_URL } = await import('../../api/client');

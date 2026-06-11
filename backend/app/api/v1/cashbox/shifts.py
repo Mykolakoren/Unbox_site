@@ -67,17 +67,27 @@ def preview_close_shift(
     shift_start = last_shift.shift_end if last_shift else datetime.min
     starting_balance = float(last_shift.actual_balance) if last_shift else 0.0
 
+    # Exclude reconciliation entries from the shift window. They're auto-created
+    # at the previous close (date == prev shift_end) and would otherwise be
+    # double-counted: once via `starting_balance = previous actual` (which
+    # already bakes in the discrepancy) and once via this query (it falls on
+    # the boundary `date >= shift_start`). Result: every closed-with-delta
+    # shift inflated the *next* shift's `expected` by exactly that delta.
+    RECON_CAT = "cash_reconciliation"
+
     cash_in_q = (
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "income")
         .where(CashboxTransaction.payment_method == "cash")
         .where(CashboxTransaction.date >= shift_start)
+        .where(CashboxTransaction.category_id != RECON_CAT)
     )
     cash_out_q = (
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "expense")
         .where(CashboxTransaction.payment_method == "cash")
         .where(CashboxTransaction.date >= shift_start)
+        .where(CashboxTransaction.category_id != RECON_CAT)
     )
     if branch:
         cash_in_q = cash_in_q.where(CashboxTransaction.branch == branch)
@@ -88,11 +98,12 @@ def preview_close_shift(
     expected = round(starting_balance + cash_in - cash_out, 2)
 
     # Count of transactions that make up this window — gives the admin a
-    # "did I expect this many?" sanity check.
+    # "did I expect this many?" sanity check. Same recon exclusion.
     tx_count_q = (
         select(func.count(CashboxTransaction.id))  # type: ignore
         .where(CashboxTransaction.payment_method == "cash")
         .where(CashboxTransaction.date >= shift_start)
+        .where(CashboxTransaction.category_id != RECON_CAT)
     )
     if branch:
         tx_count_q = tx_count_q.where(CashboxTransaction.branch == branch)
@@ -189,18 +200,26 @@ def end_shift(
     starting_balance = float(last_shift.actual_balance) if last_shift else 0.0
 
     # Sum cash movements for this shift window. For branch closes, also
-    # filter by branch so we only count transactions for that location.
+    # filter by branch. Exclude prior reconciliation entries — they're baked
+    # into starting_balance via the previous shift's actual_balance, so
+    # counting them here would double-apply the discrepancy. (Excel #13 bug
+    # admin-Ира reported: every shift after a delta-closed shift kept
+    # showing that same delta as a phantom carryover.)
+    RECON_CAT = "cash_reconciliation"
+
     cash_in_q = (
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "income")
         .where(CashboxTransaction.payment_method == "cash")
         .where(CashboxTransaction.date >= shift_start)
+        .where(CashboxTransaction.category_id != RECON_CAT)
     )
     cash_out_q = (
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "expense")
         .where(CashboxTransaction.payment_method == "cash")
         .where(CashboxTransaction.date >= shift_start)
+        .where(CashboxTransaction.category_id != RECON_CAT)
     )
     if branch:
         cash_in_q = cash_in_q.where(CashboxTransaction.branch == branch)

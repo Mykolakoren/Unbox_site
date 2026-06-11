@@ -1,4 +1,5 @@
 """CRM Calendar Sync — Google Calendar import with auto-client creation."""
+import logging
 import re
 import random
 import string
@@ -9,7 +10,142 @@ from app.api import deps
 from app.models.user import User
 from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import TherapySession
+from app.models.therapist_payment import TherapistPayment
+from app.models.therapist_note import TherapistNote
 from app.api.v1.crm import get_crm_calendar_id
+
+
+def _try_move_linked_booking(
+    session: Session,
+    ts: TherapySession,
+    old_date: datetime,
+    new_date: datetime,
+    new_duration: int,
+    specialist_id: str,
+) -> None:
+    """Mirror a CRM session move onto its linked cabinet booking.
+
+    Called from the sync update path when GCal reports a session at a new
+    time. Three outcomes:
+      A) Linked booking moves cleanly                            → booking updated
+      B) Slot is occupied in the same cabinet → look for free
+         alternatives at the new time across all resources       → notification with options
+      C) Booking not found / not confirmed                       → no-op, log warning
+
+    No GCal write-back here — the calendar already shows the new time
+    (that's how we got here). We just keep the cabinet booking in sync.
+    """
+    from app.models.booking import Booking
+    from app.models.notification import Notification
+    from app.models.resource import Resource
+    from app.services.booking import check_availability
+
+    log = logging.getLogger(__name__)
+    booking = session.get(Booking, ts.booking_id)
+    if not booking or booking.status != "confirmed":
+        log.info("[crm-sync] session %s moved but booking %s not confirmed; skipping",
+                 ts.id, ts.booking_id)
+        return
+
+    # `new_date` is UTC-naive (from crm_calendar._parse_event_dt), but
+    # Booking.date/start_time follow the Tbilisi-naive convention (midnight
+    # date + Tbilisi wall-clock "HH:MM"). Lift UTC → Tbilisi (+4h) before
+    # deriving start_time and the midnight booking.date, otherwise the moved
+    # booking shifts 4h / wrong day.
+    from datetime import timedelta as _td_tbs
+    new_date_tbs = new_date + _td_tbs(hours=4)
+    new_start_time = f"{new_date_tbs.hour:02d}:{new_date_tbs.minute:02d}"
+    new_booking_date = new_date_tbs.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Same cabinet, new time — happiest path. Use exclude_booking_id so
+    # the booking we're moving doesn't conflict with itself.
+    is_available, reason = check_availability(
+        session,
+        resource_id=booking.resource_id,
+        date=new_booking_date,
+        start_time=new_start_time,
+        duration=new_duration,
+        exclude_booking_id=str(booking.id),
+    )
+    if is_available:
+        booking.date = new_booking_date
+        booking.start_time = new_start_time
+        booking.duration = new_duration
+        booking.updated_at = datetime.now()
+        session.add(booking)
+        log.info("[crm-sync] booking %s moved with session %s → %s %s",
+                 booking.id, ts.id, new_booking_date.date(), new_start_time)
+        return
+
+    # Conflict — find alternative cabinets free at the new time. We check
+    # every resource at the same location first (most likely substitute),
+    # then resources at other locations as a fallback.
+    resources = session.exec(select(Resource)).all()
+    same_loc = [r for r in resources if r.location_id == booking.location_id and r.id != booking.resource_id]
+    other_loc = [r for r in resources if r.location_id != booking.location_id]
+    alternatives: list[str] = []
+    for r in same_loc + other_loc:
+        ok, _ = check_availability(
+            session,
+            resource_id=r.id,
+            date=new_booking_date,
+            start_time=new_start_time,
+            duration=new_duration,
+        )
+        if ok:
+            loc_label = ''
+            if r.location_id != booking.location_id:
+                loc_label = f" · {r.location_id}"
+            alternatives.append(f"{r.name}{loc_label}")
+        if len(alternatives) >= 5:
+            break
+
+    title = "Конфликт переноса брони"
+    alt_line = (
+        "Свободны: " + ", ".join(alternatives)
+        if alternatives else "Все кабинеты заняты в это время."
+    )
+    desc = (
+        f"Сессия перенесена в Google Calendar на {new_date_tbs.strftime('%d.%m %H:%M')} "
+        f"(было {(old_date + _td_tbs(hours=4)).strftime('%d.%m %H:%M')}), но текущий кабинет "
+        f"({booking.resource_id}) занят: {reason or 'нет деталей'}. "
+        f"{alt_line}"
+    )
+    notif = Notification(
+        recipient_id=specialist_id,
+        type="booking_conflict",
+        title=title,
+        description=desc,
+        icon="alert-triangle",
+        link=f"/crm/clients/{ts.client_id}",
+    )
+    session.add(notif)
+    log.warning("[crm-sync] booking %s conflict on move to %s %s — %d alts",
+                booking.id, new_booking_date.date(), new_start_time, len(alternatives))
+
+
+def _delete_session_safely(session: Session, ts: TherapySession) -> None:
+    """Hard-delete a CRM session, nulling FK refs on payments/notes first.
+
+    Background: the admin's mental model is "if I cancel it in Google
+    Calendar, it should disappear from CRM" (2026-05-14 spec). We used
+    to flip status → CANCELLED_*, but that left ghost rows polluting the
+    client page. Now sync deletes outright.
+    Payments and notes that referenced the session lose their session_id
+    (FK becomes NULL) but stay in their tables — financial / clinical
+    history isn't destroyed, just decoupled.
+    """
+    for p in session.exec(
+        select(TherapistPayment).where(TherapistPayment.session_id == ts.id)
+    ).all():
+        p.session_id = None
+        session.add(p)
+    for n in session.exec(
+        select(TherapistNote).where(TherapistNote.session_id == ts.id)
+    ).all():
+        n.session_id = None
+        session.add(n)
+    session.delete(ts)
 
 router = APIRouter()
 
@@ -256,6 +392,25 @@ def sync_from_calendar(
     # ── Save sessions ─────────────────────────────────────────────────────
     created = 0
     updated = 0
+    # Track every Google event id we saw in this sync window — used below to
+    # detect "orphaned" CRM sessions whose GCal events disappeared (deleted
+    # outright, or moved out of the window after a recurrence-rule change).
+    # Includes unmatched and ambiguous events too — those still exist in GCal,
+    # they just couldn't be linked to a client; don't cancel sessions for them.
+    seen_gcal_ids: set[str] = set()
+    for bucket in ("matched", "unmatched", "ambiguous"):
+        for entry in result.get(bucket, []):
+            gid = entry.get("google_event_id")
+            if gid:
+                seen_gcal_ids.add(gid)
+    # 48h past-window guard — mirrors the orphan-cancel sweep below and the
+    # GCal query window. Without this, deleting a recurring rule in Google
+    # Calendar would retroactively delete every CRM session that ever
+    # belonged to it, even ones that actually took place — exactly what
+    # happened to client cffd5c45 (Анастасия Черепанова) on 2026-04-16.
+    from datetime import timedelta as _td_cancel_guard
+    _cancel_window_start = datetime.utcnow() - _td_cancel_guard(hours=48)
+    deleted_on_cancel = 0
     for entry in result["matched"]:
         if entry.get("is_cancelled"):
             existing = session.exec(
@@ -264,11 +419,33 @@ def sync_from_calendar(
                     TherapySession.specialist_id == uid,
                 )
             ).first()
-            if existing and existing.status not in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST"):
-                existing.status = "CANCELLED_CLIENT"
-                existing.updated_at = datetime.now()
-                session.add(existing)
-                updated += 1
+            if existing:
+                if existing.date < _cancel_window_start:
+                    # Past sessions are immutable — admin cancelled the
+                    # whole series in GCal but the older instances actually
+                    # happened. Leave them alone.
+                    continue
+                # 2026-05-14: spec says cancellation in GCal = removal from
+                # CRM (no CANCELLED_* status). Detach any linked cabinet
+                # booking first so the slot frees up automatically — same
+                # behaviour as the admin pressing "Отменить" in the sheet.
+                if existing.booking_id:
+                    try:
+                        from app.models.booking import Booking
+                        b = session.get(Booking, existing.booking_id)
+                        if b and b.status == "confirmed":
+                            b.status = "cancelled"
+                            b.cancellation_reason = "Сессия отменена в Google Calendar"
+                            b.cancelled_by = "auto-sync"
+                            b.updated_at = datetime.now()
+                            session.add(b)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            "[crm-sync] failed to cancel linked booking %s: %r",
+                            existing.booking_id, e,
+                        )
+                _delete_session_safely(session, existing)
+                deleted_on_cancel += 1
             continue
 
         existing = session.exec(
@@ -279,19 +456,41 @@ def sync_from_calendar(
         ).first()
         if existing:
             if abs((existing.date - entry["date"]).total_seconds()) > 60:
+                old_date = existing.date
                 existing.date = entry["date"]
                 existing.duration_minutes = entry["duration_minutes"]
+                # Reset COMPLETED → PLANNED when session moves into the
+                # future. Bug 2026-05-17 (Игорь Юрченко): user runs
+                # auto-complete-past while session still has old past date,
+                # then GCal reschedule moves it to a future date — status
+                # would stay stuck on COMPLETED, looking like a passed
+                # session in the new slot. A future-dated session simply
+                # cannot be COMPLETED, by definition.
+                if existing.status == "COMPLETED" and entry["date"] > datetime.utcnow():
+                    existing.status = "PLANNED"
                 existing.updated_at = datetime.now()
                 session.add(existing)
                 updated += 1
+
+                # If this session is tied to a cabinet booking, try to move
+                # the booking too (admin moved the GCal event → CRM and the
+                # cabinet should follow). If the new slot conflicts with
+                # another booking, fall back to a CRM notification with
+                # alternative cabinets the specialist can rebook to.
+                if existing.booking_id:
+                    _try_move_linked_booking(
+                        session, existing, old_date,
+                        new_date=entry["date"],
+                        new_duration=entry["duration_minutes"],
+                        specialist_id=uid,
+                    )
             continue
 
-        # Also check by client_id + date to prevent duplicates.
-        # Edge case: a recurring series instance was cancelled (status=
-        # CANCELLED_CLIENT), then the user recreated a one-off event at the
-        # same slot. The old cancelled row would block the new one here —
-        # instead, adopt the new Google event onto the cancelled row and
-        # flip the status.
+        # Same-day duplicate check — if there's already a session for this
+        # client at this exact moment, don't insert a second one. Past
+        # behaviour adopted the incoming GCal id onto a CANCELLED row, but
+        # cancelled rows no longer exist (2026-05-14 spec change — sync
+        # deletes on cancel instead of flipping status).
         existing_by_date = session.exec(
             select(TherapySession).where(
                 TherapySession.client_id == entry["client_id"],
@@ -300,14 +499,6 @@ def sync_from_calendar(
             )
         ).first()
         if existing_by_date:
-            if existing_by_date.status in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST") \
-               and existing_by_date.google_event_id != entry["google_event_id"]:
-                existing_by_date.google_event_id = entry["google_event_id"]
-                existing_by_date.status = entry["status"]
-                existing_by_date.duration_minutes = entry["duration_minutes"]
-                existing_by_date.updated_at = datetime.now()
-                session.add(existing_by_date)
-                updated += 1
             continue
 
         ts = TherapySession(
@@ -320,6 +511,62 @@ def sync_from_calendar(
         )
         session.add(ts)
         created += 1
+
+    # ── Orphaned sessions: GCal event vanished ─────────────────────────────
+    # Sessions with a google_event_id that did NOT come back from this sync
+    # window mean the underlying calendar event was deleted (or moved out of
+    # the window after a recurrence-rule change like "weekly → biweekly").
+    # The desktop UX silently kept them as PLANNED, so admins saw ghost
+    # sessions that no longer existed in GCal. Mark them cancelled.
+    #
+    # Scoping: we ONLY look at sessions whose date is inside the same window
+    # we queried GCal for. A session outside the window may have been omitted
+    # by Google simply because we didn't ask for it; we mustn't cancel those.
+    # Window matches the service's GCal query (2026-05-12: hard 48h past
+    # limit). Anything older is "historical" — never touched. months_back is
+    # accepted but ignored, for backwards compat with old callers.
+    from datetime import timedelta as _td
+    now_utc = datetime.utcnow()
+    win_start = now_utc - _td(hours=48)
+    win_end = now_utc + _td(days=months_forward * 30)
+
+    orphan_q = select(TherapySession).where(
+        TherapySession.specialist_id == uid,
+        TherapySession.google_event_id.is_not(None),  # type: ignore
+        TherapySession.date >= win_start,
+        TherapySession.date <= win_end,
+    )
+    orphans_cancelled = 0
+    for ts in session.exec(orphan_q).all():
+        if ts.google_event_id in seen_gcal_ids:
+            continue
+        # Same "GCal-cancel = delete" rule applies to orphan rows whose
+        # GCal event vanished from the sync window.
+        if ts.booking_id:
+            try:
+                from app.models.booking import Booking
+                b = session.get(Booking, ts.booking_id)
+                if b and b.status == "confirmed":
+                    b.status = "cancelled"
+                    b.cancellation_reason = "Сессия удалена из Google Calendar"
+                    b.cancelled_by = "auto-sync"
+                    b.updated_at = datetime.now()
+                    session.add(b)
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "[crm-sync] orphan: failed to cancel linked booking %s: %r",
+                    ts.booking_id, e,
+                )
+        _delete_session_safely(session, ts)
+        orphans_cancelled += 1
+
+    if orphans_cancelled > 0 or deleted_on_cancel > 0:
+        logging.getLogger(__name__).info(
+            "[crm-sync] hard-deleted %d (cancel-matched) + %d (orphan) sessions "
+            "(window %s → %s, seen %d gcal ids)",
+            deleted_on_cancel, orphans_cancelled, win_start.isoformat(),
+            win_end.isoformat(), len(seen_gcal_ids),
+        )
 
     session.commit()
 
@@ -334,7 +581,6 @@ def sync_from_calendar(
     backfill_errors = 0
     if not dry_run:
         from app.services.crm_calendar import patch_event_summary
-        import logging
         _log = logging.getLogger(__name__)
         for entry in result["matched"]:
             if entry.get("has_alias_code"):
@@ -364,7 +610,12 @@ def sync_from_calendar(
         "unmatched": len(result["unmatched"]),
         "ambiguous": len(result.get("ambiguous", [])),
         "created": created,
-        "updated": updated,
+        # `updated` is the running total: status flips for cancelled-in-GCal,
+        # date moves on existing rows, AND the orphan-cancel sweep below.
+        # Frontend just shows "Обновлено: N" and we want orphans to be in there
+        # so admins notice when a ghost session is purged.
+        "updated": updated + orphans_cancelled,
+        "orphans_cancelled": orphans_cancelled,
         "auto_created_clients": auto_created_clients,
         "codes_backfilled": codes_backfilled,
         "backfill_errors": backfill_errors,
@@ -442,7 +693,6 @@ def backfill_alias_codes(
     patched = 0
     failed = []
     if not dry_run:
-        import logging
         _log = logging.getLogger(__name__)
         for item in would_patch:
             try:

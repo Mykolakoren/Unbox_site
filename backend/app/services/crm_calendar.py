@@ -39,18 +39,36 @@ def _get_calendar_service():
 
 # ─── Core helpers ─────────────────────────────────────────────────────────────
 
-def _dt_to_rfc3339(dt: datetime) -> str:
-    """Convert datetime → RFC3339 string for Google Calendar.
+_TZ_TBILISI = timezone(timedelta(hours=4))
 
-    Naive datetimes coming from CRM endpoints (frontend sends
-    "YYYY-MM-DDTHH:MM:SS" without a TZ suffix) represent Tbilisi local
-    wall-clock time — that's the convention the rest of the CRM follows
-    (chessboard, session list, reminders). Treat them as Asia/Tbilisi
-    (UTC+4) and serialise with the offset so Google Calendar lands the
-    event at the right wall-clock time. The previous behaviour (assume
-    naive=UTC) buried events 4 hours late."""
+
+def tbilisi_naive_to_utc_naive(dt: datetime) -> datetime:
+    """Subtract 4h from a Tbilisi-naive datetime to get UTC-naive.
+
+    The frontend posts ``"YYYY-MM-DDTHH:MM:SS"`` strings that mean Tbilisi
+    wall-clock time. Pydantic loads them as naive ``datetime`` objects.
+    Internally we store all CRM session timestamps as **UTC-naive** —
+    that's the convention the bulk of the table already follows because
+    GCal sync (`_parse_event_dt`) produces UTC-naive rows. Use this
+    helper at every API ingestion point to normalise to UTC before
+    saving, so the column has a single, unambiguous meaning."""
+    if dt.tzinfo is not None:
+        # Already aware — convert to UTC and drop tzinfo.
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return (dt.replace(tzinfo=_TZ_TBILISI)).astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _dt_to_rfc3339(dt: datetime) -> str:
+    """Convert a UTC-naive datetime → RFC3339 string for Google Calendar.
+
+    The CRM stores naive timestamps in UTC (see
+    ``tbilisi_naive_to_utc_naive``). Append ``Z`` so Google parses them
+    as UTC; Google then renders the event at the correct Tbilisi wall
+    clock thanks to the calendar's timezone. (Aware datetimes are kept
+    as-is so explicit-offset callers — none today, but defensive — keep
+    working.)"""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone(timedelta(hours=4)))
+        dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
 
 
@@ -211,16 +229,17 @@ def sync_from_calendar(
         }
     """
     # Use explicit UTC so naive datetimes are consistent with _parse_event_dt
-    TZ_TBILISI = timezone(timedelta(hours=4))
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
 
-    if months_back == 0:
-        # "current month only" → from 1st of this month in Tbilisi time
-        now_tb = datetime.now(TZ_TBILISI)
-        month_start_tb = now_tb.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        time_min = month_start_tb.astimezone(timezone.utc).replace(tzinfo=None)
-    else:
-        time_min = now_utc - timedelta(days=months_back * 30)
+    # Past window is fixed at 48 hours per product decision (2026-05-12):
+    # — anything older is "historical" and should NEVER be touched by sync,
+    # — last-48h is the grace zone where post-fact cancellations / time
+    #   shifts still flow into CRM (admins regularly fix yesterday's
+    #   no-shows by deleting the GCal event the morning after).
+    # `months_back` is kept in the signature for backward compatibility with
+    # callers but is effectively ignored.
+    _ = months_back
+    time_min = now_utc - timedelta(hours=48)
     time_max = now_utc + timedelta(days=months_forward * 30)
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)

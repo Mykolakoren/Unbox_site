@@ -5,6 +5,7 @@ import { startOfToday, startOfMonth, endOfMonth, isAfter, format } from 'date-fn
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
+import { AdminInbox } from '../../components/admin/AdminInbox';
 import { useCashboxStore } from '../../store/cashboxStore';
 import { cashboxApi, type CashboxAnalytics } from '../../api/cashbox';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -209,6 +210,12 @@ function GridHouseAdminDashboard({
                     {format(new Date(), 'LLLL yyyy')}
                 </h1>
             </div>
+
+            {/* Inbox — owner 2026-05-27. Surfaces hot-bookings, pending
+                specialist applications, credit-over users in ONE place so
+                admin doesn't have to ping-pong between tabs at the start
+                of the shift. */}
+            <AdminInbox users={users} />
 
             {/* KPI strip 1 */}
             <div

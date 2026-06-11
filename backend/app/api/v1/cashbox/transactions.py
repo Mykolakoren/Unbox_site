@@ -1,6 +1,6 @@
 """Cashbox — transactions: balance, list, create, delete."""
-from typing import List, Optional
-from datetime import datetime, date, timedelta
+from typing import List, Optional, Union
+from datetime import datetime, date, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select, func, col, desc
 from app.db.session import get_session
@@ -12,6 +12,39 @@ from app.models.cashbox_transaction import (
 from app.api.v1.cashbox import require_cashbox
 
 router = APIRouter()
+
+
+# ── TZ normalisation for cashbox transaction dates ────────────────────
+# The DB column stores naive UTC. Frontend sends Tbilisi wall-clock as a
+# naive ISO string ("YYYY-MM-DDTHH:MM"). Without conversion we get a
+# split-personality column where some rows are UTC (defaulted to now())
+# and others are Tbilisi (admin-typed) — they render with a 4h shift
+# relative to each other. This helper is the single normalisation point:
+# whatever input shape we get, the result is always naive UTC.
+_TZ_TBILISI = timezone(timedelta(hours=4))
+
+
+def _normalise_tx_date(value: Union[str, datetime, None]) -> datetime:
+    """Convert any incoming date representation to naive UTC datetime.
+
+    - None       → utcnow() (naive UTC).
+    - aware dt   → astimezone(UTC).replace(tzinfo=None).
+    - naive dt   → treat as Tbilisi wall-clock, subtract 4h → UTC-naive.
+    - string     → datetime.fromisoformat then recurse.
+    """
+    if value is None:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except Exception:
+            return datetime.now(timezone.utc).replace(tzinfo=None)
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        # Naive: treat as Tbilisi wall-clock per frontend convention.
+        return value.replace(tzinfo=_TZ_TBILISI).astimezone(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @router.get("/balance")
@@ -148,6 +181,15 @@ def create_transaction(
         if not client_name and target_user.name:
             client_name = target_user.name
 
+    # ── Normalise the operation date to UTC-naive ──
+    # Frontend sends Tbilisi wall-clock as a naive ISO string
+    # ("YYYY-MM-DDTHH:MM"). The DB column is stored UTC-naive (server is
+    # UTC). Without conversion the same column carried two different
+    # meanings — frontend's naive went in as-is, defaulted-to-now() rows
+    # went in as UTC. Display always treats as UTC → entries with
+    # explicit date appeared shifted +4h ("кенгуру" admins reported).
+    # Always go through `_normalise_tx_date` so the column has one
+    # interpretation forever.
     tx = CashboxTransaction(
         type=payload.type,
         amount=payload.amount,
@@ -156,7 +198,7 @@ def create_transaction(
         category_id=payload.category_id,
         description=payload.description,
         branch=payload.branch,
-        date=payload.date or datetime.now(),  # local server time (Tbilisi UTC+4)
+        date=_normalise_tx_date(payload.date),
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",
         client_id=payload.client_id,
@@ -260,7 +302,7 @@ def update_transaction(
     for key, value in payload.items():
         if key in allowed:
             if key == "date" and value:
-                value = datetime.fromisoformat(str(value))
+                value = _normalise_tx_date(value)
             if key == "type" and value not in ("income", "expense"):
                 raise HTTPException(400, "type должен быть 'income' или 'expense'")
             if key == "amount" and (value is None or float(value) <= 0):
@@ -361,7 +403,7 @@ def create_balance_correction(
         payment_method=payment_method,
         branch=branch or None,
         description=f"[КОРРЕКЦИЯ{' · ' + branch if branch else ''}] {reason} (было: {current_balance:.2f}, стало: {new_balance:.2f})",
-        date=datetime.now(),
+        date=_normalise_tx_date(None),
         admin_id=str(current_user.id),
         admin_name=current_user.name or "",
     )

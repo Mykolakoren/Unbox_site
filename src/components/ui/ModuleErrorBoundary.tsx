@@ -18,6 +18,17 @@ export class ModuleErrorBoundary extends Component<Props, State> {
     this.state = { hasError: false, error: null, componentStack: null };
   }
 
+  componentDidMount() {
+    // If we got here, the children rendered successfully → drop the
+    // chunk-retry flag so a future deploy can auto-recover too. Without
+    // this the flag stays in sessionStorage forever and a second
+    // stale-bundle event on the same path silently shows the error
+    // screen instead of reloading.
+    try {
+      sessionStorage.removeItem(`unbox_chunk_retry_${window.location.pathname}`);
+    } catch { /* private mode / disabled storage */ }
+  }
+
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
@@ -31,8 +42,9 @@ export class ModuleErrorBoundary extends Component<Props, State> {
     // tab opened before the deploy still has the previous index.js with
     // references to those now-gone chunk filenames. The first lazy import
     // (e.g. clicking on /crm) then fails with "Failed to fetch dynamically
-    // imported module". We can detect that shape of error and force-reload,
-    // which pulls the fresh index.js with the current chunk names.
+    // imported module". We detect that shape of error and force-reload
+    // with a cache-busting query so iOS Safari can't serve the stale
+    // index.html out of bfcache.
     const msg = (error?.message || '').toLowerCase();
     const isChunkLoad =
       msg.includes('failed to fetch dynamically imported module') ||
@@ -46,7 +58,14 @@ export class ModuleErrorBoundary extends Component<Props, State> {
       if (!sessionStorage.getItem(flag)) {
         sessionStorage.setItem(flag, '1');
         // Small timeout so the state update above has a chance to flush.
-        setTimeout(() => window.location.reload(), 250);
+        setTimeout(() => {
+          // Cache-bust: changing the URL forces Safari/iOS off bfcache
+          // and off the disk cache for the HTML document, which then
+          // pulls the fresh <script src="index-<NEW_HASH>.js">.
+          const url = new URL(window.location.href);
+          url.searchParams.set('_cb', String(Date.now()));
+          window.location.replace(url.toString());
+        }, 250);
       }
     }
   }
@@ -95,7 +114,14 @@ export class ModuleErrorBoundary extends Component<Props, State> {
           )}
           <div className="flex gap-2 flex-wrap justify-center">
             <button
-              onClick={() => this.setState({ hasError: false, error: null, componentStack: null })}
+              onClick={() => {
+                // Clear the chunk-retry flag so the next stale-bundle
+                // event can auto-reload again.
+                try {
+                  sessionStorage.removeItem(`unbox_chunk_retry_${window.location.pathname}`);
+                } catch { /* noop */ }
+                this.setState({ hasError: false, error: null, componentStack: null });
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-800 transition-colors"
             >
               <RotateCcw className="w-4 h-4" />

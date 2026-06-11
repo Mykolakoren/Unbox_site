@@ -8,7 +8,11 @@ import { motion } from 'framer-motion';
 export function LocationStep() {
     const { locationId, resourceId, setLocation, setResource } = useBookingStore();
 
-    const activeResources = RESOURCES.filter(r => r.locationId === locationId);
+    // Owner 2026-05-27: respect Resource.isActive so admin-toggled-off
+    // cabinets disappear from the booking UI. Treat `undefined` as active.
+    const activeResources = RESOURCES.filter(
+        r => r.locationId === locationId && r.isActive !== false,
+    );
 
     return (
         <motion.div

@@ -25,6 +25,15 @@ export const waitlistApi = {
         return response.data.map(mapToFrontend);
     },
 
+    /** Admin-only: every active waitlist entry across all users. Used by
+     *  the admin waitlist page (desktop + /m/admin/cabinets). */
+    getAllWaitlistAdmin: async (skip = 0, limit = 500) => {
+        const response = await api.get<any[]>('/waitlist/admin/all', {
+            params: { skip, limit },
+        });
+        return response.data.map(mapToFrontend);
+    },
+
     addToWaitlist: async (entry: Partial<WaitlistEntry>) => {
         const payload = mapToBackend(entry);
         const response = await api.post<any>('/waitlist/', payload);

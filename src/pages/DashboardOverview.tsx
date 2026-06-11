@@ -293,10 +293,32 @@ export function DashboardOverview() {
         ? Math.min(100, Math.max(0, (Math.abs(currentUser.balance) / creditLimit) * 100))
         : 0;
 
-    const recentBookings = bookings
-        .filter(b => b.userId === currentUser.email || b.userId === currentUser.id)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 5);
+    // Sort by SLOT TIME (booking.date + startTime), nearest upcoming first.
+    // Used to sort by createdAt — admin feedback: "I open Обзор to see what's
+    // next, not what I clicked last." Falls back to most-recent past when the
+    // user has no upcoming bookings, so the block is never empty.
+    const recentBookings = (() => {
+        const mine = bookings.filter(b => b.userId === currentUser.email || b.userId === currentUser.id);
+        const now = Date.now();
+        const startMs = (b: any): number => {
+            try {
+                const d = new Date(b.date);
+                if (isNaN(d.getTime())) return 0;
+                if (b.startTime && /^\d{2}:\d{2}/.test(b.startTime)) {
+                    const [h, m] = b.startTime.split(':').map(Number);
+                    d.setHours(h, m, 0, 0);
+                }
+                return d.getTime();
+            } catch { return 0; }
+        };
+        const active = mine.filter(b => b.status === 'confirmed' || b.status === 'pending_approval' || b.status === 'completed');
+        const upcoming = active
+            .filter(b => startMs(b) >= now - 60 * 60 * 1000) // include rows starting within last hour as "current"
+            .sort((a, b) => startMs(a) - startMs(b));
+        if (upcoming.length > 0) return upcoming.slice(0, 5);
+        // No upcoming → show 5 most recent past bookings as historical context.
+        return active.sort((a, b) => startMs(b) - startMs(a)).slice(0, 5);
+    })();
 
     const recentTransactions = getTransactionsByUser(currentUser.id).slice(0, 5);
 
@@ -690,27 +712,57 @@ function GridHouseDashboardOverview({
                 </div>
             </div>
 
-            {/* Quick actions — Excel #20.
-                Desktop: visible strip of cards (QuickActionsStrip below).
-                Mobile: falls back to QuickActionsFab rendered by DashboardLayout.
-                We also keep the primary "Забронировать кабинет" ink button for
-                mobile where the strip is hidden. */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-                <button
-                    onClick={() => navigate('/dashboard/bookings')}
-                    style={{
-                        padding: '10px 20px', background: GH.ink, color: GH.paper, fontWeight: 700,
-                        fontSize: 13, fontFamily: GH_SANS, border: 'none', cursor: 'pointer',
-                    }}
-                >
-                    + Забронировать кабинет
-                </button>
-            </div>
+            {/* Specialist gate — booking is reserved for verified specialists.
+                Until the user's role is `specialist` (or admin), the primary
+                "+ Забронировать" CTA is replaced with a banner that links to
+                /become-specialist. Saves a confused 403 round-trip. */}
+            {(() => {
+                const role = (currentUser.role || '').toLowerCase();
+                const canBook = ['specialist', 'admin', 'senior_admin', 'owner'].includes(role);
+                if (!canBook) {
+                    return (
+                        <div style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            gap: 16, padding: '14px 18px', marginBottom: 20,
+                            background: GH.ink, color: GH.paper, flexWrap: 'wrap',
+                        }}>
+                            <div style={{ fontSize: 13, lineHeight: 1.5, maxWidth: 520 }}>
+                                Бронирование кабинетов доступно только верифицированным специалистам.
+                                Заполните анкету — после одобрения админом сможете бронировать.
+                            </div>
+                            <button
+                                onClick={() => navigate('/become-specialist')}
+                                style={{
+                                    padding: '8px 16px', background: GH.paper, color: GH.ink,
+                                    border: 'none', cursor: 'pointer',
+                                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+                                    fontWeight: 700,
+                                }}
+                            >
+                                Заполнить анкету
+                            </button>
+                        </div>
+                    );
+                }
+                return (
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+                        <button
+                            onClick={() => navigate('/dashboard/bookings')}
+                            style={{
+                                padding: '10px 20px', background: GH.ink, color: GH.paper, fontWeight: 700,
+                                fontSize: 13, fontFamily: GH_SANS, border: 'none', cursor: 'pointer',
+                            }}
+                        >
+                            + Забронировать кабинет
+                        </button>
+                    </div>
+                );
+            })()}
             <QuickActionsStrip
                 actions={[
                     { label: 'Оформить абонемент', sub: 'Выгоднее почасовой аренды', path: '/subscriptions', icon: CalendarPlus },
                     { label: 'Получить бонусы', sub: 'Приведи друга — бонус обоим', path: '/dashboard/bonuses', icon: Gift },
-                    { label: 'Стать специалистом', sub: 'Принимать клиентов в Unbox', path: '/crm/apply', icon: UserCheck },
+                    { label: 'Стать специалистом', sub: 'Заявка в публичный каталог', path: '/become-specialist', icon: UserCheck },
                 ]}
                 heading="Что дальше"
             />
@@ -719,7 +771,7 @@ function GridHouseDashboardOverview({
             <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: narrow ? 24 : 32 }}>
                 {/* Recent bookings */}
                 <div>
-                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>ПОСЛЕДНИЕ БРОНИРОВАНИЯ</div>
+                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>БЛИЖАЙШИЕ БРОНИРОВАНИЯ</div>
                     {recentBookings.length === 0 ? (
                         <div style={{ padding: 24, border: ghdoHairline, color: GH.ink30, fontSize: 13, textAlign: 'center' }}>
                             Нет бронирований

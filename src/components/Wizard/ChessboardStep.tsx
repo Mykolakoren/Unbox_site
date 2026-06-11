@@ -1,7 +1,7 @@
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
-import { WaitlistModal } from '../WaitlistModal';
-import { RESOURCES } from '../../utils/data';
+import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
+import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { useState, useMemo, useEffect, useRef } from 'react';
@@ -105,15 +105,24 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         return res;
     };
 
+    // Active-only pool — owner 2026-05-27: cabinets / locations toggled off
+    // in the admin panel must NEVER appear in the booking grid, even if the
+    // static data list still has them. Treat `isActive: undefined` as
+    // active (legacy rows without the flag set).
+    const activeResources = useMemo(
+        () => RESOURCES.filter(r => r.isActive !== false),
+        [],
+    );
+
     // Auto-expand to all locations when current location has no matching cabinets
     // (e.g. group/intervision is only available in Unbox Uni — rooms 7/8/9)
     const [autoExpanded, setAutoExpanded] = useState(false);
     useEffect(() => {
         if (!locationId || showAllLocations) { setAutoExpanded(false); return; }
-        const inLocation = RESOURCES.filter(r => r.locationId === locationId);
+        const inLocation = activeResources.filter(r => r.locationId === locationId);
         const matchInLocation = applyFormatSizeFilter(inLocation);
         if (matchInLocation.length === 0) {
-            const globalMatch = applyFormatSizeFilter(RESOURCES);
+            const globalMatch = applyFormatSizeFilter(activeResources);
             if (globalMatch.length > 0) {
                 setShowAllLocations(true);
                 setAutoExpanded(true);
@@ -122,14 +131,16 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             setAutoExpanded(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [locationId, bookingFormat, groupSize]);
+    }, [locationId, bookingFormat, groupSize, activeResources]);
 
     // 1. Get Resources
     const resources = useMemo(() => {
-        const inLocation = (showAllLocations || !locationId) ? RESOURCES : RESOURCES.filter(r => r.locationId === locationId);
+        const inLocation = (showAllLocations || !locationId)
+            ? activeResources
+            : activeResources.filter(r => r.locationId === locationId);
         return applyFormatSizeFilter(inLocation);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [locationId, showAllLocations, bookingFormat, groupSize]);
+    }, [locationId, showAllLocations, bookingFormat, groupSize, activeResources]);
 
     // 2. Fetch External Events from Google Calendar (real pull, 5-min cached)
     useEffect(() => {
@@ -860,11 +871,16 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                 handleMobileTap(mobileResource.id, time, isHourCol);
                                             }
                                         }}
-                                        disabled={blocked && !bookerName}
+                                        // disabled убран: раньше HTML-disable
+                                        // блокировал tap'ы по занятым ячейкам у
+                                        // не-админов, и onClick → waitlist никогда
+                                        // не срабатывал. Теперь все занятые
+                                        // ячейки кликабельны (открывается окно
+                                        // подписки).
                                         style={isGH ? {
                                             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                                             padding: '12px 12px', borderRadius: 8, minHeight: 48, border: 'none',
-                                            fontFamily: GH_MONO, fontSize: 13, cursor: blocked && !bookerName ? 'not-allowed' : 'pointer',
+                                            fontFamily: GH_MONO, fontSize: 13, cursor: 'pointer',
                                             background: blocked ? GH.cellDead : selected ? GH.accent : isPeakTime(time) ? '#FEF3C7' : '#fff',
                                             color: blocked ? GH.ink30 : selected ? '#fff' : GH.ink,
                                             outline: !blocked && !selected ? `1px solid ${GH.ink8}` : 'none',
@@ -873,7 +889,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                         className={isGH ? '' : clsx(
                                             "flex-1 flex items-center justify-between px-3 py-3 rounded-xl transition-all min-h-[48px]",
                                             blocked
-                                                ? "bg-gray-50 text-gray-300 cursor-not-allowed"
+                                                ? "bg-gray-50 text-gray-400 active:scale-[0.97]"
                                                 : selected
                                                     ? "bg-unbox-green text-white shadow-sm"
                                                     : isPeakTime(time)
@@ -896,7 +912,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                             {blocked && !bookerName && (
                                                 <span style={isGH ? { fontSize: 10, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 2 } : undefined}
                                                       className={isGH ? '' : "text-[10px] text-gray-400 flex items-center gap-0.5"}>
-                                                    <Clock size={9} /> Занято
+                                                    <Clock size={9} /> Занято — тап чтобы следить
                                                 </span>
                                             )}
                                         </div>
@@ -962,14 +978,34 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     </div>
                 </div>
 
-                {/* Waitlist modal */}
-                <WaitlistModal
-                    isOpen={isWaitlistOpen}
-                    onClose={() => setIsWaitlistOpen(false)}
-                    resourceId={waitlistData?.resourceId || ''}
-                    startTime={waitlistData?.time || ''}
-                    date={date}
-                />
+                {/* Waitlist modal — унифицирован с /dashboard/bookings и /crm.
+                    Старый WaitlistModal с заголовком «Слот занят» заменён на
+                    общий WaitlistSubscribeModal — у него лучший mobile UX
+                    (sticky-кнопки, scrollable, слышимый sub-text "уведомим
+                    когда любой кабинет в этом центре освободится"). */}
+                {(() => {
+                    const wlRes = waitlistData ? RESOURCES.find(r => r.id === waitlistData.resourceId) : null;
+                    const wlLoc = wlRes ? LOCATIONS.find(l => l.id === wlRes.locationId) : null;
+                    const wlEnd = (() => {
+                        if (!waitlistData) return '';
+                        const [h, m] = waitlistData.time.split(':').map(Number);
+                        const eh = h + 1;
+                        return `${eh.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                    })();
+                    return (
+                        <WaitlistSubscribeModal
+                            isOpen={isWaitlistOpen}
+                            onClose={() => setIsWaitlistOpen(false)}
+                            resourceId={waitlistData?.resourceId || ''}
+                            resourceName={wlRes?.name || waitlistData?.resourceId || ''}
+                            locationName={wlLoc?.name ?? null}
+                            date={date}
+                            startTime={waitlistData?.time || ''}
+                            endTime={wlEnd}
+                            extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+                        />
+                    );
+                })()}
             </div>
         );
     }
@@ -1581,13 +1617,29 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 </div>
             )}
 
-            <WaitlistModal
-                isOpen={isWaitlistOpen}
-                onClose={() => setIsWaitlistOpen(false)}
-                resourceId={waitlistData?.resourceId || ''}
-                startTime={waitlistData?.time || ''}
-                date={date}
-            />
+            {(() => {
+                const wlRes = waitlistData ? RESOURCES.find(r => r.id === waitlistData.resourceId) : null;
+                const wlLoc = wlRes ? LOCATIONS.find(l => l.id === wlRes.locationId) : null;
+                const wlEnd = (() => {
+                    if (!waitlistData) return '';
+                    const [h, m] = waitlistData.time.split(':').map(Number);
+                    const eh = h + 1;
+                    return `${eh.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                })();
+                return (
+                    <WaitlistSubscribeModal
+                        isOpen={isWaitlistOpen}
+                        onClose={() => setIsWaitlistOpen(false)}
+                        resourceId={waitlistData?.resourceId || ''}
+                        resourceName={wlRes?.name || waitlistData?.resourceId || ''}
+                        locationName={wlLoc?.name ?? null}
+                        date={date}
+                        startTime={waitlistData?.time || ''}
+                        endTime={wlEnd}
+                        extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
+                    />
+                );
+            })()}
         </div>
     );
 }

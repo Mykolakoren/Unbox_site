@@ -1,10 +1,13 @@
 """CRM Access — application, approval/rejection of psy_crm.access."""
+import logging
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlmodel import Session, select
 from app.api import deps
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -84,6 +87,22 @@ def apply_for_crm_access(
         link="/admin/specialists?tab=crm-requests",
     )
     session.commit()
+
+    # Telegram admin chat — same channel as bookings, so the team sees it
+    # alongside the per-booking events without having to open the panel.
+    try:
+        from app.services.telegram import telegram_service
+        telegram_service.send_admin_event(
+            event="crm_access_request",
+            fields={
+                "Кто":             current_user.name or current_user.email,
+                "Email":           current_user.email,
+                "Специализация":   profession or None,
+                "Сообщение":       (message[:200] + "…") if message and len(message) > 200 else (message or None),
+            },
+        )
+    except Exception as e:
+        logger.warning(f"[Admin TG alert / CRM access] Non-blocking failure: {e}")
 
     return {"ok": True, "status": "pending"}
 

@@ -49,6 +49,15 @@ def _booking_end_time(booking: Booking) -> str:
 def notify_waitlist_for_freed_slot(session: Session, booking: Booking) -> int:
     """Find active waitlist entries covering this slot and notify their users.
 
+    Matching is **location-scoped**: a subscription on Кабинет 5 in Unbox UNI
+    fires when ANY UNI cabinet (5/6/7/8/9, capsules) frees up at the same
+    time. Specialists asked for this — they don't actually care which exact
+    room opens, they care about the time slot at the branch.
+
+    Each match is committed separately so a mid-loop crash can't leave a
+    user double-notified later (the commit moves the row to `fulfilled`
+    immediately after the TG/in-app side-effects succeed).
+
     Returns the number of entries marked fulfilled. Never raises.
     """
     try:
@@ -60,9 +69,25 @@ def notify_waitlist_for_freed_slot(session: Session, booking: Booking) -> int:
         day_start = booking.date.replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
 
+        # Resolve the freed booking's location once. Waitlist entries are
+        # stored anchored to a specific resource_id — to broaden to the
+        # whole branch we collect every resource in the same location and
+        # match on that set.
+        freed_resource = session.get(Resource, booking.resource_id)
+        freed_location_id = freed_resource.location_id if freed_resource else None
+        if freed_location_id:
+            sibling_resources = session.exec(
+                select(Resource).where(Resource.location_id == freed_location_id)
+            ).all()
+            sibling_ids = [r.id for r in sibling_resources] or [booking.resource_id]
+        else:
+            # Resource has no location (legacy / orphan) — fall back to the
+            # narrower exact-resource match so we never widen unsafely.
+            sibling_ids = [booking.resource_id]
+
         matches = session.exec(
             select(Waitlist).where(
-                Waitlist.resource_id == booking.resource_id,
+                Waitlist.resource_id.in_(sibling_ids),  # type: ignore[attr-defined]
                 Waitlist.status == "active",
                 Waitlist.date >= day_start,
                 Waitlist.date < day_end,
@@ -72,15 +97,9 @@ def notify_waitlist_for_freed_slot(session: Session, booking: Booking) -> int:
         if not matches:
             return 0
 
-        # Preload resource + location for rendering
-        resource = session.get(Resource, booking.resource_id)
-        res_name = (resource.name if resource else booking.resource_id) or booking.resource_id
-        location = None
-        if resource and resource.location_id:
-            location = session.get(Location, resource.location_id)
+        res_name = (freed_resource.name if freed_resource else booking.resource_id) or booking.resource_id
+        location = session.get(Location, freed_location_id) if freed_location_id else None
         loc_name = (location.name if location else None) or None
-
-        end_time_str = _booking_end_time(booking)
 
         # Overlap check: waitlist [w_start, w_end) intersects freed [freed_start, freed_end)
         fulfilled_count = 0
@@ -98,11 +117,16 @@ def notify_waitlist_for_freed_slot(session: Session, booking: Booking) -> int:
                 # Orphan entry — clean it up so we don't retry forever
                 entry.status = "cancelled"
                 session.add(entry)
+                try:
+                    session.commit()
+                except Exception:
+                    session.rollback()
                 continue
 
             # 1) Telegram (best-effort)
+            tg_sent = False
             try:
-                telegram_service.send_slot_available(
+                tg_sent = bool(telegram_service.send_slot_available(
                     chat_id=user.telegram_id or "",
                     user_name=user.name,
                     resource_name=res_name,
@@ -110,36 +134,62 @@ def notify_waitlist_for_freed_slot(session: Session, booking: Booking) -> int:
                     date=booking.date,
                     start_time=entry.start_time,
                     end_time=entry.end_time,
-                )
+                ))
             except Exception as e:  # pragma: no cover — defensive
                 logger.warning("[waitlist] TG send failed: %r", e)
+
+            # 1b) If we couldn't reach the user via TG (no chat_id linked),
+            # ping the admin chat so someone can call/text them manually.
+            # Without this fallback the user's only signal is the in-app
+            # toast — easy to miss before the slot is taken again.
+            if not tg_sent and not user.telegram_id:
+                try:
+                    day_label = booking.date.strftime("%d.%m")
+                    where_label = f"{loc_name} · {res_name}" if loc_name else res_name
+                    telegram_service.send_admin_event(
+                        event="waitlist_user_no_tg",
+                        fields={
+                            "Клиент": user.email or user.name or str(user.id),
+                            "Контакт": user.phone or "—",
+                            "Слот": f"{where_label} · {day_label} {entry.start_time}–{entry.end_time}",
+                            "Действие": "Позвоните — TG не привязан, сам не узнает",
+                        },
+                    )
+                except Exception:
+                    logger.warning("[waitlist] admin no-tg alert failed", exc_info=True)
 
             # 2) In-app notification (always, even if TG is linked —
             #    it serves as an audit trail and reaches web-only users).
             try:
                 day_label = booking.date.strftime("%d.%m")
+                where_label = f"{loc_name} · {res_name}" if loc_name else res_name
                 notif = Notification(
                     type="slot_freed",
                     title="Слот освободился!",
                     description=(
-                        f"{res_name} · {day_label} {entry.start_time}–{entry.end_time} "
+                        f"{where_label} · {day_label} {entry.start_time}–{entry.end_time} "
                         "— успейте забронировать."
                     ),
                     recipient_id=str(user.id),
                     icon="Bell",
-                    link="/booking",
+                    link="/dashboard/waitlist",
                 )
                 session.add(notif)
             except Exception as e:
                 logger.warning("[waitlist] in-app notif failed: %r", e)
 
-            # Mark fulfilled so we don't spam the same user later
+            # Mark fulfilled — committed per-iteration so a crash mid-loop
+            # can't double-notify (TG already went out, but the row was
+            # not yet flipped from active).
             entry.status = "fulfilled"
             session.add(entry)
-            fulfilled_count += 1
+            try:
+                session.commit()
+                fulfilled_count += 1
+            except Exception as e:
+                session.rollback()
+                logger.warning("[waitlist] commit failed for entry %s: %r", entry.id, e)
 
-        if fulfilled_count:
-            session.commit()
         return fulfilled_count
 
     except Exception as e:

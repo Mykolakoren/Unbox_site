@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Мини-гайд администратора Unbox CRM</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #666;
+    --line: #e5e5e5;
+    --accent: #000;
+    --bg: #fff;
+    --code-bg: #f5f5f5;
+    --box-bg: #fafafa;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+  }
+  .wrap {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+  }
+  .topbar .title { font-weight: 700; font-size: 14px; }
+  .topbar .actions { display: flex; gap: 8px; }
+  .btn {
+    background: var(--ink);
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+  .btn:hover { background: #333; }
+  .btn-outline {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--ink);
+  }
+  .btn-outline:hover { background: var(--ink); color: #fff; }
+
+  h1 {
+    font-size: 36px;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+    border-bottom: 4px solid var(--ink);
+    padding-bottom: 12px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 16px;
+    margin-bottom: 48px;
+  }
+  h2 {
+    font-size: 24px;
+    margin: 48px 0 16px;
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+  }
+  h3 {
+    font-size: 18px;
+    margin: 24px 0 8px;
+  }
+  h4 {
+    font-size: 15px;
+    margin: 16px 0 6px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  p { margin: 0 0 12px; }
+  ol, ul { margin: 0 0 16px; padding-left: 24px; }
+  li { margin-bottom: 4px; }
+  a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  strong { font-weight: 700; }
+  code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9em;
+  }
+
+  /* TOC */
+  .toc {
+    background: var(--box-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 24px 32px;
+    margin-bottom: 48px;
+    page-break-inside: avoid;
+  }
+  .toc h3 { margin-top: 0; }
+  .toc-group {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+    align-items: start;
+  }
+  .toc-group-title {
+    font-weight: 700;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding-top: 2px;
+  }
+  .toc-group ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .toc-group li {
+    margin-bottom: 4px;
+    font-size: 14px;
+  }
+
+  /* blockquote */
+  blockquote {
+    border-left: 3px solid var(--ink);
+    background: var(--box-bg);
+    padding: 12px 20px;
+    margin: 16px 0;
+    color: var(--ink);
+  }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  /* table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--box-bg);
+    font-weight: 700;
+  }
+
+  /* anchor offset for sticky header */
+  section { scroll-margin-top: 80px; }
+
+  /* Print / PDF */
+  @page {
+    size: A4;
+    margin: 15mm 14mm;
+  }
+  @media print {
+    .topbar, .print-hide { display: none !important; }
+    .wrap { padding: 0; max-width: 100%; }
+    body { font-size: 10.5pt; line-height: 1.45; }
+    h1 {
+      font-size: 20pt;
+      margin-top: 0;
+      padding-bottom: 6px;
+      border-bottom-width: 2px;
+    }
+    .subtitle { margin-bottom: 20px; font-size: 10pt; }
+    h2 {
+      font-size: 14pt;
+      margin: 18px 0 10px;
+      page-break-after: avoid;
+    }
+    h3 { font-size: 12pt; page-break-after: avoid; margin: 14px 0 6px; }
+    h4 { font-size: 9.5pt; margin: 10px 0 4px; }
+    p, li { orphans: 3; widows: 3; }
+    section {
+      page-break-inside: avoid;
+      margin-bottom: 10px;
+    }
+    table, blockquote { page-break-inside: avoid; }
+    table { font-size: 9.5pt; }
+    th, td { padding: 6px 10px; }
+    a { color: var(--ink); text-decoration: none; }
+    /* keep TOC compact and inline with cover — no forced page break */
+    .toc {
+      page-break-inside: avoid;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      font-size: 10pt;
+    }
+    .toc h3 { margin: 0 0 8px; font-size: 12pt; }
+    .toc-group { margin-bottom: 8px; gap: 10px; }
+    .toc-group li { font-size: 9.5pt; margin-bottom: 2px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar print-hide">
+  <div class="title">Unbox CRM — гайд администратора</div>
+  <div class="actions">
+    <button class="btn" onclick="window.print()">⬇ Скачать PDF</button>
+    <a class="btn btn-outline" href="ADMIN_GUIDE.md" download>Markdown</a>
+  </div>
+</div>
+
+<div class="wrap">
+
+<h1>Мини-гайд администратора Unbox CRM</h1>
+<div class="subtitle">Короткое руководство по всем ключевым задачам. Версия: апрель 2026.</div>
+
+<div class="toc">
+  <h3>Оглавление</h3>
+
+  <div class="toc-group">
+    <div class="toc-group-title">Старт</div>
+    <ul>
+      <li><a href="#s1">1. Первый день админа</a></li>
+      <li><a href="#s2">2. Навигация и роли</a></li>
+    </ul>
+  </div>
+
+  <div class="toc-group">
+    <div class="toc-group-title">Бронирование</div>
+    <ul>
+      <li><a href="#s3">3. Создание брони</a></li>
+      <li><a href="#s4">4. Перенос, продление, отмена</a></li>
+      <li><a href="#s5">5. Горячие брони и одобрение</a></li>
+      <li><a href="#s6">6. Многочасовая бронь на нескольких клиентов</a></li>
+      <li><a href="#s7">7. Повторяющиеся еженедельные брони</a></li>
+    </ul>
+  </div>
+
+  <div class="toc-group">
+    <div class="toc-group-title">Касса и финансы</div>
+    <ul>
+      <li><a href="#s8">8. Приход, расход в кассе</a></li>
+      <li><a href="#s9">9. Пополнение баланса клиента</a></li>
+      <li><a href="#s10">10. Перевод между счетами</a></li>
+      <li><a href="#s11">11. Открытие и закрытие смены</a></li>
+      <li><a href="#s12">12. Корректировка баланса</a></li>
+      <li><a href="#s13">13. Мульти-валютность</a></li>
+    </ul>
+  </div>
+
+  <div class="toc-group">
+    <div class="toc-group-title">CRM психолога</div>
+    <ul>
+      <li><a href="#s14">14. Клиенты: создание, объединение, удаление</a></li>
+      <li><a href="#s15">15. Сессии</a></li>
+      <li><a href="#s16">16. Долги</a></li>
+      <li><a href="#s17">17. Синхронизация с Google Calendar</a></li>
+      <li><a href="#s18">18. Расписание специалиста и шахматка записи</a></li>
+    </ul>
+  </div>
+
+  <div class="toc-group">
+    <div class="toc-group-title">Админка и каталог</div>
+    <ul>
+      <li><a href="#s19">19. Пользователи и роли</a></li>
+      <li><a href="#s20">20. Каталог специалистов</a></li>
+      <li><a href="#s21">21. Абонементы, цены, скидки</a></li>
+      <li><a href="#s22">22. Дашборд админа</a></li>
+    </ul>
+  </div>
+
+  <div class="toc-group">
+    <div class="toc-group-title">Telegram и уведомления</div>
+    <ul>
+      <li><a href="#s23">23. Telegram-бот</a></li>
+      <li><a href="#s24">24. Уведомления</a></li>
+    </ul>
+  </div>
+
+  <div class="toc-group">
+    <div class="toc-group-title">Устранение проблем</div>
+    <ul>
+      <li><a href="#s25">25. Типичные ошибки</a></li>
+      <li><a href="#s26">26. Карта «где что искать»</a></li>
+    </ul>
+  </div>
+</div>
+
+<section id="s1">
+<h2>1. Первый день админа</h2>
+<ol>
+  <li>Зайти под своим логином в админку.</li>
+  <li>Проверить вверху хедера: есть ли бейдж роли (<code>owner</code> / <code>senior_admin</code> / <code>admin</code> / <code>specialist</code>).</li>
+  <li>Открыть <strong>Dashboard</strong> — убедиться, что видны выручка месяца, последние брони, аналитика.</li>
+  <li>Открыть <strong>Bookings → Шахматка</strong> — проверить сегодняшний день.</li>
+  <li>Открыть <strong>Finance → Баланс по счетам</strong> — увидеть текущее состояние кассы.</li>
+  <li>Открыть <strong>CRM</strong> (кнопка в хедере) — проверить клиентов и долги.</li>
+</ol>
+</section>
+
+<section id="s2">
+<h2>2. Навигация и роли</h2>
+<p>Порядок вкладок: <strong>Dashboard → Bookings → Finance → Tasks → Clients → Specialists → Users → Settings.</strong></p>
+<table>
+  <tr><th>Роль</th><th>Что может</th></tr>
+  <tr><td><code>owner</code></td><td>Всё. Корректировка балансов, удаление любых транзакций, управление правами.</td></tr>
+  <tr><td><code>senior_admin</code></td><td>Всё, кроме управления правами. Корректировка балансов, удаление любых транзакций.</td></tr>
+  <tr><td><code>admin</code></td><td>Брони, касса, CRM. Удаление только <strong>сегодняшних</strong> транзакций.</td></tr>
+  <tr><td><code>specialist</code></td><td>Только свой CRM и расписание.</td></tr>
+</table>
+<blockquote><p>Owner/senior_admin получают авто-доступ к CRM без отдельной заявки.</p></blockquote>
+</section>
+
+<section id="s3">
+<h2>3. Создание брони</h2>
+<ol>
+  <li><strong>Bookings → Шахматка</strong> (или «Новая бронь» из дашборда).</li>
+  <li>Выделить мышью нужный слот на шахматке (можно тащить по нескольким часам).</li>
+  <li>В боковой панели выбрать клиента (если пользователь зарегистрирован) или ввести имя.</li>
+  <li>Выбрать формат: <strong>Индивид. / Группа / Интервизия</strong> — от этого зависит тариф.</li>
+  <li>Цена рассчитается автоматически (базовый тариф × длительность + пиковые часы − скидки − абонемент).</li>
+  <li>Подтвердить → бронь появится на шахматке.</li>
+</ol>
+<blockquote><p><strong>Админ может бронировать задним числом до 12 часов назад</strong> (например, забыли оформить раннюю бронь).</p></blockquote>
+</section>
+
+<section id="s4">
+<h2>4. Перенос, продление, отмена</h2>
+<h4>Перенос</h4>
+<p>В шахматке взять бронь мышью и перетащить на новое время. Откроется подтверждение.</p>
+
+<h4>Продление на +30 мин</h4>
+<p>В карточке брони — кнопка «+30 мин». Проверит конфликт со следующей бронью и добавит оплату по тарифу.</p>
+
+<h4>Отмена</h4>
+<ul>
+  <li>В карточке брони → «Отменить».</li>
+  <li>В таймлайне будет видно <strong>время отмены</strong>, не дата самой брони.</li>
+  <li>Если бронь была «субарендой» — при отмене 50% возвращается автору, остальное → доход Unbox.</li>
+</ul>
+</section>
+
+<section id="s5">
+<h2>5. Горячие брони и одобрение</h2>
+<p><strong>Горячая бронь</strong> = клиент бронит менее чем за N часов до начала.</p>
+<ul>
+  <li>Обычный клиент создаёт горячую бронь → она <strong>в очереди одобрения</strong>.</li>
+  <li>Админу приходит уведомление в колокольчик.</li>
+  <li>Админ открывает → <strong>Одобрить</strong> или <strong>Отклонить</strong>.</li>
+  <li>Админы сами создают горячие брони <strong>без одобрения</strong>.</li>
+</ul>
+</section>
+
+<section id="s6">
+<h2>6. Многочасовая бронь на нескольких клиентов</h2>
+<p>Если клиент забронировал 3 часа, но часть — для другого человека:</p>
+<ol>
+  <li>Открыть бронь → <strong>«Разбить на слоты»</strong>.</li>
+  <li>Для каждого часа выбрать клиента (из CRM).</li>
+  <li>Каждый час записывается как отдельная сессия CRM.</li>
+  <li>На шахматке отображается разными цветами.</li>
+</ol>
+</section>
+
+<section id="s7">
+<h2>7. Повторяющиеся еженедельные брони</h2>
+<ol>
+  <li>При создании брони отметить <strong>«Повторять еженедельно»</strong>.</li>
+  <li>Указать количество недель (например, 8).</li>
+  <li>Система создаст 8 броней — по одной на каждую неделю.</li>
+  <li>Если неделя занята — эта неделя пропускается, остальные создаются.</li>
+  <li>Отменить можно как всю серию, так и отдельную бронь.</li>
+</ol>
+</section>
+
+<section id="s8">
+<h2>8. Приход, расход в кассе</h2>
+<ol>
+  <li><strong>Finance → Транзакции → «+ Транзакция»</strong>.</li>
+  <li>Выбрать тип: <strong>Приход / Расход</strong>.</li>
+  <li>Выбрать счёт: <strong>Cash / TBC / BOG / Карта / Перевод / RU Банк</strong>.</li>
+  <li>Выбрать категорию (категории фильтруются по типу транзакции).</li>
+  <li>Указать сумму и валюту (GEL / USD / RUB).</li>
+  <li><strong>Филиал</strong> — Unbox Uni / Unbox One / Neo School.</li>
+  <li>Можно привязать к клиенту CRM (для приходов).</li>
+  <li>Сохранить.</li>
+</ol>
+<h4>Удаление</h4>
+<ul>
+  <li>Админ — только сегодняшние.</li>
+  <li>Senior/owner — любые.</li>
+</ul>
+</section>
+
+<section id="s9">
+<h2>9. Пополнение баланса клиента</h2>
+<ol>
+  <li><strong>Users → карточка клиента → «Пополнить баланс»</strong>.</li>
+  <li>Указать сумму, валюту, счёт и филиал.</li>
+  <li>Транзакция <strong>автоматически</strong> появится в кассе с категорией «Пополнение баланса».</li>
+  <li>Баланс клиента увеличится мгновенно.</li>
+</ol>
+</section>
+
+<section id="s10">
+<h2>10. Перевод между счетами</h2>
+<p>Нужно, если, например, деньги из Cash положили в TBC.</p>
+<ol>
+  <li><strong>Finance → Счета → «Перевод»</strong>.</li>
+  <li>Выбрать счёт-источник и счёт-получатель.</li>
+  <li>Указать сумму.</li>
+  <li>Создаются <strong>две связанные транзакции</strong> (расход + приход).</li>
+</ol>
+</section>
+
+<section id="s11">
+<h2>11. Открытие и закрытие смены</h2>
+<h4>Открытие</h4>
+<p>В начале рабочего дня: <strong>Finance → «Открыть смену»</strong>. Фиксируется стартовый остаток по каждому счёту и филиалу.</p>
+<h4>Закрытие смены</h4>
+<ol>
+  <li><strong>Finance → «Закрыть смену»</strong>.</li>
+  <li>Модалка сама подставит филиал, в котором ты работал.</li>
+  <li>Указать фактический остаток наличных (система сверяет с расчётным).</li>
+  <li>Если есть расхождение — появляется поле «Комментарий».</li>
+  <li>Закрытие создаёт отчёт смены.</li>
+</ol>
+<blockquote><p>Смены закрываются <strong>только по наличным</strong>. Безнал сверяется автоматически.</p></blockquote>
+</section>
+
+<section id="s12">
+<h2>12. Корректировка баланса</h2>
+<p>Только для <strong>owner / senior_admin</strong>.</p>
+<ol>
+  <li><strong>Users → клиент → «Корректировать баланс»</strong> (или Finance → Балансы).</li>
+  <li>Указать сумму (+/−), причину.</li>
+  <li>Создаётся транзакция типа <code>manual_correction</code>.</li>
+  <li>Видна в истории клиента.</li>
+</ol>
+</section>
+
+<section id="s13">
+<h2>13. Мульти-валютность</h2>
+<p>Клиент может быть в <strong>GEL / USD / RUB</strong>.</p>
+<ul>
+  <li>На дашборде выручка показывается в <strong>трёх колонках</strong>: <code>1200 ₾ · 50 $ · 3000 ₽</code> + <strong>GEL-эквивалент</strong> общей строкой.</li>
+  <li>В долгах тот же формат.</li>
+  <li>Пересчёт в GEL идёт по актуальному курсу из настроек.</li>
+  <li>Мин/Макс тариф на дашборде автоматически переводится в GEL для сравнения.</li>
+</ul>
+</section>
+
+<section id="s14">
+<h2>14. Клиенты: создание, объединение, удаление</h2>
+<h4>Создание</h4>
+<ul>
+  <li><strong>CRM → Клиенты → «+ Клиент»</strong> или из страницы пользователей админки.</li>
+  <li>Поля: имя, контакты, базовый тариф, счёт по умолчанию, валюта, персональная скидка.</li>
+  <li>Поддержка <strong>инлайн-редактирования</strong> прямо в карточке.</li>
+</ul>
+<h4>Объединение (merge)</h4>
+<p>Если один клиент создан дважды.</p>
+<ol>
+  <li>Открыть клиента → <strong>«Объединить с…»</strong>.</li>
+  <li>Выбрать второго клиента.</li>
+  <li>Все сессии и платежи переносятся на основного, alias сохраняется (важно для Google Calendar).</li>
+</ol>
+<h4>Удаление</h4>
+<p>Кнопка «Удалить» в списке клиентов. С подтверждением. Все связанные сессии удаляются — осторожно.</p>
+</section>
+
+<section id="s15">
+<h2>15. Сессии</h2>
+<h4>Добавить сессию</h4>
+<p>В карточке клиента → «+ Сессия». Указать дату, время, длительность, цену, счёт.</p>
+<h4>Оплата</h4>
+<ul>
+  <li>Кнопка <strong>«Быстрая оплата»</strong> использует цену сессии. Если цена NULL — берётся базовый тариф клиента. Нулевые суммы пропускаются.</li>
+  <li>Можно выбрать счёт прямо в панели редактирования сессии.</li>
+  <li>«Отметить всё оплачено» — помечает все <strong>прошедшие</strong> сессии, будущие не трогает.</li>
+</ul>
+<h4>Завершение</h4>
+<p>Сессии <strong>автоматически завершаются</strong> по локальному времени (Батуми), когда заканчиваются.</p>
+<h4>Редактирование отменённых</h4>
+<p>Даже отменённые сессии можно редактировать и удалять.</p>
+<h4>Смена клиента в сессии</h4>
+<p>Кнопка «Сменить клиента» в окне редактирования (например, если записал на неправильного человека).</p>
+</section>
+
+<section id="s16">
+<h2>16. Долги</h2>
+<ul>
+  <li><strong>Долг</strong> = завершённая + неоплаченная сессия. Будущие и отменённые не считаются.</li>
+  <li>Кнопка «Неоплаченные сессии» на дашборде ведёт в раздел <strong>«Долги»</strong>.</li>
+  <li>В списке клиентов долги отображаются в отдельной колонке.</li>
+  <li>Неактивные клиенты в суммарный долг не включаются.</li>
+  <li>Мульти-валютный вывод: <code>долг 300 ₾ · 20 $</code>.</li>
+</ul>
+</section>
+
+<section id="s17">
+<h2>17. Синхронизация с Google Calendar</h2>
+<h4>Разовая синхронизация</h4>
+<ol>
+  <li><strong>CRM → Сессии → «Sync»</strong> (модалка).</li>
+  <li>Выбрать период (неделя / месяц / произвольный).</li>
+  <li>Импортируются события → создаются сессии.</li>
+</ol>
+<h4>По клиенту</h4>
+<p>В карточке клиента → «Sync этого клиента» с выбором периода.</p>
+<h4>Автосоздание клиентов</h4>
+<p>Если в событии календаря фигурирует имя, которого нет в CRM — клиент создастся автоматически.</p>
+<h4>Слияние (merge) и sync</h4>
+<p>Если клиенты были объединены, их alias-коды (например, <code>IVA01, IVA02</code>) все учитываются при поиске событий.</p>
+<h4>Проверка дубликатов</h4>
+<p>Сессия не создастся повторно, если уже есть сессия того же клиента на ту же дату (даже если другой google_event_id).</p>
+</section>
+
+<section id="s18">
+<h2>18. Расписание специалиста и шахматка записи</h2>
+<h4>Для специалиста</h4>
+<ol>
+  <li><strong>CRM → Расписание</strong>.</li>
+  <li>Задать недельный шаблон: для каждого дня — время начала, конца, филиал (или онлайн).</li>
+  <li>Добавить исключения: конкретные даты (отпуск, доп. день).</li>
+  <li>Переключатель «вкл/выкл» по дням.</li>
+</ol>
+<h4>Для клиента</h4>
+<ul>
+  <li>Открывает страницу специалиста в каталоге.</li>
+  <li>Видит <strong>шахматку</strong> на 2 недели вперёд.</li>
+  <li>Свободные слоты кликабельны → модалка с формой (имя, телефон, email).</li>
+  <li>Занятые слоты — серые или помечены ×.</li>
+  <li>После записи — специалисту приходит <strong>Telegram-уведомление</strong>.</li>
+</ul>
+<h4>Отмена</h4>
+<p>Клиент или админ отменяет запись → уведомление уходит обеим сторонам.</p>
+</section>
+
+<section id="s19">
+<h2>19. Пользователи и роли</h2>
+<p><strong>Users → список пользователей.</strong></p>
+<ul>
+  <li><strong>«+ Новый клиент»</strong> — прямо из админки без самостоятельной регистрации.</li>
+  <li>Роль выбирается из выпадающего: <code>user / admin / senior_admin / owner / specialist</code>.</li>
+  <li>У роли — дефолтные права (можно переопределить отдельно).</li>
+  <li>Бейдж «На проверке» <strong>скрыт</strong> для админов — вместо него показывается бейдж роли.</li>
+  <li>Смена пароля — либо админ из карточки, либо пользователь сам в профиле.</li>
+</ul>
+</section>
+
+<section id="s20">
+<h2>20. Каталог специалистов</h2>
+<p><strong>Admin → Specialists.</strong> Каждая анкета:</p>
+<ul>
+  <li>Фото, имя, tagline (до 150 символов), био.</li>
+  <li><strong>Категория:</strong> психология / психиатрия / наркология / коучинг / образование.</li>
+  <li>Специализации (теги), форматы (индивид./групп./интервизия).</li>
+  <li>Базовый тариф.</li>
+  <li><strong>Порядок сортировки</strong> (меньше = выше в каталоге).</li>
+  <li><strong>Привязка к пользователю</strong> — чтобы специалист мог сам править расписание.</li>
+  <li>Verified-флаг (если выключен — не показывается в публичном каталоге).</li>
+  <li>Тогглы «Показать/Скрыть» и «Удалить».</li>
+</ul>
+<p>Карточка в каталоге — соотношение 3:4.</p>
+</section>
+
+<section id="s21">
+<h2>21. Абонементы, цены, скидки</h2>
+<p>Страница <code>/subscriptions</code> — <strong>5 планов</strong> + стандартные цены.</p>
+<p><strong>Скидки применяются по правилу MAX</strong> — не складываются, выигрывает самая крупная:</p>
+<ul>
+  <li>Пиковые часы (надбавка).</li>
+  <li>Горячая бронь (надбавка).</li>
+  <li>Последовательные часы (скидка).</li>
+  <li>Еженедельная прогрессивная (чем больше броней в неделю — тем больше скидка).</li>
+  <li>Персональная скидка клиента.</li>
+  <li>Абонемент.</li>
+</ul>
+<p><strong>Welcome-бонус:</strong> 1 бесплатный час автоматически выдаётся новому пользователю при регистрации.</p>
+<p><strong>Инфографика</strong> со всеми правилами на странице абонементов — ссылка в футере.</p>
+</section>
+
+<section id="s22">
+<h2>22. Дашборд админа</h2>
+<ul>
+  <li>Блоки можно <strong>перетаскивать</strong> (drag &amp; drop), менять размер.</li>
+  <li><strong>Чекбоксы</strong> в настройках — какие блоки показывать.</li>
+  <li>«iPhone-стиль» — долгое нажатие → блоки «колышутся», можно переставлять.</li>
+  <li>Выручка месяца считается <strong>на бэкенде</strong> (не ограничена 50 транзакциями).</li>
+  <li>Источник выручки — <strong>касса</strong>, не брони (избегаем двойного счёта).</li>
+</ul>
+</section>
+
+<section id="s23">
+<h2>23. Telegram-бот</h2>
+<h4>Команды</h4>
+<ul>
+  <li><code>/start</code> — привязать Telegram к аккаунту.</li>
+  <li><code>/book</code> — <strong>мастер бронирования кабинета</strong> (работает как сайт).</li>
+  <li><code>/balance</code> — баланс.</li>
+  <li><code>/mybookings</code> — мои брони.</li>
+</ul>
+<h4>Мастер <code>/book</code></h4>
+<ol>
+  <li>Филиал</li>
+  <li>Формат</li>
+  <li>Дата</li>
+  <li>Кабинет</li>
+  <li>Время</li>
+  <li>Длительность</li>
+  <li>Подтверждение (с полной разбивкой цены)</li>
+  <li>Бронь</li>
+</ol>
+<p>Цена считается по тем же правилам, что и на сайте (PricingService). После подтверждения — бронь сразу отражается в системе и уходит в Google Calendar.</p>
+<h4>Уведомления специалистам</h4>
+<ul>
+  <li>Новая запись от клиента → сообщение в Telegram (имя, контакты, время, заметки).</li>
+  <li>Отмена записи → уведомления <strong>обеим сторонам</strong> (специалист + клиент, если у него есть TG).</li>
+</ul>
+</section>
+
+<section id="s24">
+<h2>24. Уведомления</h2>
+<p><strong>Колокольчик</strong> в хедере админки. Показывает:</p>
+<ul>
+  <li>Новые горячие брони на одобрение.</li>
+  <li>Новые заявки в CRM (со ссылкой на вкладку специалистов).</li>
+  <li>События таймлайна.</li>
+</ul>
+<p>Клик по уведомлению → переход к соответствующей записи.</p>
+</section>
+
+<section id="s25">
+<h2>25. Типичные ошибки</h2>
+<table>
+  <tr><th>Симптом</th><th>Решение</th></tr>
+  <tr><td>Транзакции не отображаются</td><td>Проверить фильтр по дате в Finance. По умолчанию — текущий месяц.</td></tr>
+  <tr><td>Долг у клиента не меняется</td><td>Обновить страницу. Платёж на 0 ₾ не учитывается.</td></tr>
+  <tr><td>GCal не синкает</td><td>Проверить, что <code>credentials.json</code> на проде. В логах должно быть <code>Authenticated via file: credentials.json</code>.</td></tr>
+  <tr><td>Клиент появился дважды</td><td>Использовать <strong>merge</strong> в карточке клиента.</td></tr>
+  <tr><td>Бронь не создаётся — «слот занят»</td><td>Обновить шахматку — возможно, кто-то забронил.</td></tr>
+  <tr><td>LTV показывает 0</td><td>Это уже пофикшено (использует прямой SQL). Если видишь — перезапустить бэк.</td></tr>
+  <tr><td>Горячая бронь «зависла»</td><td>Проверить уведомления — она в очереди одобрения.</td></tr>
+  <tr><td>Смена не закрывается</td><td>Проверить филиал в модалке. Возможно, открыта в другом филиале.</td></tr>
+</table>
+</section>
+
+<section id="s26">
+<h2>26. Карта «где что искать»</h2>
+<table>
+  <tr><th>Задача</th><th>Путь</th></tr>
+  <tr><td>Выручка за месяц</td><td>Админ → Dashboard</td></tr>
+  <tr><td>Создать/отменить бронь</td><td>Админ → Bookings → Шахматка</td></tr>
+  <tr><td>Одобрение горячих броней</td><td>Колокольчик в хедере</td></tr>
+  <tr><td>Касса, приходы, расходы</td><td>Админ → Finance → Транзакции</td></tr>
+  <tr><td>Балансы счетов по филиалам</td><td>Админ → Finance → Счета</td></tr>
+  <tr><td>Открыть/закрыть смену</td><td>Админ → Finance (верхние кнопки)</td></tr>
+  <tr><td>Корректировка баланса</td><td>Карточка клиента / Finance (только owner/senior)</td></tr>
+  <tr><td>Задачи команды</td><td>Админ → Tasks</td></tr>
+  <tr><td>Клиенты CRM, сессии, долги</td><td>CRM (кнопка в хедере)</td></tr>
+  <tr><td>Расписание специалиста</td><td>CRM → Расписание</td></tr>
+  <tr><td>Управление каталогом специалистов</td><td>Админ → Specialists</td></tr>
+  <tr><td>Пользователи, роли, права</td><td>Админ → Users</td></tr>
+  <tr><td>Абонементы, цены, скидки</td><td><code>/subscriptions</code></td></tr>
+  <tr><td>Sync с Google Calendar</td><td>CRM → Сессии → Sync</td></tr>
+  <tr><td>Настройки кассы (категории)</td><td>Админ → Finance → Настройки</td></tr>
+</table>
+</section>
+
+<p style="margin-top: 64px; color: var(--muted); font-size: 13px; text-align: center;">
+  Обновлено: апрель 2026 · Unbox Batumi
+</p>
+
+</div>
+
+</body>
+</html>

@@ -18,22 +18,13 @@ export function parseUTC(d: string | Date): Date {
     return new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
 }
 
-/** Parse a CRM session / cabinet booking timestamp written as Tbilisi
- *  local wall-clock. The CRM frontend posts strings like "2026-05-22T11:00:00"
- *  meaning 11:00 local, and the backend stores them as-is. Forcing a Z
- *  via parseUTC shifts everything 4h forward (11:00 → 15:00 in display),
- *  which is exactly the bug Максим/Нурлана's series hit. Use this
- *  helper for fields known to carry local wall-clock. Strings that
- *  already carry an explicit Z or +HH:MM offset are honoured, so legacy
- *  rows written in true UTC still render correctly. */
-export function parseLocal(d: string | Date | null | undefined): Date {
-    if (!d) return new Date();
-    if (d instanceof Date) return d;
-    const s = String(d);
-    // Preserve explicit timezone if present.
-    if (s.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(s)) return new Date(s);
-    return new Date(s);
-}
+// NOTE: A `parseLocal` helper used to live here that interpreted naive
+// timestamps as browser-local. It was removed once the backend was made
+// to normalise every TherapySession.date to UTC-naive at ingest — the
+// rest of the table was already UTC-naive (sync_from_calendar produces
+// UTC-naive). Use `parseUTC` for any DB-sourced timestamp; never reach
+// for browser-local interpretation, the result depends on the user's
+// machine TZ which is not always Tbilisi (e.g. admin on a UK VPN).
 
 /**
  * Format a date in Batumi (Asia/Tbilisi) timezone using a date-fns format string.
@@ -87,4 +78,34 @@ export function safeFormat(
     } catch {
         return fallback;
     }
+}
+
+/** Tbilisi wall-clock "right now" — independent of the browser's timezone.
+ *
+ *  Returns `{ h, m, totalMins, ymd }` where:
+ *    - h:    Tbilisi hour 0–23
+ *    - m:    Tbilisi minute 0–59
+ *    - totalMins: h*60 + m, handy for "is this slot in the past" comparisons
+ *    - ymd:  Tbilisi calendar date as "YYYY-MM-DD"
+ *
+ *  Use this anywhere we previously called `new Date().getHours()` to decide
+ *  if a Tbilisi-labelled slot is past — that pattern silently broke for
+ *  admins/clients on a non-Tbilisi browser zone (UK VPN, traveller phone).
+ */
+export function tbilisiNow(): { h: number; m: number; totalMins: number; ymd: string } {
+    const now = new Date();
+    // Intl gives us the wall-clock hour/minute in Tbilisi regardless of
+    // the host TZ. en-GB locale to guarantee 24h numeric format.
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: BATUMI_TZ,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '00';
+    const y = get('year'), mo = get('month'), d = get('day');
+    let h = parseInt(get('hour'), 10);
+    if (Number.isNaN(h)) h = 0;
+    if (h === 24) h = 0; // Some engines render "24:00" — normalise to 00:00.
+    const m = parseInt(get('minute'), 10) || 0;
+    return { h, m, totalMins: h * 60 + m, ymd: `${y}-${mo}-${d}` };
 }

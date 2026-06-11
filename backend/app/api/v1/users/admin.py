@@ -262,6 +262,14 @@ def update_personal_discount(
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """Update personal discount with logging."""
+    # Setting a discount is a senior-only privileged op — gate on the same
+    # permission used elsewhere for discount changes. Owner/senior_admin have
+    # it by default; a plain admin needs the explicit grant.
+    if not deps.has_permission(current_user, "subscriptions.set_discount"):
+        raise HTTPException(
+            status_code=403, detail="Requires subscriptions.set_discount permission"
+        )
+
     user = _resolve_user(session, user_id)
 
     percent = payload.get("percent")
@@ -269,6 +277,15 @@ def update_personal_discount(
 
     if percent is None:
         raise HTTPException(status_code=400, detail="percent required")
+
+    # Clamp/validate range — anything outside 0..100 would produce free or
+    # negative-priced bookings.
+    try:
+        percent = int(percent)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="percent must be an integer 0..100")
+    if percent < 0 or percent > 100:
+        raise HTTPException(status_code=400, detail="percent must be between 0 and 100")
 
     old_percent = user.personal_discount_percent
 

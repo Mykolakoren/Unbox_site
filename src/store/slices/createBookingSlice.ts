@@ -36,11 +36,34 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
     },
 
     fetchAllBookings: async () => {
+        // Admin-only endpoint. Non-admin users hit it via `fetchBookings`
+        // chained from various places (e.g. after a booking create) and
+        // get 403 "Not enough privileges" surfaced as a red toast — even
+        // though the booking itself succeeded. Silently skip for them.
+        const role = (get() as any)?.currentUser?.role;
+        const isAdmin = role === 'owner' || role === 'senior_admin' || role === 'admin';
+        if (!isAdmin) {
+            return;
+        }
+        // Quiet retry: a single 5xx / network blip shouldn't bother the
+        // admin either. Surface only the second failure with the server's
+        // detail so the message tells the truth (rate limit, etc.). 401/403
+        // never bubble — those are silenced above.
+        const tryOnce = () => bookingsApi.getAllBookings();
         try {
-            const bookings = await bookingsApi.getAllBookings();
+            const bookings = await tryOnce().catch(async (e) => {
+                if (e?.response?.status === 401 || e?.response?.status === 403) throw e;
+                await new Promise(r => setTimeout(r, 500));
+                return tryOnce();
+            });
             set({ bookings });
-        } catch (error) {
-            toast.error('Не удалось загрузить бронирования');
+        } catch (error: any) {
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) return;  // not for us, no UI noise
+            const detail = error?.response?.data?.detail
+                || error?.message
+                || 'Не удалось загрузить бронирования';
+            toast.error(detail);
         }
     },
 

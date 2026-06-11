@@ -139,46 +139,27 @@ function BookingWizard() {
   return (
     <MinimalLayout glassMode fullWidth={step === 2} noPadding>
 
-      {/* Edit mode banner. Reschedule path is a known dup-creation hazard
-          ([CLAUDE.md TODO #1]) — surface a strong warning and steer the user
-          to the safer drag-and-drop chessboard until ConfirmationStep is
-          rewritten. */}
-      {editBookingId && wizardMode === 'reschedule' && (
-        <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
-          <div style={{
-            background: '#FEE2E2', border: `1px solid #F87171`, color: '#991B1B',
-            padding: '14px 16px', borderRadius: 8,
-            fontFamily: GH_SANS, fontSize: 14, lineHeight: 1.45,
-          }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ Известный баг переноса через мастер</div>
-            <div style={{ fontSize: 13, marginBottom: 10 }}>
-              Этот мастер сейчас может <b>создать дубль</b> вместо переноса (фикс в работе).
-              Для безопасного переноса используй шахматку: открой бронь и перетащи её на новое время —
-              или попроси администратора. Для отмены этого переноса — кнопка ниже.
-            </div>
-            <button onClick={() => reset()}
-              style={{
-                fontSize: 13, fontWeight: 700,
-                background: '#fff', color: '#991B1B',
-                border: '1px solid #F87171',
-                padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
-              }}>
-              Отменить и вернуться
-            </button>
-          </div>
-        </div>
-      )}
-      {editBookingId && wizardMode !== 'reschedule' && (
+      {/* The reschedule dup-creation bug was fixed & verified
+          (CLAUDE.md → "Решённые баги": фикс 2026-05-23, проверка 2026-05-26 —
+          0 дублей на 50 новых броней). The old red "может создать дубль"
+          warning banner was removed so it stops eroding trust on every
+          reschedule. The neutral edit banner below still covers reschedule via
+          its `editBookingId` condition. */}
+      {editBookingId && (
         <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
           <div style={{
             background: '#FEF3C7', border: `1px solid ${GH.ink10}`, color: '#92400E',
             padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             fontFamily: GH_SANS, fontSize: 14,
           }}>
-            <span style={{ fontWeight: 500 }}>Вы редактируете существующее бронирование</span>
+            <span style={{ fontWeight: 500 }}>
+              {wizardMode === 'reschedule'
+                ? 'Вы переносите существующее бронирование'
+                : 'Вы редактируете существующее бронирование'}
+            </span>
             <button onClick={() => reset()}
               style={{ fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}>
-              Отменить редактирование
+              {wizardMode === 'reschedule' ? 'Отменить перенос' : 'Отменить редактирование'}
             </button>
           </div>
         </div>

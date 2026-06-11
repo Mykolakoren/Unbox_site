@@ -56,7 +56,28 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
             onOpened?.();
             onClose();
         } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось открыть смену');
+            // Surface a diagnostic message — Юля/Ира reported a blank
+            // "Не удалось открыть смену" toast (2026-05-15) and we had
+            // zero context to debug. Include status, server detail, or
+            // network/timeout cause so next failure is actionable.
+            console.error('[OpenShift] failed', e);
+            const status = e?.response?.status;
+            const detail = e?.response?.data?.detail;
+            let msg = 'Не удалось открыть смену';
+            if (status === 403) {
+                msg = 'Нет прав на открытие смены — обратись к старшему админу';
+            } else if (status && typeof detail === 'string') {
+                msg = `Ошибка ${status}: ${detail}`;
+            } else if (typeof detail === 'string') {
+                msg = detail;
+            } else if (e?.code === 'ECONNABORTED') {
+                msg = 'Таймаут — перезагрузите страницу (Cmd+Shift+R) и попробуйте ещё раз';
+            } else if (e?.message === 'Network Error') {
+                msg = 'Нет связи с сервером. Проверьте интернет и попробуйте снова';
+            } else if (e?.message) {
+                msg = `Ошибка: ${e.message}`;
+            }
+            toast.error(msg, { duration: 8000 });
         } finally {
             setSaving(false);
         }

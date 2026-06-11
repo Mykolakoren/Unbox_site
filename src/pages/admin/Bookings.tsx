@@ -59,22 +59,44 @@ export function AdminBookings() {
     // chessboard right away so the highlighted booking is visible.
     const viewFromQuery = searchParams.get('view');
     const navigate = useNavigate();
-    const { bookings, users, fetchUsers, cancelBooking, listForReRent, setManualPrice } = useUserStore();
+    const { bookings, users, fetchUsers, cancelBooking, listForReRent, fetchBookings } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
-    const [viewMode, setViewMode] = useState<ViewMode>(viewFromQuery === 'grid' ? 'grid' : 'list');
+    // Default view = chessboard (admin team works in shahmatka day-to-day).
+    // Honour ?view=list in the URL so deep-links/bookmarks still open in
+    // list mode if explicitly requested.
+    const [viewMode, setViewMode] = useState<ViewMode>(viewFromQuery === 'list' ? 'list' : 'grid');
 
     // Modal state for replacing native confirm/prompt
     const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; destructive?: boolean }>({ open: false, title: '', message: '', onConfirm: () => {} });
     const [priceModal, setPriceModal] = useState<{ open: boolean; bookingId: string; currentPrice: number }>({ open: false, bookingId: '', currentPrice: 0 });
 
     useEffect(() => {
+        // На mount — один раз. Дополнительно дёргаем при возврате на вкладку,
+        // т.к. имена клиентов в шахматке зависят от users[]; если фетч на
+        // mount упал по таймауту (мобильная сеть, blip) — на следующем
+        // фокусе подтянется и слоты перерисуются с именами вместо email'ов.
         fetchUsers();
+        const onFocus = () => {
+            if (document.visibilityState === 'visible') fetchUsers();
+        };
+        document.addEventListener('visibilitychange', onFocus);
+        window.addEventListener('focus', onFocus);
+        return () => {
+            document.removeEventListener('visibilitychange', onFocus);
+            window.removeEventListener('focus', onFocus);
+        };
     }, [fetchUsers]);
 
     const getUserName = (email: string) => {
-        const u = users.find(u => u.email === email);
-        return u ? u.name : email;
+        const u = users.find(u => u.email === email || u.id === email);
+        if (u?.name) return u.name;
+        // Fallback: если userStore ещё не догрузил юзера (timing race на
+        // мобильном) — показываем хотя бы префикс email, а не «полный
+        // адрес как имя клиента». Также покрывает случай когда у юзера
+        // в БД нет name (редко, но возможно для legacy-аккаунтов).
+        if (typeof email === 'string' && email.includes('@')) return email.split('@')[0];
+        return (email || '').slice(0, 12) || 'Гость';
     };
 
     const filteredBookings = bookings
@@ -230,16 +252,28 @@ export function AdminBookings() {
     };
 
     const handleReject = async (bookingId: string) => {
+        // Reason — короткий текст для клиента (придёт в TG/in-app),
+        // объясняет почему слот недоступен. window.prompt — самый
+        // лёгкий способ без отдельного modal (UI уже использует prompt
+        // для других похожих случаев). Пустая причина → бэкенд
+        // автоматически подставит «Слот недоступен».
+        const reason = window.prompt(
+            'Причина отклонения (будет отправлена клиенту):',
+            ''
+        );
+        if (reason === null) return; // Cancel — ничего не делаем
         setConfirmModal({
             open: true,
             title: 'Отклонить бронь',
-            message: 'Отклонить горячую бронь? Средства будут возвращены клиенту.',
+            message: reason.trim()
+                ? `Отклонить с причиной «${reason.trim()}»? Клиент получит уведомление, средства не списываются.`
+                : 'Отклонить горячую бронь без причины? Клиент получит общее уведомление «Слот недоступен».',
             destructive: true,
             onConfirm: async () => {
                 setRejectingId(bookingId);
                 try {
-                    await bookingsApi.rejectBooking(bookingId);
-                    toast.success('Бронь отклонена');
+                    await bookingsApi.rejectBooking(bookingId, reason.trim() || undefined);
+                    toast.success('Бронь отклонена, клиент уведомлён');
                     useUserStore.getState().fetchAllBookings();
                 } catch (e: any) {
                     toast.error(e?.response?.data?.detail || 'Ошибка при отклонении');
@@ -270,13 +304,25 @@ export function AdminBookings() {
             <PromptModal
                 isOpen={priceModal.open}
                 onClose={() => setPriceModal(p => ({ ...p, open: false }))}
-                onSubmit={(val) => {
+                onSubmit={async (val) => {
+                    // Server-side persist (replaces legacy local-only mutation
+                    // that lost the change on reload). Server adjusts owner's
+                    // balance/sub by the delta if the row was paid.
                     const newPrice = parseFloat(val);
-                    if (!isNaN(newPrice) && newPrice >= 0) {
-                        setManualPrice(priceModal.bookingId, newPrice);
-                        toast.success(`Цена обновлена: ${newPrice} ₾`);
-                    } else {
+                    if (isNaN(newPrice) || newPrice < 0) {
                         toast.error('Некорректная цена');
+                        return;
+                    }
+                    if (Math.abs(newPrice - (priceModal.currentPrice || 0)) < 0.005) {
+                        toast.error('Новая цена совпадает со старой');
+                        return;
+                    }
+                    try {
+                        await bookingsApi.setPrice(priceModal.bookingId, newPrice);
+                        toast.success(`Цена обновлена: ${newPrice} ₾`);
+                        await fetchBookings?.();
+                    } catch (e: any) {
+                        toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
                     }
                 }}
                 title="Изменить цену"
@@ -385,87 +431,90 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-            {/* ── Header ── */}
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 14 : 20, marginBottom: narrow ? 16 : 32 }}>
+            {/* ── Compact header — title + inline KPIs on one row, then
+                action cluster on the right (+ Бронь · Список / Шахматка). */}
+            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 12 : 16, marginBottom: narrow ? 14 : 20 }}>
                 <p style={{ ...ghabMono, color: GH.ink30, marginBottom: narrow ? 6 : 8 }}>ADMIN · BOOKINGS</p>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
-                    <h1
-                        style={{
-                            fontSize: narrow ? 24 : 'clamp(28px, 3.5vw, 42px)',
-                            fontWeight: 800,
-                            letterSpacing: '-0.02em',
-                            lineHeight: 1.1,
-                            margin: 0,
-                        }}
-                    >
-                        Поток броней.
-                    </h1>
-                    {/* Add booking — Excel #70: was navigating to /checkout (dead route)
-                        which silently fell through to '/'. Send admins straight to the
-                        chessboard where they can create a booking by selecting a slot. */}
-                    <button onClick={() => navigate('/dashboard/bookings')}
-                        style={{
-                            padding: narrow ? '5px 10px' : '6px 16px',
-                            border: ghabHairline,
-                            cursor: 'pointer',
-                            fontFamily: GH_MONO,
-                            fontSize: narrow ? 9 : 10,
-                            letterSpacing: '0.14em',
-                            textTransform: 'uppercase',
-                            background: GH.ink,
-                            color: GH.paper,
-                            display: 'inline-flex', alignItems: 'center', gap: 6,
-                            marginRight: narrow ? 4 : 8,
-                        }}>
-                        + БРОНЬ
-                    </button>
-                    {/* View toggle */}
-                    <div style={{ display: 'flex' }}>
-                        {(['list', 'grid'] as const).map((m, i) => (
-                            <button key={m} onClick={() => setViewMode(m)}
-                                style={{
-                                    padding: narrow ? '5px 10px' : '6px 16px',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    fontFamily: GH_MONO,
-                                    fontSize: narrow ? 9 : 10,
-                                    letterSpacing: '0.14em',
-                                    textTransform: 'uppercase',
-                                    background: viewMode === m ? GH.ink : 'transparent',
-                                    color: viewMode === m ? GH.paper : GH.ink60,
-                                    borderTop: ghabHairline, borderBottom: ghabHairline,
-                                    borderLeft: ghabHairline,
-                                    borderRight: i === 1 ? ghabHairline : 'none',
-                                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                                }}>
-                                {m === 'list' ? <><List size={10} /> {narrow ? 'СПИСОК' : 'СПИСОК'}</> : <><LayoutGrid size={10} /> {narrow ? 'ШАХ.' : 'ШАХМАТКА'}</>}
-                            </button>
-                        ))}
+                    {/* LEFT: title + inline KPIs */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 16 : 28, flexWrap: 'wrap' }}>
+                        <h1
+                            style={{
+                                fontSize: narrow ? 22 : 'clamp(26px, 3vw, 36px)',
+                                fontWeight: 800,
+                                letterSpacing: '-0.02em',
+                                lineHeight: 1.1,
+                                margin: 0,
+                            }}
+                        >
+                            Поток броней.
+                        </h1>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 12 : 20 }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 22 : 28, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                                    {totalFmt}
+                                </span>
+                                <span style={{ ...ghabMono, color: GH.ink30 }}>ВСЕГО</span>
+                            </div>
+                            <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: GH.accent }}>
+                                    {String(activeCount).padStart(3, '0')}
+                                </span>
+                                <span style={{ ...ghabMono, color: GH.ink30 }}>АКТИВ</span>
+                            </div>
+                            {pendingCount > 0 && (
+                                <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: GH.danger }}>
+                                        {String(pendingCount).padStart(3, '0')}
+                                    </span>
+                                    <span style={{ ...ghabMono, color: GH.ink30 }}>ОЖИДАЕТ</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
-            </div>
 
-            {/* ── KPI strip ──
-                Tightened gap below: 32px was leaving the chessboard
-                visually disconnected from the page totals on a 1080p
-                screen. 12px keeps the hierarchy without the empty space. */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 18 : 32, marginBottom: narrow ? 12 : 14, flexWrap: 'wrap' }}>
-                <div>
-                    <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 4 }}>ВСЕГО</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
-                        {totalFmt}
-                    </span>
-                </div>
-                <div>
-                    <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 2 }}>АКТИВ</p>
-                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.accent }}>{String(activeCount).padStart(3, '0')}</span>
-                </div>
-                {pendingCount > 0 && (
-                    <div>
-                        <p style={{ ...ghabMono, color: GH.ink30, marginBottom: 2 }}>ОЖИДАЕТ</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger }}>{String(pendingCount).padStart(3, '0')}</span>
+                    {/* RIGHT: + Бронь right next to view toggle */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: narrow ? 6 : 8 }}>
+                        {/* Excel #70 — was /checkout (dead). Admin chessboard is the right entry. */}
+                        <button onClick={() => navigate('/dashboard/bookings')}
+                            style={{
+                                padding: narrow ? '5px 10px' : '6px 16px',
+                                border: ghabHairline,
+                                cursor: 'pointer',
+                                fontFamily: GH_MONO,
+                                fontSize: narrow ? 9 : 10,
+                                letterSpacing: '0.14em',
+                                textTransform: 'uppercase',
+                                background: GH.ink,
+                                color: GH.paper,
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                            }}>
+                            + БРОНЬ
+                        </button>
+                        <div style={{ display: 'flex' }}>
+                            {(['list', 'grid'] as const).map((m, i) => (
+                                <button key={m} onClick={() => setViewMode(m)}
+                                    style={{
+                                        padding: narrow ? '5px 10px' : '6px 16px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontFamily: GH_MONO,
+                                        fontSize: narrow ? 9 : 10,
+                                        letterSpacing: '0.14em',
+                                        textTransform: 'uppercase',
+                                        background: viewMode === m ? GH.ink : 'transparent',
+                                        color: viewMode === m ? GH.paper : GH.ink60,
+                                        borderTop: ghabHairline, borderBottom: ghabHairline,
+                                        borderLeft: ghabHairline,
+                                        borderRight: i === 1 ? ghabHairline : 'none',
+                                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                                    }}>
+                                    {m === 'list' ? <><List size={10} /> {narrow ? 'СПИСОК' : 'СПИСОК'}</> : <><LayoutGrid size={10} /> {narrow ? 'ШАХ.' : 'ШАХМАТКА'}</>}
+                                </button>
+                            ))}
+                        </div>
                     </div>
-                )}
+                </div>
             </div>
 
             {/* ── Grid view = chessboard ──

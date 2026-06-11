@@ -94,45 +94,57 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
     let totalMinutes = 0;
     let peakSurcharge = 0;
     let peakSlotCount = 0;
+    let nonPeakHours = 0;
+    let peakHoursCount = 0;
+    let nonPeakBase = 0;
+    let peakBase = 0;
 
-    const surchargePercent = PRICING_CONFIG.peak_hours.surcharge_percent;
+    // Aligned with backend pricing.py (admin policy 2026-05-13):
+    //   peak hours = base × hours + 5 ₾/h flat (BOTH base AND surcharge);
+    //   discount applies to non-peak portion only;
+    //   tiers are based on non-peak hours (peak hours don't bump tier).
+    const peakSurchargePerHour = PRICING_CONFIG.peak_hours.surcharge_per_hour_gel;
 
-    // 1. Base Price (with peak hours surcharge)
+    const accountSlot = (timeStr: string, rate: number) => {
+        if (isPeakTime(timeStr)) {
+            peakHoursCount += 0.5;
+            peakSlotCount++;
+            // Bug fix: peak base used to be skipped — admin reported
+            // 09:00–10:00 = 5 ₾ instead of 25 ₾. Peak hours include the
+            // standard rate AND the +5/h surcharge.
+            peakBase += rate / 2;
+        } else {
+            nonPeakHours += 0.5;
+            nonPeakBase += rate / 2;
+        }
+        totalMinutes += 30;
+    };
+
+    // 1. Base Price (separating peak vs non-peak)
     if (params.selectedSlots && params.selectedSlots.length > 0) {
         params.selectedSlots.forEach(slot => {
             const [rId, time] = slot.split('|');
             const rate = getBaseRate(rId, params.format);
-            const slotBase = rate / 2; // 30 min slot
-            if (isPeakTime(time)) {
-                const surcharge = slotBase * (surchargePercent / 100);
-                peakSurcharge += surcharge;
-                peakSlotCount++;
-                totalBasePrice += slotBase + surcharge;
-            } else {
-                totalBasePrice += slotBase;
-            }
-            totalMinutes += 30;
+            accountSlot(time, rate);
         });
     } else if (params.resourceId) {
         const rate = getBaseRate(params.resourceId, params.format);
-        totalMinutes = differenceInMinutes(params.endTime, params.startTime);
-        // Check each 30-min slot within the range for peak hours
+        totalMinutes = 0; // re-counted by accountSlot below
+        const minutes = differenceInMinutes(params.endTime, params.startTime);
         const startMins = params.startTime.getHours() * 60 + params.startTime.getMinutes();
-        for (let m = startMins; m < startMins + totalMinutes; m += 30) {
+        for (let m = startMins; m < startMins + minutes; m += 30) {
             const h = Math.floor(m / 60);
             const mm = m % 60;
             const timeStr = `${h.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
-            const slotBase = rate / 2;
-            if (isPeakTime(timeStr)) {
-                const surcharge = slotBase * (surchargePercent / 100);
-                peakSurcharge += surcharge;
-                peakSlotCount++;
-                totalBasePrice += slotBase + surcharge;
-            } else {
-                totalBasePrice += slotBase;
-            }
+            accountSlot(timeStr, rate);
         }
     }
+
+    // peakTotal = base for those hours + flat surcharge × hours
+    const peakSurchargeAmount = peakHoursCount * peakSurchargePerHour;
+    const peakTotal = peakBase + peakSurchargeAmount;
+    peakSurcharge = peakSurchargeAmount;
+    totalBasePrice = nonPeakBase + peakTotal;
 
     // 2. Extras
     const extrasPrice = params.extras.reduce((sum, extra) => sum + extra.price, 0);
@@ -145,37 +157,45 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
     const isSubscription = params.paymentMethod === 'subscription';
 
     if (!isSubscription) {
-        // Collect ALL discount candidates, apply the MAX one (no stacking)
+        // 2026-05-20: pricing_system='personal' means the admin and client
+        // negotiated a fixed rate. That rate is EXCLUSIVE — not a floor,
+        // not part of MAX. Heavy users with personal rate were silently
+        // losing it to weekly_progressive (e.g. Алла 25% → 50%, paid 30
+        // instead of agreed 45). Skip tier checks entirely when personal
+        // is set.
         const personalPercent = (params.pricingSystem === 'personal' && params.personalDiscountPercent && params.personalDiscountPercent > 0)
             ? params.personalDiscountPercent : 0;
 
-        const hours = totalMinutes / 60;
-        const totalWeeklyHours = (params.accumulatedWeeklyHours || 0) + hours;
+        // 2026-05-21: discount applies to the FULL hourly base (peak + non-peak),
+        // but NOT to the peak surcharge (+5 ₾/ч). Surcharge always charged in full.
+        const fullBase = nonPeakBase + peakBase;
+        if (personalPercent > 0) {
+            discountAmount = fullBase * (personalPercent / 100);
+            discountType = 'personal';
+        } else {
+            const hours = totalMinutes / 60;
+            const totalWeeklyHours = (params.accumulatedWeeklyHours || 0) + hours;
 
-        // Weekly Progressive
-        let weeklyPercent = 0;
-        const weeklyTiers = PRICING_CONFIG.discounts.weekly_progressive;
-        const matchWeekly = weeklyTiers.find(t => totalWeeklyHours >= t.min && totalWeeklyHours < t.max);
-        if (matchWeekly) weeklyPercent = matchWeekly.percent;
+            // Weekly Progressive — based on total hours including peak (this
+            // is per-week accumulation, not per-booking duration).
+            let weeklyPercent = 0;
+            const weeklyTiers = PRICING_CONFIG.discounts.weekly_progressive;
+            const matchWeekly = weeklyTiers.find(t => totalWeeklyHours >= t.min && totalWeeklyHours < t.max);
+            if (matchWeekly) weeklyPercent = matchWeekly.percent;
 
-        // Duration (Consecutive)
-        let durationPercent = 0;
-        const durationTiers = PRICING_CONFIG.discounts.duration;
-        const matchDuration = durationTiers.find(t => hours >= t.min && hours < t.max);
-        if (matchDuration) durationPercent = matchDuration.percent;
+            // Duration tier — based on NON-PEAK hours only (admin policy).
+            let durationPercent = 0;
+            const durationTiers = PRICING_CONFIG.discounts.duration;
+            const matchDuration = durationTiers.find(t => nonPeakHours >= t.min && nonPeakHours < t.max);
+            if (matchDuration) durationPercent = matchDuration.percent;
 
-        // Hot Booking: no discount, only admin approval (handled server-side)
-
-        // Apply BEST discount (max of all — no stacking)
-        const maxPercent = Math.max(personalPercent, weeklyPercent, durationPercent);
-
-        if (maxPercent > 0) {
-            discountAmount = totalBasePrice * (maxPercent / 100);
-
-            // Determine Type for UI Label
-            if (maxPercent === personalPercent && personalPercent > 0) discountType = 'personal';
-            else if (maxPercent === durationPercent) discountType = 'duration';
-            else if (maxPercent === weeklyPercent) discountType = 'loyalty';
+            // Apply BEST tier discount (max of weekly/duration) to FULL base.
+            const maxPercent = Math.max(weeklyPercent, durationPercent);
+            if (maxPercent > 0) {
+                discountAmount = fullBase * (maxPercent / 100);
+                if (maxPercent === durationPercent) discountType = 'duration';
+                else if (maxPercent === weeklyPercent) discountType = 'loyalty';
+            }
         }
     }
 

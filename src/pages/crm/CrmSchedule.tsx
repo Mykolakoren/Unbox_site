@@ -15,12 +15,21 @@ const LOCATION_OPTIONS = [
     ...LOCATIONS.filter(l => l.id !== 'neo_school').map(l => ({ value: l.id, label: l.name, icon: MapPin })),
 ];
 
-interface DaySchedule {
-    enabled: boolean;
+interface DayRange {
     start_time: string;
     end_time: string;
     location_id: string; // "__online__" or location id
 }
+
+interface DaySchedule {
+    enabled: boolean;
+    /** Multiple time windows per day. Backend already supports any number
+     *  of weekly ScheduleSlot rows for the same day_of_week, so e.g.
+     *  Monday can be 10:00–13:00 at Unbox One AND 16:00–20:00 online. */
+    ranges: DayRange[];
+}
+
+const DEFAULT_RANGE = (): DayRange => ({ start_time: '10:00', end_time: '18:00', location_id: 'unbox_uni' });
 
 // Date-specific override: either mark the day off (is_available=false)
 // or override the weekly schedule for that date (custom hours/location).
@@ -32,7 +41,7 @@ interface OverrideEntry {
     location_id: string;   // "__online__" or location id
 }
 
-const DEFAULT_DAY: DaySchedule = { enabled: false, start_time: '10:00', end_time: '18:00', location_id: 'unbox_uni' };
+const DEFAULT_DAY = (): DaySchedule => ({ enabled: false, ranges: [DEFAULT_RANGE()] });
 
 const todayISO = () => format(new Date(), 'yyyy-MM-dd');
 
@@ -49,21 +58,29 @@ export function CrmSchedule() {
         const [specialistId, setSpecialistId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [days, setDays] = useState<DaySchedule[]>(Array(7).fill(null).map(() => ({ ...DEFAULT_DAY })));
+    const [days, setDays] = useState<DaySchedule[]>(Array(7).fill(null).map(DEFAULT_DAY));
     const [overrides, setOverrides] = useState<OverrideEntry[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
 
-    // Find specialist ID for current user
+    // Find specialist ID for current user.
+    // The shared axios interceptor converts every API response from
+    // snake_case to camelCase before returning, so `Specialist.user_id`
+    // arrives here as `userId`. Earlier code matched on `s.user_id`
+    // and always missed — Mykola (owner, has anketa) saw the empty
+    // "Аккаунт не привязан к анкете" placeholder. We check both keys
+    // defensively in case any future call bypasses the interceptor.
     useEffect(() => {
         if (!currentUser) return;
+        const targetId = String(currentUser.id);
+        const matchUser = (s: any) => (s?.userId ?? s?.user_id) === targetId;
         api.get('/specialists/admin/all').then(r => {
-            const spec = r.data.find((s: any) => s.user_id === String(currentUser.id));
+            const spec = r.data.find(matchUser);
             if (spec) {
                 setSpecialistId(spec.id);
             } else {
                 // Try verified public list
                 api.get('/specialists/').then(r2 => {
-                    const spec2 = r2.data.find((s: any) => s.user_id === String(currentUser.id));
+                    const spec2 = r2.data.find(matchUser);
                     if (spec2) setSpecialistId(spec2.id);
                 }).catch(() => {});
             }
@@ -78,8 +95,10 @@ export function CrmSchedule() {
             specialistsApi.getSchedule(specialistId),
             specialistsApi.getAppointments(specialistId).catch(() => []),
         ]).then(([schedule, appts]) => {
-            // Map schedule to days + overrides
-            const newDays = Array(7).fill(null).map(() => ({ ...DEFAULT_DAY }));
+            // Group weekly slots by day_of_week so the same day can hold
+            // multiple ranges (e.g. Mon 10:00–13:00 + 16:00–20:00).
+            const newDays: DaySchedule[] = Array(7).fill(null).map(DEFAULT_DAY);
+            const haveAnyRange = Array(7).fill(false);
             const newOverrides: OverrideEntry[] = [];
             schedule.forEach(slot => {
                 if (slot.specific_date) {
@@ -91,14 +110,23 @@ export function CrmSchedule() {
                         location_id: slot.location_id || '__online__',
                     });
                 } else if (slot.day_of_week != null && slot.day_of_week >= 0 && slot.day_of_week <= 6) {
-                    newDays[slot.day_of_week] = {
-                        enabled: slot.is_available,
+                    const dow = slot.day_of_week;
+                    const range: DayRange = {
                         start_time: slot.start_time,
                         end_time: slot.end_time,
                         location_id: slot.location_id || '__online__',
                     };
+                    if (!haveAnyRange[dow]) {
+                        newDays[dow] = { enabled: slot.is_available, ranges: [range] };
+                        haveAnyRange[dow] = true;
+                    } else {
+                        newDays[dow].ranges.push(range);
+                        if (slot.is_available) newDays[dow].enabled = true;
+                    }
                 }
             });
+            // Sort each day's ranges by start_time so they read top-down chronologically.
+            newDays.forEach(d => d.ranges.sort((a, b) => a.start_time.localeCompare(b.start_time)));
             newOverrides.sort((a, b) => a.specific_date.localeCompare(b.specific_date));
             setDays(newDays);
             setOverrides(newOverrides);
@@ -112,14 +140,23 @@ export function CrmSchedule() {
         if (!specialistId) return;
         setSaving(true);
         try {
-            const weeklySlots: Omit<ScheduleSlot, 'id'>[] = days.map((d, i) => ({
-                day_of_week: i,
-                specific_date: null,
-                start_time: d.start_time,
-                end_time: d.end_time,
-                location_id: d.location_id === '__online__' ? null : d.location_id,
-                is_available: d.enabled,
-            }));
+            // Flatten each day's ranges into one ScheduleSlot row per range.
+            // Empty / invalid ranges (start >= end) are dropped silently —
+            // we'd rather discard a half-edited row than reject the whole save.
+            const weeklySlots: Omit<ScheduleSlot, 'id'>[] = [];
+            days.forEach((d, i) => {
+                d.ranges.forEach(r => {
+                    if (d.enabled && r.start_time >= r.end_time) return;
+                    weeklySlots.push({
+                        day_of_week: i,
+                        specific_date: null,
+                        start_time: r.start_time,
+                        end_time: r.end_time,
+                        location_id: r.location_id === '__online__' ? null : r.location_id,
+                        is_available: d.enabled,
+                    });
+                });
+            });
             // Deduplicate overrides by date (last one wins) and drop invalid ranges
             const byDate = new Map<string, OverrideEntry>();
             overrides.forEach(o => {
@@ -159,6 +196,34 @@ export function CrmSchedule() {
     const updateDay = (i: number, patch: Partial<DaySchedule>) => {
         setDays(prev => prev.map((d, idx) => idx === i ? { ...d, ...patch } : d));
     };
+    const updateRange = (dayIdx: number, rangeIdx: number, patch: Partial<DayRange>) => {
+        setDays(prev => prev.map((d, idx) => {
+            if (idx !== dayIdx) return d;
+            return { ...d, ranges: d.ranges.map((r, ri) => ri === rangeIdx ? { ...r, ...patch } : r) };
+        }));
+    };
+    const addRange = (dayIdx: number) => {
+        // Adding a range to a disabled day auto-enables it — without this
+        // the new row visually appears but doesn't get saved.
+        setDays(prev => prev.map((d, idx) => {
+            if (idx !== dayIdx) return d;
+            const last = d.ranges[d.ranges.length - 1];
+            const seed: DayRange = last
+                ? { ...last, start_time: bumpHour(last.end_time, 1), end_time: bumpHour(last.end_time, 2) }
+                : DEFAULT_RANGE();
+            return { ...d, enabled: true, ranges: [...d.ranges, seed] };
+        }));
+    };
+    const removeRange = (dayIdx: number, rangeIdx: number) => {
+        setDays(prev => prev.map((d, idx) => {
+            if (idx !== dayIdx) return d;
+            const filtered = d.ranges.filter((_, ri) => ri !== rangeIdx);
+            // Day always has at least one range row; if the user removed
+            // the last one we drop back to the default and disable the day.
+            if (filtered.length === 0) return { ...d, enabled: false, ranges: [DEFAULT_RANGE()] };
+            return { ...d, ranges: filtered };
+        }));
+    };
 
     const upcomingAppointments = useMemo(() => {
         const today = format(new Date(), 'yyyy-MM-dd');
@@ -177,6 +242,9 @@ export function CrmSchedule() {
                 specialistId={specialistId}
                 days={days}
                 updateDay={updateDay}
+                updateRange={updateRange}
+                addRange={addRange}
+                removeRange={removeRange}
                 overrides={overrides}
                 addOverride={addOverride}
                 updateOverride={updateOverride}
@@ -221,6 +289,9 @@ interface GridHouseCrmScheduleProps {
     specialistId: string | null;
     days: DaySchedule[];
     updateDay: (i: number, patch: Partial<DaySchedule>) => void;
+    updateRange: (dayIdx: number, rangeIdx: number, patch: Partial<DayRange>) => void;
+    addRange: (dayIdx: number) => void;
+    removeRange: (dayIdx: number, rangeIdx: number) => void;
     overrides: OverrideEntry[];
     addOverride: () => void;
     updateOverride: (i: number, patch: Partial<OverrideEntry>) => void;
@@ -236,6 +307,9 @@ function GridHouseCrmSchedule({
     specialistId,
     days,
     updateDay,
+    updateRange,
+    addRange,
+    removeRange,
     overrides,
     addOverride,
     updateOverride,
@@ -381,7 +455,7 @@ function GridHouseCrmSchedule({
                 <div
                     style={{
                         display: 'grid',
-                        gridTemplateColumns: '32px 60px 1.4fr 1fr 1fr',
+                        gridTemplateColumns: '32px 60px 1.4fr 2.4fr',
                         gap: 0,
                         ...GH_MONO_LABEL,
                         borderTop: GH_HAIRLINE,
@@ -392,13 +466,20 @@ function GridHouseCrmSchedule({
                     <div>#</div>
                     <div>Вкл</div>
                     <div>День</div>
-                    <div>Время</div>
-                    <div>Локация</div>
+                    <div>Время · локация</div>
                 </div>
 
                 {/* Rows */}
                 {days.map((day, i) => (
-                    <GridHouseDayRow key={i} index={i} day={day} onUpdate={(patch) => updateDay(i, patch)} />
+                    <GridHouseDayRow
+                        key={i}
+                        index={i}
+                        day={day}
+                        onUpdate={(patch) => updateDay(i, patch)}
+                        onUpdateRange={(rangeIdx, patch) => updateRange(i, rangeIdx, patch)}
+                        onAddRange={() => addRange(i)}
+                        onRemoveRange={(rangeIdx) => removeRange(i, rangeIdx)}
+                    />
                 ))}
             </section>
 
@@ -611,20 +692,27 @@ function GridHouseDayRow({
     index,
     day,
     onUpdate,
+    onUpdateRange,
+    onAddRange,
+    onRemoveRange,
 }: {
     index: number;
     day: DaySchedule;
     onUpdate: (patch: Partial<DaySchedule>) => void;
+    onUpdateRange: (rangeIdx: number, patch: Partial<DayRange>) => void;
+    onAddRange: () => void;
+    onRemoveRange: (rangeIdx: number) => void;
 }) {
     const enabled = day.enabled;
+    const hasMultiple = day.ranges.length > 1;
     return (
         <div
             style={{
                 display: 'grid',
-                gridTemplateColumns: '32px 60px 1.4fr 1fr 1fr',
+                gridTemplateColumns: '32px 60px 1.4fr 2.4fr',
                 gap: 0,
                 padding: '16px 0',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 borderBottom: GH_HAIRLINE,
                 opacity: enabled ? 1 : 0.6,
                 background: enabled ? 'transparent' : GH.ink5,
@@ -638,13 +726,14 @@ function GridHouseDayRow({
                     fontSize: 11,
                     color: GH.ink60,
                     fontVariantNumeric: 'tabular-nums',
+                    paddingTop: 6,
                 }}
             >
                 {String(index + 1).padStart(2, '0')}
             </div>
 
             {/* Toggle */}
-            <div>
+            <div style={{ paddingTop: 4 }}>
                 <button
                     onClick={() => onUpdate({ enabled: !enabled })}
                     style={{
@@ -679,87 +768,127 @@ function GridHouseDayRow({
                     fontSize: 16,
                     fontWeight: enabled ? 600 : 500,
                     color: GH.ink,
+                    paddingTop: 4,
                 }}
             >
                 {GH_DOW_LABELS[index]}
             </div>
 
-            {/* Time range */}
-            <div>
+            {/* Range list (time + location) — one row per range. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {enabled ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <input
-                            type="time"
-                            value={day.start_time}
-                            onChange={e => onUpdate({ start_time: e.target.value })}
-                            style={{
-                                fontFamily: GH_MONO,
-                                fontSize: 13,
-                                border: 'none',
-                                borderBottom: `1px solid ${GH.ink30}`,
-                                background: 'transparent',
-                                padding: '4px 2px',
-                                color: GH.ink,
-                                outline: 'none',
-                                width: 82,
-                                fontVariantNumeric: 'tabular-nums',
-                            }}
-                        />
-                        <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
-                        <input
-                            type="time"
-                            value={day.end_time}
-                            onChange={e => onUpdate({ end_time: e.target.value })}
-                            style={{
-                                fontFamily: GH_MONO,
-                                fontSize: 13,
-                                border: 'none',
-                                borderBottom: `1px solid ${GH.ink30}`,
-                                background: 'transparent',
-                                padding: '4px 2px',
-                                color: GH.ink,
-                                outline: 'none',
-                                width: 82,
-                                fontVariantNumeric: 'tabular-nums',
-                            }}
-                        />
-                    </div>
-                ) : (
-                    <div style={{ ...GH_MONO_LABEL }}>Выходной</div>
-                )}
-            </div>
-
-            {/* Location select */}
-            <div>
-                {enabled ? (
-                    <select
-                        value={day.location_id}
-                        onChange={e => onUpdate({ location_id: e.target.value })}
-                        style={{
-                            fontFamily: GH_MONO,
-                            fontSize: 12,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.1em',
-                            border: 'none',
-                            borderBottom: `1px solid ${GH.ink30}`,
-                            background: 'transparent',
-                            padding: '4px 2px',
-                            color: GH.ink,
-                            outline: 'none',
-                            width: '100%',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        {LOCATION_OPTIONS.map(opt => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    <>
+                        {day.ranges.map((range, ri) => (
+                            <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <input
+                                    type="time"
+                                    value={range.start_time}
+                                    onChange={e => onUpdateRange(ri, { start_time: e.target.value })}
+                                    style={GH_TIME_INPUT}
+                                />
+                                <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
+                                <input
+                                    type="time"
+                                    value={range.end_time}
+                                    onChange={e => onUpdateRange(ri, { end_time: e.target.value })}
+                                    style={GH_TIME_INPUT}
+                                />
+                                <select
+                                    value={range.location_id}
+                                    onChange={e => onUpdateRange(ri, { location_id: e.target.value })}
+                                    style={{
+                                        fontFamily: GH_MONO,
+                                        fontSize: 12,
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.1em',
+                                        border: 'none',
+                                        borderBottom: `1px solid ${GH.ink30}`,
+                                        background: 'transparent',
+                                        padding: '4px 2px',
+                                        color: GH.ink,
+                                        outline: 'none',
+                                        flex: 1,
+                                        minWidth: 120,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    {LOCATION_OPTIONS.map(opt => (
+                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
+                                {hasMultiple && (
+                                    <button
+                                        onClick={() => onRemoveRange(ri)}
+                                        title="Убрать этот диапазон"
+                                        style={{
+                                            width: 28,
+                                            height: 28,
+                                            border: 'none',
+                                            background: 'transparent',
+                                            color: GH.ink60,
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
+                            </div>
                         ))}
-                    </select>
+                        {/* Add-range button: separate row so it doesn't collide with locations. */}
+                        <button
+                            onClick={onAddRange}
+                            style={{
+                                alignSelf: 'flex-start',
+                                background: 'none',
+                                border: `1px dashed ${GH.ink30}`,
+                                color: GH.ink60,
+                                padding: '4px 10px',
+                                fontFamily: GH_MONO,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.18em',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                marginTop: 2,
+                            }}
+                        >
+                            <Plus size={11} /> Диапазон
+                        </button>
+                    </>
                 ) : (
-                    <div style={GH_MONO_LABEL}>—</div>
+                    <div style={{ ...GH_MONO_LABEL, paddingTop: 6 }}>Выходной</div>
                 )}
             </div>
         </div>
     );
+}
+
+const GH_TIME_INPUT: React.CSSProperties = {
+    fontFamily: GH_MONO,
+    fontSize: 13,
+    border: 'none',
+    borderBottom: `1px solid ${GH.ink30}`,
+    background: 'transparent',
+    padding: '4px 2px',
+    color: GH.ink,
+    outline: 'none',
+    width: 82,
+    fontVariantNumeric: 'tabular-nums',
+};
+
+/** Add `n` hours to an "HH:MM" string, clamped to 22:00 so we never seed
+ *  a new range past business close. Used by addRange() to suggest a sane
+ *  start for the next chunk after the previous one ends. */
+function bumpHour(t: string, n: number): string {
+    const [h, m] = t.split(':').map(Number);
+    const next = Math.min(22, Math.max(0, (isFinite(h) ? h : 10) + n));
+    return `${String(next).padStart(2, '0')}:${String(isFinite(m) ? m : 0).padStart(2, '0')}`;
 }
 
 // ── Single override row (Grid House) ──

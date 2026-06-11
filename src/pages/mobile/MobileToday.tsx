@@ -6,7 +6,6 @@ import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
-import { InstallBanner } from './InstallBanner';
 import { prepareRepeat } from './repeatBooking';
 import { priceLabel } from './priceLabel';
 import { NotificationsBell } from './NotificationsBell';
@@ -225,8 +224,6 @@ export function MobileToday() {
                 display: 'flex', flexDirection: 'column', gap: 20,
             }}>
                 <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
-
-                <InstallBanner />
 
                 {/* Header */}
                 <div style={{ ...sectionPad, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>

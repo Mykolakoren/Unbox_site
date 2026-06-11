@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { LOCATIONS, CABINET_SERVICES } from '../../utils/data';
 import { useBookingStore } from '../../store/bookingStore';
-import { MapPin, Users, Ruler, Settings, ImageOff } from 'lucide-react';
+import { MapPin, Users, Ruler, Settings, ImageOff, Power, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'sonner';
 import { ResourceModal } from '../../components/admin/ResourceModal';
-import type { Resource } from '../../types';
+import { resourcesApi } from '../../api/resources';
+import { locationsApi } from '../../api/locations';
+import type { Resource, Location } from '../../types';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 /* ── Grid House module-scope constants (prefix: ghc) ── */
@@ -27,8 +30,9 @@ const ghcH1: React.CSSProperties = {
 };
 
 export function AdminCabinets() {
-        const { resources, fetchResources } = useBookingStore();
+    const { resources, fetchResources, locations, fetchLocations } = useBookingStore();
     const [filterLocation, setFilterLocation] = useState<string | 'all'>('all');
+    const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
 
     // Edit State
     const [editingResource, setEditingResource] = useState<Resource | null>(null);
@@ -36,7 +40,8 @@ export function AdminCabinets() {
 
     useEffect(() => {
         fetchResources();
-    }, [fetchResources]);
+        fetchLocations();
+    }, [fetchResources, fetchLocations]);
 
     const filteredResources = filterLocation === 'all'
         ? resources
@@ -45,6 +50,57 @@ export function AdminCabinets() {
     const handleEdit = (resource: Resource) => {
         setEditingResource(resource);
         setIsModalOpen(true);
+    };
+
+    const handleToggleResource = async (r: Resource) => {
+        const next = !(r.isActive !== false);
+        setToggleBusyId(r.id);
+        try {
+            await resourcesApi.update(r.id, { isActive: next });
+            await fetchResources();
+            toast.success(next ? 'Кабинет включён' : 'Кабинет скрыт');
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось');
+        } finally {
+            setToggleBusyId(null);
+        }
+    };
+
+    // Owner 2026-05-27: toggling a location off also disables every cabinet
+    // inside it — that way the existing cabinet-isActive filter in the
+    // booking flow does the right thing without a separate location check
+    // in every place. Re-enabling a location does NOT auto-enable its
+    // cabinets — admins flip them back individually as needed (avoids
+    // unexpected unhide of a cabinet that was off for its own reason).
+    const handleToggleLocation = async (loc: Location) => {
+        const next = !(loc.isActive !== false);
+        const action = next ? 'включить' : 'выключить';
+        const childrenAffected = resources.filter(r => r.locationId === loc.id);
+        if (!confirm(
+            `${next ? 'Включить' : 'Выключить'} локацию "${loc.name}"?\n\n`
+            + (next
+                ? 'Кабинеты внутри останутся в своём текущем состоянии (включи нужные вручную).'
+                : `Все ${childrenAffected.length} кабинета в этой локации станут скрытыми.`),
+        )) return;
+        setToggleBusyId(loc.id);
+        try {
+            await locationsApi.update(loc.id, { isActive: next });
+            if (!next) {
+                // Cascade: disable every cabinet in this location.
+                for (const child of childrenAffected) {
+                    if (child.isActive !== false) {
+                        await resourcesApi.update(child.id, { isActive: false });
+                    }
+                }
+            }
+            await fetchLocations();
+            await fetchResources();
+            toast.success(next ? 'Локация включена' : 'Локация и её кабинеты скрыты');
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || `Не удалось ${action}`);
+        } finally {
+            setToggleBusyId(null);
+        }
     };
 
     return (
@@ -57,6 +113,11 @@ export function AdminCabinets() {
             editingResource={editingResource}
             isModalOpen={isModalOpen}
             setIsModalOpen={setIsModalOpen}
+            locations={locations.length > 0 ? locations : LOCATIONS}
+            onToggleResource={handleToggleResource}
+            onToggleLocation={handleToggleLocation}
+            toggleBusyId={toggleBusyId}
+            resources={resources}
         />
     );
 }
@@ -74,6 +135,11 @@ interface GridHouseCabinetsProps {
     editingResource: Resource | null;
     isModalOpen: boolean;
     setIsModalOpen: (v: boolean) => void;
+    locations: Location[];
+    onToggleResource: (r: Resource) => void;
+    onToggleLocation: (l: Location) => void;
+    toggleBusyId: string | null;
+    resources: Resource[];
 }
 
 function GridHouseCabinets({
@@ -84,6 +150,11 @@ function GridHouseCabinets({
     editingResource,
     isModalOpen,
     setIsModalOpen,
+    locations,
+    onToggleResource,
+    onToggleLocation,
+    toggleBusyId,
+    resources,
 }: GridHouseCabinetsProps) {
     const total = String(filteredResources.length).padStart(3, '0');
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -106,6 +177,87 @@ function GridHouseCabinets({
                 </div>
                 <div style={{ ...ghcMono, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
                     Показано кабинетов
+                </div>
+            </div>
+
+            {/* ── Locations management strip ──
+                Owner 2026-05-27: above the cabinet grid, list every location
+                with an on/off toggle. Switching a location off cascades
+                disable to every cabinet inside it (the booking UI honours
+                cabinet.isActive). Re-enabling a location does NOT auto-
+                re-enable cabinets — admins flip the ones they want back. */}
+            <div style={{ marginBottom: narrow ? 20 : 32, paddingBottom: narrow ? 16 : 24, borderBottom: ghcHairline }}>
+                <div style={{ ...ghcMono, marginBottom: 12 }}>Раздел · Локации</div>
+                <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
+                    {locations.map(loc => {
+                        const childCount = resources.filter(r => r.locationId === loc.id).length;
+                        const childActive = resources.filter(r => r.locationId === loc.id && r.isActive !== false).length;
+                        const isActive = loc.isActive !== false;
+                        const busy = toggleBusyId === loc.id;
+                        return (
+                            <div
+                                key={loc.id}
+                                style={{
+                                    border: ghcHairline,
+                                    padding: '14px 16px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 12,
+                                    opacity: isActive ? 1 : 0.6,
+                                }}
+                            >
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontFamily: GH_SANS, fontWeight: 700, fontSize: 15, color: GH.ink }}>
+                                        {loc.name}
+                                        {!isActive && (
+                                            <span style={{
+                                                fontFamily: GH_MONO,
+                                                fontSize: 9,
+                                                letterSpacing: '0.14em',
+                                                textTransform: 'uppercase',
+                                                color: GH.paper,
+                                                background: GH.danger,
+                                                padding: '2px 6px',
+                                                marginLeft: 8,
+                                                verticalAlign: 'middle',
+                                            }}>
+                                                Скрыта
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div style={{ ...ghcMono, marginTop: 4 }}>
+                                        {childActive} / {childCount} активных кабинетов
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => onToggleLocation(loc)}
+                                    disabled={busy}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                        padding: '8px 14px',
+                                        background: isActive ? GH.ink5 : GH.danger,
+                                        color: isActive ? GH.ink : GH.paper,
+                                        border: 'none',
+                                        fontFamily: GH_MONO,
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        letterSpacing: '0.14em',
+                                        textTransform: 'uppercase',
+                                        cursor: busy ? 'wait' : 'pointer',
+                                        opacity: busy ? 0.6 : 1,
+                                    }}
+                                    title={isActive
+                                        ? 'Скрыть локацию и все её кабинеты'
+                                        : 'Показать локацию (кабинеты включай вручную)'}
+                                >
+                                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Power size={12} />}
+                                    {isActive ? 'Вкл' : 'Выкл'}
+                                </button>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -350,26 +502,56 @@ function GridHouseCabinets({
                                                 {resource.hourlyRate}₾/ч
                                             </span>
                                         </div>
-                                        <button
-                                            onClick={() => handleEdit(resource)}
-                                            style={{
-                                                fontFamily: GH_MONO,
-                                                fontSize: 10,
-                                                fontWeight: 600,
-                                                letterSpacing: '0.14em',
-                                                textTransform: 'uppercase',
-                                                padding: '6px 10px',
-                                                background: 'transparent',
-                                                color: GH.ink,
-                                                border: `1px solid ${GH.ink}`,
-                                                cursor: 'pointer',
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: 5,
-                                            }}
-                                        >
-                                            <Settings size={11} /> Править
-                                        </button>
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                            <button
+                                                onClick={() => onToggleResource(resource)}
+                                                disabled={toggleBusyId === resource.id}
+                                                style={{
+                                                    fontFamily: GH_MONO,
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                    letterSpacing: '0.14em',
+                                                    textTransform: 'uppercase',
+                                                    padding: '6px 10px',
+                                                    background: resource.isActive === false ? GH.danger : GH.ink5,
+                                                    color: resource.isActive === false ? GH.paper : GH.ink,
+                                                    border: 'none',
+                                                    cursor: toggleBusyId === resource.id ? 'wait' : 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: 5,
+                                                    opacity: toggleBusyId === resource.id ? 0.6 : 1,
+                                                }}
+                                                title={resource.isActive === false
+                                                    ? 'Показать кабинет'
+                                                    : 'Скрыть кабинет от клиентов'}
+                                            >
+                                                {toggleBusyId === resource.id
+                                                    ? <Loader2 size={11} className="animate-spin" />
+                                                    : <Power size={11} />}
+                                                {resource.isActive === false ? 'Выкл' : 'Вкл'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleEdit(resource)}
+                                                style={{
+                                                    fontFamily: GH_MONO,
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                    letterSpacing: '0.14em',
+                                                    textTransform: 'uppercase',
+                                                    padding: '6px 10px',
+                                                    background: 'transparent',
+                                                    color: GH.ink,
+                                                    border: `1px solid ${GH.ink}`,
+                                                    cursor: 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: 5,
+                                                }}
+                                            >
+                                                <Settings size={11} /> Править
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

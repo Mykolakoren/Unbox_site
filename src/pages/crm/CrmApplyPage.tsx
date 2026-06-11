@@ -392,24 +392,10 @@ function GHFooter() {
             style={{
                 borderTop: `2px solid ${GH.ink}`,
                 padding: '16px 32px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
                 ...GH_MONO_LABEL,
             }}
         >
             <span>UNBOX · 2026</span>
-            <a
-                href={`${window.location.pathname}?design=off`}
-                style={{
-                    color: GH.ink,
-                    textDecoration: 'none',
-                    borderBottom: `1px solid ${GH.ink}`,
-                    paddingBottom: 2,
-                }}
-            >
-                ← Вернуться к обычному дизайну
-            </a>
         </footer>
     );
 }

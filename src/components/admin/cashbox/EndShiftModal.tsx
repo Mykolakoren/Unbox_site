@@ -5,9 +5,14 @@ import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import { cashboxApi } from '../../../api/cashbox';
 
+const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'] as const;
+
 interface Props {
     isOpen: boolean;
     onClose: () => void;
+    /** Pre-selected branch when the modal is opened from a branch-scoped view.
+     *  The admin still has to confirm/change it via the picker — accidental
+     *  closes against the wrong branch were trashing the cash math. */
     branch?: string;
     /** Excel #54 — if the admin bypassed the pre-close checklist with a
      *  justification, that reason is passed here and appended to the shift
@@ -22,31 +27,45 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
     const [saving, setSaving] = useState(false);
     const [branchCash, setBranchCash] = useState<number | null>(null);
     const [loadingBranchCash, setLoadingBranchCash] = useState(false);
+    // Branch is now selectable inside the modal — explicitly REQUIRED before
+    // the close button enables. We seed from the `branch` prop (admin opened
+    // from a branch-scoped pane) but still let them flip if they realise it's
+    // wrong. Empty string = "not selected yet".
+    const [selectedBranch, setSelectedBranch] = useState<string>('');
     // Excel #13 — backend breakdown so the admin can see how `expected` is
     // made up (starting + cash_in − cash_out) and spot backdated txs.
     const [preview, setPreview] = useState<Awaited<ReturnType<typeof cashboxApi.previewCloseShift>> | null>(null);
 
+    // Reset everything when the modal opens. Branch comes from the prop the
+    // first time around — admin can change it via the picker.
     useEffect(() => {
         if (!isOpen) return;
         setActualBalance('');
         setNotes('');
         setPreview(null);
-        // Preview runs for every open; branch filter applied at backend.
-        cashboxApi.previewCloseShift(branch || undefined)
-            .then(setPreview)
-            .catch(() => setPreview(null));
-        if (branch) {
-            setLoadingBranchCash(true);
-            setBranchCash(null);
-            cashboxApi.getBalance(branch)
-                .then(b => setBranchCash(b.cash))
-                .catch(() => setBranchCash(null))
-                .finally(() => setLoadingBranchCash(false));
-        } else {
+        setSelectedBranch(branch || '');
+    }, [isOpen, branch]);
+
+    // Re-fetch preview + branch cash whenever the selected branch changes.
+    // Without a branch we don't fetch — admin has to pick one first.
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!selectedBranch) {
+            setPreview(null);
             setBranchCash(null);
             setLoadingBranchCash(false);
+            return;
         }
-    }, [isOpen, branch]);
+        cashboxApi.previewCloseShift(selectedBranch)
+            .then(setPreview)
+            .catch(() => setPreview(null));
+        setLoadingBranchCash(true);
+        setBranchCash(null);
+        cashboxApi.getBalance(selectedBranch)
+            .then(b => setBranchCash(b.cash))
+            .catch(() => setBranchCash(null))
+            .finally(() => setLoadingBranchCash(false));
+    }, [isOpen, selectedBranch]);
 
     if (!isOpen) return null;
 
@@ -58,7 +77,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
     // admin who typed the lifetime number (because the till physically
     // showed it) ended up with a phantom -82.5 ₾ "discrepancy" because the
     // backend was comparing against the algorithm number instead.
-    const lifetimeBalance = Number(branch ? (branchCash ?? 0) : (balances?.cash ?? 0));
+    const lifetimeBalance = Number(selectedBranch ? (branchCash ?? 0) : (balances?.cash ?? 0));
     // Drive the headline number from the preview — same number the backend
     // will use to compute discrepancy on submit. Falls back to lifetime
     // until preview loads so the modal doesn't render an empty box.
@@ -73,6 +92,13 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        // Branch is required — picking the wrong branch silently re-anchors
+        // an entire location's cash math, so we never let admins close
+        // without an explicit choice.
+        if (!selectedBranch) {
+            toast.error('Выберите филиал');
+            return;
+        }
         if (!hasAmount) {
             toast.error('Введите сумму в кассе');
             return;
@@ -87,7 +113,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
             const report = await endShift({
                 actual_balance: actualValue,
                 notes: finalNotes,
-                branch: branch || undefined,
+                branch: selectedBranch,
             });
             const disc = Number(report.discrepancy ?? 0);
             if (Math.abs(disc) < 0.01) {
@@ -139,11 +165,44 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         </div>
                     </div>
                 )}
-                <p className="text-sm text-unbox-grey mb-5">
-                    {branch
-                        ? <>Филиал: <span className="font-semibold text-unbox-dark">{branch}</span> · пересчитайте наличные в кассе</>
-                        : 'Общая касса · пересчитайте наличные во всех кассах'}
+                <p className="text-sm text-unbox-grey mb-3">
+                    Выберите филиал — кассу которого вы закрываете. От этого зависит «ожидаемый остаток».
                 </p>
+
+                {/* Branch picker — REQUIRED. Closing without an explicit branch
+                    would mix all locations' cash and silently re-anchor the
+                    next shift's expected. Picker uses chip-style buttons so
+                    the active branch is unambiguous. */}
+                <div className="mb-4">
+                    <div className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+                        Филиал <span className="text-red-500">*</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {BRANCHES.map(b => {
+                            const active = selectedBranch === b;
+                            return (
+                                <button
+                                    key={b}
+                                    type="button"
+                                    onClick={() => setSelectedBranch(b)}
+                                    className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                                        active
+                                            ? 'bg-unbox-dark text-white border-unbox-dark'
+                                            : 'bg-white text-unbox-dark border-gray-200 hover:border-unbox-dark/40'
+                                    }`}
+                                >
+                                    {b}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {!selectedBranch && (
+                        <div className="mt-2 text-xs text-amber-700 flex items-start gap-1.5">
+                            <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                            <span>Закрытие без указания филиала отключено — выберите выше.</span>
+                        </div>
+                    )}
+                </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Expected cash balance — uses the SAME number the backend
@@ -154,12 +213,14 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         admins then typed verbatim → phantom discrepancy. */}
                     <div className="bg-gray-50 rounded-xl px-4 py-3">
                         <div className="text-xs text-gray-500 mb-0.5">
-                            Ожидаемый остаток наличных {branch && <span className="text-unbox-grey/70">· {branch}</span>}
+                            Ожидаемый остаток наличных {selectedBranch && <span className="text-unbox-grey/70">· {selectedBranch}</span>}
                         </div>
                         <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
-                            {loadingBranchCash || !preview
-                                ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
-                                : `${expectedBalance.toFixed(2)} ₾`}
+                            {!selectedBranch
+                                ? <span className="text-gray-400 text-base font-medium">Выберите филиал ↑</span>
+                                : loadingBranchCash || !preview
+                                    ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
+                                    : `${expectedBalance.toFixed(2)} ₾`}
                         </div>
                         {/* Drift warning: if total cash flow ever ≠ algorithm's
                             running expected, surface it so the admin knows
@@ -258,7 +319,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         </button>
                         <button
                             type="submit"
-                            disabled={saving || !hasAmount}
+                            disabled={saving || !hasAmount || !selectedBranch}
                             className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors disabled:opacity-60"
                         >
                             {saving ? 'Сохранение...' : 'Закрыть смену'}

@@ -44,6 +44,23 @@ class BookingBase(SQLModel):
     # Recurring booking group
     recurring_group_id: Optional[str] = None
 
+    # ── 24h-before-start billing (replaces upfront-charge-on-create) ──
+    # `pending` — money/hours not yet deducted, will be at T-24h
+    # `paid`    — deduction happened (legacy rows + post-charge state)
+    # `waived`  — admin cancelled the charge with a reason; user keeps the
+    #             slot but is not billed. NULL on legacy rows = `paid`.
+    payment_status: Optional[str] = Field(default=None, index=True)
+    charged_at: Optional[datetime] = None
+    charge_amount: Optional[float] = None  # GEL actually deducted at T-24h (or hours snapshot for subscription)
+
+    # Admin waiver audit trail — populated on POST /bookings/{id}/waive.
+    # Reason is required (UI enforces) so the timeline + TG notification
+    # always carry a human explanation.
+    waiver_reason: Optional[str] = None
+    waived_at: Optional[datetime] = None
+    waived_by: Optional[UUID] = Field(default=None, foreign_key="user.id")
+
+
 class Booking(BookingBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: str = Field(index=True) # Linking to User.email for now (legacy compatibility), or User.id?

@@ -106,6 +106,41 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /**
+     * Admin: waive the charge on a booking. If the row was `paid`, money/hours
+     * are refunded; if `pending`, the cron simply skips it. Reason is required.
+     * Generates a TG admin alert + notifies the booking owner.
+     */
+    waiveCharge: async (id: string, reason: string): Promise<{ ok: boolean; scenario: string; payment_status: string }> => {
+        const response = await api.post(`/billing/bookings/${id}/waive`, { reason });
+        return response.data;
+    },
+
+    /**
+     * Switch a booking between individual and group format.
+     * Server re-quotes via PricingService and adjusts the user's balance/sub
+     * by the delta (only if booking was already `paid`); for `pending` rows
+     * the new price is just stamped and the cron charges the right amount.
+     */
+    changeFormat: async (id: string, newFormat: 'individual' | 'group'): Promise<any> => {
+        const response = await api.patch(`/bookings/${id}/format`, { new_format: newFormat });
+        return mapToFrontend(response.data);
+    },
+
+    /**
+     * Admin: override booking price. The previous setManualPrice flow only
+     * mutated the local Zustand store and lost the change on reload.
+     * Server now persists the new price + adjusts the owner's balance
+     * (or subscription hours) by the delta when the row is already paid.
+     */
+    setPrice: async (id: string, newPrice: number, reason?: string): Promise<any> => {
+        const response = await api.patch(`/bookings/${id}/price`, {
+            new_price: newPrice,
+            reason: reason || null,
+        });
+        return mapToFrontend(response.data);
+    },
+
     checkAvailability: async (slots: Array<{
         resourceId: string;
         date: string;       // "YYYY-MM-DD"
@@ -120,9 +155,33 @@ export const bookingsApi = {
         newDate: string;        // "YYYY-MM-DD"
         newStartTime: string;   // "HH:MM"
         newResourceId?: string;
+        newDuration?: number;   // minutes, multiple of 30 — for /m/find reschedule
     }) => {
         const response = await api.patch<any>(`/bookings/${id}/reschedule`, data);
         return mapToFrontend(response.data);
+    },
+
+    /**
+     * "This and following" reschedule for a booking that lives in a
+     * recurring series. The anchor booking takes the full date/time/
+     * resource change; every later sibling keeps its own date but
+     * adopts the new start_time and (if changed) new resource.
+     *
+     * Returns the anchor plus a count of how many siblings were
+     * propagated and a list of skipped ones (slot conflicts).
+     */
+    rescheduleBookingSeries: async (id: string, data: {
+        newDate: string;
+        newStartTime: string;
+        newResourceId?: string;
+    }): Promise<{
+        ok: boolean;
+        anchor: any;
+        propagated: number;
+        skipped: Array<{ id: string; date: string; reason: string }>;
+    }> => {
+        const response = await api.patch<any>(`/bookings/${id}/reschedule-series`, data);
+        return response.data;
     },
 
     linkCrmClient: async (bookingId: string, crmClientId: string | null) => {
@@ -155,8 +214,25 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
-    rejectBooking: async (bookingId: string): Promise<BookingHistoryItem> => {
-        const response = await api.post<any>(`/bookings/${bookingId}/reject`);
+    /** Сократить бронь на N минут (кратно 30), отрезать с начала или с конца.
+     *  Минимальная итоговая длительность — 60 мин. Возврат пропорциональной
+     *  доли цены / часов абонемента происходит автоматически на сервере. */
+    shortenBooking: async (
+        bookingId: string,
+        opts: { removeMinutes: number; side?: 'start' | 'end' }
+    ): Promise<BookingHistoryItem> => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/shorten`, {
+            removeMinutes: opts.removeMinutes,
+            side: opts.side || 'end',
+        });
+        return mapToFrontend(response.data);
+    },
+
+    rejectBooking: async (bookingId: string, reason?: string): Promise<BookingHistoryItem> => {
+        // Reason — admin-supplied text shown to the client in their TG/in-app
+        // notification. Optional — backend falls back to «Слот недоступен»
+        // if missing.
+        const response = await api.post<any>(`/bookings/${bookingId}/reject`, reason ? { reason } : null);
         return mapToFrontend(response.data);
     },
 
@@ -208,7 +284,7 @@ export const bookingsApi = {
         return response.data;
     },
 
-    getRecurringGroups: async (): Promise<Array<{
+    getRecurringGroups: async (opts?: { scope?: 'mine' }): Promise<Array<{
         recurringGroupId: string;
         resourceId: string;
         locationId: string;
@@ -219,14 +295,36 @@ export const bookingsApi = {
         futureCount: number;
         totalCount: number;
         nextDate: string | null;
+        lastDate: string | null;
         pattern: 'weekly' | 'biweekly' | 'monthly';
     }>> => {
-        const response = await api.get('/bookings/recurring-groups');
+        // scope=mine forces user-only filtering even for admins.
+        // The CRM page passes it so an admin viewing /crm/bookings doesn't
+        // see every specialist's series — that view belongs in /admin/*.
+        const response = await api.get('/bookings/recurring-groups', {
+            params: opts?.scope ? { scope: opts.scope } : undefined,
+        });
         return response.data;
     },
 
-    cancelRecurringSeries: async (groupId: string): Promise<{ ok: boolean; cancelled: number }> => {
-        const response = await api.delete(`/bookings/recurring/${groupId}`);
+    /**
+     * Cancel a recurring series.
+     *
+     * Pass `fromBookingId` for "this and following" semantics — the
+     * anchor booking and every sibling on the same calendar day or
+     * later get cancelled, earlier siblings (incl. ones in the past)
+     * are preserved. This matches Google Calendar.
+     *
+     * Omit it to fall back to legacy "every future booking" scope —
+     * kept for callers that don't yet know the anchor.
+     */
+    cancelRecurringSeries: async (
+        groupId: string,
+        fromBookingId?: string,
+    ): Promise<{ ok: boolean; cancelled: number }> => {
+        const response = await api.delete(`/bookings/recurring/${groupId}`, {
+            params: fromBookingId ? { from_booking_id: fromBookingId } : undefined,
+        });
         return response.data;
     },
 
@@ -240,6 +338,14 @@ export const bookingsApi = {
         const response = await api.post(`/bookings/recurring/${groupId}/extend`, {
             add_occurrences: addOccurrences,
         });
+        return response.data;
+    },
+
+    /** Acknowledge the "series ending soon" Telegram reminder so further
+     *  pings (3 → 2 → 1) are suppressed. Used by the "ОК, завершится в
+     *  срок" button on the series deep-link banner. */
+    dismissSeriesEndReminder: async (groupId: string): Promise<{ ok: boolean }> => {
+        const response = await api.post(`/bookings/recurring/${groupId}/dismiss-end-reminder`);
         return response.data;
     },
 };

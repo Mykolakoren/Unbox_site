@@ -106,7 +106,13 @@ def send_reminders_endpoint(
     secret: Optional[str] = None,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None) or settings.TELEGRAM_BOT_TOKEN
+    # Only a dedicated TELEGRAM_REMINDER_SECRET is accepted — no bot-token
+    # fallback (the bot token leaks elsewhere and must never gate cron).
+    # Fail closed if it's unset.
+    # TODO: move the secret from `?secret=` to an Authorization header so it
+    # stops landing in nginx/access logs (kept as a query param for now to
+    # avoid breaking existing cron jobs).
+    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None)
     if not expected:
         raise HTTPException(status_code=503, detail="Telegram reminders not configured")
     if secret != expected:
@@ -305,7 +311,11 @@ def daily_summary_endpoint(
     secret: Optional[str] = None,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None) or settings.TELEGRAM_BOT_TOKEN
+    # Only a dedicated TELEGRAM_REMINDER_SECRET is accepted — no bot-token
+    # fallback. Fail closed if it's unset.
+    # TODO: move the secret to an Authorization header (kept as `?secret=`
+    # for now to avoid breaking existing cron jobs; it leaks via access logs).
+    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None)
     if not expected:
         raise HTTPException(status_code=503, detail="Telegram not configured")
     if secret != expected:
@@ -462,7 +472,11 @@ def weekly_cashback_endpoint(
     dry_run: bool = False,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None) or settings.TELEGRAM_BOT_TOKEN
+    # Only a dedicated TELEGRAM_REMINDER_SECRET is accepted — no bot-token
+    # fallback. Fail closed if it's unset.
+    # TODO: move the secret to an Authorization header (kept as `?secret=`
+    # for now to avoid breaking existing cron jobs; it leaks via access logs).
+    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None)
     if not expected:
         raise HTTPException(status_code=503, detail="Telegram not configured")
     if secret != expected:
@@ -652,7 +666,12 @@ async def telegram_webhook(
 ) -> dict[str, Any]:
     """Receive updates from Telegram."""
     expected = settings.TELEGRAM_WEBHOOK_SECRET
-    if expected and x_telegram_bot_api_secret_token != expected:
+    # Fail closed: with no configured secret the webhook would otherwise be
+    # fully public. Reject every request until the secret is set in env.
+    if not expected:
+        logger.warning("[tg:webhook] TELEGRAM_WEBHOOK_SECRET unset — rejecting")
+        raise HTTPException(status_code=503, detail="webhook secret not configured")
+    if x_telegram_bot_api_secret_token != expected:
         logger.warning("[tg:webhook] bad secret token — rejecting")
         raise HTTPException(status_code=403, detail="forbidden")
 

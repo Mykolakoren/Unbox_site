@@ -57,6 +57,25 @@ export const usersApi = {
         return response.data;
     },
 
+    /** Self-service: set or clear the 'I'm on vacation until X' marker.
+     *  Pass null to clear. Stored under user.crm_data.vacation_until. */
+    setVacation: async (untilDate: string | null) => {
+        const response = await api.post<User>('/users/me/vacation', { until: untilDate });
+        return response.data;
+    },
+
+    /** Admin: set User.balance to an exact value with a mandatory reason.
+     *  Backend logs the delta as a cashbox_transactions row of type
+     *  `adjustment` and records a timeline event. Used by the Excel-
+     *  reconciliation flow (Egor 2026-05-27). */
+    correctBalance: async (id: string, newBalance: number, reason: string) => {
+        const response = await api.post<User>(`/users/${id}/balance-correction`, {
+            new_balance: newBalance,
+            reason,
+        });
+        return response.data;
+    },
+
     /** Admin-only email change. Cascades to Booking/Waitlist/Cashbox refs
      *  that store email as a soft foreign key. Returns the updated user. */
     changeEmail: async (id: string, newEmail: string) => {

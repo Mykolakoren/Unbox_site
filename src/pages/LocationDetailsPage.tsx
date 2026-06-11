@@ -50,11 +50,28 @@ export function LocationDetailsPage() {
     // Location resources (active only)
     const locationResources = resources.filter(r => r.locationId === id && r.isActive !== false);
 
-    // Gallery photos — location image + all resource photos
+    // Gallery photos — location image + common-area shots + all resource
+    // photos. Common-area folder (`/img/cabinets/{one,uni}/common/`) was
+    // previously not surfaced in the UI; owner asked 2026-05-26 to include
+    // those panoramas (reception, corridor, kitchen, etc.) so visitors get
+    // a feel for the whole space, not just individual rooms.
     const locationPhotos = location.image ? [location.image] : [];
+    // Folder slug → number of `01.jpg…NN.jpg` photos shipped under
+    // /public/img/cabinets/<slug>/common. Keep counts here so we don't
+    // have to `fetch` directory listings client-side.
+    const COMMON_PHOTO_FOLDERS: Record<string, { slug: string; count: number }> = {
+        unbox_one: { slug: 'one', count: 16 },
+        unbox_uni: { slug: 'uni', count: 38 },
+    };
+    const commonCfg = COMMON_PHOTO_FOLDERS[location.id];
+    const commonPhotos = commonCfg
+        ? Array.from({ length: commonCfg.count }, (_, i) =>
+            `/img/cabinets/${commonCfg.slug}/common/${String(i + 1).padStart(2, '0')}.jpg`,
+        )
+        : [];
     const allResourcePhotos = locationResources.flatMap(r => r.photos || []);
-    const allPhotos = [...locationPhotos, ...allResourcePhotos].length > 0
-        ? [...locationPhotos, ...allResourcePhotos]
+    const allPhotos = [...locationPhotos, ...commonPhotos, ...allResourcePhotos].length > 0
+        ? [...locationPhotos, ...commonPhotos, ...allResourcePhotos]
         : ['/img/offices/miniature_cab_1_pal.jpg', '/img/offices/cabinet_5_ira.jpg', '/img/offices/cabinet_7_liza.webp'];
     // Show up to 5 for the hero grid
     const heroPhotos = allPhotos.slice(0, 5);
@@ -239,7 +256,17 @@ function GridHouseLocationDetails({
                                     }}
                                 >
                                     <div>
-                                        <div style={{ fontWeight: 600, fontSize: 15 }}>{resource.name}</div>
+                                        <Link
+                                            to={`/cabinet/${resource.id}`}
+                                            style={{
+                                                fontWeight: 600, fontSize: 15,
+                                                color: GH.ink, textDecoration: 'none',
+                                                borderBottom: `1px solid ${GH.ink10}`,
+                                                display: 'inline-block',
+                                            }}
+                                        >
+                                            {resource.name} →
+                                        </Link>
                                         <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
                                             <span style={{ ...ghldMono, color: GH.ink30, fontSize: 9 }}>
                                                 {resource.type === 'capsule' ? 'КАПСУЛА' : 'КАБИНЕТ'}

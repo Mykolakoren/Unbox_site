@@ -43,7 +43,74 @@ export interface AppointmentCreate {
     notes?: string;
 }
 
+// ─── Self-service application flow ──────────────────────────────────────────
+// Used by /become-specialist. Returns the user's own profile (or 404) and
+// lets them submit/resubmit. Admin then reviews and toggles is_verified.
+
+export interface SpecialistApplicationPayload {
+    firstName: string;
+    lastName: string;
+    photoUrl?: string;
+    tagline?: string;
+    bio?: string;
+    specializations: string[];
+    formats: string[];
+    basePriceGel: number;
+    category?: string;
+}
+
+export interface SpecialistProfile {
+    id: string;
+    userId: string | null;
+    firstName: string;
+    lastName: string;
+    photoUrl: string | null;
+    tagline: string;
+    bio: string;
+    specializations: string[];
+    formats: string[];
+    basePriceGel: number;
+    category: string | null;
+    isVerified: boolean;
+    applicationStatus: 'pending' | 'approved' | 'rejected' | null;
+    sortOrder: number;
+}
+
 export const specialistsApi = {
+    // ── Self-service application ──
+    // Returns null on 404 (no profile yet) instead of throwing — the page
+    // distinguishes "draft mode" vs "edit mode" by null-ness, which is
+    // cleaner than try/catch threading through React.
+    getMine: async (): Promise<SpecialistProfile | null> => {
+        try {
+            const r = await api.get('/specialists/me');
+            return r.data;
+        } catch (e: any) {
+            if (e?.response?.status === 404) return null;
+            throw e;
+        }
+    },
+
+    apply: async (payload: SpecialistApplicationPayload): Promise<SpecialistProfile> => {
+        const r = await api.post('/specialists/apply', payload);
+        return r.data;
+    },
+
+    adminApprove: async (specialistId: string): Promise<SpecialistProfile> => {
+        const r = await api.post(`/specialists/admin/${specialistId}/approve`);
+        return r.data;
+    },
+
+    adminReject: async (specialistId: string): Promise<SpecialistProfile> => {
+        const r = await api.post(`/specialists/admin/${specialistId}/reject`);
+        return r.data;
+    },
+
+    adminList: async (): Promise<SpecialistProfile[]> => {
+        const r = await api.get('/specialists/admin/all');
+        return r.data;
+    },
+
     // Schedule
     getSchedule: async (specialistId: string): Promise<ScheduleSlot[]> => {
         const r = await api.get(`/specialists/${specialistId}/schedule`);

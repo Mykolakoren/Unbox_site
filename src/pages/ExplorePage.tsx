@@ -92,12 +92,61 @@ export function ExplorePage() {
 
     // ── Grid House design flag — full-page rollback-safe variant ──
     return (
-
+        <>
             <GridHouseLanding
                 visitorMode={visitorMode}
                 onModeSelect={handleModeSelect}
                 onModeReset={resetMode}
             />
+            <MobileBookFab visitorMode={visitorMode} />
+        </>
         );
+}
+
+// ── Mobile floating "+ Забронировать" button ────────────────────────────────
+// Mobile users almost always come here to book a room quickly. The current
+// landing has a long path: WelcomeGate → ClientLanding → scroll/find CTA.
+// FAB short-circuits that — visible on every variant, fixed bottom-right,
+// one tap → /checkout. Hidden on the welcome gate (no mode picked yet) and
+// on desktop (≥768px) where the regular CTAs are easy to find.
+function MobileBookFab({ visitorMode }: { visitorMode: 'client' | 'specialist' | null }) {
+    const navigate = useNavigate();
+    const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+    useEffect(() => {
+        const onResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+    if (!isMobile) return null;
+    if (visitorMode === null) return null; // gate first — don't crowd the choice
+    return (
+        <button
+            onClick={() => navigate('/checkout')}
+            aria-label="Забронировать кабинет"
+            style={{
+                position: 'fixed',
+                right: 16,
+                bottom: 'calc(16px + env(safe-area-inset-bottom))',
+                zIndex: 50,
+                background: '#1f2a37',
+                color: '#fff',
+                padding: '14px 20px',
+                borderRadius: 999,
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 14,
+                fontWeight: 700,
+                boxShadow: '0 6px 20px rgba(31,42,55,0.35), 0 1px 3px rgba(0,0,0,0.2)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                letterSpacing: '0.01em',
+            }}
+        >
+            <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>+</span>
+            Забронировать
+        </button>
+    );
 }
 

@@ -257,21 +257,16 @@ async def telegram_login(
     user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
 
     if not user:
-        placeholder_email = f"{telegram_id}@telegram.unbox"
-        first_name = body.get("first_name", "") or ""
-        last_name = body.get("last_name", "") or ""
-
-        user = User(
-            email=placeholder_email,
-            name=f"{first_name} {last_name}".strip(),
-            telegram_id=telegram_id,
-            avatar_url=body.get("photo_url"),
-            hashed_password="",
-            is_admin=False,
+        # Mirror the rule from the GET callback: no auto-create. The login-via-
+        # TG path only works for accounts that previously linked TG from the
+        # profile (one account, three auth methods — never spin up ghosts).
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Telegram не привязан ни к одному аккаунту. "
+                "Войдите через Google или email, затем привяжите Telegram в профиле."
+            ),
         )
-        session.add(user)
-        session.commit()
-        session.refresh(user)
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
@@ -462,27 +457,41 @@ def telegram_login_callback(
         raise HTTPException(status_code=400, detail="Invalid Telegram Hash.")
         
     telegram_id = str(params.get("id"))
-    
+
     # Check user by Telegram ID
     user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
-    
+
     if not user:
-        placeholder_email = f"{telegram_id}@telegram.unbox"
-        first_name = params.get("first_name", "")
-        last_name = params.get("last_name", "")
-        
-        user = User(
-            email=placeholder_email,
-            name=f"{first_name} {last_name}".strip(),
-            telegram_id=telegram_id,
-            avatar_url=params.get("photo_url"),
-            hashed_password="",
-            is_admin=False
-        )
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-        _create_welcome_bonus(session, user)
+        # Owner 2026-05-25: the "Login via Telegram" widget previously
+        # auto-created a placeholder user when no telegram_id match was
+        # found. This duplicated real users who had logged in via
+        # Google/email but never linked TG (`<tg_id>@telegram.unbox`
+        # ghosts that needed manual merging). New rule: one account, three
+        # auth methods (Google / email-password / Telegram). TG can ONLY
+        # log in if previously linked from the profile page.
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(status_code=403, content=(
+            "<!DOCTYPE html><html><head>"
+            "<meta charset='utf-8'>"
+            "<title>Telegram не привязан</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<style>"
+            "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;"
+            "background:#FAFAF7;color:#0F0F10;display:flex;align-items:center;"
+            "justify-content:center;height:100vh;margin:0;text-align:center;padding:24px}"
+            ".card{max-width:380px}"
+            "h1{font-size:22px;margin:0 0 12px;font-weight:700}"
+            "p{font-size:15px;color:#444;line-height:1.5;margin:0 0 16px}"
+            ".cta{display:inline-block;background:#0E0E0E;color:#fff;"
+            "padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600}"
+            "</style></head><body>"
+            "<div class='card'>"
+            "<h1>Telegram ещё не привязан</h1>"
+            "<p>Войдите через Google или email и привяжите Telegram в профиле — "
+            "после этого вход через Telegram заработает на одном аккаунте.</p>"
+            "<a class='cta' href='/login?tg_unlinked=1'>Перейти на вход</a>"
+            "</div></body></html>"
+        ))
 
     user_id = user.id
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

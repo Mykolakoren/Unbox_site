@@ -19,6 +19,10 @@ export interface CrmClient {
     notesText?: string;
     createdAt: string;
     updatedAt: string;
+    /** Owning specialist's display name. Populated for admin/owner callers
+     * when the list spans multiple specialists, so the booking-flow dropdown
+     * can disambiguate "Maria → Yana" vs "Maria → Galina". */
+    specialistName?: string;
 }
 
 export interface CrmClientCreate {

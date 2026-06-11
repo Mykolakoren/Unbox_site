@@ -41,6 +41,12 @@ export function ConfirmationStep() {
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
     const navigate = useNavigate();
     const shouldResetOnUnmount = useRef(false);
+    // Synchronous re-entry guard. setIsSubmitting is async state, so a slow
+    // network lets the button path AND the programmatic re-fire (alternative
+    // cabinet) both pass the `isSubmitting` check before React re-renders —
+    // firing two POSTs. This ref flips synchronously at the top of
+    // handleConfirm and clears in finally, blocking the double-submit.
+    const submittingRef = useRef(false);
 
     const [activeBonuses, setActiveBonuses] = useState<Bonus[]>([]);
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
@@ -119,8 +125,20 @@ export function ConfirmationStep() {
         };
     }, []);
 
-    // Pre-check availability on mount — before showing payment form.
-    // cartDetails is computed synchronously via useMemo, so it's ready at first render.
+    // Stable identity of the slots being checked — drives the availability
+    // pre-check below. Derived from the raw store inputs (not cartDetails,
+    // which is declared later) so it's available as an effect dep. Changes
+    // when the user swaps cabinets or picks a different time.
+    const cartSignature = useMemo(
+        () => `${format(state.date, 'yyyy-MM-dd')}::${[...state.selectedSlots].sort().join(',')}`,
+        [state.date, state.selectedSlots]
+    );
+
+    // Pre-check availability — before showing payment form. Re-runs on slot
+    // identity change (cartSignature) so an alternative-cabinet swap is
+    // re-validated instead of showing the stale conflict screen.
+    // cartDetails is computed synchronously via useMemo, so it's ready by the
+    // time this effect's body runs.
     useEffect(() => {
         if (cartDetails.length === 0) {
             setIsCheckingAvailability(false);
@@ -134,6 +152,13 @@ export function ConfirmationStep() {
             duration: item.duration,
         }));
 
+        // Clear any stale conflict from a previous slot/cabinet before the
+        // fresh check resolves — otherwise swapping to an alternative cabinet
+        // would briefly (or permanently, if the new check passes) keep the old
+        // "время занято" guard screen up.
+        setAvailabilityError(null);
+        setIsCheckingAvailability(true);
+
         bookingsApi.checkAvailability(slots)
             .then(results => {
                 const conflict = results.find(r => !r.available);
@@ -146,7 +171,13 @@ export function ConfirmationStep() {
                 console.warn('Availability pre-check failed (non-blocking):', err);
             })
             .finally(() => setIsCheckingAvailability(false));
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps — run once on mount
+        // Re-run whenever the slot identity changes (e.g. user swaps to an
+        // alternative cabinet via the conflict dialog → resourceId/cartDetails
+        // change). cartSignature is a stable string of resourceId|startTime|
+        // duration for each cart item plus the date, so the effect only re-fires
+        // on a real slot change, not on every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [cartSignature]);
 
     // Determine effective user for pricing and logic
     const effectiveUser = state.bookingForUser
@@ -293,6 +324,11 @@ export function ConfirmationStep() {
 
 
     const handleConfirm = async () => {
+        // Synchronous re-entry guard — bail before any await if a submit is
+        // already in flight (covers button double-tap + the alternative-cabinet
+        // re-fire racing the async isSubmitting state).
+        if (submittingRef.current) return;
+        submittingRef.current = true;
         setIsSubmitting(true);
         try {
             // Validate guest form if no authenticated user
@@ -336,18 +372,24 @@ export function ConfirmationStep() {
                     });
                     const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
                     toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
+                    // Mark success BEFORE the refetch — the series IS created.
+                    setConfirmed(true);
+                    shouldResetOnUnmount.current = true;
                     // Refresh BOTH the user (balance) AND the bookings store —
                     // earlier we only refetched the user, so when the next
                     // chessboard render relied on a cached `bookings` array
                     // (e.g. when the destination route was already mounted),
                     // none of the new occurrences showed up. The chessboard's
                     // own useEffect on mount only fires on first mount.
+                    //
+                    // CRITICAL: swallow refetch errors. A failed refetch must
+                    // NEVER bubble to the outer catch, which would render a
+                    // "время занято"/conflict screen even though the series was
+                    // created — the user would then retry and double-book.
                     await Promise.all([
                         fetchCurrentUser(),
                         useUserStore.getState().fetchBookings(),
-                    ]);
-                    setConfirmed(true);
-                    shouldResetOnUnmount.current = true;
+                    ]).catch(() => {});
                     setTimeout(() => {
                         navigate(getMyBookingsPath(currentUser), { state: { targetDate: new Date(state.date).toISOString() } });
                     }, 2000);
@@ -547,18 +589,22 @@ export function ConfirmationStep() {
                         newStartTime: newSlot.startTime,
                         newResourceId: newSlot.resourceId,
                     });
+                    // Mark success BEFORE the refetch — the move IS persisted.
+                    setConfirmed(true);
+                    shouldResetOnUnmount.current = true;
                     // Refetch both — user balance may have changed (price
                     // diff) and bookings array still holds the pre-move row.
+                    // Swallow refetch errors so a failed GET can't bubble to
+                    // the outer catch and masquerade as a booking conflict.
                     await Promise.all([
                         fetchCurrentUser(),
                         useUserStore.getState().fetchBookings(),
-                    ]);
+                    ]).catch(() => {});
                 } else {
                     await addBookings(newBookings);
+                    setConfirmed(true);
+                    shouldResetOnUnmount.current = true;
                 }
-
-                setConfirmed(true);
-                shouldResetOnUnmount.current = true;
 
                 // Check if booking is pending approval (hot booking) by checking store
                 const latestBookings = useUserStore.getState().bookings;
@@ -646,6 +692,7 @@ export function ConfirmationStep() {
                 toast.error(message);
             }
         } finally {
+            submittingRef.current = false;
             setIsSubmitting(false);
         }
     };
@@ -911,6 +958,9 @@ export function ConfirmationStep() {
                         {/* Option: Bonus */}
                         {totalBonusHours > 0 && (
                             <div
+                                role="button"
+                                tabIndex={0}
+                                aria-disabled={!isBonusEligible}
                                 className={`
                                     relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                     ${state.paymentMethod === 'bonus'
@@ -919,6 +969,12 @@ export function ConfirmationStep() {
                                     ${!isBonusEligible ? 'opacity-50 pointer-events-none' : ''}
                                 `}
                                 onClick={() => isBonusEligible && state.setPaymentMethod('bonus')}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        if (isBonusEligible) state.setPaymentMethod('bonus');
+                                    }
+                                }}
                             >
                                 <div className="flex justify-between items-center">
                                     <div className="flex items-center gap-2">
@@ -939,6 +995,9 @@ export function ConfirmationStep() {
 
                         {/* Option: Subscription */}
                         <div
+                            role="button"
+                            tabIndex={0}
+                            aria-disabled={!isSubscriptionEligible}
                             className={`
                                 relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                 ${state.paymentMethod === 'subscription'
@@ -947,6 +1006,12 @@ export function ConfirmationStep() {
                                 ${!isSubscriptionEligible ? 'opacity-50 pointer-events-none' : ''}
                             `}
                             onClick={() => isSubscriptionEligible && state.setPaymentMethod('subscription')}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    if (isSubscriptionEligible) state.setPaymentMethod('subscription');
+                                }
+                            }}
                         >
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
@@ -969,6 +1034,8 @@ export function ConfirmationStep() {
 
                         {/* Option: Balance/Deposit */}
                         <div
+                            role="button"
+                            tabIndex={0}
                             className={`
                                 relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
                                 ${state.paymentMethod === 'balance'
@@ -976,6 +1043,12 @@ export function ConfirmationStep() {
                                     : 'border-gray-300 hover:border-gray-400 bg-white'}
                             `}
                             onClick={() => state.setPaymentMethod('balance')}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    state.setPaymentMethod('balance');
+                                }
+                            }}
                         >
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">

@@ -17,7 +17,20 @@ def create_access_token(subject: Union[str, Any], expires_delta: Optional[timede
     return encoded_jwt
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """Constant-shape password verifier — never raises.
+
+    OAuth-only accounts (Google / Telegram) are stored with hashed_password=""
+    or NULL — passlib's argon2 verifier sees that as "not an argon2 hash"
+    and throws UnknownHashError, which bubbled up as 500 on POST /auth/login
+    (instead of a clean "wrong password"). Same defense for legacy or
+    corrupted hashes from old imports. Always return False on any anomaly.
+    """
+    if not hashed_password:
+        return False
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)

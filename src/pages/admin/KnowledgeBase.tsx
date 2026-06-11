@@ -190,16 +190,16 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             ['Индивидуальный · Капсула', '10 GEL'],
             ['Групповой · Кабинет', '35 GEL'],
         ];
-        const weeklyTiers = [
-            ['до 5 часов', '0%'],
-            ['5 – 11 часов', '10%'],
-            ['11 – 16 часов', '25%'],
-            ['16+ часов', '50%'],
+        // 2026-05-26: weekly_progressive disabled in backend — KB block
+        // repurposed for the peak-hour surcharge that actually applies.
+        const peakWindows = [
+            ['09:00 – 10:00', '+5 ₾/ч'],
+            ['20:00 – 22:00', '+5 ₾/ч'],
         ];
         const durationTiers = [
             ['2 – 2:59 часа подряд', '10%'],
-            ['3 – 3:59 часа подряд', '15%'],
-            ['4+ часа подряд', '20%'],
+            ['3 – 4:59 часа подряд', '15%'],
+            ['5+ часов подряд', '20%'],
         ];
         return (
             <div>
@@ -214,16 +214,19 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                         ))}
                     </div>
                     <div style={boxHair}>
-                        <div style={subhead}>Еженедельная прогрессивная скидка</div>
+                        <div style={subhead}>Вечерний тариф (пиковые часы)</div>
                         <p style={{ ...para, fontSize: 12, color: GH.ink60, marginTop: 0, marginBottom: 10 }}>
-                            Чем больше часов за неделю, тем выше процент:
+                            Часы повышенного спроса — небольшая надбавка к часу аренды:
                         </p>
-                        {weeklyTiers.map(([label, disc], i) => (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < weeklyTiers.length - 1 ? `1px solid ${GH.ink10}` : 'none' }}>
+                        {peakWindows.map(([label, disc], i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < peakWindows.length - 1 ? `1px solid ${GH.ink10}` : 'none' }}>
                                 <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>{label}</span>
                                 <strong style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>{disc}</strong>
                             </div>
                         ))}
+                        <p style={{ ...para, fontSize: 11, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic' }}>
+                            Все остальные часы — по стандартному тарифу.
+                        </p>
                     </div>
                 </div>
 

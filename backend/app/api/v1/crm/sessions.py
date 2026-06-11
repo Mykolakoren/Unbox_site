@@ -1,7 +1,7 @@
 """CRM Sessions — therapy session CRUD + quick-pay."""
 import logging
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlmodel import Session, select
 from app.api import deps
@@ -48,7 +48,9 @@ def auto_complete_sessions(
 ):
     """Auto-mark PLANNED sessions in the past as COMPLETED."""
     uid = str(current_user.id)
-    now = datetime.now()
+    # TherapySession.date is UTC-naive; compare against utcnow(), not the
+    # server-local now(), or the "past" filter is off by the UTC offset.
+    now = datetime.utcnow()
     stmt = select(TherapySession).where(
         TherapySession.specialist_id == uid,
         TherapySession.status == "PLANNED",
@@ -76,7 +78,74 @@ def create_session(
     if not client or client.specialist_id != str(current_user.id):
         raise HTTPException(404, "Client not found")
 
+    # Frontend sends Tbilisi wall-clock as a naive ISO string (e.g.
+    # "2026-05-22T11:00:00" = 11:00 Tbilisi). The DB convention is
+    # UTC-naive (matches what GCal sync produces). Subtract 4h here so
+    # every TherapySession.date row carries the same meaning, and
+    # parseUTC + formatBatumi on the frontend renders correctly.
     create_data = data.model_dump(exclude={"push_to_calendar"})
+    if "date" in create_data and create_data["date"] is not None:
+        from app.services.crm_calendar import tbilisi_naive_to_utc_naive
+        create_data["date"] = tbilisi_naive_to_utc_naive(create_data["date"])
+
+    # ── Dedup check ────────────────────────────────────────────────────
+    # Mirrors the recurring-booking fix from 885ca64: if a session for this
+    # client+specialist already exists on the same UTC day at the exact
+    # same hour:minute and is not cancelled — REUSE it instead of inserting
+    # a duplicate. This catches the common case where:
+    #   1) sync_from_calendar already imported the session from GCal
+    #   2) specialist then books a cabinet via CRM chessboard with the
+    #      client linked → handleBooked calls POST /crm/sessions
+    # Without this, both rows survive (Марат / Александр scenario).
+    target_dt = create_data.get("date")
+    if target_dt is not None:
+        from datetime import timedelta as _td
+        day_start = target_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + _td(days=1)
+        same_day = session.exec(
+            select(TherapySession)
+            .where(TherapySession.client_id == data.client_id)
+            .where(TherapySession.specialist_id == str(current_user.id))
+            .where(TherapySession.date >= day_start)
+            .where(TherapySession.date < day_end)
+            .where(TherapySession.status.not_in(("CANCELLED_CLIENT", "CANCELLED_THERAPIST")))  # type: ignore
+        ).all()
+        target_h = (target_dt.hour, target_dt.minute)
+        existing_match = next(
+            (s for s in same_day if (s.date.hour, s.date.minute) == target_h),
+            None,
+        )
+        if existing_match is not None:
+            # Adopt incoming fields onto the existing row where they add
+            # info (booking_id, price, notes etc.) — same shape as the
+            # recurring path. Don't blindly overwrite — only fill nulls.
+            ex = existing_match
+            if create_data.get("booking_id") and not ex.booking_id:
+                ex.booking_id = create_data["booking_id"]
+                ex.is_booked = True
+            elif create_data.get("is_booked") and not ex.is_booked:
+                ex.is_booked = True
+            if create_data.get("price") is not None and ex.price is None:
+                ex.price = create_data["price"]
+            if create_data.get("notes") and not ex.notes:
+                ex.notes = create_data["notes"]
+            if create_data.get("duration_minutes") and ex.duration_minutes != create_data["duration_minutes"]:
+                # Trust the incoming duration if it differs (specialist explicitly
+                # picked it in the booking modal).
+                ex.duration_minutes = create_data["duration_minutes"]
+            if create_data.get("recurring_group_id") and not ex.recurring_group_id:
+                ex.recurring_group_id = create_data["recurring_group_id"]
+            ex.updated_at = datetime.now()
+            session.add(ex)
+            session.commit()
+            session.refresh(ex)
+            logger.info(
+                f"[create_session] dedup: reused existing session {ex.id} for "
+                f"client={data.client_id} at {target_dt.isoformat()} "
+                f"(adopted booking_id/price/notes from incoming payload)"
+            )
+            return ex
+
     therapy_session = TherapySession(
         **create_data,
         specialist_id=str(current_user.id),
@@ -97,11 +166,14 @@ def create_session(
         if calendar_id:
             try:
                 from app.services.crm_calendar import create_calendar_event
+                # Use the already-normalised UTC-naive date (matches the
+                # row we'll store) — _dt_to_rfc3339 will append "Z" and
+                # GCal will render in the calendar's TZ correctly.
                 gcal_id = create_calendar_event(
                     calendar_id=calendar_id,
                     client_name=client.name,
                     alias_code=client.alias_code,
-                    session_date=data.date,
+                    session_date=therapy_session.date,
                     duration_minutes=data.duration_minutes,
                     notes=data.notes,
                 )
@@ -130,6 +202,78 @@ def update_session(
         raise HTTPException(404, "Session not found")
 
     update_data = data.model_dump(exclude_unset=True)
+    # Same Tbilisi-naive → UTC-naive normalisation as create_session.
+    if "date" in update_data and update_data["date"] is not None:
+        from app.services.crm_calendar import tbilisi_naive_to_utc_naive
+        update_data["date"] = tbilisi_naive_to_utc_naive(update_data["date"])
+
+    # ── Auto-sync linked cabinet booking ─────────────────────────────────
+    # Owner asked 2026-05-27: when a session is moved in CRM, the
+    # attached cabinet booking must follow so they stay in lock-step.
+    # CRITICAL: we check availability for the new slot BEFORE committing
+    # the session change — if the cabinet is busy at the new time, we
+    # raise an HTTPException and roll back. Better to fail loudly than
+    # leave the user with a session that points at an old booking time.
+    booking_date_changed = (
+        ts.booking_id
+        and "date" in update_data
+        and update_data["date"] is not None
+        and update_data["date"] != ts.date
+    )
+    if booking_date_changed:
+        from app.models.booking import Booking as _Booking
+        from app.api.v1.bookings.routes import check_availability as _check_avail
+
+        bk = session.get(_Booking, ts.booking_id)
+        if bk and bk.status == "confirmed":
+            # Convert new UTC-naive session time → Tbilisi wall-clock for booking
+            new_session_utc = update_data["date"]
+            new_session_tb = new_session_utc + timedelta(hours=4)
+            new_booking_date = new_session_tb.replace(
+                hour=0, minute=0, second=0, microsecond=0,
+            )
+            new_start_time = new_session_tb.strftime("%H:%M")
+
+            same_slot = (
+                bk.date.date() == new_booking_date.date()
+                and bk.start_time == new_start_time
+            )
+            if not same_slot:
+                # Check availability — must NOT count this booking itself.
+                available, conflict_msg = _check_avail(
+                    session=session,
+                    resource_id=bk.resource_id,
+                    date=new_booking_date,
+                    start_time=new_start_time,
+                    duration=bk.duration,
+                    exclude_booking_id=str(bk.id),
+                    requester_user_uuid=bk.user_uuid,
+                    lock_rows=True,
+                )
+                if not available:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Не могу перенести сессию на {new_start_time}: "
+                            f"в это время кабинет {bk.resource_id} занят. "
+                            f"Освободите слот или отвяжите бронь от сессии. "
+                            f"({conflict_msg})"
+                        ),
+                    )
+                logger.info(
+                    "[autosync] session %s moved → booking %s %s %s → %s %s",
+                    ts.id, bk.id, bk.date, bk.start_time,
+                    new_booking_date, new_start_time,
+                )
+                bk.date = new_booking_date
+                bk.start_time = new_start_time
+                # Clearing gcal_event_id forces the next CRM-calendar /
+                # gcal sync pass to regenerate the event at the new time
+                # instead of leaving a stale event on the cabinet calendar.
+                bk.gcal_event_id = None
+                bk.updated_at = datetime.now()
+                session.add(bk)
+
     for key, value in update_data.items():
         setattr(ts, key, value)
     ts.updated_at = datetime.now()
@@ -324,7 +468,12 @@ def accept_merge_suggestion(
         b = session.get(Booking, _UUID(bid))
     except Exception:
         b = None
-    if not b or b.user_id != current_user.email:
+    # Ownership: совпадает email ИЛИ user_uuid — без uuid-варианта спец
+    # с переименованной почтой получал бы 404 на свои же брони.
+    if not b or (
+        b.user_id != current_user.email
+        and b.user_uuid != current_user.id
+    ):
         raise HTTPException(404, "Booking not found")
 
     ts.booking_id = str(b.id)
@@ -497,7 +646,9 @@ def mark_all_sessions_paid(
         raise HTTPException(404, "Client not found")
 
     uid = str(current_user.id)
-    now = datetime.now()
+    # TherapySession.date is UTC-naive; the "don't touch future sessions"
+    # guard must compare against utcnow(), not the server-local now().
+    now = datetime.utcnow()
     unpaid = session.exec(
         select(TherapySession).where(
             TherapySession.specialist_id == uid,

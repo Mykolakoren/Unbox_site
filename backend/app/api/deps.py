@@ -89,6 +89,30 @@ def require_admin(
         )
     return current_user
 
+def require_can_book(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Cabinet booking is gated to specialists + admins.
+
+    Why: clients without an approved specialist profile shouldn't be able to
+    rent rooms — the platform is for therapists running their own practice,
+    not a generic coworking. Plain `client` role accounts go through
+    `/become-specialist` first; until that's approved by an admin, every
+    booking endpoint refuses with a 403 + actionable message.
+    """
+    role = (current_user.role or "").lower()
+    if role in ("specialist", "owner", "senior_admin", "admin"):
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Бронирование кабинетов доступно только верифицированным специалистам. "
+            "Подайте заявку на /become-specialist — после одобрения админом "
+            "появится возможность бронировать."
+        ),
+    )
+
+
 def require_specialist(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:

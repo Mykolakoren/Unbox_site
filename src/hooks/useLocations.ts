@@ -3,10 +3,12 @@ import { locationsApi } from '../api/locations';
 import { useBookingStore } from '../store/bookingStore';
 import { useEffect } from 'react';
 
-// Desired display order: Unbox Uni → Unbox One → Neo School
+// Desired display order: Unbox One → Unbox Uni → Neo School.
+// 2026-05-06: One ставим первым — это «первый» центр (открыт раньше),
+// логика «1 = One, 2 = Uni» совпадает с названиями.
 const LOCATION_ORDER: Record<string, number> = {
-    unbox_uni: 0,
-    unbox_one: 1,
+    unbox_one: 0,
+    unbox_uni: 1,
     neo_school: 2,
 };
 

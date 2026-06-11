@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # summary). Create the group, add @Unbox_Booking_G_Bot as admin,
     # /chatid in the group → paste the number here (e.g. -1001234567890).
     TELEGRAM_ADMIN_CHAT_ID: Optional[str] = None
+    # Owner-only chat (Микола). Daily summary posts here instead of the
+    # busy admin group so the founder gets the once-a-day money/hours
+    # roll-up without the per-event noise. If unset, daily summary
+    # falls back to TELEGRAM_ADMIN_CHAT_ID (legacy behaviour).
+    TELEGRAM_OWNER_CHAT_ID: Optional[str] = None
 
     # First Superuser (for auto-creation on deploy) — MUST be overridden via
     # env vars in production. The literal "CHANGE_ME_ON_FIRST_DEPLOY" default
