@@ -3029,6 +3029,324 @@ def reschedule_booking(
     return booking
 
 
+# ─── Partial cancellation ("trim") — cut a sub-range out of a booking ─────────
+
+class TrimRequest(PydanticBaseModel):
+    remove_from: str   # "HH:MM" inclusive start of the part to REMOVE
+    remove_to: str     # "HH:MM" exclusive end of the part to REMOVE
+
+
+@router.post("/{booking_id}/trim")
+def trim_booking(
+    booking_id: str,
+    data: TrimRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Remove a middle (or edge) sub-range from a booking, leaving 1–2
+    remnants (each ≥60 min), repricing each and refunding the removed
+    portion.
+
+    A booking is one row (start_time "HH:MM" + duration minutes). Trimming
+    13:00–15:00 out of a 12:00–18:00 booking yields a left remnant 12–13
+    (kept on the original row) and a right remnant 15–18 (new row).
+    Trimming an edge (e.g. 12:00–13:00 off the front) leaves a single
+    remnant, which the original row becomes — no new row is created.
+
+    Guards mirror cancel_booking exactly (ownership, past-protection, 24h
+    late gate). Money is refunded to the booking OWNER, not current_user.
+    """
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    is_owner = _check_ownership(booking, current_user)
+    is_admin = current_user.role in ADMIN_ROLES
+    if not is_owner and not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if booking.status == "cancelled":
+        raise HTTPException(status_code=400, detail="Booking is already cancelled")
+
+    if booking.status == "pending_approval":
+        raise HTTPException(
+            status_code=400,
+            detail="Нельзя редактировать бронь, ожидающую подтверждения",
+        )
+
+    # ── Past booking protection (same message as cancel) ──
+    if _is_past(booking) and current_user.role not in ("senior_admin", "owner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Past bookings cannot be modified. Only senior admin or owner can delete them.",
+        )
+
+    # ── 24h late gate (same message as cancel_booking) ──
+    hours_until = _booking_hours_until_start(booking)
+    if hours_until < 24 and not _is_past(booking) and not is_admin:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Отмена брони невозможна менее чем за 24 часа до начала "
+                f"(до сессии осталось {hours_until:.1f} ч). "
+                f"Можно поставить бронь на переаренду или связаться с администратором."
+            ),
+        )
+
+    # ── Parse minutes ──
+    def _tm(t: str) -> int:
+        h, m = str(t).split(":")[:2]
+        return int(h) * 60 + int(m)
+
+    def _mt(mn: int) -> str:
+        return f"{mn // 60:02d}:{mn % 60:02d}"
+
+    try:
+        bStart = _tm(booking.start_time)
+        cFrom = _tm(data.remove_from)
+        cTo = _tm(data.remove_to)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Некорректный диапазон")
+    bEnd = bStart + booking.duration
+
+    if cFrom >= cTo:
+        raise HTTPException(status_code=400, detail="Некорректный диапазон")
+    if cFrom < bStart or cTo > bEnd:
+        raise HTTPException(status_code=400, detail="Диапазон вне брони")
+
+    left = cFrom - bStart
+    right = bEnd - cTo
+
+    # ── ≥1h rule on each remaining remnant ──
+    if (0 < left < 60) or (0 < right < 60):
+        raise HTTPException(
+            status_code=400,
+            detail="Каждая оставшаяся часть брони должна быть не короче 1 часа",
+        )
+    if left == 0 and right == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Вырезается вся бронь — используйте полную отмену",
+        )
+
+    owner = _resolve_booking_owner(session, booking)
+
+    # ── Re-price each remnant ──
+    from app.services.pricing import PricingService
+    pricing_service = PricingService(session)
+
+    def _quote_for(start_min: int, dur: int):
+        start_dt = booking.date.replace(
+            hour=start_min // 60, minute=start_min % 60, second=0, microsecond=0
+        )
+        return pricing_service.calculate_price(
+            user=owner,
+            resource_id=booking.resource_id,
+            start_time=start_dt,
+            duration_minutes=dur,
+            format_type=booking.format,
+            exclude_booking_id=str(booking.id),
+        )
+
+    leftQuote = _quote_for(bStart, left) if left > 0 else None
+    rightQuote = _quote_for(cTo, right) if right > 0 else None
+
+    # ── Money ──
+    pending = booking.payment_status == "pending"
+    new_total_price = (
+        (leftQuote.final_price if left > 0 else 0)
+        + (rightQuote.final_price if right > 0 else 0)
+    )
+
+    removed_value = 0.0
+    removed_hours = 0.0
+
+    if booking.payment_method == "balance":
+        removed_value = round((booking.final_price or 0) - new_total_price, 2)
+        # pending bookings haven't been charged — the T-24h cron will capture
+        # the (new, smaller) final_price. Touching the balance here would hand
+        # a phantom refund. Only settle when already charged.
+        if not pending and removed_value > 0 and owner:
+            owner.balance = round((owner.balance or 0) + removed_value, 2)
+            session.add(owner)
+    elif booking.payment_method == "subscription":
+        orig_hours = (
+            booking.hours_deducted
+            if booking.hours_deducted is not None
+            else (booking.duration / 60)
+        )
+        new_hours = (
+            ((leftQuote.hours_deducted or 0) if left > 0 else 0)
+            + ((rightQuote.hours_deducted or 0) if right > 0 else 0)
+        )
+        removed_hours = round(orig_hours - new_hours, 4)
+        # Refund the removed hours to the pool using the SAME dual-key
+        # (snake+camel) pattern as _refund_booking_to_owner: bump
+        # remaining_hours, drop used_hours (floored at 0), delete camel keys.
+        if not pending and removed_hours > 0 and owner and owner.subscription:
+            new_sub = owner.subscription.copy()
+            rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
+            new_sub["remaining_hours"] = float(rem) + removed_hours
+            if "remainingHours" in new_sub:
+                del new_sub["remainingHours"]
+            used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
+            new_sub["used_hours"] = max(0.0, float(used) - removed_hours)
+            if "usedHours" in new_sub:
+                del new_sub["usedHours"]
+            owner.subscription = new_sub
+            session.add(owner)
+
+    # ── Apply the split ──
+    # The original row becomes the LEFT remnant when left>0, else it becomes
+    # the RIGHT remnant (front-trim). A separate NEW row is created only when
+    # BOTH remnants survive.
+    new_remnant_id = None
+
+    if left > 0:
+        kept_start, kept_dur, kept_quote = bStart, left, leftQuote
+    else:
+        # Front-trim: original becomes the right remnant, no new row.
+        kept_start, kept_dur, kept_quote = cTo, right, rightQuote
+
+    booking.start_time = _mt(kept_start)
+    booking.duration = kept_dur
+    booking.final_price = kept_quote.final_price
+    booking.base_price = kept_quote.base_price
+    booking.discount_amount = kept_quote.discount_amount
+    booking.discount_percent = kept_quote.discount_percent
+    booking.applied_rule = kept_quote.applied_rule
+    if booking.payment_method == "subscription":
+        booking.hours_deducted = kept_quote.hours_deducted
+    if pending:
+        booking.charge_amount = kept_quote.final_price
+    booking.updated_at = datetime.now()
+
+    # NEW remnant row only when BOTH left>0 and right>0 (middle trim).
+    new_remnant = None
+    if left > 0 and right > 0:
+        new_remnant = Booking(
+            user_id=booking.user_id,
+            user_uuid=booking.user_uuid,
+            resource_id=booking.resource_id,
+            location_id=booking.location_id,
+            date=booking.date,
+            start_time=_mt(cTo),
+            duration=right,
+            status=booking.status,
+            format=booking.format,
+            payment_method=booking.payment_method,
+            payment_source=booking.payment_source,
+            payment_status=booking.payment_status,
+            final_price=rightQuote.final_price,
+            base_price=rightQuote.base_price,
+            discount_amount=rightQuote.discount_amount,
+            discount_percent=rightQuote.discount_percent,
+            applied_rule=rightQuote.applied_rule,
+            hours_deducted=(
+                rightQuote.hours_deducted
+                if booking.payment_method == "subscription"
+                else None
+            ),
+            charge_amount=(rightQuote.final_price if pending else None),
+            charged_at=None,
+            crm_client_id=None,  # keep the CRM link only on the original
+            recurring_group_id=None,
+            gcal_event_id=None,
+        )
+        session.add(new_remnant)
+
+    # ── Google Calendar: drop the old event, schedule recreation(s) ──
+    if booking.gcal_event_id:
+        try:
+            gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
+        except Exception as e:
+            logger.warning(
+                f"[Trim] GCal delete_event failed for "
+                f"booking={booking.id} event={booking.gcal_event_id}: {e}"
+            )
+        booking.gcal_event_id = None
+
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+    if new_remnant is not None:
+        session.refresh(new_remnant)
+        new_remnant_id = str(new_remnant.id)
+
+    # Schedule GCal recreation for the (already-persisted) remnant rows.
+    if owner:
+        owner_label = owner.name or owner.email
+        background_tasks.add_task(
+            _gcal_create_in_background, str(booking.id), owner_label
+        )
+        if new_remnant is not None:
+            background_tasks.add_task(
+                _gcal_create_in_background, new_remnant_id, owner_label
+            )
+
+    # ── Consecutive-hours: trimming a row may have broken a chain ──
+    if owner and booking.payment_method == "balance":
+        try:
+            from app.services.consecutive_pricing import recompute_user_chains_for_day
+            recompute_user_chains_for_day(
+                session,
+                owner,
+                booking.resource_id,
+                booking.date,
+                actor_id=str(current_user.id),
+                actor_role=current_user.role,
+                reason="trim_booking",
+            )
+        except Exception:
+            logger.exception("[consecutive] recompute on trim failed")
+
+    # ── Audit logging ──
+    is_balance = booking.payment_method == "balance"
+    remnants = [{"start": booking.start_time, "duration": booking.duration}]
+    if new_remnant is not None:
+        remnants.append({"start": new_remnant.start_time, "duration": new_remnant.duration})
+
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(booking.id),
+        target_type="booking",
+        event_type="booking_trimmed",
+        description=(
+            f"Trimmed {data.remove_from}-{data.remove_to} from "
+            f"{_mt(bStart)}-{_mt(bEnd)}. "
+            f"Refund: {removed_value if is_balance else removed_hours}"
+            f"{' ₾' if is_balance else ' ч'}"
+        ),
+        metadata={
+            "remove_from": data.remove_from,
+            "remove_to": data.remove_to,
+            "orig_start": _mt(bStart),
+            "orig_end": _mt(bEnd),
+            "refunded_amount": removed_value if is_balance else None,
+            "refunded_hours": removed_hours if not is_balance else None,
+            "new_remnant_id": new_remnant_id,
+            "remnants": remnants,
+        },
+    )
+
+    return {
+        "ok": True,
+        "booking_id": str(booking.id),
+        "new_remnant_id": new_remnant_id,
+        "refunded_amount": removed_value if is_balance else None,
+        "refunded_hours": removed_hours if not is_balance else None,
+        "remnants": remnants,
+    }
+
+
 # ─── Reschedule "this and following" in a recurring series ───────────────────
 
 @router.patch("/{booking_id}/reschedule-series")
