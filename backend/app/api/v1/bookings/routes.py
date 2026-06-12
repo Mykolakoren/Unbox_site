@@ -346,6 +346,36 @@ def _maybe_alert_booking_overload(
         logger.warning(f"[overload alert] non-blocking failure: {e}")
 
 
+def _assert_start_not_past(booking_date: datetime, start_time: str, is_admin: bool) -> None:
+    """Reject bookings whose start is already in the past.
+
+    Non-admins: no past starts at all. Admins/senior/owner: up to 12h
+    backdating (per owner policy). Previously this was enforced ONLY on the
+    frontend — a direct API call could create a past booking, which also
+    skipped the hot-approval gate (past => diff<=0 => not "hot" => confirmed).
+    `booking_date` is Tbilisi-naive midnight; `start_time` is 'HH:MM' Tbilisi.
+    """
+    from datetime import timezone as _tz, timedelta as _td
+    try:
+        hh, mm = (int(x) for x in str(start_time).split(":")[:2])
+    except (ValueError, AttributeError):
+        return  # malformed time — handled by check_availability
+    base = booking_date.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if base.tzinfo is None:
+        start_utc = (base - _td(hours=4)).replace(tzinfo=_tz.utc)  # Tbilisi -> UTC
+    else:
+        start_utc = base.astimezone(_tz.utc)
+    diff_h = (start_utc - datetime.now(_tz.utc)).total_seconds() / 3600.0
+    if diff_h < 0:
+        if not is_admin:
+            raise HTTPException(status_code=400, detail="Нельзя бронировать на прошедшее время.")
+        if diff_h < -12.0:
+            raise HTTPException(
+                status_code=400,
+                detail="Задним числом можно бронировать не более чем на 12 часов назад.",
+            )
+
+
 # ─── GET endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/me", response_model=List[BookingRead])
@@ -632,6 +662,12 @@ def create_booking(
                 ).first()
             if target:
                 booking_owner = target
+
+        # Reject past-dated starts (non-admin: none; admin: up to 12h back).
+        _assert_start_not_past(
+            booking_in.date, booking_in.start_time,
+            is_admin=current_user.role in ADMIN_ROLES,
+        )
 
         is_available, reason = check_availability(
             session=session,
@@ -1264,7 +1300,9 @@ def create_multi_slot_booking(
     # concurrent multi-slot batches can't both pass the availability check
     # and end up with conflicting bookings (audit found this race).
     conflicts = []
+    _is_admin_ms = current_user.role in ADMIN_ROLES
     for s, d in parsed_slots:
+        _assert_start_not_past(d, s.start_time, is_admin=_is_admin_ms)
         available, reason = check_availability(
             session=session,
             resource_id=s.resource_id,
@@ -1620,7 +1658,9 @@ def create_recurring_booking(
     # the same slots on unbox_one_room_2 Saturdays).
     conflicts = []
     create_dates = dates[1:] if anchor_booking else dates
+    _is_admin_rec = current_user.role in ADMIN_ROLES
     for d in create_dates:
+        _assert_start_not_past(d, data.start_time, is_admin=_is_admin_rec)
         available, reason = check_availability(
             session=session,
             resource_id=data.resource_id,
