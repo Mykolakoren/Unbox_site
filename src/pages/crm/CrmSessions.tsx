@@ -103,7 +103,10 @@ export function CrmSessions() {
     const dateTo = monthEnd > futureEnd ? monthEnd : futureEnd;
 
     const handleBookCab = (session: CrmSession, clientName: string) => {
-        navigate('/crm/bookings', {
+        // → /dashboard/bookings (MyBookingsPage): подсветка времени сессии
+        // оранжевым + привязка брони к сессии. DashboardLayout пропускает
+        // специалиста сюда без редиректа в /crm/bookings при наличии crmMode.
+        navigate('/dashboard/bookings', {
             state: {
                 crmMode: {
                     sessionId: session.id,

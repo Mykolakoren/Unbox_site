@@ -848,7 +848,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                         </span>
                                         {!s.isBooked && (
                                             <button
-                                                onClick={() => navigate('/crm/bookings', {
+                                                onClick={() => navigate('/dashboard/bookings', {
                                                     state: { crmMode: { sessionId: s.id, clientId: client.id, clientName: client.name, date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z', duration: s.durationMinutes } },
                                                 })}
                                                 style={{ ...ghMono, fontSize: 9, padding: '2px 8px', background: 'rgba(184,74,47,0.08)', color: GH.danger, border: 'none', cursor: 'pointer' }}

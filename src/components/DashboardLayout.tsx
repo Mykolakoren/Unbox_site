@@ -9,6 +9,7 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 export function DashboardLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
     const navigate = useNavigate();
+    const location = useLocation();
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
@@ -56,7 +57,16 @@ export function DashboardLayout() {
         };
         const target = map[path];
         if (target) {
-            return <Navigate to={target + search + hash} replace />;
+            // Флоу «Забронировать кабинет под сессию» из CRM навигирует на
+            // /dashboard/bookings с crmMode в state — там MyBookingsPage
+            // подсвечивает оранжевым время сессии и привязывает бронь к
+            // сессии. Этого функционала нет в /crm/bookings, поэтому при
+            // наличии crmMode НЕ редиректим, отдаём MyBookingsPage.
+            const hasCrmMode = path === '/dashboard/bookings'
+                && !!(location.state as { crmMode?: unknown } | null)?.crmMode;
+            if (!hasCrmMode) {
+                return <Navigate to={target + search + hash} replace />;
+            }
         }
         // Любой другой /dashboard/* — на CRM index.
         if (path.startsWith('/dashboard')) {
