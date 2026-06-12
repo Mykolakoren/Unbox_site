@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
 import { CancelBookingChoiceModal } from '../components/CancelBookingChoiceModal';
+import { TrimBookingModal } from '../components/TrimBookingModal';
 import { RescheduleScopeChoiceModal } from '../components/RescheduleScopeChoiceModal';
 import type { BookingHistoryItem } from '../store/types';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
@@ -102,6 +103,8 @@ function BookingsChessboard({
     // Quick booking slot for CRM mode
     const [crmSlot, setCrmSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
+    // Partial-cancel ("trim") target — opens TrimBookingModal for this booking.
+    const [trimBooking, setTrimBooking] = useState<BookingHistoryItem | null>(null);
     // Waitlist subscribe target — set when user taps a busy slot, drives the
     // shared mobile-friendly modal (replaces native window.confirm). One state
     // serves both desktop and mobile chessboard renderings.
@@ -1255,12 +1258,22 @@ function BookingsChessboard({
                                 <span className="ml-2 text-unbox-grey">{activeBooking.finalPrice} ₾</span>
                             </div>
                             {canModify(activeBooking) ? (
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button onClick={() => { onReschedule(activeBooking); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-unbox-light text-unbox-dark">Перенести</button>
-                                    <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-amber-50 text-amber-700">
-                                        {activeBooking.isReRentListed ? 'Снять' : 'Пересдать'}
-                                    </button>
-                                    <button onClick={() => { onCancel(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-red-50 text-red-600">Отменить</button>
+                                <div className="space-y-2">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button onClick={() => { onReschedule(activeBooking); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-unbox-light text-unbox-dark">Перенести</button>
+                                        <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-amber-50 text-amber-700">
+                                            {activeBooking.isReRentListed ? 'Снять' : 'Пересдать'}
+                                        </button>
+                                        <button onClick={() => { onCancel(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-red-50 text-red-600">Отменить</button>
+                                    </div>
+                                    {activeBooking.duration >= 120 && !activeBooking.isReRentListed && (
+                                        <button
+                                            onClick={() => { setTrimBooking(activeBooking); setActiveBooking(null); }}
+                                            className="w-full py-2 text-xs font-medium rounded-xl bg-red-50 text-red-600"
+                                        >
+                                            Отменить часть
+                                        </button>
+                                    )}
                                 </div>
                             ) : activeBooking.status === 'confirmed' && !(() => {
                                 const [bh, bm] = (activeBooking.startTime || '00:00').split(':').map(Number);
@@ -1323,6 +1336,18 @@ function BookingsChessboard({
                     endTime={waitlistTarget?.endTime ?? ''}
                     extraNote="Уведомим, как только в этом филиале освободится любой кабинет в это же время."
                 />
+                {trimBooking && (
+                    <TrimBookingModal
+                        booking={{
+                            id: trimBooking.id,
+                            startTime: trimBooking.startTime!,
+                            duration: trimBooking.duration,
+                            date: trimBooking.date as any,
+                        }}
+                        onClose={() => setTrimBooking(null)}
+                        onDone={refreshBookings}
+                    />
+                )}
             </div>
         );
     }

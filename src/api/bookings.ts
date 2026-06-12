@@ -228,6 +228,33 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /**
+     * Partial cancellation ("trim") — remove a contiguous time range from the
+     * MIDDLE or EDGE of a booking. The backend splits the booking into the
+     * surviving remnant(s), refunds the trimmed portion (discount-adjusted),
+     * and returns the refund details.
+     *
+     *   data.remove_from / data.remove_to — "HH:MM", the range to REMOVE.
+     *
+     * Each surviving remnant must be ≥1h; trimming the whole booking is rejected
+     * (use the regular cancel flow instead) — server returns HTTP 400 with
+     * { detail } on these.
+     */
+    trimBooking: async (
+        id: string,
+        data: { remove_from: string; remove_to: string },
+    ): Promise<{
+        ok: boolean;
+        booking_id: string;
+        new_remnant_id: string | null;
+        refunded_amount: number | null;
+        refunded_hours: number | null;
+        remnants: Array<{ start: string; duration: number }>;
+    }> => {
+        const res = await api.post(`/bookings/${id}/trim`, data);
+        return res.data;
+    },
+
     rejectBooking: async (bookingId: string, reason?: string): Promise<BookingHistoryItem> => {
         // Reason — admin-supplied text shown to the client in their TG/in-app
         // notification. Optional — backend falls back to «Слот недоступен»

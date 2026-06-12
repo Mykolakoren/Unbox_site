@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Clock, MapPin, X, Calendar, Plus, AlertTriangle, Smartphone, Repeat, User as UserIcon, BellOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
+import { TrimBookingModal } from '../../components/TrimBookingModal';
 import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
@@ -31,6 +32,7 @@ export function BookingDetailSheet({ booking, onClose }: {
     const { fetchBookings } = useUserStore();
     const navigate = useNavigate();
     const [mode, setMode] = useState<'view' | 'confirmCancel' | 'pickClient'>('view');
+    const [trimming, setTrimming] = useState(false);
     const [busy, setBusy] = useState<'cancel' | 'extend' | 'rerent' | 'link' | 'cancel_tail' | 'cancel_all_future' | 'extend_series' | 'dismiss_series_reminder' | null>(null);
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
 
@@ -180,6 +182,7 @@ export function BookingDetailSheet({ booking, onClose }: {
     }
 
     return (
+        <>
         <div
             onClick={onClose}
             style={{
@@ -387,6 +390,16 @@ export function BookingDetailSheet({ booking, onClose }: {
                                         sub={within24h ? 'Менее 24ч — без возврата (можно пересдать)' : 'Бесплатно, оплата ещё не списана'}
                                         onClick={() => setMode('confirmCancel')}
                                     />
+
+                                    {(booking.duration ?? 60) >= 120 && !booking.isReRentListed && (
+                                        <ActionRow
+                                            danger
+                                            icon={<AlertTriangle size={18} />}
+                                            label="Отменить часть"
+                                            sub="Убрать часть брони, остальное оставить"
+                                            onClick={() => setTrimming(true)}
+                                        />
+                                    )}
                                 </>
                             )}
 
@@ -538,6 +551,19 @@ export function BookingDetailSheet({ booking, onClose }: {
                 )}
             </div>
         </div>
+        {trimming && (
+            <TrimBookingModal
+                booking={{
+                    id: booking.id,
+                    startTime: booking.startTime!,
+                    duration: booking.duration ?? 60,
+                    date: booking.date as any,
+                }}
+                onClose={() => setTrimming(false)}
+                onDone={() => { fetchBookings(); }}
+            />
+        )}
+        </>
     );
 }
 

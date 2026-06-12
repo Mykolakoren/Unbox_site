@@ -20,6 +20,7 @@ import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { parseUTC } from '../../utils/dateUtils';
 import { apiErrorMessage } from '../../utils/errors';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
+import { TrimBookingModal } from '../TrimBookingModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { tbilisiNow } from '../../utils/dateUtils';
@@ -349,6 +350,7 @@ function LinkBookingModal({
     onClose,
     onSaveMulti,
     onDeleteBooking,
+    onTrim,
 }: {
     booking: BookingHistoryItem;
     crmClients: CrmClient[];
@@ -363,6 +365,7 @@ function LinkBookingModal({
      */
     onSaveMulti: (assignments: SlotAssignment[], opts?: { recurringPattern?: 'weekly' | 'biweekly' | 'monthly' | ''; occurrences?: number }) => Promise<boolean | void>;
     onDeleteBooking: (booking: BookingHistoryItem) => Promise<void>;
+    onTrim: (booking: BookingHistoryItem) => void;
 }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const duration = booking.duration || 60;
@@ -683,6 +686,21 @@ function LinkBookingModal({
                     </div>
                 )}
 
+                {/* Partial cancel ("trim") — only for normal active bookings ≥ 2h. */}
+                {duration >= 120
+                    && (booking.status === 'confirmed' || (booking.status as any) === undefined)
+                    && !booking.isReRentListed && (
+                    <div className="px-5 pb-3 pt-0">
+                        <button
+                            onClick={() => onTrim(booking)}
+                            disabled={deleting || saving}
+                            className="w-full py-2 rounded-xl border border-red-200 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                            Отменить часть
+                        </button>
+                    </div>
+                )}
+
                 {/* Footer */}
                 <div className="flex gap-3 p-5 pt-0">
                     <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
@@ -721,6 +739,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     // part of a recurring series — gives the specialist the same "this /
     // future" choice the CRM /sessions delete already offers.
     const [seriesCancelTarget, setSeriesCancelTarget] = useState<BookingHistoryItem | null>(null);
+    // Partial-cancel ("trim") target — opens TrimBookingModal for this booking.
+    const [trimTarget, setTrimTarget] = useState<BookingHistoryItem | null>(null);
     // Waitlist subscribe modal — fired when specialist taps a foreign booking
     // (someone else's slot). Backend then notifies them when ANY cabinet in
     // the same branch frees up at the same time.
@@ -1669,6 +1689,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         onClose={() => setLinkBooking(null)}
                         onSaveMulti={(assignments, recOpts) => handleMultiSlotSave(linkBooking, assignments, recOpts)}
                         onDeleteBooking={handleDeleteBooking}
+                        onTrim={(b) => { setLinkBooking(null); setTrimTarget(b); }}
                     />
                 )}
                 {/* Slot-watch (waitlist) modal — раньше был только в desktop-ветке,
@@ -1975,6 +1996,23 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     onClose={() => setLinkBooking(null)}
                     onSaveMulti={(assignments, recOpts) => handleMultiSlotSave(linkBooking, assignments, recOpts)}
                     onDeleteBooking={handleDeleteBooking}
+                    onTrim={(b) => { setLinkBooking(null); setTrimTarget(b); }}
+                />
+            )}
+
+            {trimTarget && (
+                <TrimBookingModal
+                    booking={{
+                        id: trimTarget.id,
+                        startTime: trimTarget.startTime!,
+                        duration: trimTarget.duration,
+                        date: trimTarget.date as any,
+                    }}
+                    onClose={() => setTrimTarget(null)}
+                    onDone={async () => {
+                        await fetchBookings();
+                        await fetchSessions();
+                    }}
                 />
             )}
 
