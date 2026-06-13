@@ -38,7 +38,9 @@ export function AdminPosts() {
 
     useEffect(() => {
         // Список специалистов для выбора автора статьи.
-        api.get('/specialists/admin')
+        // Путь именно /admin/all — /admin падал бы в роут /{specialist_id}
+        // и парсил "admin" как UUID (422).
+        api.get('/specialists/admin/all')
             .then(r => setSpecs(r.data.map((s: any) => ({ id: s.id, firstName: s.firstName, lastName: s.lastName }))))
             .catch(() => {});
     }, []);
