@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-d
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
     BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star, Wrench,
-    CreditCard, Gift, UserCircle,
+    CreditCard, Gift, UserCircle, Newspaper,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
     { path: '/admin/cabinets',    icon: Box,             label: 'Кабинеты' },
     { path: '/admin/maintenance', icon: Wrench,          label: 'Обслуживание' },
     { path: '/admin/specialists', icon: Star,            label: 'Специалисты' },
+    { path: '/admin/posts',       icon: Newspaper,       label: 'Новости и статьи' },
     { path: '/admin/team',        icon: UsersRound,      label: 'Команда' },
     { path: '/admin/waitlist',    icon: Clock,           label: 'Лист ожидания' },
     { path: '/admin/knowledge-base', icon: BookOpen,     label: 'База знаний' },

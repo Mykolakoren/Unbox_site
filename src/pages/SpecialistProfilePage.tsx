@@ -11,54 +11,9 @@ import { SpecialistBookingChessboard } from '../components/Specialists/Specialis
 import { SpecialistBookingChessboardGrid } from '../components/Specialists/SpecialistBookingChessboardGrid';
 import { NextAvailableSlots } from '../components/Specialists/NextAvailableSlots';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
-
-/** Render the specialist bio as styled sections.
- *
- * Bios are stored as plain text with markdown-style headings prefixed by
- * "## " (e.g. "## Запросы\n…\n\n## Метод\n…"). Splitting on the marker
- * lets us paint each section with its own heading band — cleaner than a
- * single 600-char wall of text, and matches the structure unbox.center
- * had on the source pages we imported from. Lines starting with "_..._"
- * are rendered as muted italic captions ("В профессии с 2019 года.").
- */
-function renderStructuredBio(bio: string): React.ReactNode {
-    // Backward-compat: legacy bios without "## " markers still render
-    // as a single block, preserving line breaks.
-    if (!bio.includes('## ')) {
-        return <div style={{ whiteSpace: 'pre-wrap' }}>{bio}</div>;
-    }
-    const blocks = bio.split(/\n*##\s+/).map(b => b.trim()).filter(Boolean);
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {blocks.map((block, idx) => {
-                const nl = block.indexOf('\n');
-                if (nl === -1) {
-                    // No body — italic caption like "_В профессии с 2019_"
-                    const t = block.replace(/^_+|_+$/g, '');
-                    return (
-                        <div key={idx} style={{ fontStyle: 'italic', fontSize: 14, color: '#6b7280' }}>
-                            {t}
-                        </div>
-                    );
-                }
-                const heading = block.slice(0, nl).trim();
-                const body = block.slice(nl + 1).trim();
-                return (
-                    <div key={idx}>
-                        <div style={{
-                            fontFamily: GH_MONO, fontSize: 11,
-                            letterSpacing: '0.18em', textTransform: 'uppercase',
-                            color: GH.ink60, marginBottom: 6,
-                        }}>
-                            {heading}
-                        </div>
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{body}</div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
+// 2026-06-13 owner: рендер структурированного текста вынесен в общий
+// компонент StructuredText (переиспользуется новостями/статьями).
+import { StructuredText } from '../components/StructuredText';
 
 export function SpecialistProfilePage() {
     const { id } = useParams<{ id: string }>();
@@ -519,7 +474,7 @@ export function SpecialistProfilePage() {
                                     maxWidth: '640px',
                                 }}>
                                     {specialist.bio
-                                        ? renderStructuredBio(specialist.bio)
+                                        ? <StructuredText text={specialist.bio} />
                                         : 'Специалист пока не добавил описание о себе.'}
                                 </div>
                             </section>

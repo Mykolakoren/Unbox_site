@@ -27,6 +27,9 @@ import { TestPage } from './pages/TestPage';
 import { SubscriptionsPage } from './pages/SubscriptionsPage';
 import { BookingRulesPage } from './pages/BookingRulesPage';
 const BecomeSpecialistPage = lazy(() => import('./pages/BecomeSpecialistPage').then(m => ({ default: m.BecomeSpecialistPage })));
+// Контент-блок: новости/анонсы + статьи специалистов (lazy — публичный, но не на каждой сессии)
+const PostListPage = lazy(() => import('./pages/content/PostListPage').then(m => ({ default: m.PostListPage })));
+const PostDetailPage = lazy(() => import('./pages/content/PostDetailPage').then(m => ({ default: m.PostDetailPage })));
 
 // Admin pages (lazy loaded — only for admins)
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout').then(m => ({ default: m.AdminLayout })));
@@ -44,6 +47,7 @@ const AdminAccessRights = lazy(() => import('./pages/admin/AccessRights').then(m
 const AdminFinance = lazy(() => import('./pages/admin/Finance').then(m => ({ default: m.AdminFinance })));
 const AdminTeam = lazy(() => import('./pages/admin/AdminTeam').then(m => ({ default: m.AdminTeam })));
 const AdminSpecialists = lazy(() => import('./pages/admin/AdminSpecialists').then(m => ({ default: m.AdminSpecialists })));
+const AdminPosts = lazy(() => import('./pages/admin/AdminPosts').then(m => ({ default: m.AdminPosts })));
 
 // CRM pages (lazy loaded — only for specialists)
 const CrmLayout = lazy(() => import('./pages/crm/CrmLayout').then(m => ({ default: m.CrmLayout })));
@@ -381,6 +385,12 @@ function App() {
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/booking-rules" element={<BookingRulesPage />} />
 
+        {/* Контент: новости/анонсы + тексты специалистов */}
+        <Route path="/news" element={<Suspense fallback={null}><PostListPage type="news" /></Suspense>} />
+        <Route path="/news/:slug" element={<Suspense fallback={null}><PostDetailPage /></Suspense>} />
+        <Route path="/articles" element={<Suspense fallback={null}><PostListPage type="article" /></Suspense>} />
+        <Route path="/articles/:slug" element={<Suspense fallback={null}><PostDetailPage /></Suspense>} />
+
         {/* Self-assessment tests */}
         <Route path="/tests/:testId" element={<TestPage />} />
 
@@ -439,6 +449,7 @@ function App() {
           <Route path="finance" element={<AdminFinance />} />
           <Route path="team" element={<AdminTeam />} />
           <Route path="specialists" element={<AdminSpecialists />} />
+          <Route path="posts" element={<AdminPosts />} />
           <Route path="access-rights" element={<AdminAccessRights />} />
           {/* Личные функции под админским шеллом — симметрично с /crm. */}
           <Route path="subscription" element={<SubscriptionsPage />} />

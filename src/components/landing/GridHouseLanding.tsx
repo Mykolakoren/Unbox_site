@@ -328,6 +328,10 @@ function Masthead({
                     <NavLink to="/#cabinets" label="Кабинеты" hideOnNarrow={narrow} />
                     <NavDivider hideOnNarrow={narrow} />
                     <NavLink to="/subscriptions" label="Тарифы" hideOnNarrow={narrow} />
+                    <NavDivider hideOnNarrow={narrow} />
+                    <NavLink to="/articles" label="Статьи" hideOnNarrow={narrow} />
+                    <NavDivider hideOnNarrow={narrow} />
+                    <NavLink to="/news" label="Новости" hideOnNarrow={narrow} />
                     {currentUser && (
                         <>
                             <NavDivider hideOnNarrow={narrow} />
