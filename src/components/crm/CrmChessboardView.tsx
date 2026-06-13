@@ -9,7 +9,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus, Bell } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus, Bell, Repeat } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -1563,15 +1563,31 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 const endSlotIdx = TIME_SLOTS.indexOf(slot) + colspan;
                 const endTime = endSlotIdx < TIME_SLOTS.length ? TIME_SLOTS[endSlotIdx] : '21:00';
                 // For multi-slot bookings that span to the next column, we'll handle via colspan spanning
+                // claimable: чужой слот на переаренде — забрать (паритет с desktop/admin)
+                const claimable = !isMine && booking.isReRentListed;
                 return (
                     <button
-                        onClick={() => isMine ? setLinkBooking(booking) : openWaitlistFor(booking)}
-                        title={isMine ? undefined : 'Тап — следить за слотом'}
+                        onClick={() => {
+                            if (isMine) { setLinkBooking(booking); return; }
+                            if (claimable && booking.resourceId && booking.startTime) {
+                                setBookSlot({
+                                    resId: booking.resourceId,
+                                    time: booking.startTime,
+                                    date: selectedDate,
+                                    duration: booking.duration ?? 60,
+                                });
+                                return;
+                            }
+                            openWaitlistFor(booking);
+                        }}
+                        title={isMine ? undefined : claimable ? 'Слот на переаренде — тап чтобы забрать' : 'Тап — следить за слотом'}
                         className={clsx(
                             'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px] active:scale-[0.97]',
                             isMine
                                 ? 'bg-unbox-green/10 border border-unbox-green/30 text-unbox-dark'
-                                : 'bg-gray-100 border border-gray-200 text-gray-500 hover:bg-orange-50 hover:border-orange-200'
+                                : claimable
+                                    ? 'bg-amber-50 border border-amber-300 border-dashed text-amber-800 hover:bg-amber-100'
+                                    : 'bg-gray-100 border border-gray-200 text-gray-500 hover:bg-orange-50 hover:border-orange-200'
                         )}
                     >
                         <div className="min-w-0">
@@ -1581,13 +1597,17 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                     ? (linkedSessions.length > 1
                                         ? `${linkedSessions.length} клиента`
                                         : linkedClient?.name || 'Привязать клиента')
-                                    : 'Занято — тап чтобы следить'
+                                    : claimable
+                                        ? '📤 Переаренда — тап чтобы забрать'
+                                        : 'Занято — тап чтобы следить'
                                 }
                             </div>
                         </div>
                         {isMine
                             ? <UserPlus size={12} className="text-unbox-green shrink-0" />
-                            : <Bell size={12} className="text-orange-500 shrink-0" />}
+                            : claimable
+                                ? <Repeat size={12} className="text-amber-600 shrink-0" />
+                                : <Bell size={12} className="text-orange-500 shrink-0" />}
                     </button>
                 );
             }
@@ -1853,7 +1873,16 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                     );
                                                                 })}
                                                         </div>
-                                                    ) : (
+                                                    ) : (() => {
+                                                        // 2026-06-13 owner: чужой слот, выставленный на
+                                                        // переаренду — это НЕ глухое «занято», а claimable
+                                                        // слот. Специалист может забрать его (backend
+                                                        // авто-отменит переаренду оригиналу с возвратом
+                                                        // 50%). Раньше CRM-шахматка показывала его как
+                                                        // обычный серый «Занято» с подпиской на слежение —
+                                                        // совпадало с админом только частично. Теперь паритет.
+                                                        const claimable = !isMine && booking.isReRentListed;
+                                                        return (
                                                         <div
                                                             // pointerdown → start drag-to-move; click → open link modal.
                                                             // The drag handler waits for pointer-move before
@@ -1871,19 +1900,39 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                     e.stopPropagation();
                                                                     setLinkBooking(booking);
                                                                 }
-                                                                : (e) => {
-                                                                    // Foreign booking → offer slot-watch
-                                                                    e.stopPropagation();
-                                                                    openWaitlistFor(booking);
-                                                                }}
+                                                                : claimable
+                                                                    ? (e) => {
+                                                                        // Забрать слот с переаренды → открыть
+                                                                        // booking-модал на этот слот/кабинет/время.
+                                                                        e.stopPropagation();
+                                                                        if (booking.resourceId && booking.startTime) {
+                                                                            setBookSlot({
+                                                                                resId: booking.resourceId,
+                                                                                time: booking.startTime,
+                                                                                date: selectedDate,
+                                                                                duration: booking.duration ?? 60,
+                                                                            });
+                                                                        }
+                                                                    }
+                                                                    : (e) => {
+                                                                        // Foreign booking → offer slot-watch
+                                                                        e.stopPropagation();
+                                                                        openWaitlistFor(booking);
+                                                                    }}
                                                             className={clsx(
                                                                 'h-8 rounded-md border text-[10px] font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
                                                                 isMine
                                                                     ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-grab active:cursor-grabbing hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
-                                                                    : 'bg-gray-100 text-gray-500 border-gray-200 cursor-pointer hover:bg-orange-50 hover:border-orange-200 hover:text-orange-700 transition-colors',
+                                                                    : claimable
+                                                                        ? 'bg-amber-50 text-amber-800 border-amber-300 border-dashed cursor-pointer hover:bg-amber-100 transition-colors'
+                                                                        : 'bg-gray-100 text-gray-500 border-gray-200 cursor-pointer hover:bg-orange-50 hover:border-orange-200 hover:text-orange-700 transition-colors',
                                                                 reschedSaving && 'opacity-60 pointer-events-none'
                                                             )}
-                                                            title={isMine ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента` : 'Тап — следить за слотом, уведомим когда освободится'}
+                                                            title={isMine
+                                                                ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента`
+                                                                : claimable
+                                                                    ? 'Слот на переаренде — нажмите чтобы забрать'
+                                                                    : 'Тап — следить за слотом, уведомим когда освободится'}
                                                         >
                                                             {/* Recurring marker — оранжевая звёздочка ⭐ для серийных
                                                                 броней. Видна и владельцу, и админу/наблюдателю. */}
@@ -1893,9 +1942,12 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                             <span className="truncate flex-1">
                                                                 {isMine
                                                                     ? (linkedClient ? linkedClient.name : '✓ Моё')
-                                                                    : 'Занято'}
+                                                                    : claimable
+                                                                        ? '📤 Переаренда'
+                                                                        : 'Занято'}
                                                             </span>
-                                                            {!isMine && <Bell size={10} className="text-orange-500 shrink-0 opacity-70" />}
+                                                            {claimable && <Repeat size={10} className="text-amber-600 shrink-0" />}
+                                                            {!isMine && !claimable && <Bell size={10} className="text-orange-500 shrink-0 opacity-70" />}
                                                             {isMine && (
                                                                 <UserPlus
                                                                     size={10}
@@ -1906,7 +1958,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                 />
                                                             )}
                                                         </div>
-                                                    )}
+                                                        );
+                                                    })()}
                                                 </td>
                                             );
                                         }

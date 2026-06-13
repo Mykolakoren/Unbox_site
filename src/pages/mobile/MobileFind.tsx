@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Check, ExternalLink, Link as LinkIcon, Move, X } from 'lucide-react';
+import { ArrowRight, Check, ExternalLink, Link as LinkIcon, Move, Repeat, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -598,15 +598,20 @@ export function MobileFind() {
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                     {s.freeResIds.map(rid => {
                                         const r = RESOURCES.find(x => x.id === rid);
+                                        const isReRent = s.reRentResIds.includes(rid);
                                         return (
                                             <button
                                                 key={rid}
                                                 onClick={() => chooseWindow(s.startMin, rid)}
                                                 className="press"
+                                                title={isReRent ? 'Слот на переаренде — кто-то освободил, можно забрать' : undefined}
                                                 style={{
-                                                    background: '#0E0E0E',
-                                                    color: '#fff',
-                                                    border: 'none',
+                                                    // Переаренда — amber-обводка вместо
+                                                    // чёрной заливки: визуально «особый»
+                                                    // слот, отличается от обычных свободных.
+                                                    background: isReRent ? '#FFF7E6' : '#0E0E0E',
+                                                    color: isReRent ? '#8A5A00' : '#fff',
+                                                    border: isReRent ? '1px solid #F2C94C' : 'none',
                                                     borderRadius: 999,
                                                     padding: '7px 12px',
                                                     fontSize: 12,
@@ -618,8 +623,11 @@ export function MobileFind() {
                                                     gap: 5,
                                                 }}
                                             >
+                                                {isReRent && <Repeat size={11} />}
                                                 {r?.name ?? rid}
-                                                <ArrowRight size={11} />
+                                                {isReRent
+                                                    ? <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>переаренда</span>
+                                                    : <ArrowRight size={11} />}
                                             </button>
                                         );
                                     })}
@@ -804,7 +812,15 @@ function bookingDay(b: BookingHistoryItem): string | null {
     } catch { return null; }
 }
 
-interface FreeWindow { startMin: number; freeResIds: string[]; }
+interface FreeWindow {
+    startMin: number;
+    freeResIds: string[];
+    /** Подмножество freeResIds, которые свободны ИМЕННО из-за переаренды
+     *  (владелец выставил слот на пересдачу). Рендерим их с amber-меткой
+     *  «переаренда» — клиент видит что слот освободил кто-то, и может
+     *  забрать (backend вернёт 50% оригиналу). */
+    reRentResIds: string[];
+}
 
 /**
  * For the chosen date and filters, walk the day in 1-hour increments and
@@ -858,13 +874,21 @@ function buildFreeWindows(
     // routes.py). Десктоп показывал такие слоты как dashed-amber, мобильный
     // же блокировал — это и есть «слотов на переаренде не видно».
     const busy: Record<string, Set<number>> = {};
-    for (const r of candidates) busy[r.id] = new Set();
+    // reRent[resId] — минуты дня, где у ресурса стоит переарендованная
+    // бронь. Эти минуты НЕ в busy (слот свободен для забора), но мы их
+    // помним чтобы пометить окно меткой «переаренда».
+    const reRent: Record<string, Set<number>> = {};
+    for (const r of candidates) { busy[r.id] = new Set(); reRent[r.id] = new Set(); }
     for (const b of dayBookings) {
         if (!b.resourceId || !b.startTime || !busy[b.resourceId]) continue;
-        if (b.isReRentListed) continue; // slot открыт для пересдачи
         const [h, m] = b.startTime.split(':').map(Number);
         const start = h * 60 + m;
         const end = start + (b.duration ?? 60);
+        if (b.isReRentListed) {
+            // slot открыт для пересдачи — не busy, но метим reRent.
+            for (let t = start; t < end; t += 30) reRent[b.resourceId].add(t);
+            continue;
+        }
         // Granularity stays at 30 min for occupancy — matches how slots are
         // stored. Window step changes below.
         for (let t = start; t < end; t += 30) busy[b.resourceId].add(t);
@@ -901,7 +925,15 @@ function buildFreeWindows(
             if (favCab && free.includes(favCab)) {
                 free.sort((a, b) => (a === favCab ? -1 : b === favCab ? 1 : 0));
             }
-            out.push({ startMin: t, freeResIds: free });
+            // Какие из free-ресурсов свободны из-за переаренды: хотя бы
+            // один слот окна попадает в reRent-сет ресурса.
+            const reRentResIds = free.filter(rid => {
+                for (let s = t; s < t + durationMin; s += 30) {
+                    if (reRent[rid]?.has(s)) return true;
+                }
+                return false;
+            });
+            out.push({ startMin: t, freeResIds: free, reRentResIds });
         }
     }
     return out;
