@@ -1882,16 +1882,27 @@ def _handle_hot_booking_callback(
     from app.models.booking import Booking as _Booking
     from app.core.permissions import ADMIN_ROLES
 
-    # Auth — only admins (matched by their personal TG id) can approve/reject.
+    # Auth — кто может подтверждать/отклонять hot-брони.
+    # Owner 2026-06-16: доверяем членству в АДМИН-ЧАТЕ. Кнопки ✅/❌ живут
+    # только в нём (TELEGRAM_ADMIN_CHAT_ID), а сам чат контролируется
+    # владельцем — значит любой его участник доверенный. Раньше требовался
+    # привязанный личный TG у каждого админа, и 6 из 10 не привязали →
+    # «Недостаточно прав». Теперь: привязанный админ ИЛИ действие внутри
+    # доверенного админ-чата.
     if from_user_id is None:
         _answer_callback(callback_id, "Не определён пользователь", show_alert=True)
         return {"ok": True}
     actor = session.exec(
         select(User).where(User.telegram_id == str(from_user_id))
     ).first()
-    if not actor or actor.role not in ADMIN_ROLES:
+    admin_chat = str(settings.TELEGRAM_ADMIN_CHAT_ID or "")
+    in_admin_chat = bool(admin_chat) and str(chat_id) == admin_chat
+    is_linked_admin = bool(actor) and actor.role in ADMIN_ROLES
+    if not (is_linked_admin or in_admin_chat):
         _answer_callback(callback_id, "Недостаточно прав", show_alert=True)
         return {"ok": True}
+    # Подпись «кто подтвердил»: имя залинкованного админа, иначе общий ярлык.
+    actor_label = (actor.name or actor.email) if actor else "админ (TG-чат)"
 
     try:
         action, raw_id = data.split(":", 1)
@@ -1967,7 +1978,7 @@ def _handle_hot_booking_callback(
         session.refresh(booking)
 
         try:
-            ev_id = _gcal.create_event(booking, user_name=actor.name or "")
+            ev_id = _gcal.create_event(booking, user_name=actor_label)
             if ev_id:
                 booking.gcal_event_id = ev_id
                 session.add(booking)
@@ -2018,7 +2029,7 @@ def _handle_hot_booking_callback(
         try:
             _edit_reply_markup(chat_id, message_id, None)
             stamp = (datetime.utcnow() + timedelta(hours=4)).strftime("%H:%M")
-            _send(chat_id, f"✅ Подтверждено @ {actor.name or actor.email} · {stamp}", parse_mode="HTML")
+            _send(chat_id, f"✅ Подтверждено @ {actor_label} · {stamp}", parse_mode="HTML")
         except Exception:
             pass
         _answer_callback(callback_id, "✓ Подтверждено")
@@ -2122,9 +2133,16 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
     actor = session.exec(
         select(User).where(User.telegram_id == str(from_user_id))
     ).first() if from_user_id else None
-    if not actor or actor.role not in ADMIN_ROLES:
+    # Trust the admin chat (см. _handle_hot_booking_callback): причину отказа
+    # может прислать любой участник админ-чата, не только залинкованный.
+    admin_chat = str(settings.TELEGRAM_ADMIN_CHAT_ID or "")
+    in_admin_chat = bool(admin_chat) and str(chat_id) == admin_chat
+    is_linked_admin = bool(actor) and actor.role in ADMIN_ROLES
+    if not (is_linked_admin or in_admin_chat):
         # Reply from non-admin to bot's prompt — silently ignore.
         return True
+    actor_label = (actor.name or actor.email) if actor else "админ (TG-чат)"
+    actor_email = actor.email if actor else "tg-group"
 
     booking = session.get(_Booking, b_uuid)
     if not booking or booking.status != "pending_approval":
@@ -2135,9 +2153,9 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
     reason = (message.get("text") or "").strip() or "Слот недоступен"
     booking.status = "cancelled"
     booking.cancellation_reason = (
-        f"Отклонено админом ({actor.name or actor.email}): {reason}"
+        f"Отклонено админом ({actor_label}): {reason}"
     )
-    booking.cancelled_by = f"admin:{actor.email}"
+    booking.cancelled_by = f"admin:{actor_email}"
     booking.updated_at = datetime.utcnow()
     session.add(booking)
     session.commit()
@@ -2187,7 +2205,7 @@ def _handle_reject_reason_reply(session: Session, message: dict) -> bool:
     # Echo to admin chat
     if chat_id:
         stamp = (datetime.utcnow() + timedelta(hours=4)).strftime("%H:%M")
-        _send(chat_id, f"❌ Отклонено @ {actor.name or actor.email} · {stamp} · «{reason}»", parse_mode="HTML")
+        _send(chat_id, f"❌ Отклонено @ {actor_label} · {stamp} · «{reason}»", parse_mode="HTML")
     return True
 
 
