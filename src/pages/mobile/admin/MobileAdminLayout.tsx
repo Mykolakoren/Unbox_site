@@ -106,8 +106,10 @@ export function MobileAdminLayout() {
                         ?forceDesktop=1 на любой странице. */}
                 </div>
 
-                <main style={{ flex: 1, overflow: 'auto' }}>
-                    <Outlet />
+                <main data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>
+                    <div key={location.pathname} className="mobile-page">
+                        <Outlet />
+                    </div>
                 </main>
             </div>
 

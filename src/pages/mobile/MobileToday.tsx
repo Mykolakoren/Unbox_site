@@ -19,7 +19,12 @@ const sectionPad: React.CSSProperties = { padding: '0 16px' };
 
 export function MobileToday() {
     const navigate = useNavigate();
-    const { currentUser, bookings, fetchBookings } = useUserStore();
+    // Селективные селекторы вместо whole-store: ре-рендер только при
+    // изменении именно этих полей, а не любого поля стора (баланс, users…).
+    // Это убирает основной стуттер при скролле/обновлении данных.
+    const currentUser = useUserStore(s => s.currentUser);
+    const bookings = useUserStore(s => s.bookings);
+    const fetchBookings = useUserStore(s => s.fetchBookings);
     const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [repeatOpen, setRepeatOpen] = useState(false);

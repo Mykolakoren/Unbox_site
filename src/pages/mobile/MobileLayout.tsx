@@ -112,9 +112,13 @@ export function MobileLayout() {
                     ролей. Переключиться на десктоп можно из /m/me →
                     «Открыть десктопную версию» (escape hatch для случая
                     когда мобильная страница не покрывает функционал). */}
-                <main ref={mainRef} style={{ flex: 1, overflow: 'auto' }}>
+                <main ref={mainRef} data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>
                     <InstallBanner />
-                    <Outlet />
+                    {/* key=pathname → ремоунт + одноразовый enter-переход при
+                        смене экрана. Тонко и быстро (нав частая, Emil: «reduce»). */}
+                    <div key={location.pathname} className="mobile-page">
+                        <Outlet />
+                    </div>
                 </main>
             </div>
 

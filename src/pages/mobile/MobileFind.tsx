@@ -20,7 +20,10 @@ const DURATIONS = [60, 90, 120, 180]; // minutes
 export function MobileFind() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const { currentUser, bookings, fetchBookings } = useUserStore();
+    // Селективные селекторы — ре-рендер только на изменение нужных полей.
+    const currentUser = useUserStore(s => s.currentUser);
+    const bookings = useUserStore(s => s.bookings);
+    const fetchBookings = useUserStore(s => s.fetchBookings);
     const reset = useBookingStore(s => s.reset);
     const favCab = getFavoriteCabinet(currentUser?.id);
 
