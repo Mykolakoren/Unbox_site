@@ -67,8 +67,6 @@ export function SpecialistProfilePage() {
     }
 
     const hasOnline = specialist.formats.includes('ONLINE');
-    const hasOfflineRoom = specialist.formats.includes('OFFLINE_ROOM');
-    const hasOfflineCapsule = specialist.formats.includes('OFFLINE_CAPSULE');
     // Per-center offline tags (new in May 2026 — see CrmProfile FormatCheckbox).
     // If specialist hasn't migrated yet, legacy `OFFLINE_ROOM/_CAPSULE` keep
     // surfacing them as "офлайн в центрах Unbox" without a specific link.
@@ -78,7 +76,13 @@ export function SpecialistProfilePage() {
         { tag: 'OFFLINE_NEO_SCHOOL', id: 'neo_school', label: 'Neo School' },
     ];
     const selectedCenters = PROFILE_LOCATIONS.filter(l => specialist.formats.includes(l.tag));
-    const hasAnyOffline = selectedCenters.length > 0 || hasOfflineRoom || hasOfflineCapsule;
+    // 2026-06-24 fix: «Очно» не показывалось у большинства — в базе зоопарк
+    // offline-кодов (OFFLINE, OFFLINE_ROOM, OFFLINE_TBEL, OFFLINE_PALIASHVILI,
+    // OFFLINE_NEO, OFFLINE_UNBOX_*), а проверялись только некоторые. Ловим
+    // ЛЮБОЙ код, начинающийся с OFFLINE — устойчиво к историческим вариантам.
+    const hasAnyOffline = specialist.formats.some(
+        f => typeof f === 'string' && f.toUpperCase().startsWith('OFFLINE')
+    );
 
     // ─────────────────────────────────────────────────────────────────────
     // GRID HOUSE — экспериментальный вид всей страницы профиля.
