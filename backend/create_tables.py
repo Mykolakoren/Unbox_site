@@ -33,6 +33,8 @@ def run_migrations():
         ("therapy_sessions", "notes", "TEXT"),
         # Specialist — category for public catalog
         ("specialists", "category", "VARCHAR"),
+        # Specialist — длительность консультации (мин), редактируется спецом
+        ("specialists", "session_duration_min", "INTEGER DEFAULT 50"),
     ]
     with Session(engine) as session:
         for table, column, col_type in migrations:

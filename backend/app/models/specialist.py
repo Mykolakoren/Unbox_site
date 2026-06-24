@@ -19,6 +19,9 @@ class SpecialistBase(SQLModel):
     formats: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
     base_price_gel: int = Field(default=0)
+    # Длительность консультации в минутах — показывается в шапке профиля,
+    # редактируется самим специалистом в анкете. Owner 2026-06-24.
+    session_duration_min: int = Field(default=50)
     is_verified: bool = Field(default=False)
     # Visibility in PUBLIC catalog (/specialists). Separate from is_verified
     # which gates "can this profile work in CRM at all" (KYC/approval).
@@ -67,6 +70,7 @@ class SpecialistUpdate(SQLModel):
     specializations: Optional[List[str]] = None
     formats: Optional[List[str]] = None
     base_price_gel: Optional[int] = None
+    session_duration_min: Optional[int] = None
     is_verified: Optional[bool] = None
     is_public: Optional[bool] = None
     application_status: Optional[str] = None

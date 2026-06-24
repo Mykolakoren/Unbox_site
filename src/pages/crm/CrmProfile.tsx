@@ -38,6 +38,7 @@ interface ProfileData {
     specializations: string[];
     formats: string[];
     basePriceGel: number;
+    sessionDurationMin: number;
 }
 
 export function CrmProfile() {
@@ -66,6 +67,7 @@ export function CrmProfile() {
                 specializations: profile.specializations,
                 formats: profile.formats,
                 basePriceGel: profile.basePriceGel,
+                sessionDurationMin: profile.sessionDurationMin,
             });
             setProfile(r.data);
             toast.success('Анкета сохранена');
@@ -486,6 +488,39 @@ function GridHouseCrmProfile({
                         <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.1em' }}>
                             GEL
                         </span>
+                    </div>
+                </div>
+
+                <div>
+                    <div style={{ ...GHP_MONO_LABEL, marginBottom: 6 }}>Длительность консультации · мин</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, borderBottom: `2px solid ${GH.ink}`, paddingBottom: 8, maxWidth: 240 }}>
+                        <input
+                            type="number"
+                            value={profile.sessionDurationMin ?? 50}
+                            onChange={(e) => setProfile((p) => (p ? { ...p, sessionDurationMin: Number(e.target.value) } : p))}
+                            min={15}
+                            max={240}
+                            step={5}
+                            style={{
+                                flex: 1,
+                                background: 'transparent',
+                                border: 'none',
+                                outline: 'none',
+                                fontFamily: GH_SANS,
+                                fontWeight: 700,
+                                fontSize: 32,
+                                letterSpacing: '-0.02em',
+                                color: GH.ink,
+                                fontVariantNumeric: 'tabular-nums',
+                                padding: 0,
+                            }}
+                        />
+                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.1em' }}>
+                            МИН
+                        </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6 }}>
+                        Показывается в шапке вашего профиля на сайте.
                     </div>
                 </div>
             </GHPSection>

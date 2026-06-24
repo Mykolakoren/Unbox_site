@@ -23,6 +23,7 @@ interface ProfileData {
     specializations: string[];
     formats: string[];
     basePriceGel: number;
+    sessionDurationMin: number;
 }
 
 const FORMAT_OPTIONS = [
@@ -58,6 +59,7 @@ export function MobileCrmProfile() {
                 specializations: profile.specializations,
                 formats: profile.formats,
                 basePriceGel: profile.basePriceGel,
+                sessionDurationMin: profile.sessionDurationMin,
             });
             setProfile(r.data);
             toast.success('Анкета сохранена');
@@ -179,6 +181,18 @@ export function MobileCrmProfile() {
                     value={profile.basePriceGel || ''}
                     onChange={e => set('basePriceGel', parseInt(e.target.value) || 0)}
                     placeholder="100"
+                    style={inputStyle}
+                />
+            </Section>
+
+            {/* Session duration — показывается в шапке профиля на сайте */}
+            <Section title="Длительность консультации, мин">
+                <input
+                    type="number"
+                    inputMode="numeric"
+                    value={profile.sessionDurationMin ?? 50}
+                    onChange={e => set('sessionDurationMin', parseInt(e.target.value) || 50)}
+                    placeholder="50"
                     style={inputStyle}
                 />
             </Section>

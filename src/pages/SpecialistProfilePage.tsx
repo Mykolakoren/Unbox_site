@@ -243,7 +243,7 @@ export function SpecialistProfilePage() {
                                     textAlign: 'right',
                                     color: GH.ink30,
                                 }}>
-                                    50<br />МИН
+                                    {specialist.sessionDurationMin ?? 50}<br />МИН
                                 </div>
                             </div>
 
@@ -392,7 +392,7 @@ export function SpecialistProfilePage() {
                                             fontWeight: 500,
                                             marginTop: '4px',
                                         }}>
-                                            50 минут
+                                            {specialist.sessionDurationMin ?? 50} минут
                                         </div>
                                     </div>
                                 </div>

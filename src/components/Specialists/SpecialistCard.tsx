@@ -12,6 +12,7 @@ export interface Specialist {
     specializations: string[];
     formats: string[];
     basePriceGel: number;
+    sessionDurationMin?: number;
 }
 
 interface SpecialistCardProps {
