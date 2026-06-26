@@ -69,10 +69,18 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
     const [allUsers, setAllUsers] = useState<{ id: string; email: string; name: string }[]>([]);
     const [saving, setSaving] = useState(false);
 
+    // 2026-06-26 fix: галочки формата работали наивно (includes('OFFLINE')),
+    // но в базе зоопарк offline-кодов (OFFLINE_ROOM/_TBEL/_PALIASHVILI/…) →
+    // «Оффлайн» показывался снятым, а снятие убирало только 'OFFLINE'.
+    // Теперь group-aware: «Оффлайн» отмечен если ЛЮБОЙ offline-код есть;
+    // включение → добавляем 'OFFLINE', выключение → убираем ВСЕ offline-коды.
+    const isOffline = (f: string) => typeof f === 'string' && f.toUpperCase().startsWith('OFFLINE');
     const FORMAT_OPTIONS = [
-        { value: 'ONLINE', label: 'Онлайн' },
-        { value: 'OFFLINE', label: 'Оффлайн' },
+        { group: 'online' as const, label: 'Онлайн' },
+        { group: 'offline' as const, label: 'Оффлайн' },
     ];
+    const isGroupChecked = (group: 'online' | 'offline') =>
+        group === 'online' ? formats.includes('ONLINE') : formats.some(isOffline);
 
     useEffect(() => {
         api.get('/users/').then(r => {
@@ -80,8 +88,15 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
         }).catch(() => {});
     }, []);
 
-    const toggleFormat = (fmt: string) =>
-        setFormats(prev => prev.includes(fmt) ? prev.filter(f => f !== fmt) : [...prev, fmt]);
+    const toggleFormatGroup = (group: 'online' | 'offline') =>
+        setFormats(prev => {
+            if (group === 'online') {
+                return prev.includes('ONLINE') ? prev.filter(f => f !== 'ONLINE') : [...prev, 'ONLINE'];
+            }
+            // offline: если есть любой offline-код — убрать все; иначе добавить 'OFFLINE'
+            const hasOffline = prev.some(isOffline);
+            return hasOffline ? prev.filter(f => !isOffline(f)) : [...prev, 'OFFLINE'];
+        });
 
     const addSpec = (val: string) => {
         const trimmed = val.trim();
@@ -216,8 +231,8 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                         <h4 className="text-sm font-semibold text-unbox-dark/60 uppercase tracking-wide">Формат и стоимость</h4>
                         <div className="flex gap-4">
                             {FORMAT_OPTIONS.map(opt => (
-                                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" checked={formats.includes(opt.value)} onChange={() => toggleFormat(opt.value)}
+                                <label key={opt.group} className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked={isGroupChecked(opt.group)} onChange={() => toggleFormatGroup(opt.group)}
                                         className="w-4 h-4 rounded accent-unbox-green" />
                                     <span className="text-sm text-unbox-dark/80">{opt.label}</span>
                                 </label>

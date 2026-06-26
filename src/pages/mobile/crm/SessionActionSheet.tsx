@@ -47,11 +47,11 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const startY = useRef<number | null>(null);
     const sheetRef = useRef<HTMLDivElement | null>(null);
 
-    // Lock body scroll while sheet open
+    // Lock scroll while sheet open — класс лочит и body, и реальный
+    // мобильный scroll-контейнер [data-mobile-scroll] (см. index.css).
     useEffect(() => {
-        const prev = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        return () => { document.body.style.overflow = prev; };
+        document.body.classList.add('scroll-locked');
+        return () => { document.body.classList.remove('scroll-locked'); };
     }, []);
 
     const time = formatBatumi(session.date, 'HH:mm');

@@ -36,12 +36,12 @@ export function BookingDetailSheet({ booking, onClose }: {
     const [busy, setBusy] = useState<'cancel' | 'extend' | 'rerent' | 'link' | 'cancel_tail' | 'cancel_all_future' | 'extend_series' | 'dismiss_series_reminder' | null>(null);
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
 
-    // Lock body scroll while the sheet is open so the background doesn't
-    // scroll-chain under the overlay. Mirrors OnboardingTour's pattern.
+    // Lock scroll while the sheet is open. Реальный скролл — в
+    // <main data-mobile-scroll>, поэтому одного body.overflow мало;
+    // класс scroll-locked лочит и контейнер прокрутки (см. index.css).
     useEffect(() => {
-        const prev = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        return () => { document.body.style.overflow = prev; };
+        document.body.classList.add('scroll-locked');
+        return () => { document.body.classList.remove('scroll-locked'); };
     }, []);
 
     useEffect(() => {

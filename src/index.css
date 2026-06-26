@@ -82,6 +82,18 @@ button, a, [role="button"], [role="tab"], [role="link"], label, summary {
   overscroll-behavior-y: contain;
 }
 
+/* ── Блокировка фона под открытым шитом/модалкой ──
+ * Реальный скролл мобильных страниц живёт в <main data-mobile-scroll>
+ * (overflow:auto), НЕ в body. Поэтому document.body.overflow='hidden' не
+ * останавливал прокрутку фона под оверлеем — палец двигал фон. Класс
+ * scroll-locked на body лочит именно контейнер прокрутки. */
+body.scroll-locked {
+  overflow: hidden;
+}
+body.scroll-locked [data-mobile-scroll] {
+  overflow: hidden !important;
+}
+
 /* ── Переход между мобильными экранами — emil-design-eng ──
  * Навигация частая → анимация ТОНКАЯ и БЫСТРАЯ: лёгкий fade + 6px вверх,
  * 200ms strong ease-out, только opacity/transform (GPU). Не блокирует тап.
