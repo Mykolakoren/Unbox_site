@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, MapPin, X, Calendar, Plus, AlertTriangle, Smartphone, Repeat, User as UserIcon, BellOff } from 'lucide-react';
+import { Clock, MapPin, X, Calendar, Plus, AlertTriangle, Smartphone, Repeat, User as UserIcon, BellOff, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
@@ -381,6 +381,18 @@ export function BookingDetailSheet({ booking, onClose }: {
                                             onClose();
                                             navigate(`/m/find?reschedule=${booking.id}`);
                                         }}
+                                    />
+
+                                    {/* Пересдача — прямое действие в карточке (раньше
+                                        было спрятано только в экране отмены). */}
+                                    <ActionRow
+                                        icon={<Users size={18} />}
+                                        label={booking.isReRentListed ? 'Снять с пересдачи' : 'Выставить на пересдачу'}
+                                        sub={booking.isReRentListed
+                                            ? 'Бронь снова станет только твоей'
+                                            : 'Другой специалист займёт — вернётся 50% на баланс'}
+                                        busy={busy === 'rerent'}
+                                        onClick={doToggleReRent}
                                     />
 
                                     <ActionRow
