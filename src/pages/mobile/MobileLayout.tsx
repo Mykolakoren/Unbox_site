@@ -4,6 +4,7 @@ import { CalendarDays, Home, Search, User as UserIcon } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { OnboardingTour, hasCompletedTour } from './OnboardingTour';
 import { registerPtrScrollContainer } from './usePullToRefresh';
+import { forceUnlockScroll } from './useScrollLock';
 import { InstallBanner } from './InstallBanner';
 
 /**
@@ -31,6 +32,13 @@ export function MobileLayout() {
         registerPtrScrollContainer(mainRef.current);
         return () => registerPtrScrollContainer(null);
     }, []);
+
+    // Страховка: на каждой смене экрана гарантированно снимаем блокировку
+    // прокрутки. Если шит/тур по какой-то причине не снял лок (race) — фон
+    // не останется залоченным и лента продолжит скроллиться.
+    useEffect(() => {
+        forceUnlockScroll();
+    }, [location.pathname]);
 
     useEffect(() => {
         const token = localStorage.getItem('token');

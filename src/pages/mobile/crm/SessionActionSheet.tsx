@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useScrollLock } from '../useScrollLock';
 import { toast } from 'sonner';
 import {
     Check, X, MapPin, Calendar, Trash2,
@@ -47,12 +48,8 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
     const startY = useRef<number | null>(null);
     const sheetRef = useRef<HTMLDivElement | null>(null);
 
-    // Lock scroll while sheet open — класс лочит и body, и реальный
-    // мобильный scroll-контейнер [data-mobile-scroll] (см. index.css).
-    useEffect(() => {
-        document.body.classList.add('scroll-locked');
-        return () => { document.body.classList.remove('scroll-locked'); };
-    }, []);
+    // Lock scroll while sheet open — ref-counted, не залипает.
+    useScrollLock();
 
     const time = formatBatumi(session.date, 'HH:mm');
     const dateLabel = formatBatumi(session.date, 'd MMMM, EEE');

@@ -8,6 +8,7 @@ import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { prepareRepeat } from './repeatBooking';
+import { useScrollLock } from './useScrollLock';
 import { priceLabel } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
@@ -36,13 +37,8 @@ export function BookingDetailSheet({ booking, onClose }: {
     const [busy, setBusy] = useState<'cancel' | 'extend' | 'rerent' | 'link' | 'cancel_tail' | 'cancel_all_future' | 'extend_series' | 'dismiss_series_reminder' | null>(null);
     const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
 
-    // Lock scroll while the sheet is open. Реальный скролл — в
-    // <main data-mobile-scroll>, поэтому одного body.overflow мало;
-    // класс scroll-locked лочит и контейнер прокрутки (см. index.css).
-    useEffect(() => {
-        document.body.classList.add('scroll-locked');
-        return () => { document.body.classList.remove('scroll-locked'); };
-    }, []);
+    // Lock scroll while the sheet is open — ref-counted, не залипает.
+    useScrollLock();
 
     useEffect(() => {
         // Lazy-load CRM clients only when the user opens the picker. Avoids

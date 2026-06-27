@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
+import { useScrollLock } from './useScrollLock';
 import { ArrowRight, Calendar, CheckCircle2, Compass, Home, Search, Smartphone, User as UserIcon, X } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 
@@ -157,13 +158,10 @@ export function OnboardingTour({
     const current = allSteps[step];
     const Icon = current.icon;
 
-    // Lock body scroll while tour is open so the page underneath doesn't
-    // wander when the user taps "Дальше" on a long step.
-    useEffect(() => {
-        const prev = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        return () => { document.body.style.overflow = prev; };
-    }, []);
+    // Lock scroll while tour is open — ref-counted общий лок (раньше тут
+    // был inline body.overflow с capture/restore, который на первом запуске
+    // мог залипнуть и лента переставала скроллиться).
+    useScrollLock();
 
     const finish = () => {
         markTourCompleted(currentUser?.id, storagePrefix);
