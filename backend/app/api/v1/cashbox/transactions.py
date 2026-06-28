@@ -282,13 +282,9 @@ def update_transaction(
     if not tx:
         raise HTTPException(404, "Транзакция не найдена")
 
-    tx_date = tx.date.date() if isinstance(tx.date, datetime) else tx.date
-    today = date.today()
-    yesterday = today - timedelta(days=1)
-    is_recent = tx_date >= yesterday
-
-    if current_user.role not in ("owner", "senior_admin") and not is_recent:
-        raise HTTPException(403, "Редактирование прошлых транзакций требует подтверждения старшего администратора")
+    # 2026-06-28 owner: РЕДАКТИРОВАТЬ транзакции может только владелец.
+    if current_user.role != "owner":
+        raise HTTPException(403, "Редактировать транзакции может только владелец")
 
     # Allowed fields
     allowed = {"type", "amount", "currency", "payment_method", "category_id",

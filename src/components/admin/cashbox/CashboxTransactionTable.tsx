@@ -93,7 +93,12 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().slice(0, 10);
 
-    const canEditTx = (tx: CashboxTransaction) => {
+    // 2026-06-28 owner: РЕДАКТИРОВАТЬ транзакции может ТОЛЬКО владелец.
+    const isOwner = currentUser?.role === 'owner';
+    const canEditTx = (_tx: CashboxTransaction) => isOwner;
+    // Удаление оставляем как было (owner/senior — любую, admin — сегодня/вчера),
+    // чтобы не сломать админам исправление ошибок в смену.
+    const canDeleteTx = (tx: CashboxTransaction) => {
         if (isSeniorOrOwner) return true;
         const txDateStr = tx.date?.slice(0, 10);
         return txDateStr === todayStr || txDateStr === yesterdayStr;
@@ -137,7 +142,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                             const formattedTime = formatBatumi(d, 'HH:mm');
                             const isIncome = tx.type === 'income';
                             const canEdit = canEditTx(tx);
-                            const canDelete = canEdit;
+                            const canDelete = canDeleteTx(tx);
 
                             return (
                                 <tr key={tx.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
@@ -174,11 +179,11 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                         <span className="text-xs text-gray-600">{tx.adminName || '—'}</span>
                                     </td>
                                     <td className="py-3 pr-2 pl-3 align-top text-right">
-                                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                        <div className="flex items-center justify-end gap-1 transition-all">
                                             {canEdit && (
                                                 <button
                                                     onClick={() => setEditingTx(tx)}
-                                                    className="text-gray-300 hover:text-blue-500 transition-colors p-1"
+                                                    className="text-gray-500 hover:text-blue-600 transition-colors p-1"
                                                     title="Редактировать"
                                                 >
                                                     <Pencil size={14} />
@@ -213,7 +218,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                     const formattedTime = formatBatumi(d, 'HH:mm');
                     const isIncome = tx.type === 'income';
                     const canEdit = canEditTx(tx);
-                    const canDelete = canEdit;
+                    const canDelete = canDeleteTx(tx);
 
                     return (
                         <div

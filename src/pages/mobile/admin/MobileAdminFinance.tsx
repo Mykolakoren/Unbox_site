@@ -75,15 +75,9 @@ export function MobileAdminFinance() {
     const [branch, setBranch] = useState<Branch>('all');
     const [period, setPeriod] = useState<Period>('day');
     const [offset, setOffset] = useState(0);
-    // Редактирование транзакции (owner 2026-06-28). owner/senior — любую;
-    // admin — только за сегодня/вчера (зеркалит права бэка).
+    // Редактирование транзакции — ТОЛЬКО владелец (owner 2026-06-28).
     const [editingTx, setEditingTx] = useState<import('../../../api/cashbox').CashboxTransaction | null>(null);
-    const canEditTx = (t: { date: string }) => {
-        if (currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') return true;
-        const d = t.date?.slice(0, 10);
-        const today = new Date(); const yest = new Date(Date.now() - 864e5);
-        return d === today.toISOString().slice(0, 10) || d === yest.toISOString().slice(0, 10);
-    };
+    const canEditTx = (_t: { date: string }) => currentUser?.role === 'owner';
     const [showAdd, setShowAdd] = useState(false);
     const [closeShiftOpen, setCloseShiftOpen] = useState(false);
 
