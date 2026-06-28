@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, TrendingUp, TrendingDown, Wallet, ChevronDown, Loader2, X, Check, Lock } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Wallet, ChevronDown, Loader2, X, Check, Lock, Trash2 } from 'lucide-react';
 import { MobileCloseShiftSheet } from './MobileCloseShiftSheet';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
+import { useUserStore } from '../../../store/userStore';
 import { formatBatumi } from '../../../utils/dateUtils';
 
 const BRANCHES = ['all', 'Unbox Uni', 'Unbox One', 'Neo School'] as const;
@@ -67,12 +68,22 @@ export function MobileAdminFinance() {
         balances, fetchBalance,
         transactions, fetchTransactions, isLoading,
         categories, fetchCategories,
-        createTransaction,
+        createTransaction, updateTransaction, deleteTransaction,
     } = useCashboxStore();
+    const currentUser = useUserStore(s => s.currentUser);
 
     const [branch, setBranch] = useState<Branch>('all');
     const [period, setPeriod] = useState<Period>('day');
     const [offset, setOffset] = useState(0);
+    // Редактирование транзакции (owner 2026-06-28). owner/senior — любую;
+    // admin — только за сегодня/вчера (зеркалит права бэка).
+    const [editingTx, setEditingTx] = useState<import('../../../api/cashbox').CashboxTransaction | null>(null);
+    const canEditTx = (t: { date: string }) => {
+        if (currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') return true;
+        const d = t.date?.slice(0, 10);
+        const today = new Date(); const yest = new Date(Date.now() - 864e5);
+        return d === today.toISOString().slice(0, 10) || d === yest.toISOString().slice(0, 10);
+    };
     const [showAdd, setShowAdd] = useState(false);
     const [closeShiftOpen, setCloseShiftOpen] = useState(false);
 
@@ -251,7 +262,11 @@ export function MobileAdminFinance() {
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {scopedTransactions.slice(0, 100).map(t => (
-                        <TransactionRow key={t.id} tx={t} />
+                        <TransactionRow
+                            key={t.id}
+                            tx={t}
+                            onTap={canEditTx(t) ? () => setEditingTx(t) : undefined}
+                        />
                     ))}
                 </div>
             )}
@@ -288,6 +303,48 @@ export function MobileAdminFinance() {
                             await createTransaction(payload);
                             setShowAdd(false);
                             // Refresh both totals + list
+                            await Promise.all([
+                                fetchBalance(branch === 'all' ? undefined : branch),
+                                fetchTransactions({
+                                    dateFrom: range.from.toISOString(),
+                                    dateTo: range.to.toISOString(),
+                                    limit: 100,
+                                }),
+                            ]);
+                        } catch {
+                            /* toast already shown by store */
+                        }
+                    }}
+                />
+            )}
+
+            {/* Edit transaction (owner 2026-06-28) */}
+            {editingTx && (
+                <AddTransactionSheet
+                    initial={editingTx}
+                    branch={editingTx.branch}
+                    categories={categories}
+                    onClose={() => setEditingTx(null)}
+                    onSubmit={async (payload) => {
+                        try {
+                            await updateTransaction(editingTx.id, payload);
+                            setEditingTx(null);
+                            await Promise.all([
+                                fetchBalance(branch === 'all' ? undefined : branch),
+                                fetchTransactions({
+                                    dateFrom: range.from.toISOString(),
+                                    dateTo: range.to.toISOString(),
+                                    limit: 100,
+                                }),
+                            ]);
+                        } catch {
+                            /* toast already shown by store */
+                        }
+                    }}
+                    onDelete={async () => {
+                        try {
+                            await deleteTransaction(editingTx.id);
+                            setEditingTx(null);
                             await Promise.all([
                                 fetchBalance(branch === 'all' ? undefined : branch),
                                 fetchTransactions({
@@ -389,10 +446,16 @@ function TotalCell({ icon, label, value, positive }: { icon: React.ReactNode; la
     );
 }
 
-function TransactionRow({ tx }: { tx: ReturnType<typeof useCashboxStore.getState>['transactions'][number] }) {
+function TransactionRow({ tx, onTap }: {
+    tx: ReturnType<typeof useCashboxStore.getState>['transactions'][number];
+    onTap?: () => void;
+}) {
     const isIncome = tx.type === 'income';
     return (
-        <div style={{
+        <div
+            onClick={onTap}
+            className={onTap ? 'press' : undefined}
+            style={{
             display: 'flex',
             alignItems: 'center',
             gap: 10,
@@ -400,6 +463,7 @@ function TransactionRow({ tx }: { tx: ReturnType<typeof useCashboxStore.getState
             background: '#fff',
             borderRadius: 10,
             border: '1px solid rgba(0,0,0,0.04)',
+            cursor: onTap ? 'pointer' : 'default',
         }}>
             <div style={{
                 width: 32, height: 32, borderRadius: 8,
@@ -449,19 +513,27 @@ function AddTransactionSheet({
     categories,
     onClose,
     onSubmit,
+    initial,
+    onDelete,
 }: {
     branch?: string;
     categories: ReturnType<typeof useCashboxStore.getState>['categories'];
     onClose: () => void;
     onSubmit: (p: AddPayload) => Promise<void>;
+    /** Если задано — режим редактирования: поля пред-заполнены, кнопка
+     *  «Сохранить», доступно удаление (owner 2026-06-28). */
+    initial?: import('../../../api/cashbox').CashboxTransaction;
+    onDelete?: () => Promise<void>;
 }) {
-    const [type, setType] = useState<'income' | 'expense'>('expense');
-    const [amount, setAmount] = useState('');
-    const [method, setMethod] = useState('cash');
-    const [branch, setBranch] = useState<string>(initialBranch || 'Unbox One');
-    const [categoryId, setCategoryId] = useState<string>('');
-    const [description, setDescription] = useState('');
+    const [type, setType] = useState<'income' | 'expense'>(initial?.type ?? 'expense');
+    const [amount, setAmount] = useState(initial ? String(initial.amount) : '');
+    const [method, setMethod] = useState(initial?.paymentMethod ?? 'cash');
+    const [branch, setBranch] = useState<string>(initial?.branch || initialBranch || 'Unbox One');
+    const [categoryId, setCategoryId] = useState<string>(initial?.categoryId ?? '');
+    const [description, setDescription] = useState(initial?.description ?? '');
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const isEdit = !!initial;
 
     // Flatten categories for the picker, scoped to the chosen type.
     const flatCats = useMemo(() => {
@@ -523,7 +595,7 @@ function AddTransactionSheet({
                 }}
             >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>Новая операция</div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{isEdit ? 'Редактировать операцию' : 'Новая операция'}</div>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888' }}>
                         <X size={20} />
                     </button>
@@ -646,6 +718,35 @@ function AddTransactionSheet({
                     {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                     Сохранить
                 </button>
+
+                {/* Удаление — только в режиме редактирования */}
+                {isEdit && onDelete && (
+                    <button
+                        onClick={async () => {
+                            if (!window.confirm('Удалить эту транзакцию? Если она пополняла баланс клиента — он будет скорректирован.')) return;
+                            setDeleting(true);
+                            try { await onDelete(); } finally { setDeleting(false); }
+                        }}
+                        disabled={saving || deleting}
+                        style={{
+                            width: '100%',
+                            padding: '11px',
+                            marginTop: 8,
+                            background: 'transparent',
+                            color: '#B3261E',
+                            border: '1px solid #F2C9C5',
+                            borderRadius: 10,
+                            fontWeight: 600,
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            opacity: deleting ? 0.5 : 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        }}
+                    >
+                        {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                        Удалить транзакцию
+                    </button>
+                )}
             </div>
         </div>
     );
