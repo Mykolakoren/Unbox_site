@@ -162,7 +162,10 @@ export function MobileAdminBookings() {
         }
         setBusy(b.id);
         try {
-            await bookingsApi.cancelBooking(b.id, { refundPercent, reason: reason || undefined });
+            // Бэк ждёт ДОЛЮ 0..1 (1.0 = полный возврат), а UI собирает
+            // проценты 100/50/0 → конвертируем. Без этого было
+            // «refund_percent must be between 0 and 1» и отмена падала.
+            await bookingsApi.cancelBooking(b.id, { refundPercent: refundPercent / 100, reason: reason || undefined });
             await fetchAllBookings();
             toast.success(
                 refundPercent === 100 ? 'Отменена (полный возврат)'
