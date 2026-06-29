@@ -170,6 +170,42 @@ def read_all_waitlist_admin(
     return session.exec(statement).all()
 
 
+@router.post("/{entry_id}/notify")
+def notify_waitlist_entry(
+    entry_id: str,
+    session: Session = Depends(deps.get_session),
+    _admin: User = Depends(deps.require_admin),
+) -> Any:
+    """Admin: вручную пингануть клиента из листа ожидания о его слоте.
+    Раньше кнопка «уведомить» была заглушкой. Шлёт то же TG-сообщение
+    «слот доступен», что и авто-уведомление при освобождении. Запись
+    НЕ помечается выполненной — админ просто напоминает; удалить запись
+    можно отдельно."""
+    from app.services.waitlist_notify import _resolve_user
+    entry = session.get(Waitlist, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    user = _resolve_user(session, entry)
+    if not user:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    if not user.telegram_id:
+        raise HTTPException(status_code=400, detail="У клиента не привязан Telegram — уведомить нельзя")
+    res = session.get(Resource, entry.resource_id)
+    loc = session.get(Location, res.location_id) if res and res.location_id else None
+    sent = telegram_service.send_slot_available(
+        chat_id=user.telegram_id,
+        user_name=user.name,
+        resource_name=(res.name if res else entry.resource_id),
+        location_name=(loc.name if loc else None),
+        date=entry.date,
+        start_time=entry.start_time,
+        end_time=entry.end_time,
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Не удалось отправить уведомление в Telegram")
+    return {"ok": True, "notified": user.name}
+
+
 @router.delete("/{entry_id}", response_model=WaitlistRead)
 def delete_waitlist_entry(
     entry_id: str,

@@ -589,6 +589,20 @@ function WaitlistTab() {
                                     </div>
                                 </div>
                                 <button
+                                    onClick={async () => {
+                                        try {
+                                            const r = await waitlistApi.notifyEntry(e.id);
+                                            toast.success(`Уведомлён${r.notified ? ` — ${r.notified}` : ''}`);
+                                        } catch (err: any) {
+                                            toast.error(err?.response?.data?.detail || 'Не удалось уведомить');
+                                        }
+                                    }}
+                                    style={{ background: 'none', border: 'none', color: '#3F6BD8', cursor: 'pointer', padding: 6 }}
+                                    aria-label="Уведомить клиента"
+                                >
+                                    <Bell size={15} />
+                                </button>
+                                <button
                                     onClick={() => handleDelete(e.id)}
                                     style={{ background: 'none', border: 'none', color: '#B3261E', cursor: 'pointer', padding: 6 }}
                                     aria-label="Удалить"

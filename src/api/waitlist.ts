@@ -43,5 +43,11 @@ export const waitlistApi = {
     removeFromWaitlist: async (id: string) => {
         const response = await api.delete<any>(`/waitlist/${id}`);
         return mapToFrontend(response.data);
-    }
+    },
+
+    /** Admin: вручную уведомить клиента из листа ожидания о его слоте. */
+    notifyEntry: async (id: string): Promise<{ ok: boolean; notified: string }> => {
+        const response = await api.post<any>(`/waitlist/${id}/notify`);
+        return response.data;
+    },
 };

@@ -9,6 +9,7 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { WaitlistEntry } from '../../store/types';
 import { toast } from 'sonner';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+import { waitlistApi } from '../../api/waitlist';
 
 export function AdminWaitlist() {
         const { waitlist, removeFromWaitlist, users } = useUserStore();
@@ -21,9 +22,13 @@ export function AdminWaitlist() {
         return u ? u.name : userId;
     };
 
-    const handleNotify = (_entryId: string) => {
-        // TODO: implement real notification via backend
-        toast.info('Функция уведомления пока в разработке');
+    const handleNotify = async (entryId: string) => {
+        try {
+            const r = await waitlistApi.notifyEntry(entryId);
+            toast.success(`Уведомление отправлено${r.notified ? ` — ${r.notified}` : ''}`);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось отправить уведомление');
+        }
     };
 
     const handleDeleteRequest = (entryId: string) => {
