@@ -482,6 +482,34 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         )}
 
                         <button
+                            onClick={async () => {
+                                const { toast } = await import('sonner');
+                                const { pricingApi } = await import('../../api/pricing');
+                                try {
+                                    const preview = await pricingApi.runWeeklyRebate(true);
+                                    if (!preview.users_credited) {
+                                        toast.info(`За неделю с ${preview.week_start} начислять нечего`);
+                                        return;
+                                    }
+                                    const ok = window.confirm(
+                                        `Начислить недельные кредиты за неделю с ${preview.week_start}?\n\n` +
+                                        `${preview.users_credited} клиент(ов), всего ${preview.total_credited} ₾.\n` +
+                                        `Деньги зачислятся на их балансы (повторно — не начислит).`
+                                    );
+                                    if (!ok) return;
+                                    const real = await pricingApi.runWeeklyRebate(false);
+                                    toast.success(`Начислено ${real.total_credited} ₾ · ${real.users_credited} клиент(ов)`);
+                                } catch (e: any) {
+                                    toast.error(e?.response?.data?.detail || 'Ошибка перерасчёта');
+                                }
+                            }}
+                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 11, background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink}` }}
+                            title="Начислить недельные кредиты за завершившуюся неделю (cron делает это автоматически по понедельникам)"
+                        >
+                            Недельные кредиты
+                        </button>
+
+                        <button
                             onClick={() => p.setShowAddTx(true)}
                             style={{ ...inkBtn, padding: '10px 18px', fontSize: 11 }}
                         >

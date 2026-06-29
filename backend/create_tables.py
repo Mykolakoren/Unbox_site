@@ -8,6 +8,7 @@ from app.models.specialist import Specialist
 from app.models.specialist_schedule import SpecialistSchedule
 from app.models.specialist_appointment import SpecialistAppointment
 from app.models.post import Post  # noqa: F401 — нужен для metadata.create_all
+from app.models.weekly_rebate import WeeklyRebate  # noqa: F401
 
 
 def create_tables():

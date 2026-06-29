@@ -17,6 +17,9 @@ class PriceBreakdown(BaseModel):
     # Discount Details
     discount_percent: int = 0
     discount_amount: float = 0.0
+    # База, к которой применяется процент скидки (non-peak + peak базы, без
+    # пиковой надбавки). Используется недельным перерасчётом.
+    discountable_base: float = 0.0
 
     # Subscription Details
     subscription_plan: Optional[str] = None
@@ -311,33 +314,38 @@ class PricingService:
                 duration_percent = tier["percent"]
                 break
 
-        weekly_percent = 0
-        weekly_hours = self._get_weekly_accumulated_hours(user, start_time, exclude_booking_id=exclude_booking_id)
-        total_weekly = weekly_hours + booked_hours
-        for tier in self.PRICING_CONFIG["weekly_progressive"]:
-            if tier["min"] <= total_weekly < tier["max"]:
-                weekly_percent = tier["percent"]
-                break
+        # 2026-06-16 owner: НЕДЕЛЬНАЯ скидка БОЛЬШЕ НЕ применяется здесь, в
+        # момент брони. Теперь она целиком начисляется кредитом в конце
+        # недели (см. services/weekly_rebate.py + endpoint /pricing/weekly-rebate).
+        # Причина: скидка должна действовать на ВСЕ часы недели по итоговому
+        # тарифу, а часы, забронированные раньше по полной цене, компенсируются
+        # кредитом на баланс. Живой расчёт по-броне этого дать не мог
+        # (ранние брони не пересчитывались). Здесь оставляем только скидку
+        # за длительность непрерывной сессии.
+        best_percent = duration_percent
 
-        # Apply the BEST (max) discount — no stacking.
-        # Discount applies ONLY to the non-peak portion of base price.
-        # Peak surcharge stays full — admin: «утром-вечером стандартная цена
-        # + 5 лари/час», т.е. peak часы уже наценены и доп.скидку не получают.
-        best_percent = max(duration_percent, weekly_percent)
+        # discountable_base — база, к которой применяется процент скидки
+        # (non-peak + peak базы, без пиковой надбавки). Нужна недельному
+        # перерасчёту, чтобы досчитать разницу до финального тарифа.
+        breakdown.discountable_base = full_base
 
         if best_percent > 0:
             discount_val = full_base * (best_percent / 100.0)
             breakdown.discount_percent = best_percent
             breakdown.discount_amount = discount_val
             breakdown.final_price = max(0.0, breakdown.base_price - discount_val)
-
-            # Label by which discount won
-            if best_percent == weekly_percent:
-                breakdown.applied_rule = "WEEKLY_PROGRESSIVE"
-            elif best_percent == duration_percent:
-                breakdown.applied_rule = "CONSECUTIVE_HOURS"
+            breakdown.applied_rule = "CONSECUTIVE_HOURS"
 
         return breakdown
+
+    # Недельные тиры (накопительная скидка по календарной неделе пн-вс).
+    # Применяются перерасчётом в конце недели, НЕ в момент брони.
+    @classmethod
+    def weekly_tier_percent(cls, total_hours: float) -> int:
+        for tier in cls.PRICING_CONFIG["weekly_progressive"]:
+            if tier["min"] <= total_hours < tier["max"]:
+                return int(tier["percent"])
+        return 0
 
     def _is_hot_booking(self, start_time: datetime) -> bool:
         now = datetime.now()

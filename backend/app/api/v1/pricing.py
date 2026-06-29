@@ -44,3 +44,34 @@ def get_pricing_quote(
     except Exception as e:
         logger.error(f"Pricing Error: {e}")
         raise HTTPException(status_code=500, detail="Pricing calculation failed")
+
+
+# ── Недельный перерасчёт скидки (owner 2026-06-29) ───────────────────────────
+from datetime import date as _date  # noqa: E402
+from app.api.deps import require_admin  # noqa: E402
+from app.services.weekly_rebate import run_weekly_rebates, last_completed_week_start  # noqa: E402
+
+
+class WeeklyRebateRequest(BaseModel):
+    # Понедельник недели (YYYY-MM-DD). По умолчанию — прошлая завершившаяся.
+    week_start: str | None = None
+    dry_run: bool = True
+
+
+@router.post("/weekly-rebate/run")
+def run_weekly_rebate(
+    *,
+    payload: WeeklyRebateRequest,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
+    """Начислить недельные кредиты за неделю. dry_run=True (по умолчанию) —
+    только посчитать суммы, ничего не записывать. Только админ."""
+    if payload.week_start:
+        try:
+            ws = _date.fromisoformat(payload.week_start)
+        except ValueError:
+            raise HTTPException(400, "week_start должен быть YYYY-MM-DD")
+    else:
+        ws = last_completed_week_start()
+    return run_weekly_rebates(session, ws, dry_run=payload.dry_run)
