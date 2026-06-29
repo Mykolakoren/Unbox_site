@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Search, Loader2, Filter, X } from 'lucide-react';
 import { SpecialistCard } from '../components/Specialists/SpecialistCard';
 import type { Specialist } from '../components/Specialists/SpecialistCard';
+import { hasOnlineFormat, hasOfflineFormat } from '../utils/specialistFormat';
 import { useUserStore } from '../store/userStore';
 import { api } from '../api/client';
 import { Layout } from '../components/Layout';
@@ -80,8 +81,11 @@ export function SpecialistsPage() {
     }, [specialists]);
 
     const filteredSpecialists = specialists.filter(s => {
-        // Format filter
-        if (formatFilter !== 'all' && !s.formats.includes(formatFilter)) return false;
+        // Format filter — «Кабинет» (OFFLINE_ROOM key) матчит ЛЮБОЙ offline-код
+        // (зоопарк в базе), «Онлайн» — ONLINE. Раньше includes(key) ловил
+        // только точное совпадение и терял большинство очных.
+        if (formatFilter === 'ONLINE' && !hasOnlineFormat(s.formats)) return false;
+        if (formatFilter === 'OFFLINE_ROOM' && !hasOfflineFormat(s.formats)) return false;
         // Role filter — matches tagline starts with selected role
         if (roleFilter !== 'all' && !s.tagline?.toLowerCase().startsWith(roleFilter.toLowerCase())) return false;
         // Specialisation filter (Excel #56) — must include the selected chip

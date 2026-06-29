@@ -1,6 +1,11 @@
 import { Link } from 'react-router-dom';
 import { User, Video, MapPin, Tent, ArrowRight } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import {
+    hasOnlineFormat, hasOfflineFormat,
+    hasOfflineRoom as hasOfflineRoomFmt,
+    hasOfflineCapsule as hasOfflineCapsuleFmt,
+} from '../../utils/specialistFormat';
 
 export interface Specialist {
     id: string;
@@ -20,10 +25,10 @@ interface SpecialistCardProps {
 }
 
 export function SpecialistCard({ specialist }: SpecialistCardProps) {
-    const hasOnline = specialist.formats.includes('ONLINE');
-    const hasOfflineRoom = specialist.formats.includes('OFFLINE_ROOM');
-    const hasOfflineCapsule = specialist.formats.includes('OFFLINE_CAPSULE');
-    const hasOffline = hasOfflineRoom || hasOfflineCapsule;
+    const hasOnline = hasOnlineFormat(specialist.formats);
+    const hasOfflineRoom = hasOfflineRoomFmt(specialist.formats);
+    const hasOfflineCapsule = hasOfflineCapsuleFmt(specialist.formats);
+    const hasOffline = hasOfflineFormat(specialist.formats);
 
     return <GHCard specialist={specialist} hasOnline={hasOnline} hasOffline={hasOffline} hasOfflineRoom={hasOfflineRoom} hasOfflineCapsule={hasOfflineCapsule} />;
 }

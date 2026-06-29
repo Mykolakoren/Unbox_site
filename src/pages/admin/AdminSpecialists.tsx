@@ -13,6 +13,7 @@ import type { Specialist } from '../../components/Specialists/SpecialistCard';
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { compressImage } from '../../utils/imageCompress';
+import { hasOnlineFormat, hasOfflineFormat, isOfflineFormat } from '../../utils/specialistFormat';
 import {
     DndContext, PointerSensor, TouchSensor,
     KeyboardSensor, useSensor, useSensors, type DragEndEvent,
@@ -74,7 +75,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
     // «Оффлайн» показывался снятым, а снятие убирало только 'OFFLINE'.
     // Теперь group-aware: «Оффлайн» отмечен если ЛЮБОЙ offline-код есть;
     // включение → добавляем 'OFFLINE', выключение → убираем ВСЕ offline-коды.
-    const isOffline = (f: string) => typeof f === 'string' && f.toUpperCase().startsWith('OFFLINE');
+    const isOffline = isOfflineFormat;
     const FORMAT_OPTIONS = [
         { group: 'online' as const, label: 'Онлайн' },
         { group: 'offline' as const, label: 'Оффлайн' },
@@ -437,8 +438,8 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: specialist.id, disabled: specialist.isOwner });
     const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, zIndex: isDragging ? 50 : 'auto' as any };
 
-    const hasOnline = specialist.formats?.includes('ONLINE');
-    const hasOffline = specialist.formats?.includes('OFFLINE') || specialist.formats?.includes('OFFLINE_ROOM');
+    const hasOnline = hasOnlineFormat(specialist.formats);
+    const hasOffline = hasOfflineFormat(specialist.formats);
 
     return (
         <div ref={setNodeRef} style={style} {...attributes}

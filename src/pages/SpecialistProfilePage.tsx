@@ -14,6 +14,7 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 // 2026-06-13 owner: рендер структурированного текста вынесен в общий
 // компонент StructuredText (переиспользуется новостями/статьями).
 import { StructuredText } from '../components/StructuredText';
+import { hasOnlineFormat, hasOfflineFormat } from '../utils/specialistFormat';
 
 export function SpecialistProfilePage() {
     const { id } = useParams<{ id: string }>();
@@ -66,7 +67,7 @@ export function SpecialistProfilePage() {
         );
     }
 
-    const hasOnline = specialist.formats.includes('ONLINE');
+    const hasOnline = hasOnlineFormat(specialist.formats);
     // Per-center offline tags (new in May 2026 — see CrmProfile FormatCheckbox).
     // If specialist hasn't migrated yet, legacy `OFFLINE_ROOM/_CAPSULE` keep
     // surfacing them as "офлайн в центрах Unbox" without a specific link.
@@ -80,9 +81,7 @@ export function SpecialistProfilePage() {
     // offline-кодов (OFFLINE, OFFLINE_ROOM, OFFLINE_TBEL, OFFLINE_PALIASHVILI,
     // OFFLINE_NEO, OFFLINE_UNBOX_*), а проверялись только некоторые. Ловим
     // ЛЮБОЙ код, начинающийся с OFFLINE — устойчиво к историческим вариантам.
-    const hasAnyOffline = specialist.formats.some(
-        f => typeof f === 'string' && f.toUpperCase().startsWith('OFFLINE')
-    );
+    const hasAnyOffline = hasOfflineFormat(specialist.formats);
 
     // ─────────────────────────────────────────────────────────────────────
     // GRID HOUSE — экспериментальный вид всей страницы профиля.
