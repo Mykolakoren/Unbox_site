@@ -49,6 +49,11 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# Per-post SEO (root-level /news/{slug}, /articles/{slug}) — nginx проксирует
+# только эти паттерны сюда, отдаём index.html с per-post og-мета (см. app/seo.py).
+from app.seo import router as seo_router  # noqa: E402
+app.include_router(seo_router)
+
 
 
 @app.get("/")
