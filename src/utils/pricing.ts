@@ -169,7 +169,14 @@ export const calculatePrice = (params: PricingParams): PricingResult => {
         // 2026-05-21: discount applies to the FULL hourly base (peak + non-peak),
         // but NOT to the peak surcharge (+5 ₾/ч). Surcharge always charged in full.
         const fullBase = nonPeakBase + peakBase;
-        if (personalPercent > 0) {
+        if (personalPercent >= 100) {
+            // 2026-06-30 owner: 100% = по-настоящему бесплатно, включая
+            // пиковую наценку (+5 ₾/ч) и допы. Раньше 100% снимал только
+            // базу, а наценка оставалась → comp-аккаунтам (Микола, Ирина)
+            // показывалась цена в часы пик. Совпадает с backend COMP.
+            discountAmount = totalBasePrice + extrasPrice;
+            discountType = 'personal';
+        } else if (personalPercent > 0) {
             discountAmount = fullBase * (personalPercent / 100);
             discountType = 'personal';
         } else {

@@ -278,6 +278,17 @@ class PricingService:
         full_base = non_peak_base + peak_base
         if user.pricing_system == "personal" and (user.personal_discount_percent or 0) > 0:
             personal_percent = float(user.personal_discount_percent)
+            # 2026-06-30 owner: 100% = по-настоящему бесплатно, включая пиковую
+            # надбавку (+5 ₾/ч). Раньше пик снимался только для хардкод-списка
+            # COMP_ACCOUNTS; теперь любой personal=100 truly free. Для <100%
+            # надбавка остаётся (политика Anna Borta).
+            if personal_percent >= 100:
+                breakdown.discount_percent = 100
+                breakdown.discount_amount = breakdown.base_price
+                breakdown.final_price = 0.0
+                breakdown.peak_surcharge = 0.0
+                breakdown.applied_rule = "PERSONAL_DISCOUNT"
+                return breakdown
             discount_val = full_base * (personal_percent / 100.0)
             breakdown.discount_percent = personal_percent
             breakdown.discount_amount = discount_val
