@@ -284,6 +284,7 @@ def sync_from_calendar(
     auto_create_clients: bool = Query(True, description="Auto-create clients from unmatched events"),
     months_back: int = Query(24),
     months_forward: int = Query(3),
+    past_days: int = Query(45, description="How many days back to pull events for add/update"),
 ):
     """
     Pull events from Google Calendar, match to CRM clients.
@@ -306,6 +307,7 @@ def sync_from_calendar(
             clients=clients,
             months_back=months_back,
             months_forward=months_forward,
+            past_days=past_days,
         )
     except Exception as e:
         raise HTTPException(502, _gcal_error_to_message(e, calendar_id))
@@ -409,7 +411,9 @@ def sync_from_calendar(
     # belonged to it, even ones that actually took place — exactly what
     # happened to client cffd5c45 (Анастасия Черепанова) on 2026-04-16.
     from datetime import timedelta as _td_cancel_guard
-    _cancel_window_start = datetime.utcnow() - _td_cancel_guard(hours=48)
+    _now = datetime.utcnow()
+    _recent_guard = _now - _td_cancel_guard(hours=48)
+    _cancel_window_start = _now - _td_cancel_guard(days=max(2, past_days))
     deleted_on_cancel = 0
     for entry in result["matched"]:
         if entry.get("is_cancelled"):
@@ -420,10 +424,20 @@ def sync_from_calendar(
                 )
             ).first()
             if existing:
+                # Удаление в GCal распространяем в CRM, но историю бережём.
+                # 1) Повторяющиеся события старше 48 ч НЕ удаляем — смена
+                #    recurrence-rule (нед→2нед) помечает прошлые инстансы
+                #    cancelled, а они реально состоялись (Анастасия
+                #    Черепанова 2026-04-16).
+                if entry.get("is_recurring") and existing.date < _recent_guard:
+                    continue
+                # 2) Старая (>48 ч) сессия с привязанной бронью — вероятно
+                #    реально прошедшая (и, возможно, оплаченная). Чистка
+                #    календаря не должна стирать финансовую историю.
+                if existing.date < _recent_guard and existing.booking_id:
+                    continue
+                # 3) За пределами окна синка вообще не трогаем.
                 if existing.date < _cancel_window_start:
-                    # Past sessions are immutable — admin cancelled the
-                    # whole series in GCal but the older instances actually
-                    # happened. Leave them alone.
                     continue
                 # 2026-05-14: spec says cancellation in GCal = removal from
                 # CRM (no CANCELLED_* status). Detach any linked cabinet

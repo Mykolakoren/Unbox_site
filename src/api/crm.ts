@@ -457,8 +457,14 @@ export const crmApi = {
 
     // Google Calendar Sync
     syncFromCalendar: async (dryRun = false, monthsBack = 1, monthsForward = 1): Promise<CrmSyncResult> => {
+        // Бэкенд раньше игнорировал months_back и тянул только 48 ч назад —
+        // поэтому сессии за прошлую неделю не появлялись. Теперь реальное
+        // окно прошлого задаётся past_days; привязываем к контролу «период
+        // назад»: 0 = текущий месяц (с 1-го числа), N = +N месяцев вглубь.
+        const dayOfMonth = new Date().getDate();
+        const pastDays = Math.max(2, monthsBack * 31 + dayOfMonth);
         const response = await api.post('/crm/sync/calendar', null, {
-            params: { dry_run: dryRun, months_back: monthsBack, months_forward: monthsForward },
+            params: { dry_run: dryRun, months_back: monthsBack, months_forward: monthsForward, past_days: pastDays },
         });
         return response.data;
     },

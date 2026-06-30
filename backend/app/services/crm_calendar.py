@@ -216,6 +216,7 @@ def sync_from_calendar(
     clients: list,  # list of TherapistClient objects
     months_back: int = 24,
     months_forward: int = 3,
+    past_days: int = 45,
 ) -> dict:
     """
     Pull events from Google Calendar and return sync data.
@@ -231,15 +232,15 @@ def sync_from_calendar(
     # Use explicit UTC so naive datetimes are consistent with _parse_event_dt
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
 
-    # Past window is fixed at 48 hours per product decision (2026-05-12):
-    # — anything older is "historical" and should NEVER be touched by sync,
-    # — last-48h is the grace zone where post-fact cancellations / time
-    #   shifts still flow into CRM (admins regularly fix yesterday's
-    #   no-shows by deleting the GCal event the morning after).
-    # `months_back` is kept in the signature for backward compatibility with
-    # callers but is effectively ignored.
+    # Past fetch window: `past_days` (2026-06-30, owner). Раньше было жёстко
+    # 48 ч — события старше 2 дней вообще не выбирались, поэтому сессии за
+    # прошлую неделю (напр. «Елена и Иван» 20 июня) не появлялись в CRM при
+    # синхронизации. Теперь тянем шире (по умолчанию 45 дней) — это
+    # ДОБАВЛЕНИЕ/ОБНОВЛЕНИЕ, оно безопасно (не удаляет историю). Защита от
+    # ретро-удаления живёт отдельно в эндпоинте (orphan-sweep остаётся 48 ч).
+    # `months_back` kept for backward compat with callers.
     _ = months_back
-    time_min = now_utc - timedelta(hours=48)
+    time_min = now_utc - timedelta(days=max(2, past_days))
     time_max = now_utc + timedelta(days=months_forward * 30)
 
     events = _get_events(calendar_id, time_min, time_max, show_deleted=True)
