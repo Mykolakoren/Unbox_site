@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 WELCOME_BONUS_EXPIRY_DAYS = 15  # how long the new-user "free hour" stays redeemable
 
+# 2026-06-30 owner: каждому новому клиенту — лимит брони (овердрафт) 50 ₾,
+# чтобы можно было забронировать «в депозит» (в минус до −50), не внося
+# деньги заранее. Бронь проверяет balance + credit_limit. Перк навсегда.
+NEW_CLIENT_CREDIT_LIMIT = 50.0
+
 
 def _create_welcome_bonus(session: Session, user: User) -> None:
     """Create a 1-hour free booking bonus for a new user.
@@ -114,6 +119,9 @@ def register_new_user(
         )
         
     user = User.model_validate(user_in, update={"hashed_password": security.get_password_hash(user_in.password)})
+    # Новым клиентам — лимит брони 50 ₾ (если форма его не прислала).
+    if not user.credit_limit:
+        user.credit_limit = NEW_CLIENT_CREDIT_LIMIT
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -165,7 +173,8 @@ def google_login(
                     google_id=google_id,
                     avatar_url=picture,
                     hashed_password="", # No password for OAuth users
-                    is_admin=False
+                    is_admin=False,
+                    credit_limit=NEW_CLIENT_CREDIT_LIMIT,
                 )
                 session.add(user)
                 session.commit()
