@@ -232,6 +232,11 @@ export function MobileAdminInbox() {
                             display: 'flex',
                             flexDirection: 'column',
                             gap: 12,
+                            // Высокое содержимое не уходит под тулбар Safari —
+                            // ограничиваем высоту (dvh) и даём внутренний скролл.
+                            maxHeight: 'calc(100dvh - 16px)',
+                            overflowY: 'auto',
+                            WebkitOverflowScrolling: 'touch',
                         }}
                     >
                         <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Причина отказа</h3>

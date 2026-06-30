@@ -660,6 +660,12 @@ function ActionSheet({
                     padding: 20,
                     paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
                     display: 'flex', flexDirection: 'column', gap: 14,
+                    // Когда действий много, содержимое не помещается и нижняя
+                    // кнопка («Отменить») уходила под тулбар Safari. dvh учитывает
+                    // адресную строку/тулбар, внутренний скролл поднимает контент.
+                    maxHeight: 'calc(100dvh - 16px)',
+                    overflowY: 'auto',
+                    WebkitOverflowScrolling: 'touch',
                 }}
             >
                 <div>
