@@ -4041,7 +4041,16 @@ def extend_booking(
         raise HTTPException(status_code=400, detail="Only confirmed bookings can be extended")
 
     if _is_past(booking):
-        raise HTTPException(status_code=400, detail="Cannot extend a past booking")
+        # 2026-06-30 owner: клиент часто занимается дольше заказанного. Админ
+        # может добить время по ФАКТУ на СЕГОДНЯШНЕЙ броне, даже если её слот
+        # уже закончился. Прошлые дни и обычные пользователи — по-прежнему блок
+        # (нельзя задним числом растягивать чужую завершённую аренду).
+        from datetime import timezone as _tz_ext
+        tbilisi_today = (datetime.now(_tz_ext.utc) + timedelta(hours=4)).date()
+        booking_day = booking.date.date() if hasattr(booking.date, "date") else booking.date
+        is_admin = current_user.role in ADMIN_ROLES
+        if not (is_admin and booking_day == tbilisi_today):
+            raise HTTPException(status_code=400, detail="Cannot extend a past booking")
 
     extra = payload.extra_minutes
     if extra < 30 or extra % 30 != 0:

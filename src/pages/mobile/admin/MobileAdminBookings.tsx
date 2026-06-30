@@ -227,6 +227,21 @@ export function MobileAdminBookings() {
         navigate(`/m/find?reschedule=${b.id}`);
     };
 
+    const doExtend = async (b: BookingHistoryItem) => {
+        if (!window.confirm('Добавить 30 минут к этой брони? Цена пересчитается.')) return;
+        setBusy(b.id);
+        try {
+            await bookingsApi.extendBooking(b.id, 30);
+            await fetchAllBookings();
+            toast.success('Добавлено 30 минут');
+            setSheet(null);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось добавить время');
+        } finally {
+            setBusy(null);
+        }
+    };
+
     const doToggleReRent = async (b: BookingHistoryItem) => {
         setBusy(b.id);
         try {
@@ -495,6 +510,7 @@ export function MobileAdminBookings() {
                     onReschedule={() => doReschedule(sheet)}
                     onToggleReRent={() => doToggleReRent(sheet)}
                     onEditPrice={() => doEditPrice(sheet)}
+                    onExtend={() => doExtend(sheet)}
                     onOpenUser={() => navigate(`/m/admin/users/${encodeURIComponent(sheet.userId)}`)}
                 />
             )}
@@ -611,7 +627,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function ActionSheet({
-    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onOpenUser,
+    booking, userName, resourceName, busy, onClose, onCancel, onApprove, onReschedule, onToggleReRent, onEditPrice, onExtend, onOpenUser,
 }: {
     booking: BookingHistoryItem;
     userName: string;
@@ -623,6 +639,7 @@ function ActionSheet({
     onReschedule: () => void;
     onToggleReRent: () => void;
     onEditPrice: () => void;
+    onExtend: () => void;
     onOpenUser: () => void;
 }) {
     const canCancel = booking.status === 'confirmed' || booking.status === 'pending_approval';
@@ -640,6 +657,17 @@ function ActionSheet({
     })();
     const canReschedule = isActive && isFuture;
     const canReRent = isActive && isFuture;
+    // «Продлить» — будущие, а также СЕГОДНЯШНИЕ прошедшие: клиент занимался
+    // дольше заказанного, админ доводит время по факту в тот же день. Бэкенд
+    // тоже разрешает добор только сегодняшним прошедшим (для админа).
+    const isToday = (() => {
+        try {
+            const d = new Date(booking.date as any);
+            const n = new Date();
+            return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+        } catch { return false; }
+    })();
+    const canExtend = isActive && (isFuture || isToday);
     const isReRented = (booking as any).isReRentListed === true;
     return (
         <div
@@ -700,6 +728,15 @@ function ActionSheet({
                             sub="Выбрать новый слот"
                             icon={<CalendarClock size={18} />}
                             onClick={onReschedule}
+                        />
+                    )}
+                    {canExtend && (
+                        <ActionRow
+                            label="Добавить 30 минут"
+                            sub={isFuture ? 'Продлить бронь' : 'Клиент занимался дольше — добить по факту'}
+                            icon={<Plus size={18} />}
+                            busy={busy}
+                            onClick={onExtend}
                         />
                     )}
                     {canReRent && (
