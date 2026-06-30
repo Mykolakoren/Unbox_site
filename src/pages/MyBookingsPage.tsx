@@ -2510,6 +2510,12 @@ function SeriesView({
                                 {head.startTime} · {patternLabel} · {info?.futureCount ?? items.length} впереди
                             </span>
                         </div>
+                        <SeriesControls
+                            groupId={groupId}
+                            currentPattern={(info?.pattern as 'weekly' | 'biweekly' | 'monthly') || 'weekly'}
+                            onChanged={onSeriesChanged}
+                            onCancelSeries={() => onCancel(head.id)}
+                        />
                         {items.slice(0, 6).map(b => (
                             <BookingCard
                                 key={b.id} booking={b}
@@ -2532,6 +2538,125 @@ function SeriesView({
     );
 }
 
+
+// ─── Series controls: продлить (число / до даты, периодичность) + отменить ───
+function SeriesControls({
+    groupId, currentPattern, onChanged, onCancelSeries,
+}: {
+    groupId: string;
+    currentPattern: 'weekly' | 'biweekly' | 'monthly';
+    onChanged: () => void | Promise<void>;
+    onCancelSeries: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [pattern, setPattern] = useState<'weekly' | 'biweekly' | 'monthly'>(currentPattern);
+    const [mode, setMode] = useState<'count' | 'until'>('count');
+    const [count, setCount] = useState(4);
+    const [until, setUntil] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    const submit = async () => {
+        if (mode === 'until' && !until) { toast.error('Укажите дату «до»'); return; }
+        setBusy(true);
+        try {
+            const r = await bookingsApi.extendRecurringSeries(groupId,
+                mode === 'until'
+                    ? { untilDate: until, pattern }
+                    : { addOccurrences: count, pattern });
+            toast.success(`Добавлено ${r.created} сессий${r.totalCost ? ` (+${r.totalCost.toFixed(0)} ₾)` : ''}`);
+            setOpen(false);
+            await onChanged();
+        } catch (e: any) {
+            const d = e?.response?.data?.detail;
+            toast.error(typeof d === 'string' ? d : (d?.message || 'Не удалось продлить серию'));
+        } finally { setBusy(false); }
+    };
+
+    const PATTERNS: { id: 'weekly' | 'biweekly' | 'monthly'; label: string }[] = [
+        { id: 'weekly', label: 'Еженед.' },
+        { id: 'biweekly', label: 'Раз в 2 нед.' },
+        { id: 'monthly', label: 'Ежемес.' },
+    ];
+
+    if (!open) {
+        return (
+            <div style={{ display: 'flex', gap: 8, margin: '8px 0 12px' }}>
+                <button onClick={() => setOpen(true)} style={seriesBtnInk}>
+                    + Продлить серию
+                </button>
+                <button onClick={onCancelSeries} style={seriesBtnGhost}>
+                    Отменить серию
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{
+            margin: '8px 0 14px', padding: 12, border: `1px solid ${GH.ink10}`,
+            display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+            {/* Периодичность */}
+            <div>
+                <div style={{ ...ghmbMono, color: GH.ink60, marginBottom: 6 }}>ПЕРИОДИЧНОСТЬ</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                    {PATTERNS.map(p => (
+                        <button key={p.id} onClick={() => setPattern(p.id)} style={{
+                            ...seriesChip,
+                            background: pattern === p.id ? GH.ink : 'transparent',
+                            color: pattern === p.id ? GH.paper : GH.ink60,
+                        }}>{p.label}</button>
+                    ))}
+                </div>
+            </div>
+            {/* Режим: число / до даты */}
+            <div>
+                <div style={{ ...ghmbMono, color: GH.ink60, marginBottom: 6 }}>СКОЛЬКО ДОБАВИТЬ</div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    {(['count', 'until'] as const).map(mo => (
+                        <button key={mo} onClick={() => setMode(mo)} style={{
+                            ...seriesChip,
+                            background: mode === mo ? GH.ink : 'transparent',
+                            color: mode === mo ? GH.paper : GH.ink60,
+                        }}>{mo === 'count' ? 'По числу' : 'До даты'}</button>
+                    ))}
+                </div>
+                {mode === 'count' ? (
+                    <input type="number" min={1} max={52} value={count}
+                        onChange={e => setCount(Math.max(1, Math.min(52, Number(e.target.value))))}
+                        style={seriesInput} />
+                ) : (
+                    <input type="date" value={until} min={new Date().toISOString().slice(0, 10)}
+                        onChange={e => setUntil(e.target.value)} style={seriesInput} />
+                )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={submit} disabled={busy} style={{ ...seriesBtnInk, opacity: busy ? 0.6 : 1 }}>
+                    {busy ? 'Добавляю…' : 'Добавить'}
+                </button>
+                <button onClick={() => setOpen(false)} style={seriesBtnGhost}>Отмена</button>
+            </div>
+        </div>
+    );
+}
+
+const seriesBtnInk: React.CSSProperties = {
+    padding: '8px 14px', background: GH.ink, color: GH.paper, border: 'none',
+    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.06em', cursor: 'pointer',
+};
+const seriesBtnGhost: React.CSSProperties = {
+    padding: '8px 14px', background: 'transparent', color: GH.ink60,
+    border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 11,
+    letterSpacing: '0.06em', cursor: 'pointer',
+};
+const seriesChip: React.CSSProperties = {
+    padding: '6px 12px', border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO,
+    fontSize: 11, cursor: 'pointer',
+};
+const seriesInput: React.CSSProperties = {
+    padding: '8px 10px', border: `1px solid ${GH.ink10}`, fontFamily: 'inherit',
+    fontSize: 14, width: 160,
+};
 
 // ─── Booking Card (List view) ────────────────────────────────────────────────
 function BookingCard({

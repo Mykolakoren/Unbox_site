@@ -2088,9 +2088,15 @@ def extend_recurring_series(
     then walk forward N steps from the latest date and create the new
     bookings under the SAME recurring_group_id.
     """
+    # Расширение серии: по КОЛИЧЕСТВУ (add_occurrences) ЛИБО по ДИАПАЗОНУ
+    # (until_date — добавлять сессии до указанной даты включительно).
+    # pattern (опц.) — задать/сменить периодичность новых сессий
+    # (weekly/biweekly/monthly); без него — авто-детект из хвоста серии.
     add_occurrences = int(payload.get("add_occurrences") or 0)
-    if add_occurrences < 1 or add_occurrences > 52:
-        raise HTTPException(400, "add_occurrences должно быть от 1 до 52")
+    until_date_str = (payload.get("until_date") or "").strip()
+    pattern_override = (payload.get("pattern") or "").strip().lower()
+    if not until_date_str and (add_occurrences < 1 or add_occurrences > 52):
+        raise HTTPException(400, "Укажите число сессий (1–52) или дату «до»")
 
     existing = session.exec(
         select(Booking)
@@ -2108,29 +2114,41 @@ def extend_recurring_series(
     if not is_owner and current_user.role not in ADMIN_ROLES:
         raise HTTPException(403, "Not authorized")
 
-    # Detect pattern interval from the last two bookings (most recent
-    # interval — handles series that started weekly then user manually
-    # rescheduled; the tail interval is the source of truth).
     dates_sorted = sorted([b.date for b in existing])
-    if len(dates_sorted) >= 2:
-        delta_days = (dates_sorted[-1] - dates_sorted[-2]).days
-    else:
-        delta_days = 7  # weekly default
-    # Snap to nearest known step
-    if delta_days <= 8:
+    # Шаг: из явного pattern, иначе авто-детект из последнего интервала
+    # (хвост — источник правды, если серию вручную переносили).
+    if pattern_override == "weekly":
         step_days = 7
-    elif delta_days <= 16:
+    elif pattern_override == "biweekly":
         step_days = 14
-    else:
+    elif pattern_override == "monthly":
         step_days = 30
+    else:
+        delta_days = (dates_sorted[-1] - dates_sorted[-2]).days if len(dates_sorted) >= 2 else 7
+        step_days = 7 if delta_days <= 8 else (14 if delta_days <= 16 else 30)
 
-    # Build new dates starting after the latest existing one
+    # Build new dates после последней существующей — по дате «до» или по числу.
     last_date = dates_sorted[-1]
     new_dates: list[datetime] = []
     cur = last_date
-    for _ in range(add_occurrences):
-        cur = cur + timedelta(days=step_days)
-        new_dates.append(cur)
+    if until_date_str:
+        try:
+            until_dt = datetime.fromisoformat(until_date_str)
+        except ValueError:
+            raise HTTPException(400, "until_date должен быть YYYY-MM-DD")
+        until_day = until_dt.date()
+        while len(new_dates) < 52:
+            cur = cur + timedelta(days=step_days)
+            if cur.date() > until_day:
+                break
+            new_dates.append(cur)
+    else:
+        for _ in range(add_occurrences):
+            cur = cur + timedelta(days=step_days)
+            new_dates.append(cur)
+
+    if not new_dates:
+        raise HTTPException(400, "Нечего добавить — проверьте дату «до» или периодичность")
 
     # Reuse the most recent confirmed booking as the template (price,
     # extras, format, payment method etc).

@@ -361,10 +361,15 @@ export const bookingsApi = {
      * the booking detail popup and in Telegram reminder messages
      * approaching end-of-series.
      */
-    extendRecurringSeries: async (groupId: string, addOccurrences: number): Promise<{ ok: boolean; created: number; totalCost: number }> => {
-        const response = await api.post(`/bookings/recurring/${groupId}/extend`, {
-            add_occurrences: addOccurrences,
-        });
+    extendRecurringSeries: async (
+        groupId: string,
+        opts: number | { addOccurrences?: number; untilDate?: string; pattern?: 'weekly' | 'biweekly' | 'monthly' },
+    ): Promise<{ ok: boolean; created: number; totalCost: number }> => {
+        // Поддержка старого вызова (число) + нового (диапазон/периодичность).
+        const body = typeof opts === 'number'
+            ? { add_occurrences: opts }
+            : { add_occurrences: opts.addOccurrences, until_date: opts.untilDate, pattern: opts.pattern };
+        const response = await api.post(`/bookings/recurring/${groupId}/extend`, body);
         return response.data;
     },
 
