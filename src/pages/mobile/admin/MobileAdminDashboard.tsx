@@ -31,10 +31,14 @@ export function MobileAdminDashboard() {
     // (чтобы можно было быстро тапнуть, например, 19:00 без перехода
     // на /m/admin/bookings).
     const [todayExpanded, setTodayExpanded] = useState(false);
+    // Прогноз должников: у кого будущие pending-списания уведут за лимит.
+    const [forecast, setForecast] = useState<Awaited<ReturnType<typeof bookingsApi.getLimitForecast>> | null>(null);
+    const [forecastExpanded, setForecastExpanded] = useState(false);
 
     useEffect(() => {
         fetchBookings();
         bookingsApi.getPendingApprovals().then(setPendingApprovals).catch(() => setPendingApprovals([]));
+        bookingsApi.getLimitForecast().then(setForecast).catch(() => setForecast(null));
     }, [fetchBookings]);
 
     const today = useMemo(() => {
@@ -101,6 +105,58 @@ export function MobileAdminDashboard() {
                             textAlign: 'center',
                         }}>{pendingApprovals.length}</span>
                     </Link>
+                </div>
+            )}
+
+            {/* Прогноз должников — раннее предупреждение о превышении лимита */}
+            {forecast && forecast.count > 0 && (
+                <div style={{ padding: '0 16px' }}>
+                    <button
+                        onClick={() => setForecastExpanded(v => !v)}
+                        style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                            background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 14,
+                            padding: '14px 16px', color: '#92400E', textAlign: 'left', cursor: 'pointer',
+                        }}
+                    >
+                        <AlertTriangle size={20} />
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700 }}>Риск превышения лимита</div>
+                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                                {forecast.count} клиент(ов) уйдут за лимит после будущих списаний
+                            </div>
+                        </div>
+                        <span style={{
+                            background: '#92400E', color: '#fff', fontSize: 13, fontWeight: 800,
+                            padding: '4px 10px', borderRadius: 999, minWidth: 28, textAlign: 'center',
+                        }}>{forecast.count}</span>
+                    </button>
+                    {forecastExpanded && (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {forecast.clients.map(c => (
+                                <Link
+                                    key={c.userId}
+                                    to={`/m/admin/users/${encodeURIComponent(c.email)}`}
+                                    style={{
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                        gap: 10, background: '#fff', border: '1px solid #F3E8C8',
+                                        borderRadius: 12, padding: '10px 14px', textDecoration: 'none', color: 'inherit',
+                                    }}
+                                >
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                                        <div style={{ fontSize: 11, color: '#92400E', marginTop: 2 }}>
+                                            баланс {c.balance}₾ · лимит {c.creditLimit}₾ · pending {c.pendingTotal}₾ ({c.pendingCount})
+                                        </div>
+                                    </div>
+                                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 800, color: '#B45309' }}>−{c.overLimitBy}₾</div>
+                                        <div style={{ fontSize: 10, color: '#999' }}>за лимит</div>
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 

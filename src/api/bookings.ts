@@ -209,6 +209,22 @@ export const bookingsApi = {
         return response.data.map(mapToFrontend);
     },
 
+    /** Прогноз должников: клиенты, у кого будущие (pending) списания за 24 ч
+     *  уведут баланс за кредитный лимит (или уже за лимитом). */
+    getLimitForecast: async (): Promise<{
+        count: number;
+        clients: Array<{
+            userId: string; name: string; email: string;
+            balance: number; creditLimit: number;
+            pendingTotal: number; pendingCount: number;
+            projectedBalance: number; overLimitBy: number;
+            alreadyOverBy: number; nextChargeDate: string | null;
+        }>;
+    }> => {
+        const response = await api.get('/bookings/limit-forecast');
+        return response.data;
+    },
+
     approveBooking: async (bookingId: string): Promise<BookingHistoryItem> => {
         const response = await api.post<any>(`/bookings/${bookingId}/approve`);
         return mapToFrontend(response.data);

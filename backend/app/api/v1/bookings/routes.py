@@ -4306,6 +4306,89 @@ def shorten_booking(
     return enrich_booking_status(booking)
 
 
+# ─── Credit-limit forecast (раннее предупреждение о должниках) ────────────────
+
+@router.get("/limit-forecast")
+def credit_limit_forecast(
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Клиенты, у кого будущие (pending) списания за 24 ч уведут баланс за
+    кредитный лимит — или кто уже за лимитом.
+
+    Списание отложенное: брони дальше 24 ч висят `pending` (деньги ещё не
+    сняты) и лимит при создании не проверяется. Этот отчёт заранее считает,
+    к чему приведёт весь конвейер pending-списаний, чтобы админ видел риск
+    до того, как клиент уйдёт в долг за лимит.
+    """
+    pend = session.exec(
+        select(Booking).where(
+            Booking.status == "confirmed",
+            Booking.payment_status == "pending",
+        )
+    ).all()
+
+    by_user: dict[str, list[Booking]] = {}
+    for b in pend:
+        key = str(b.user_uuid) if b.user_uuid else (b.user_id or "")
+        if key:
+            by_user.setdefault(key, []).append(b)
+
+    rows: list[dict] = []
+    for key, bks in by_user.items():
+        u: Optional[User] = None
+        f = bks[0]
+        if f.user_uuid:
+            try:
+                u = session.get(User, f.user_uuid if isinstance(f.user_uuid, UUID) else UUID(str(f.user_uuid)))
+            except (ValueError, TypeError):
+                u = None
+        if u is None and f.user_id:
+            u = session.exec(select(User).where(User.email == f.user_id)).first()
+        if u is None:
+            continue
+
+        pending_total = 0.0
+        pending_count = 0
+        soonest = None
+        for b in bks:
+            # только явные списания с баланса (subscription/bonus считаем
+            # отдельным пулом — на кредитный лимит напрямую не давят)
+            if (b.payment_method or "balance").lower() != "balance":
+                continue
+            pending_total += float(b.charge_amount or b.final_price or 0)
+            pending_count += 1
+            if soonest is None or b.date < soonest:
+                soonest = b.date
+        if pending_count == 0:
+            continue
+
+        balance = round(float(u.balance or 0), 2)
+        limit = round(float(u.credit_limit or 0), 2)
+        projected = round(balance - pending_total, 2)
+        over_limit_by = round(max(0.0, -projected - limit), 2)
+        already_over_by = round(max(0.0, -balance - limit), 2)
+        if over_limit_by <= 0 and already_over_by <= 0:
+            continue
+
+        rows.append({
+            "user_id": str(u.id),
+            "name": u.name,
+            "email": u.email,
+            "balance": balance,
+            "credit_limit": limit,
+            "pending_total": round(pending_total, 2),
+            "pending_count": pending_count,
+            "projected_balance": projected,
+            "over_limit_by": over_limit_by,
+            "already_over_by": already_over_by,
+            "next_charge_date": soonest.isoformat() if soonest else None,
+        })
+
+    rows.sort(key=lambda r: (r["over_limit_by"], r["already_over_by"]), reverse=True)
+    return {"count": len(rows), "clients": rows}
+
+
 # ─── Hot Booking Approval ────────────────────────────────────────────────────
 
 @router.get("/pending-approval", response_model=List[BookingRead])
