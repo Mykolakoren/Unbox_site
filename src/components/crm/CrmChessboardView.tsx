@@ -375,12 +375,17 @@ function LinkBookingModal({
     // Build initial slot assignments from existing sessions
     const [slots, setSlots] = useState<SlotAssignment[]>(() => {
         const result: SlotAssignment[] = [];
+        const bookingEnd = startMin + duration;
         for (let i = 0; i < numSlots; i++) {
             const slotStart = startMin + i * 60;
+            // Последний слот тянется до реального конца брони — иначе бронь
+            // на 90 мин показывалась как «18:00 – 19:00» (теряли 30 мин).
+            // Фидбэк Яны 2026-07-06: слот не совпадал с длительностью.
+            const slotEnd = i === numSlots - 1 ? bookingEnd : slotStart + 60;
             const h1 = Math.floor(slotStart / 60);
             const m1 = slotStart % 60;
-            const h2 = Math.floor((slotStart + 60) / 60);
-            const m2 = (slotStart + 60) % 60;
+            const h2 = Math.floor(slotEnd / 60);
+            const m2 = slotEnd % 60;
             const label = `${String(h1).padStart(2, '0')}:${String(m1).padStart(2, '0')} – ${String(h2).padStart(2, '0')}:${String(m2).padStart(2, '0')}`;
 
             // Find existing session for this hour
