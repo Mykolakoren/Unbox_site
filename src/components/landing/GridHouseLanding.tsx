@@ -19,6 +19,7 @@ import { useUserStore } from '../../store/userStore';
 import { getMyBookingsPath, getHomePath } from '../../utils/userPaths';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { Specialist } from '../Specialists/SpecialistCard';
+import { getBadge } from '../../utils/specialistBadges';
 import type { Location } from '../../types/index';
 
 type VisitorMode = 'client' | 'specialist' | null;
@@ -917,6 +918,22 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
 
             {/* Name + tagline */}
             <div style={{ paddingLeft: narrow ? 14 : 20, minWidth: 0 }}>
+                {((specialist as any).badges || []).length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                        {((specialist as any).badges as string[]).map(code => {
+                            const b = getBadge(code);
+                            if (!b) return null;
+                            return (
+                                <span key={code} style={{
+                                    fontFamily: GH_MONO, fontSize: narrow ? 8 : 9, fontWeight: 700,
+                                    letterSpacing: '0.05em', textTransform: 'uppercase',
+                                    padding: '2px 6px', color: b.fg, background: b.bg,
+                                    border: `1px solid ${b.border}`, lineHeight: 1.3,
+                                }}>{b.label}</span>
+                            );
+                        })}
+                    </div>
+                )}
                 <div
                     style={{
                         fontSize: narrow ? 17 : 22,
