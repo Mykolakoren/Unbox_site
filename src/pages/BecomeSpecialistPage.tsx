@@ -73,8 +73,13 @@ export function BecomeSpecialistPage() {
         formats: [],
         basePriceGel: 0,
         category: 'psychology',
+        documents: [],
     });
     const [specInput, setSpecInput] = useState('');
+    const addDocument = (url: string) =>
+        setForm(f => ({ ...f, documents: [...f.documents, url] }));
+    const removeDocument = (url: string) =>
+        setForm(f => ({ ...f, documents: f.documents.filter(x => x !== url) }));
 
     useEffect(() => {
         if (!currentUser) {
@@ -98,6 +103,7 @@ export function BecomeSpecialistPage() {
                         formats: p.formats || [],
                         basePriceGel: p.basePriceGel || 0,
                         category: p.category || 'psychology',
+                        documents: p.documents || [],
                     });
                 }
             })
@@ -130,6 +136,10 @@ export function BecomeSpecialistPage() {
         }
         if (form.formats.length === 0) {
             toast.error('Выберите хотя бы один формат работы');
+            return;
+        }
+        if (form.documents.length === 0) {
+            toast.error('Загрузите хотя бы один документ (диплом/сертификат)');
             return;
         }
         setSubmitting(true);
@@ -191,6 +201,28 @@ export function BecomeSpecialistPage() {
                     Заполните карточку — она появится в каталоге <Link to="/specialists" style={{ color: GH.ink, textDecoration: 'underline' }}>/specialists</Link> после подтверждения админом.
                 </p>
 
+                {/* Инфоблок про каталог — ЧЕРНОВИК-ЗАГЛУШКА (owner отредактирует
+                    реальные цену и условия). Плейсхолдеры помечены __ */}
+                <div style={{
+                    border: `1px solid ${GH.ink10}`, background: GH.ink5,
+                    padding: '16px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6, color: GH.ink,
+                }}>
+                    <div style={{ ...ghMono, fontSize: 11, letterSpacing: '0.08em', marginBottom: 8, color: GH.ink60 }}>
+                        О КАТАЛОГЕ СПЕЦИАЛИСТОВ
+                    </div>
+                    <p style={{ margin: '0 0 8px' }}>
+                        <b>Что это.</b> Каталог <Link to="/specialists" style={{ color: GH.ink }}>/specialists</Link> — публичная витрина специалистов Unbox.
+                        Клиенты находят вас, читают анкету и записываются онлайн.
+                    </p>
+                    <p style={{ margin: '0 0 8px' }}>
+                        <b>Сколько стоит.</b> Размещение в каталоге — __ ₾ / __ (месяц/год). {/* TODO: owner впишет реальную цену */}
+                    </p>
+                    <p style={{ margin: 0 }}>
+                        <b>Условия размещения.</b> __ (например: подтверждённое образование/сертификаты,
+                        заполненная анкета с фото, актуальное расписание). {/* TODO: owner впишет условия */}
+                    </p>
+                </div>
+
                 {statusBanner && (
                     <div style={{
                         padding: '12px 16px',
@@ -223,6 +255,35 @@ export function BecomeSpecialistPage() {
                             onUploaded={(url) => setForm(f => ({ ...f, photoUrl: url }))}
                         />
                         <div style={{ ...ghMono, fontSize: 9, marginTop: 4 }}>jpg, png · до 2 МБ. Можно оставить пустым — добавите позже.</div>
+                    </div>
+
+                    {/* Документы — ОБЯЗАТЕЛЬНО (дипломы/сертификаты) */}
+                    <div>
+                        <label style={labelStyle}>
+                            Документы (диплом / сертификаты) <span style={{ color: '#DC2626' }}>*</span>
+                        </label>
+                        <div style={{ ...ghMono, fontSize: 10, color: GH.ink60, margin: '2px 0 8px' }}>
+                            Обязательно. Загрузите подтверждение образования. pdf, jpg, png · до 20 МБ.
+                        </div>
+                        {form.documents.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                                {form.documents.map((url, i) => (
+                                    <div key={url} style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        border: `1px solid ${GH.ink10}`, padding: '8px 10px', fontSize: 13,
+                                    }}>
+                                        <a href={url} target="_blank" rel="noreferrer" style={{ color: GH.ink, textDecoration: 'underline' }}>
+                                            Документ {i + 1}
+                                        </a>
+                                        <button type="button" onClick={() => removeDocument(url)}
+                                            style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontSize: 12 }}>
+                                            удалить
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <DocumentUpload onUploaded={addDocument} />
                     </div>
 
                     <div>
@@ -298,6 +359,50 @@ export function BecomeSpecialistPage() {
                     </button>
                 </form>
             </div>
+        </div>
+    );
+}
+
+
+/** Загрузка документа (диплом/сертификат). Через /upload/task-file —
+ *  принимает pdf + картинки, до 20 МБ. Каждый вызов добавляет один файл. */
+function DocumentUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const [busy, setBusy] = useState(false);
+    const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setBusy(true);
+        try {
+            const data = new FormData();
+            data.append('file', file);
+            const res = await api.post<{ url: string }>('/upload/task-file', data, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            const baseUrl = (API_URL || '').replace('/api/v1', '');
+            onUploaded(`${baseUrl}${res.data.url}`);
+            toast.success('Документ загружен');
+        } catch (err: unknown) {
+            const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить документ');
+        } finally {
+            setBusy(false);
+            e.target.value = '';
+        }
+    };
+    return (
+        <div>
+            <input ref={inputRef} type="file" accept=".pdf,image/*" onChange={handlePick} style={{ display: 'none' }} />
+            <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
+                style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '10px 16px', border: `1px solid ${GH.ink}`, background: GH.paper,
+                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1,
+                }}>
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {busy ? 'Загружаем…' : 'Загрузить документ'}
+            </button>
         </div>
     );
 }

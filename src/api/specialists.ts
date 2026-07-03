@@ -57,6 +57,7 @@ export interface SpecialistApplicationPayload {
     formats: string[];
     basePriceGel: number;
     category?: string;
+    documents: string[];
 }
 
 export interface SpecialistProfile {
@@ -74,6 +75,8 @@ export interface SpecialistProfile {
     isVerified: boolean;
     applicationStatus: 'pending' | 'approved' | 'rejected' | null;
     sortOrder: number;
+    documents: string[];
+    badges: string[];
 }
 
 export const specialistsApi = {

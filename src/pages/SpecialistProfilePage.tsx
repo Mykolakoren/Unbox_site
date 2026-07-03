@@ -15,6 +15,7 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 // компонент StructuredText (переиспользуется новостями/статьями).
 import { StructuredText } from '../components/StructuredText';
 import { hasOnlineFormat, hasOfflineFormat } from '../utils/specialistFormat';
+import { getBadge } from '../utils/specialistBadges';
 
 export function SpecialistProfilePage() {
     const { id } = useParams<{ id: string }>();
@@ -320,6 +321,22 @@ export function SpecialistProfilePage() {
                             {/* Name + tagline */}
                             <header style={{ marginBottom: '72px' }}>
                                 <div style={monoLabel}>СПЕЦИАЛИСТ · 01</div>
+                                {((specialist as any).badges || []).length > 0 && (
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
+                                        {((specialist as any).badges as string[]).map(code => {
+                                            const b = getBadge(code);
+                                            if (!b) return null;
+                                            return (
+                                                <span key={code} style={{
+                                                    fontFamily: MONO, fontSize: 11, fontWeight: 700,
+                                                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                                                    padding: '5px 10px', color: b.fg, background: b.bg,
+                                                    border: `1px solid ${b.border}`,
+                                                }}>{b.label}</span>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                                 <h1 style={{
                                     fontFamily: SANS,
                                     fontSize: 'clamp(48px, 6.5vw, 84px)',

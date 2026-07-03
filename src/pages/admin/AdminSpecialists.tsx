@@ -7,6 +7,7 @@ import {
 import { toast } from 'sonner';
 import { api, API_URL } from '../../api/client';
 import { crmApi, type CrmAccessRequest } from '../../api/crm';
+import { SPECIALIST_BADGES } from '../../utils/specialistBadges';
 import { useUserStore } from '../../store/userStore';
 import { hasPermission } from '../../utils/permissions';
 import type { Specialist } from '../../components/Specialists/SpecialistCard';
@@ -66,7 +67,11 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
     const [basePriceGel, setBasePriceGel] = useState<number>((specialist as any).basePriceGel ?? 0);
     const [specializations, setSpecializations] = useState<string[]>((specialist as any).specializations ?? []);
     const [formats, setFormats] = useState<string[]>((specialist as any).formats ?? []);
+    const [badges, setBadges] = useState<string[]>((specialist as any).badges ?? []);
     const [newSpec, setNewSpec] = useState('');
+    const documents: string[] = (specialist as any).documents ?? [];
+    const toggleBadge = (code: string) =>
+        setBadges(prev => prev.includes(code) ? prev.filter(b => b !== code) : [...prev, code]);
     const [allUsers, setAllUsers] = useState<{ id: string; email: string; name: string }[]>([]);
     const [saving, setSaving] = useState(false);
 
@@ -123,6 +128,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                 formats,
                 category: category || null,
                 isVerified,
+                badges,
             };
             if (userId && userId !== specialist.userId) {
                 payload.userId = userId;
@@ -265,6 +271,41 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                                 className="w-4 h-4 rounded accent-unbox-green" />
                             <span className="text-sm text-unbox-dark/70">Верифицирован (виден в каталоге)</span>
                         </label>
+
+                        {/* Плашки-маркеры */}
+                        <div>
+                            <label className="block text-xs text-unbox-grey mb-1">Плашки на карточке</label>
+                            <div className="flex flex-col gap-2">
+                                {SPECIALIST_BADGES.map(b => (
+                                    <label key={b.code} className="flex items-center gap-3 cursor-pointer">
+                                        <input type="checkbox" checked={badges.includes(b.code)}
+                                            onChange={() => toggleBadge(b.code)}
+                                            className="w-4 h-4 rounded accent-unbox-green" />
+                                        <span className="text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded"
+                                            style={{ color: b.fg, background: b.bg, border: `1px solid ${b.border}` }}>
+                                            {b.label}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Загруженные документы (диплом/сертификаты) */}
+                        <div>
+                            <label className="block text-xs text-unbox-grey mb-1">
+                                Документы {documents.length > 0 ? `(${documents.length})` : '— не загружены'}
+                            </label>
+                            {documents.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {documents.map((url, i) => (
+                                        <a key={i} href={url} target="_blank" rel="noreferrer"
+                                            className="text-xs px-2 py-1 rounded border border-unbox-light text-unbox-green hover:bg-unbox-green/5 flex items-center gap-1">
+                                            <Upload size={11} /> Документ {i + 1}
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
 
                         <div>
                             <label className="block text-xs text-unbox-grey mb-1">Привязать к аккаунту</label>

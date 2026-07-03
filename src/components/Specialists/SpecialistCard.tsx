@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { User, Video, MapPin, Tent, ArrowRight } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { getBadge } from '../../utils/specialistBadges';
 import {
     hasOnlineFormat, hasOfflineFormat,
     hasOfflineRoom as hasOfflineRoomFmt,
@@ -18,6 +19,7 @@ export interface Specialist {
     formats: string[];
     basePriceGel: number;
     sessionDurationMin?: number;
+    badges?: string[];
 }
 
 interface SpecialistCardProps {
@@ -93,6 +95,22 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
 
                 {/* Content */}
                 <div style={{ padding: '14px 16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    {(specialist.badges || []).length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                            {(specialist.badges || []).map(code => {
+                                const b = getBadge(code);
+                                if (!b) return null;
+                                return (
+                                    <span key={code} style={{
+                                        fontFamily: GH_MONO, fontSize: 9, fontWeight: 700,
+                                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                                        padding: '3px 7px', color: b.fg, background: b.bg,
+                                        border: `1px solid ${b.border}`,
+                                    }}>{b.label}</span>
+                                );
+                            })}
+                        </div>
+                    )}
                     <div style={{ fontFamily: GH_SANS, fontSize: 16, fontWeight: 700, lineHeight: 1.2, marginBottom: 6 }}>
                         {specialist.firstName} {specialist.lastName}
                     </div>

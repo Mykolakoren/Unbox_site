@@ -98,6 +98,10 @@ def get_all_specialists_admin(
     return _order_specialists(session, list(session.exec(select(Specialist)).all()))
 
 
+# Фиксированный набор плашек-маркеров (ставит только админ).
+ALLOWED_BADGES = {"in_training", "recommended"}
+
+
 @router.patch("/admin/{specialist_id}", response_model=SpecialistRead)
 def update_specialist_admin(
     *,
@@ -112,6 +116,10 @@ def update_specialist_admin(
         raise HTTPException(status_code=404, detail="Specialist not found")
 
     update_data = specialist_in.model_dump(exclude_unset=True)
+
+    # Плашки — только из фиксированного набора (защита от произвольных кодов).
+    if "badges" in update_data and update_data["badges"] is not None:
+        update_data["badges"] = [b for b in update_data["badges"] if b in ALLOWED_BADGES]
 
     # If user_id is being changed, unlink it from any other specialist first
     # (user_id has a UNIQUE constraint, so we must clear the old link before assigning)
@@ -222,8 +230,9 @@ def update_my_specialist_profile(
         raise HTTPException(status_code=404, detail="Specialist profile not found")
 
     update_data = specialist_in.model_dump(exclude_unset=True)
-    # Prevent specialist from self-granting admin-only fields
-    for restricted in ("user_id", "is_verified", "category", "sort_order"):
+    # Prevent specialist from self-granting admin-only fields.
+    # badges — только админ (нельзя самому поставить «Рекомендованный»).
+    for restricted in ("user_id", "is_verified", "category", "sort_order", "badges"):
         update_data.pop(restricted, None)
 
     for key, value in update_data.items():
@@ -252,6 +261,9 @@ class SpecialistApplyPayload(BaseModel):
     formats: List[str] = PField(default_factory=list)
     base_price_gel: int = PField(default=0, ge=0)
     category: Optional[str] = None
+    # Дипломы/сертификаты — обязательны при подаче (валидация во фронте;
+    # на бэке страхуемся минимум одним документом).
+    documents: List[str] = PField(default_factory=list)
 
 
 @router.post("/apply", response_model=SpecialistRead)
@@ -263,6 +275,13 @@ def apply_as_specialist(
 ):
     """Submit a specialist-catalog application. Re-submitting overwrites the
     user's existing draft as long as it's not already approved (is_verified)."""
+    # Документы обязательны при подаче (owner 2026-07-03).
+    if not payload.documents:
+        raise HTTPException(
+            status_code=400,
+            detail="Загрузите хотя бы один документ (диплом/сертификат).",
+        )
+
     existing = session.exec(
         select(Specialist).where(Specialist.user_id == current_user.id)
     ).first()

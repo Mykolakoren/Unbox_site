@@ -18,6 +18,13 @@ class SpecialistBase(SQLModel):
     specializations: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     formats: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
+    # Загруженные документы (дипломы/сертификаты) — URL-ы файлов. Обязательны
+    # при подаче анкеты (2026-07-03 owner). Видны админу при проверке.
+    documents: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    # Плашки-маркеры на карточке специалиста. Фиксированный набор кодов,
+    # ставит только админ. Допустимые: "in_training" | "recommended".
+    badges: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+
     base_price_gel: int = Field(default=0)
     # Длительность консультации в минутах — показывается в шапке профиля,
     # редактируется самим специалистом в анкете. Owner 2026-06-24.
@@ -78,6 +85,8 @@ class SpecialistUpdate(SQLModel):
     user_id: Optional[UUID] = None
     payment_accounts: Optional[List[dict]] = None
     sort_order: Optional[int] = None
+    documents: Optional[List[str]] = None
+    badges: Optional[List[str]] = None
 
 class SpecialistRead(SpecialistBase):
     id: UUID

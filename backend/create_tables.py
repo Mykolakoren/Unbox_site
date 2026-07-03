@@ -36,6 +36,9 @@ def run_migrations():
         ("specialists", "category", "VARCHAR"),
         # Specialist — длительность консультации (мин), редактируется спецом
         ("specialists", "session_duration_min", "INTEGER DEFAULT 50"),
+        # Specialist — документы (дипломы/сертификаты) + плашки-маркеры
+        ("specialists", "documents", "JSON DEFAULT '[]'::json"),
+        ("specialists", "badges", "JSON DEFAULT '[]'::json"),
     ]
     with Session(engine) as session:
         for table, column, col_type in migrations:
