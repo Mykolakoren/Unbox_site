@@ -58,6 +58,9 @@ export interface SpecialistApplicationPayload {
     basePriceGel: number;
     category?: string;
     documents: string[];
+    instagram?: string;
+    telegram?: string;
+    website?: string;
 }
 
 export interface SpecialistProfile {
@@ -77,6 +80,9 @@ export interface SpecialistProfile {
     sortOrder: number;
     documents: string[];
     badges: string[];
+    instagram?: string | null;
+    telegram?: string | null;
+    website?: string | null;
 }
 
 export const specialistsApi = {

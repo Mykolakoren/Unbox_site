@@ -39,6 +39,10 @@ def run_migrations():
         # Specialist — документы (дипломы/сертификаты) + плашки-маркеры
         ("specialists", "documents", "JSON DEFAULT '[]'::json"),
         ("specialists", "badges", "JSON DEFAULT '[]'::json"),
+        # Specialist — контакты
+        ("specialists", "instagram", "VARCHAR"),
+        ("specialists", "telegram", "VARCHAR"),
+        ("specialists", "website", "VARCHAR"),
     ]
     with Session(engine) as session:
         for table, column, col_type in migrations:

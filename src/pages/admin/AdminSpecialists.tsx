@@ -68,6 +68,9 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
     const [specializations, setSpecializations] = useState<string[]>((specialist as any).specializations ?? []);
     const [formats, setFormats] = useState<string[]>((specialist as any).formats ?? []);
     const [badges, setBadges] = useState<string[]>((specialist as any).badges ?? []);
+    const [instagram, setInstagram] = useState((specialist as any).instagram ?? '');
+    const [telegram, setTelegram] = useState((specialist as any).telegram ?? '');
+    const [website, setWebsite] = useState((specialist as any).website ?? '');
     const [newSpec, setNewSpec] = useState('');
     const documents: string[] = (specialist as any).documents ?? [];
     const toggleBadge = (code: string) =>
@@ -129,6 +132,9 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                 category: category || null,
                 isVerified,
                 badges,
+                instagram: instagram || null,
+                telegram: telegram || null,
+                website: website || null,
             };
             if (userId && userId !== specialist.userId) {
                 payload.userId = userId;
@@ -207,6 +213,27 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                             <label className="block text-xs text-unbox-grey mb-1">Bio (подробное описание)</label>
                             <textarea value={bio} onChange={e => setBio(e.target.value)} rows={4}
                                 className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green resize-none" />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                            <div>
+                                <label className="block text-xs text-unbox-grey mb-1">Instagram</label>
+                                <input type="text" value={instagram} onChange={e => setInstagram(e.target.value)} maxLength={200}
+                                    placeholder="@username или ссылка"
+                                    className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-unbox-grey mb-1">Telegram</label>
+                                <input type="text" value={telegram} onChange={e => setTelegram(e.target.value)} maxLength={200}
+                                    placeholder="@username или ссылка"
+                                    className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-unbox-grey mb-1">Сайт</label>
+                                <input type="text" value={website} onChange={e => setWebsite(e.target.value)} maxLength={300}
+                                    placeholder="https://…"
+                                    className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
+                            </div>
                         </div>
                     </div>
 

@@ -264,6 +264,9 @@ class SpecialistApplyPayload(BaseModel):
     # Дипломы/сертификаты — обязательны при подаче (валидация во фронте;
     # на бэке страхуемся минимум одним документом).
     documents: List[str] = PField(default_factory=list)
+    instagram: Optional[str] = None
+    telegram: Optional[str] = None
+    website: Optional[str] = None
 
 
 @router.post("/apply", response_model=SpecialistRead)

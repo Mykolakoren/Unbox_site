@@ -25,6 +25,11 @@ class SpecialistBase(SQLModel):
     # ставит только админ. Допустимые: "in_training" | "recommended".
     badges: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
+    # Контакты специалиста (показываются в профиле). Хендл или ссылка.
+    instagram: Optional[str] = Field(default=None)
+    telegram: Optional[str] = Field(default=None)
+    website: Optional[str] = Field(default=None)
+
     base_price_gel: int = Field(default=0)
     # Длительность консультации в минутах — показывается в шапке профиля,
     # редактируется самим специалистом в анкете. Owner 2026-06-24.
@@ -87,6 +92,9 @@ class SpecialistUpdate(SQLModel):
     sort_order: Optional[int] = None
     documents: Optional[List[str]] = None
     badges: Optional[List[str]] = None
+    instagram: Optional[str] = None
+    telegram: Optional[str] = None
+    website: Optional[str] = None
 
 class SpecialistRead(SpecialistBase):
     id: UUID

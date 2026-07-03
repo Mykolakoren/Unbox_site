@@ -74,6 +74,9 @@ export function BecomeSpecialistPage() {
         basePriceGel: 0,
         category: 'psychology',
         documents: [],
+        instagram: '',
+        telegram: '',
+        website: '',
     });
     const [specInput, setSpecInput] = useState('');
     const addDocument = (url: string) =>
@@ -104,6 +107,9 @@ export function BecomeSpecialistPage() {
                         basePriceGel: p.basePriceGel || 0,
                         category: p.category || 'psychology',
                         documents: p.documents || [],
+                        instagram: p.instagram || '',
+                        telegram: p.telegram || '',
+                        website: p.website || '',
                     });
                 }
             })
@@ -294,6 +300,19 @@ export function BecomeSpecialistPage() {
                     <div>
                         <label style={labelStyle}>О себе</label>
                         <textarea value={form.bio || ''} onChange={e => setForm(f => ({ ...f, bio: e.target.value }))} style={{ ...inputStyle, minHeight: 140, fontFamily: 'inherit' }} maxLength={5000} placeholder="Образование, подходы, опыт, с чем работаете…" />
+                    </div>
+
+                    {/* Контакты */}
+                    <div>
+                        <label style={labelStyle}>Контакты (необязательно)</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <input value={form.instagram || ''} onChange={e => setForm(f => ({ ...f, instagram: e.target.value }))}
+                                style={inputStyle} maxLength={200} placeholder="Instagram — @username или ссылка" />
+                            <input value={form.telegram || ''} onChange={e => setForm(f => ({ ...f, telegram: e.target.value }))}
+                                style={inputStyle} maxLength={200} placeholder="Telegram — @username или ссылка" />
+                            <input value={form.website || ''} onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
+                                style={inputStyle} maxLength={300} placeholder="Сайт — https://…" />
+                        </div>
                     </div>
 
                     <div>

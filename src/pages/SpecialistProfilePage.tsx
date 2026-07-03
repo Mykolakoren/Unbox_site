@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Video, MapPin, Calendar, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Video, MapPin, Calendar, CheckCircle, Instagram, Send, Globe } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { api } from '../api/client';
@@ -16,6 +16,40 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { StructuredText } from '../components/StructuredText';
 import { hasOnlineFormat, hasOfflineFormat } from '../utils/specialistFormat';
 import { getBadge } from '../utils/specialistBadges';
+
+/** Нормализует контакт (@handle или ссылка) в {href, label} для профиля. */
+function normalizeContact(
+    raw: string | null | undefined,
+    kind: 'instagram' | 'telegram' | 'website',
+): { href: string; label: string } | null {
+    const v = (raw || '').trim();
+    if (!v) return null;
+    const isUrl = /^https?:\/\//i.test(v);
+    if (kind === 'website') {
+        const href = isUrl ? v : `https://${v}`;
+        return { href, label: v.replace(/^https?:\/\//i, '').replace(/\/$/, '') };
+    }
+    const handle = v.replace(/^@/, '').replace(/^https?:\/\/(www\.)?(instagram\.com|t\.me|telegram\.me)\//i, '').replace(/\/$/, '');
+    const base = kind === 'instagram' ? 'https://instagram.com/' : 'https://t.me/';
+    const href = isUrl ? v : `${base}${handle}`;
+    return { href, label: `@${handle}` };
+}
+
+function ContactLink({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
+    return (
+        <a href={href} target="_blank" rel="noreferrer"
+            style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                fontFamily: GH_MONO, fontSize: 13, color: GH.ink, textDecoration: 'none',
+                padding: '7px 12px', border: `1px solid ${GH.ink10}`,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = GH.ink; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = GH.ink10; }}
+        >
+            {icon}{label}
+        </a>
+    );
+}
 
 export function SpecialistProfilePage() {
     const { id } = useParams<{ id: string }>();
@@ -359,6 +393,22 @@ export function SpecialistProfilePage() {
                                 }}>
                                     {specialist.tagline}
                                 </p>
+
+                                {/* Контакты */}
+                                {(() => {
+                                    const sp = specialist as any;
+                                    const ig = normalizeContact(sp.instagram, 'instagram');
+                                    const tg = normalizeContact(sp.telegram, 'telegram');
+                                    const web = normalizeContact(sp.website, 'website');
+                                    if (!ig && !tg && !web) return null;
+                                    return (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 20 }}>
+                                            {ig && <ContactLink href={ig.href} icon={<Instagram size={15} />} label={ig.label} />}
+                                            {tg && <ContactLink href={tg.href} icon={<Send size={15} />} label={tg.label} />}
+                                            {web && <ContactLink href={web.href} icon={<Globe size={15} />} label={web.label} />}
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* Format strip */}
                                 <div style={{
