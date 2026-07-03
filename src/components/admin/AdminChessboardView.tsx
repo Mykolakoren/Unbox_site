@@ -1276,7 +1276,15 @@ export function AdminChessboardView() {
             <ChessboardScroller minGridWidth={130 + TIME_SLOTS.length * 44 + 110}>
                 <table
                     className="border-collapse text-xs"
-                    style={{ minWidth: `${130 + TIME_SLOTS.length * 44}px` }}
+                    // table-layout:fixed — колонки строго по colgroup (44px/слот),
+                    // длинное имя клиента больше НЕ расширяет колонку часа
+                    // (обрезается ellipsis). Owner 2026-07-03: разъезжающиеся
+                    // столбцы сбивали при чтении диапазона времени.
+                    style={{
+                        tableLayout: 'fixed',
+                        width: `${130 + TIME_SLOTS.length * 44 + 110}px`,
+                        minWidth: `${130 + TIME_SLOTS.length * 44 + 110}px`,
+                    }}
                 >
                     {/* Column widths */}
                     <colgroup>

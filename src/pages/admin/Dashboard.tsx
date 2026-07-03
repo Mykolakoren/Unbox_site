@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
-import { startOfToday, startOfMonth, endOfMonth, isAfter, format } from 'date-fns';
+import { startOfToday, startOfMonth, endOfMonth, isAfter, format, subDays } from 'date-fns';
 import { Users, CreditCard, Calendar, TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import { AnalyticsCharts } from '../../components/admin/AnalyticsCharts';
@@ -18,6 +18,8 @@ export function AdminDashboard() {
 
     // Local analytics state — avoids polluting the shared store used by Finance page
     const [monthAnalytics, setMonthAnalytics] = useState<CashboxAnalytics | null>(null);
+    // 7-дневная аналитика для графика выручки (тот же кассовый источник).
+    const [weekAnalytics, setWeekAnalytics] = useState<CashboxAnalytics | null>(null);
 
     useEffect(() => {
         fetchUsers();
@@ -30,6 +32,13 @@ export function AdminDashboard() {
         const dateTo = format(endOfMonth(now), "yyyy-MM-dd'T'23:59:59");
         cashboxApi.getAnalytics(dateFrom, dateTo)
             .then(setMonthAnalytics)
+            .catch(() => {});
+
+        // Последние 7 дней (может пересекать месяцы) — для графика выручки.
+        const weekFrom = format(subDays(now, 6), "yyyy-MM-dd'T'00:00:00");
+        const weekTo = format(now, "yyyy-MM-dd'T'23:59:59");
+        cashboxApi.getAnalytics(weekFrom, weekTo)
+            .then(setWeekAnalytics)
             .catch(() => {});
     }, [fetchUsers, fetchAllBookings, fetchBalance]);
 
@@ -112,6 +121,7 @@ export function AdminDashboard() {
                 allBookings={bookings}
                 users={users}
                 monthAnalytics={monthAnalytics}
+                weekAnalytics={weekAnalytics}
                 incomingCounts={incomingCounts}
             />
         );
@@ -134,6 +144,7 @@ interface GHDashProps {
     allBookings: BookingHistoryItem[];
     users: AppUser[];
     monthAnalytics: CashboxAnalytics | null;
+    weekAnalytics: CashboxAnalytics | null;
     /** Excel #12 — header counter "Сегодня N · Вчера M". */
     incomingCounts: { today: number; yesterday: number };
 }
@@ -149,6 +160,7 @@ function GridHouseAdminDashboard({
     allBookings,
     users,
     monthAnalytics,
+    weekAnalytics,
     incomingCounts,
 }: GHDashProps) {
     const navigate = useNavigate();
@@ -273,7 +285,7 @@ function GridHouseAdminDashboard({
             {/* Analytics charts — wrapped in hairline frame (legacy internals) */}
             <div style={{ border: hairline, padding: narrow ? 14 : 28, marginBottom: narrow ? 24 : 40, overflowX: 'auto' }}>
                 <div style={{ ...monoLabel, marginBottom: narrow ? 12 : 20 }}>Аналитика · Бронирования</div>
-                <AnalyticsCharts bookings={allBookings} />
+                <AnalyticsCharts bookings={allBookings} revenueDaily={weekAnalytics?.dailyData} />
             </div>
 
             {/* Recent bookings */}

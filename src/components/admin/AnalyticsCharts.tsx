@@ -8,31 +8,42 @@ import { ru } from 'date-fns/locale';
 
 interface AnalyticsChartsProps {
   bookings: any[];
+  // Дневная выручка из кассы (тот же источник, что и цифры-карточки сверху).
+  // Если передана — график строится по ней; иначе фолбэк на брони по createdAt.
+  revenueDaily?: { date: string; income: number }[];
 }
 
-export function AnalyticsCharts({ bookings }: AnalyticsChartsProps) {
+export function AnalyticsCharts({ bookings, revenueDaily }: AnalyticsChartsProps) {
   // 1. Revenue over the last 7 days (Area Chart)
   const revenueData = useMemo(() => {
     const data = [];
     const today = startOfDay(new Date());
-    
-    // Generate last 7 days array
+
     for (let i = 6; i >= 0; i--) {
       const date = subDays(today, i);
-      
-      // Calculate revenue for this specific day
-      const dayRevenue = bookings
-        .filter(b => b.status === 'confirmed')
-        .filter(b => isSameDay(new Date(b.createdAt), date))
-        .reduce((sum, b) => sum + (b.finalPrice || 0), 0);
-        
+      let dayRevenue: number;
+
+      if (revenueDaily) {
+        // Точный источник — касса (income за конкретную дату YYYY-MM-DD).
+        const key = format(date, 'yyyy-MM-dd');
+        dayRevenue = revenueDaily
+          .filter(d => d.date === key)
+          .reduce((sum, d) => sum + (d.income || 0), 0);
+      } else {
+        // Фолбэк: выручка по броням, созданным в этот день.
+        dayRevenue = bookings
+          .filter(b => b.status === 'confirmed')
+          .filter(b => isSameDay(new Date(b.createdAt), date))
+          .reduce((sum, b) => sum + (b.finalPrice || 0), 0);
+      }
+
       data.push({
         date: format(date, 'dd MMM', { locale: ru }),
-        revenue: dayRevenue
+        revenue: dayRevenue,
       });
     }
     return data;
-  }, [bookings]);
+  }, [bookings, revenueDaily]);
 
   // 2. Bookings by Format (Pie Chart)
   const formatData = useMemo(() => {
