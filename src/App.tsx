@@ -405,7 +405,7 @@ function App() {
         <Route path="/bookings" element={<Navigate to="/dashboard/bookings" replace />} />
 
         {/* Dashboard */}
-        <Route path="/dashboard" element={<DashboardLayout />}>
+        <Route path="/dashboard" element={<ModuleErrorBoundary moduleName="Личный кабинет"><DashboardLayout /></ModuleErrorBoundary>}>
           <Route index element={<DashboardOverview />} />
           <Route path="bookings" element={<MyBookingsPage />} />
           <Route path="waitlist" element={<MyWaitlistPage />} />

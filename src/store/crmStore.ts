@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { crmApi } from '../api/crm';
+
+// Dedup concurrent quick-pay calls per session id — a double-tap on the "Оплатить"
+// button (the flag flips isPaid only AFTER the await) would otherwise fire two
+// payment API calls. Returning the same in-flight promise = one call, both
+// callers get the real result.
+const _quickPayInFlight = new Map<string, Promise<{ amount: number; currency: string }>>();
 import type {
     CrmClient, CrmClientCreate, CrmClientUpdate,
     CrmSession, CrmSessionCreate, CrmSessionUpdate,
@@ -211,18 +217,26 @@ export const useCrmStore = create<CrmStore>((set, get) => ({
     },
 
     quickPaySession: async (id, account?) => {
-        try {
-            const result = await crmApi.quickPaySession(id, account);
-            set((s) => ({
-                sessions: s.sessions.map((sess) =>
-                    sess.id === id ? { ...sess, isPaid: true } : sess
-                ),
-            }));
-            return { amount: result.amount, currency: result.currency };
-        } catch (error) {
-            toast.error('Не удалось отметить оплату');
-            throw error;
-        }
+        const existing = _quickPayInFlight.get(id);
+        if (existing) return existing;
+        const p = (async () => {
+            try {
+                const result = await crmApi.quickPaySession(id, account);
+                set((s) => ({
+                    sessions: s.sessions.map((sess) =>
+                        sess.id === id ? { ...sess, isPaid: true } : sess
+                    ),
+                }));
+                return { amount: result.amount, currency: result.currency };
+            } catch (error) {
+                toast.error('Не удалось отметить оплату');
+                throw error;
+            } finally {
+                _quickPayInFlight.delete(id);
+            }
+        })();
+        _quickPayInFlight.set(id, p);
+        return p;
     },
 
     // ── Payments ─────────────────────────────────────────────────────────────

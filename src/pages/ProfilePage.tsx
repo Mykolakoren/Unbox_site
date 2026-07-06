@@ -522,7 +522,7 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                         {currentUser.avatarUrl ? (
                             <img src={currentUser.avatarUrl} alt={currentUser.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         ) : (
-                            currentUser.name[0]?.toUpperCase()
+                            currentUser.name?.[0]?.toUpperCase()
                         )}
                     </div>
                     <div>

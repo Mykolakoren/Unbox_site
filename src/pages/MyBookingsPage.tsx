@@ -103,6 +103,9 @@ function BookingsChessboard({
     // Quick booking slot for CRM mode
     const [crmSlot, setCrmSlot] = useState<{ resId: string; time: string; date: Date } | null>(null);
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
+    // Guard against double-tap on the "+30 мин" extend buttons (slow network
+    // could otherwise fire extendBooking twice → double charge/extension).
+    const [extending, setExtending] = useState(false);
     // Partial-cancel ("trim") target — opens TrimBookingModal for this booking.
     const [trimBooking, setTrimBooking] = useState<BookingHistoryItem | null>(null);
     // Waitlist subscribe target — set when user taps a busy slot, drives the
@@ -1952,7 +1955,10 @@ function BookingsChessboard({
                                 </button>
                             </div>
                             <button
+                                disabled={extending}
                                 onClick={async () => {
+                                    if (extending) return;
+                                    setExtending(true);
                                     try {
                                         const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
                                         setActiveBooking(null);
@@ -1960,9 +1966,11 @@ function BookingsChessboard({
                                         toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
                                     } catch (err: any) {
                                         toast.error(err?.response?.data?.detail || 'Не удалось продлить');
+                                    } finally {
+                                        setExtending(false);
                                     }
                                 }}
-                                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-unbox-light text-unbox-dark text-xs font-semibold hover:bg-unbox-green/20 transition-all"
+                                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-unbox-light text-unbox-dark text-xs font-semibold hover:bg-unbox-green/20 transition-all disabled:opacity-50"
                             >
                                 <Plus size={12} /> Продлить +30 мин
                             </button>
@@ -1998,8 +2006,11 @@ function BookingsChessboard({
                                     Менее 24ч до начала — бесплатная отмена недоступна
                                 </div>
                                 <button
+                                    disabled={extending}
                                     onClick={async () => {
+                                        if (extending) return;
                                         if (!confirm('Продление менее чем за 24ч. Отмена этого действия будет платной и только через администратора. Продолжить?')) return;
+                                        setExtending(true);
                                         try {
                                             const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
                                             setActiveBooking(null);
@@ -2007,9 +2018,11 @@ function BookingsChessboard({
                                             toast.success(`Продлено на 30 мин. Итого: ${updated.duration} мин`);
                                         } catch (err: any) {
                                             toast.error(err?.response?.data?.detail || 'Не удалось продлить');
+                                        } finally {
+                                            setExtending(false);
                                         }
                                     }}
-                                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-unbox-light text-unbox-dark text-xs font-semibold hover:bg-unbox-green/20 transition-all"
+                                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-unbox-light text-unbox-dark text-xs font-semibold hover:bg-unbox-green/20 transition-all disabled:opacity-50"
                                 >
                                     <Plus size={12} /> Продлить +30 мин
                                 </button>

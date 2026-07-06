@@ -48,6 +48,13 @@ export function DashboardLayout() {
         const path = window.location.pathname;
         const search = window.location.search;
         const hash = window.location.hash;
+        // Флоу «Забронировать кабинет под сессию» из CRM навигирует на
+        // /dashboard/bookings с crmMode в state — там MyBookingsPage
+        // подсвечивает оранжевым время сессии и привязывает бронь к сессии.
+        // Этого функционала нет в /crm/bookings, поэтому при наличии crmMode
+        // НЕ редиректим специалиста НИ одним из редиректов ниже.
+        const hasCrmMode = path === '/dashboard/bookings'
+            && !!(location.state as { crmMode?: unknown } | null)?.crmMode;
         const map: Record<string, string> = {
             '/dashboard':         '/crm',
             '/dashboard/bookings':'/crm/bookings',
@@ -56,20 +63,11 @@ export function DashboardLayout() {
             '/dashboard/profile': '/crm/account',
         };
         const target = map[path];
-        if (target) {
-            // Флоу «Забронировать кабинет под сессию» из CRM навигирует на
-            // /dashboard/bookings с crmMode в state — там MyBookingsPage
-            // подсвечивает оранжевым время сессии и привязывает бронь к
-            // сессии. Этого функционала нет в /crm/bookings, поэтому при
-            // наличии crmMode НЕ редиректим, отдаём MyBookingsPage.
-            const hasCrmMode = path === '/dashboard/bookings'
-                && !!(location.state as { crmMode?: unknown } | null)?.crmMode;
-            if (!hasCrmMode) {
-                return <Navigate to={target + search + hash} replace />;
-            }
+        if (target && !hasCrmMode) {
+            return <Navigate to={target + search + hash} replace />;
         }
-        // Любой другой /dashboard/* — на CRM index.
-        if (path.startsWith('/dashboard')) {
+        // Любой другой /dashboard/* — на CRM index (кроме crmMode-флоу).
+        if (path.startsWith('/dashboard') && !hasCrmMode) {
             return <Navigate to="/crm" replace />;
         }
     }
