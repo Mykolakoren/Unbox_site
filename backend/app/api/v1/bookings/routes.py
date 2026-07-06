@@ -3080,7 +3080,12 @@ def trim_booking(
     except ValueError:
         raise HTTPException(status_code=404, detail="Invalid Booking ID")
 
-    booking = session.get(Booking, b_uuid)
+    # Lock the row (SELECT FOR UPDATE) so two concurrent trims/cancels on the
+    # same booking serialize — otherwise both read the original duration and
+    # produce inconsistent remnants / a double refund.
+    booking = session.exec(
+        select(Booking).where(Booking.id == b_uuid).with_for_update()
+    ).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
@@ -3186,7 +3191,15 @@ def trim_booking(
     removed_hours = 0.0
 
     if booking.payment_method == "balance":
-        removed_value = round((booking.final_price or 0) - new_total_price, 2)
+        # Baseline = what was ACTUALLY charged. For a paid booking that's
+        # charge_amount (final_price may have drifted via consecutive-recompute);
+        # for pending nothing was charged yet.
+        charged_baseline = (
+            booking.charge_amount
+            if (not pending and booking.charge_amount is not None)
+            else (booking.final_price or 0)
+        )
+        removed_value = round(charged_baseline - new_total_price, 2)
         # pending bookings haven't been charged — the T-24h cron will capture
         # the (new, smaller) final_price. Touching the balance here would hand
         # a phantom refund. Only settle when already charged.
@@ -3218,6 +3231,14 @@ def trim_booking(
             if "usedHours" in new_sub:
                 del new_sub["usedHours"]
             owner.subscription = new_sub
+            session.add(owner)
+        # Peak-hour surcharge on a subscription booking is charged to BALANCE at
+        # creation (final_price = subscription_peak_debt). If the trimmed slice
+        # included peak hours, that money must be refunded too — hours alone
+        # would silently keep the peak surcharge.
+        removed_peak_money = round((booking.final_price or 0) - new_total_price, 2)
+        if not pending and removed_peak_money > 0 and owner:
+            owner.balance = round((owner.balance or 0) + removed_peak_money, 2)
             session.add(owner)
 
     # ── Apply the split ──
@@ -3279,16 +3300,30 @@ def trim_booking(
         )
         session.add(new_remnant)
 
-    # ── Google Calendar: drop the old event, schedule recreation(s) ──
-    if booking.gcal_event_id:
-        try:
-            gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
-        except Exception as e:
-            logger.warning(
-                f"[Trim] GCal delete_event failed for "
-                f"booking={booking.id} event={booking.gcal_event_id}: {e}"
-            )
-        booking.gcal_event_id = None
+    # ── Detach any CRM session linked to this booking ──
+    # After a trim the booking's time/duration changed, so the automatic
+    # session↔cabinet link is no longer reliable. Mirror cancel_booking: detach
+    # so no session keeps a stale "КАБ" badge pointing at a now-different slot.
+    # (Trim only shows for duration>=120, so single-session cabinet bookings
+    # aren't affected.) The specialist can re-link via "Забронировать кабинет".
+    from app.models.therapy_session import TherapySession as _TS
+    linked_sessions = session.exec(
+        select(_TS).where(_TS.booking_id == str(booking.id))
+    ).all()
+    for ts in linked_sessions:
+        ts.booking_id = None
+        ts.is_booked = False
+        ts.updated_at = datetime.now()
+        session.add(ts)
+
+    # ── Google Calendar ── Clear the old event ref BEFORE commit so the DB is
+    # consistent even if the external call later fails; do the delete+recreate
+    # in the BACKGROUND after commit so a slow/timing-out Google API can never
+    # block the request or leave a half-written state (regression the earlier
+    # synchronous version had).
+    old_gcal_event_id = booking.gcal_event_id
+    old_gcal_resource = booking.resource_id
+    booking.gcal_event_id = None
 
     session.add(booking)
     session.commit()
@@ -3297,11 +3332,12 @@ def trim_booking(
         session.refresh(new_remnant)
         new_remnant_id = str(new_remnant.id)
 
-    # Schedule GCal recreation for the (already-persisted) remnant rows.
+    # GCal delete-old + recreate for both remnant rows, fully post-commit.
     if owner:
         owner_label = owner.name or owner.email
         background_tasks.add_task(
-            _gcal_create_in_background, str(booking.id), owner_label
+            _gcal_recreate_in_background, str(booking.id), owner_label,
+            old_gcal_event_id, old_gcal_resource,
         )
         if new_remnant is not None:
             background_tasks.add_task(
