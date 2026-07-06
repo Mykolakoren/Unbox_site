@@ -1,5 +1,9 @@
 # UnboxCRM — Контекст проекта
 
+> 📌 **Перед работой прочитай [docs/PROJECT-STATE-AND-AUDIT.md](docs/PROJECT-STATE-AND-AUDIT.md)** —
+> текущее состояние, что недавно менялось, открытые задачи из аудита и КРИТИЧНЫЕ нюансы деплоя
+> (прод-бэкенд разошёлся с git — деплоить бэк только хирургически, не `deploy.sh back`).
+
 ## Что это
 Fullstack CRM + система бронирования кабинетов для центра психологии Unbox (unbox.com.ge).
 - **Frontend**: React 19 + TypeScript + Vite + Zustand + TailwindCSS
