@@ -57,8 +57,25 @@ deploy_front() {
     mv $REMOTE_FRONT_DIR $REMOTE_FRONT_DIR-backup-\$TS
     mv /tmp/dist-new $REMOTE_FRONT_DIR
     rm -f /tmp/unbox-dist.tgz
-    nginx -t && systemctl reload nginx
+    # §5#8: битый nginx-конфиг → откат, не оставляем прод сломанным
+    if ! nginx -t; then
+      echo 'nginx -t FAILED — rolling back'
+      rm -rf $REMOTE_FRONT_DIR; mv $REMOTE_FRONT_DIR-backup-\$TS $REMOTE_FRONT_DIR; exit 1
+    fi
+    systemctl reload nginx
+    # §5#8 health-gate: сайт реально отдаёт 200? иначе авто-откат
+    sleep 2
+    CODE=\$(curl -s -o /dev/null -w '%{http_code}' https://unbox.com.ge/ || echo 000)
+    if [ \"\$CODE\" != '200' ]; then
+      echo \"health-check FAILED (HTTP \$CODE) — rolling back\"
+      rm -rf $REMOTE_FRONT_DIR; mv $REMOTE_FRONT_DIR-backup-\$TS $REMOTE_FRONT_DIR
+      systemctl reload nginx; exit 1
+    fi
+    echo \"health-check OK (200)\"
     echo 'installed bundle:' \$(grep -o 'index-[A-Za-z0-9_-]*\.js' $REMOTE_FRONT_DIR/index.html | head -1)
+    # §5#8: прунинг старых бэкапов — оставляем 3 последних
+    ls -dt $REMOTE_FRONT_DIR-backup-* 2>/dev/null | tail -n +4 | xargs -r rm -rf
+    echo 'dist-backups kept:' \$(ls -d $REMOTE_FRONT_DIR-backup-* 2>/dev/null | wc -l)
   "
 }
 

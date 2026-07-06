@@ -169,6 +169,25 @@ def charge_due_bookings(
             logger.exception("[billing] charge failed for %s", b.id)
             failures.append({"booking_id": str(b.id), "reason": f"exception: {e!s}"})
 
+    # §5#6: если денежный крон что-то не смог списать — не молчим, пингуем
+    # админа в TG. Раньше failures просто уезжали в ответ, который никто не
+    # читает. Non-blocking. (Полноценный dead-man's-switch на «крон вообще не
+    # запустился» — внешний, healthchecks.io — остаётся отдельной задачей.)
+    if failures:
+        try:
+            telegram_service.send_admin_event(
+                event="billing_charge_failures",
+                fields={
+                    "Не списано": f"{len(failures)} из {len(due)}",
+                    "Успешно": str(settled),
+                    "Примеры": "; ".join(
+                        f"{f['booking_id'][:8]}·{str(f['reason'])[:40]}" for f in failures[:5]
+                    ) or "—",
+                },
+            )
+        except Exception:
+            logger.warning("[billing] charge-failures admin alert failed", exc_info=True)
+
     return {
         "ok": True,
         "candidates": len(due),

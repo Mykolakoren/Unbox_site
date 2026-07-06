@@ -9,6 +9,25 @@ from .core.config import settings
 from .core.rate_limit import limiter
 from .api.v1 import api_router
 
+# ── Sentry (§5#5) — опт-ин трекинг ошибок бэкенда. Полный no-op, если пакет
+# не установлен ИЛИ не задан SENTRY_DSN. Чтобы включить на проде:
+#   venv/bin/pip install "sentry-sdk[fastapi]"  +  SENTRY_DSN=... в .env
+import os as _os
+_sentry_dsn = _os.getenv("SENTRY_DSN") or getattr(settings, "SENTRY_DSN", None)
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment=_os.getenv("ENVIRONMENT", "production"),
+            traces_sample_rate=0.0,   # только ошибки, без перф-трейсов
+            send_default_pii=False,
+        )
+    except Exception:  # пакет не установлен / кривой DSN — не роняем старт
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Sentry init skipped", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
