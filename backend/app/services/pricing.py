@@ -141,9 +141,17 @@ class PricingService:
 
     @staticmethod
     def _is_peak_time(time_str: str) -> bool:
-        """Check if HH:MM falls into a peak hour range."""
-        h, m = map(int, time_str.split(":"))
-        mins = h * 60 + m
+        """Check if HH:MM falls into a peak hour range.
+
+        §5#9 (2026-07-06): кривая/пустая строка времени не должна ронять
+        прайсинг (в цикле по слотам одна битая бронь ломала весь день).
+        На ошибке парсинга считаем «не пик» — безопасный дефолт (без наценки).
+        """
+        try:
+            h, m = map(int, (time_str or "").split(":")[:2])
+            mins = h * 60 + m
+        except (ValueError, AttributeError):
+            return False
         for r in PricingService.PRICING_CONFIG["peak_hours"]["ranges"]:
             sh, sm = map(int, r["start"].split(":"))
             eh, em = map(int, r["end"].split(":"))

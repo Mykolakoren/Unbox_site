@@ -1203,9 +1203,16 @@ def create_booking(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Booking Creation Error: {e}")
+    except ValueError as e:
+        # §5#7: известные валидации кидают ValueError с человекочитаемым
+        # текстом (напр. «refund_percent must be between 0 and 1») → 400.
+        logger.warning(f"Booking creation validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        # Непредвиденная ошибка — 500 (всплывёт в мониторинге, а не молча
+        # маскируется под «плохой запрос»). Клиенту — generic без деталей.
+        logger.exception("Booking creation failed unexpectedly")
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка при создании брони. Попробуйте ещё раз.")
 
 
 # ─── Multi-slot (same-day split-periods in one resource) ────────────────────
