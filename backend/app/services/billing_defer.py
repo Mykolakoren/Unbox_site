@@ -134,6 +134,9 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     method = (b.payment_method or "balance").lower()
     amount = float(b.final_price or 0)
     snapshot: float = amount
+    # True когда абонементная бронь не покрылась часами и ушла в баланс-долг —
+    # тогда снимаем реальные деньги и проверяем кредитный лимит как для balance.
+    sub_fell_back_to_balance = False
 
     if method == "subscription":
         sub = dict(user.subscription or {})
@@ -147,14 +150,35 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             snapshot = hrs
         else:
             # Subscription can't cover (expired / depleted) — fall back to
-            # cash balance debt so the slot stays bookable. Log so admin
-            # can chase the user.
-            user.balance = round((user.balance or 0) - amount, 2)
+            # cash balance debt so the slot stays bookable. §5#1 fix
+            # (2026-07-06): списываем РЕАЛЬНУЮ кэш-цену комнаты, пересчитанную
+            # на момент списания, а не сохранённый `final_price` — у
+            # абонементной брони он ≈0 (стоимость была в часах), из-за чего
+            # истёкший абонемент давал бесплатную комнату.
+            cash_amount = amount
+            try:
+                from app.services.pricing import PricingService
+                start_dt = booking_start_dt_tbilisi(b) or b.date
+                breakdown = PricingService(session).calculate_price(
+                    user=user,
+                    resource_id=b.resource_id,
+                    start_time=start_dt,
+                    duration_minutes=int(b.duration or round(hrs * 60)),
+                    format_type=(b.format or "individual"),
+                )
+                cash_amount = round(float(breakdown.final_price or 0), 2)
+            except Exception as e:
+                logger.warning(
+                    "[billing] booking %s sub-fallback price recompute failed: %r; using stored %.2f₾",
+                    b.id, e, amount,
+                )
+            user.balance = round((user.balance or 0) - cash_amount, 2)
+            snapshot = cash_amount
+            sub_fell_back_to_balance = True
             logger.info(
-                "[billing] booking %s sub-fallback to balance: had %.2fh, needed %.2fh, charged %.2f₾",
-                b.id, rem, hrs, amount,
+                "[billing] booking %s sub-fallback to balance: had %.2fh, needed %.2fh, charged %.2f₾ (cash-recomputed)",
+                b.id, rem, hrs, cash_amount,
             )
-            snapshot = amount
     elif method == "bonus":
         # Bonus pool is FIFO with expiry. We don't decrement the pool here —
         # the existing /bonuses path already does it on cancel/refund — to
@@ -186,7 +210,7 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     # We tag the result so the caller can fire targeted TG alerts:
     #   * crossed 100% → over_limit (red, also pings admin)
     #   * crossed 80%  → topup_warn (amber, owner only)
-    if method != "subscription":
+    if method != "subscription" or sub_fell_back_to_balance:
         credit = float(user.credit_limit or 0)
         debt = max(0.0, -(user.balance or 0))
         if credit > 0:
