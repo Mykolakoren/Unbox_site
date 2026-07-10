@@ -175,6 +175,9 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
             user.balance = round((user.balance or 0) - cash_amount, 2)
             snapshot = cash_amount
             sub_fell_back_to_balance = True
+            # §5#12: часы НЕ списаны (ушли в баланс) — обнуляем hours_deducted,
+            # чтобы waive/refund вернул ДЕНЬГИ, а не фантомные часы в пул.
+            b.hours_deducted = 0
             logger.info(
                 "[billing] booking %s sub-fallback to balance: had %.2fh, needed %.2fh, charged %.2f₾ (cash-recomputed)",
                 b.id, rem, hrs, cash_amount,
@@ -259,13 +262,17 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
     method = (b.payment_method or "balance").lower()
     amount = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
 
-    if method == "subscription":
+    # §5#12: возвращаем то, что РЕАЛЬНО списали. Абонементная бронь, у которой
+    # часы фактически списаны (hours_deducted>0) → возврат часов. Если же она
+    # ушла в баланс-долг (истёкший абонемент, settle пометил hours_deducted=0)
+    # → возврат ДЕНЕГ, иначе вернули бы фантомные часы в пул + не отдали деньги.
+    hours_actually_used = float(b.hours_deducted or 0)
+    if method == "subscription" and hours_actually_used > 0:
         sub = dict(user.subscription or {})
         rem = float(sub.get("remaining_hours") or 0)
         used = float(sub.get("used_hours") or 0)
-        hrs = float(b.hours_deducted or (b.duration or 0) / 60.0)
-        sub["remaining_hours"] = rem + hrs
-        sub["used_hours"] = max(0.0, used - hrs)
+        sub["remaining_hours"] = rem + hours_actually_used
+        sub["used_hours"] = max(0.0, used - hours_actually_used)
         user.subscription = sub
     else:
         user.balance = round((user.balance or 0) + amount, 2)
