@@ -38,7 +38,33 @@ ssh root@138.68.111.248 'crontab -l'   # сверить с ops/crontab
 
 Тест: `WATCHDOG_DRY_RUN=1 WATCHDOG_LOG=<файл> WATCHDOG_STATE=/tmp/x ./unbox-cron-watchdog.sh`.
 
+## Off-box бэкап БД → DigitalOcean Spaces (§5#3)
+
+Ночной `unbox-db-backup.sh` пишет локально в `/var/backups/unbox-db` И (если
+настроено) выгружает свежий дамп в DO Spaces через `rclone`. Локальный бэкап
+защищает от DROP/битой миграции; off-box — от полной потери дроплета.
+Пока не настроено — off-box просто пропускается (локальный работает как раньше).
+
+**Что сделать владельцу (панель DigitalOcean):**
+1. **Spaces Object Storage → Create a Space:** регион (напр. Frankfurt `fra1`),
+   имя бакета (напр. `unbox-backups`), доступ — Private.
+2. **API → Spaces Keys → Generate New Key:** скопировать **Access Key** и
+   **Secret Key** (секрет показывается один раз!).
+3. **Droplet → Backups → Enable** (weekly snapshots всего дроплета).
+
+**На сервере (ключи вставляются тут, НЕ в переписку):**
+```bash
+ssh root@138.68.111.248
+nano /root/.config/rclone/rclone.conf     # вписать access_key_id, secret_access_key,
+                                          # endpoint = <регион>.digitaloceanspaces.com
+nano /root/.config/unbox-offsite.env      # раскомментить: UNBOX_OFFSITE_REMOTE=spaces:unbox-backups/db
+/usr/local/bin/unbox-db-backup.sh         # тест → строка "OFFSITE-OK ..."
+rclone ls spaces:unbox-backups/db         # проверить, что дамп там появился
+```
+Дальше выгрузка идёт автоматически ночью (существующий cron `0 2`). Удалённая
+ретенция — 30 дней (`UNBOX_OFFSITE_KEEP_DAYS`). Восстановление off-box:
+`rclone copy spaces:unbox-backups/db/unbox-<ts>.sql.gz .` → `zcat ... | psql "$DATABASE_URL"`.
+
 ## Открытые ops-задачи (см. docs/PROJECT-STATE-AND-AUDIT.md §5)
 
-- §5#3 — off-box бэкап БД (DO Spaces / другой хост) + weekly snapshots DigitalOcean. Нужны доступы.
 - §5#4 — Alembic (сейчас работает `run_migrations` через ALTER IF NOT EXISTS).
