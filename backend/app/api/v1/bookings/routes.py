@@ -1586,6 +1586,7 @@ class RecurringBookingRequest(PydanticBaseModel):
 @router.post("/recurring")
 def create_recurring_booking(
     *,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(deps.get_session),
     data: RecurringBookingRequest,
     current_user: User = Depends(deps.get_current_user),
@@ -1818,14 +1819,12 @@ def create_recurring_booking(
         session.add(booking)
         session.flush()
 
-        # GCal sync (cabinet calendar)
-        try:
-            event_id = gcal_service.create_event(booking, user_name=booking_owner.name)
-            if event_id:
-                booking.gcal_event_id = event_id
-                session.add(booking)
-        except Exception as e:
-            logger.warning(f"GCal sync failed for recurring {d}: {e}")
+        # GCal sync (cabinet calendar) — §5#2 (2026-07-10): вынесено из цикла
+        # в background_tasks ПОСЛЕ коммита. Раньше N синхронных вызовов Google
+        # в одном запросе (12+ для серии) блокировали и, при обрыве до коммита,
+        # оставляли «призрачные» события для уже обработанных дат (роллбэк БД их
+        # не удалял). Теперь события создаются только для реально закоммиченных
+        # броней — см. цикл планирования после session.commit() ниже.
 
         # Auto-create the matching CRM TherapySession if the booking is
         # linked to a client. Mirrors what the CRM chessboard does on a
@@ -1934,6 +1933,13 @@ def create_recurring_booking(
         created_bookings.append(str(booking.id))
 
     session.commit()
+
+    # §5#2: кабинет-GCal создаём в фоне ПОСЛЕ коммита — только для реально
+    # сохранённых броней. Идемпотентно (_gcal_create_in_background пропускает
+    # брони с уже проставленным gcal_event_id), не блокирует ответ, не плодит
+    # призраков при обрыве.
+    for _bid in created_bookings:
+        background_tasks.add_task(_gcal_create_in_background, _bid, booking_owner.name)
 
     # ── Admin chat alert: new series ──
     try:
