@@ -129,17 +129,18 @@ class GoogleCalendarService:
         summary = f"{name} — {room_name}".strip(' —')
 
         try:
-            # Construct start/end datetime strings
-            date_str = booking.date.strftime("%Y-%m-%d")
-
-            start_dt = f"{date_str}T{booking.start_time}:00"
-
-            # Calculate end time
+            # Construct start/end datetime via real datetime arithmetic so that
+            # bookings crossing midnight roll over to the next day. Раньше
+            # end_h = total_minutes // 60 давал «T24:00:00» для брони 23:00+60мин
+            # → Google 400 Bad Request (час >23), и дата не переходила на след.
+            # день. Теперь timedelta корректно обрабатывает полночь.
+            from datetime import timedelta as _td
             start_h, start_m = map(int, booking.start_time.split(':'))
-            total_minutes = start_h * 60 + start_m + booking.duration
-            end_h = total_minutes // 60
-            end_m = total_minutes % 60
-            end_dt = f"{date_str}T{end_h:02d}:{end_m:02d}:00"
+            start_obj = booking.date.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+            end_obj = start_obj + _td(minutes=booking.duration)
+            start_dt = start_obj.strftime("%Y-%m-%dT%H:%M:%S")
+            end_dt = end_obj.strftime("%Y-%m-%dT%H:%M:%S")
+            date_str = start_obj.strftime("%Y-%m-%d")
 
             event = {
                 'summary': summary,
