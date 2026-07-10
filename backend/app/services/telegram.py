@@ -484,7 +484,7 @@ class TelegramService:
         from datetime import timezone as _tz, timedelta as _td
         tb_now = datetime.now(_tz.utc) + _td(hours=4)
         lines.append("")
-        lines.append(f"<i>{tb_now.strftime('%H:%M · %d.%m.%Y')} (Тбилиси)</i>")
+        lines.append(f"<i>{tb_now.strftime('%H:%M · %d.%m.%Y')} (Батуми)</i>")
         return self._send_message(
             chat_id=str(chat_id),
             text="\n".join(lines),

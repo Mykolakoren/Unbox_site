@@ -369,7 +369,7 @@ function RescheduleForm({ session, busy, onSubmit, onBack }: {
             <Field label="Дата">
                 <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
             </Field>
-            <Field label="Время (Тбилиси)">
+            <Field label="Время (Батуми)">
                 <input type="time" value={time} onChange={e => setTime(e.target.value)} style={inputStyle} />
             </Field>
             <Field label="Длительность (мин)">

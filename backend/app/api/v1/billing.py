@@ -125,7 +125,7 @@ def charge_due_bookings(
 
                         text = (
                             f"💳 <b>Списание за бронь</b>\n\n"
-                            f"📅 {when} (Тбилиси)\n"
+                            f"📅 {when} (Батуми)\n"
                             f"📍 {res_name}{loc_line}"
                             f"{client_line}"
                             f"{series_line}\n"
