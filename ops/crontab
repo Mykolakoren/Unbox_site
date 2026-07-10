@@ -1,0 +1,28 @@
+# UnboxCRM — crontab прод-дроплета (138.68.111.248, root).
+# ⚠️ Секреты здесь ЗАРЕДАКТИРОВАНЫ (<REMINDER_SECRET>). Реальные значения —
+#    в /var/www/unbox/backend/.env на сервере (TELEGRAM_REMINDER_SECRET).
+#    НЕ коммить реальные секреты в этот файл.
+#
+# Назначение файла: crontab живёт только на сервере (не в git) и теряется при
+# пересоздании дроплета. Это — эталонная копия для восстановления.
+# Установка/сверка: см. ops/README.md.
+#
+# ── Задачи ─────────────────────────────────────────────────────────────────
+# TLS-сертификат: продление + reload nginx.
+0 3 * * * certbot renew --quiet --post-hook "nginx -s reload"
+
+# Дневная сводка админам в Telegram.
+0 5 * * * curl -sS -X POST 'https://unbox.com.ge/api/v1/telegram/daily-summary?secret=<REMINDER_SECRET>' > /dev/null 2>&1
+
+# ДЕНЬГИ: списание за 24ч по pending-броням, каждые 10 минут.
+*/10 * * * * curl -fsS -X POST 'http://127.0.0.1:8000/api/v1/billing/charge-due?secret=<REMINDER_SECRET>' >> /var/log/unbox-billing-cron.log 2>&1
+
+# Недельный перерасчёт скидки (кредит на баланс), понедельник ночью.
+0 1 * * 1 cd /var/www/unbox/backend && venv/bin/python3 run_weekly_rebate.py >> /var/log/unbox-weekly-rebate.log 2>&1
+
+# Ночной бэкап БД (pg_dump, хранение 14 дней).
+0 2 * * * /usr/local/bin/unbox-db-backup.sh >> /var/log/unbox-db-backup.log 2>&1
+
+# Сторож денежного крона (dead-man's-switch, §5#6). Алерт в TG, если charge-due
+# перестал списывать. Каждые 15 минут.
+*/15 * * * * /usr/local/bin/unbox-cron-watchdog.sh >> /var/log/unbox-cron-watchdog.log 2>&1
