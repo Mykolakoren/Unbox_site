@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-d
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
     BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star, Wrench,
-    CreditCard, Gift, UserCircle, Newspaper,
+    CreditCard, Gift, UserCircle, Newspaper, BarChart3,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
@@ -40,6 +40,11 @@ export function AdminLayout() {
         // Insert Финансы after Бронирования (index 1)
         if (canAccessFinance) {
             items.splice(2, 0, { path: '/admin/finance', icon: Wallet, label: 'Финансы' });
+        }
+        // Аналитика (owner/senior_admin) — после Финансов
+        if (canAccessRights) {
+            const at = items.findIndex(i => i.path === '/admin/finance');
+            items.splice(at >= 0 ? at + 1 : 2, 0, { path: '/admin/analytics', icon: BarChart3, label: 'Аналитика' });
         }
         // Права доступа — в конец
         if (canAccessRights) {

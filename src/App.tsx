@@ -45,6 +45,7 @@ const AdminTasksBoard = lazy(() => import('./pages/admin/TasksBoard').then(m => 
 const AdminCrm = lazy(() => import('./pages/admin/AdminCrm').then(m => ({ default: m.AdminCrm })));
 const AdminAccessRights = lazy(() => import('./pages/admin/AccessRights').then(m => ({ default: m.AdminAccessRights })));
 const AdminFinance = lazy(() => import('./pages/admin/Finance').then(m => ({ default: m.AdminFinance })));
+const OwnerAnalytics = lazy(() => import('./pages/admin/OwnerAnalytics').then(m => ({ default: m.OwnerAnalytics })));
 const AdminTeam = lazy(() => import('./pages/admin/AdminTeam').then(m => ({ default: m.AdminTeam })));
 const AdminSpecialists = lazy(() => import('./pages/admin/AdminSpecialists').then(m => ({ default: m.AdminSpecialists })));
 const AdminPosts = lazy(() => import('./pages/admin/AdminPosts').then(m => ({ default: m.AdminPosts })));
@@ -447,6 +448,7 @@ function App() {
           <Route path="tasks" element={<AdminTasksBoard />} />
           <Route path="crm" element={<AdminCrm />} />
           <Route path="finance" element={<AdminFinance />} />
+          <Route path="analytics" element={<OwnerAnalytics />} />
           <Route path="team" element={<AdminTeam />} />
           <Route path="specialists" element={<AdminSpecialists />} />
           <Route path="posts" element={<AdminPosts />} />
