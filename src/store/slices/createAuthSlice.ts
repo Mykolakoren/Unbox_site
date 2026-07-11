@@ -51,6 +51,12 @@ export const createAuthSlice: StateCreator<UserStore, [], [], AuthSlice> = (set)
         try {
             const user = await authApi.getMe();
             set({ currentUser: user });
+            // Скользящее продление: обновляем токен при каждом заходе, чтобы
+            // при регулярном визите сессия не истекала. Не блокирует и не
+            // роняет загрузку — тихо, best-effort.
+            authApi.refresh()
+                .then(r => { if (r?.access_token) localStorage.setItem('token', r.access_token); })
+                .catch(() => {});
         } catch (error: any) {
             console.error("Failed to fetch current user", error);
             // If token is invalid (401/403), purge the stale session so the

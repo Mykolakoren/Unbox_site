@@ -11,7 +11,10 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "changethis-generate-secure-key-in-prod"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 3  # 3 days (reduced from 8)
+    # 30 дней. Owner 2026-07-11: «не разлогинивай, если не пользовался». Токен
+    # ещё и продлевается при каждом заходе (см. /auth/refresh + fetchCurrentUser),
+    # поэтому при регулярном визите (хотя бы раз в месяц) сессия не истекает.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days
 
     # OAuth — set via environment variables
     GOOGLE_CLIENT_ID: Optional[str] = None

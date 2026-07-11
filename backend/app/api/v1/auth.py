@@ -102,6 +102,20 @@ def login_access_token(
         "token_type": "bearer"
     }
 
+
+@router.post("/refresh", response_model=dict)
+def refresh_token(current_user: User = Depends(get_current_user)) -> Any:
+    """Скользящее продление сессии: выдаёт свежий токен текущему пользователю.
+    Фронт зовёт при каждом заходе (fetchCurrentUser), поэтому при регулярном
+    визите сессия не истекает. Требует ещё валидный токен (обычная авторизация).
+    """
+    access_token = security.create_access_token(
+        current_user.id,
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
 @router.post("/register", response_model=UserRead)
 def register_new_user(
     *,

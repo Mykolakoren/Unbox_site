@@ -34,6 +34,12 @@ export const authApi = {
         return response.data;
     },
 
+    // Скользящее продление сессии — свежий токен текущему пользователю.
+    refresh: async (): Promise<{ access_token: string }> => {
+        const response = await api.post<{ access_token: string }>('/auth/refresh');
+        return response.data;
+    },
+
     googleLogin: async (token: string): Promise<AuthResponse> => {
         const response = await api.post<AuthResponse>('/auth/google', { token });
         return response.data;
