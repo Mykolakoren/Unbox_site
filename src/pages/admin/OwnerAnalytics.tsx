@@ -205,5 +205,6 @@ function Bar({ pct }: { pct: number }) {
     return <div style={{ height: 8, background: GH.ink10, position: 'relative' }}><div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${p}%`, background: color }} /></div>;
 }
 
+const card: React.CSSProperties = { border: `1px solid ${GH.ink10}`, background: GH.paper, padding: 16 };
 const chip: React.CSSProperties = { padding: '7px 12px', border: `1px solid ${GH.ink10}`, background: GH.paper, fontFamily: GH_MONO, fontSize: 11, cursor: 'pointer', color: GH.ink };
 const dateInput: React.CSSProperties = { padding: '6px 8px', border: `1px solid ${GH.ink10}`, fontFamily: 'inherit', fontSize: 13 };
