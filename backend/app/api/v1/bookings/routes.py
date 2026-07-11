@@ -959,6 +959,9 @@ def create_booking(
         booking_data["user_id"] = booking_owner.email
         if "target_user_id" in booking_data:
             del booking_data["target_user_id"]
+        # Кто оформил (owner-аналитика по админам).
+        booking_data["created_by_id"] = str(current_user.id)
+        booking_data["created_by_name"] = current_user.name or ""
 
         booking = Booking(**booking_data)
 
@@ -1432,6 +1435,8 @@ def create_multi_slot_booking(
             payment_status=("pending" if defer_charge_multi else "paid"),
             charged_at=(None if defer_charge_multi else datetime.utcnow()),
             charge_amount=(None if defer_charge_multi else quote.final_price),
+            created_by_id=str(current_user.id),
+            created_by_name=current_user.name or "",
         )
         session.add(booking)
         created_bookings.append(booking)
@@ -1815,6 +1820,8 @@ def create_recurring_booking(
             payment_status=("pending" if defer_charge else "paid"),
             charged_at=(None if defer_charge else datetime.utcnow()),
             charge_amount=(None if defer_charge else quote.final_price),
+            created_by_id=str(current_user.id),
+            created_by_name=current_user.name or "",
         )
         session.add(booking)
         session.flush()

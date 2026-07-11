@@ -78,6 +78,12 @@ class Booking(BookingBase, table=True):
     # populated so we never double-notify.
     reminder_sent_at: Optional[datetime] = Field(default=None, index=True)
 
+    # Кто оформил бронь (для owner-аналитики «по админам»). Пишется при
+    # создании = current_user. Клиент сам себе → это клиент; админ за клиента
+    # → это админ. Заполняется только вперёд (2026-07-11). NULL у старых.
+    created_by_id: Optional[str] = Field(default=None, index=True)
+    created_by_name: Optional[str] = Field(default=None)
+
 class BookingCreate(BookingBase):
     # Override required fields from BookingBase — backend computes pricing server-side
     final_price: float = 0.0

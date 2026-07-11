@@ -9,6 +9,7 @@ from app.models.specialist_schedule import SpecialistSchedule
 from app.models.specialist_appointment import SpecialistAppointment
 from app.models.post import Post  # noqa: F401 — нужен для metadata.create_all
 from app.models.weekly_rebate import WeeklyRebate  # noqa: F401
+from app.models.monthly_metrics import MonthlyMetrics  # noqa: F401
 
 
 def create_tables():
@@ -27,6 +28,9 @@ def run_migrations():
         ("booking", "crm_client_id", "VARCHAR"),
         ("booking", "gcal_event_id", "VARCHAR"),
         ("booking", "gcal_calendar_id", "VARCHAR"),
+        # Owner-аналитика: кто оформил бронь
+        ("booking", "created_by_id", "VARCHAR"),
+        ("booking", "created_by_name", "VARCHAR"),
         # TherapistClient — new fields from psycrm alignment
         ("therapist_clients", "telegram", "VARCHAR"),
         ("therapist_clients", "pipeline_status", "VARCHAR DEFAULT 'ACTIVE'"),
