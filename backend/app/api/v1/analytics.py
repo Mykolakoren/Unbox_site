@@ -22,12 +22,16 @@ router = APIRouter()
 
 WORKING_HOURS_PER_DAY = 13  # 09:00–22:00 — знаменатель загрузки
 CENTER_NAMES = {"unbox_one": "Unbox One", "unbox_uni": "Unbox Uni", "neo_school": "Neo School"}
-OWNER_ROLES = {"owner", "senior_admin"}
+
+# Owner-аналитика — строго персональный доступ (owner попросил «только мне»
+# 2026-07-11). Не роль, а конкретный аккаунт: системный Admin и senior_admin
+# не должны видеть. Чтобы дать доступ ещё кому-то — добавить email сюда.
+PRIVATE_OWNER_EMAILS = {"koren.nikolas@gmail.com"}
 
 
 def _require_owner(current_user: User = Depends(deps.get_current_user)) -> User:
-    if current_user.role not in OWNER_ROLES:
-        raise HTTPException(status_code=403, detail="Только для владельца")
+    if (current_user.email or "").strip().lower() not in PRIVATE_OWNER_EMAILS:
+        raise HTTPException(status_code=403, detail="Доступно только владельцу")
     return current_user
 
 

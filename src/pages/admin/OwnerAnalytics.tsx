@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { analyticsApi, type OwnerAnalytics, type MonthlyMetric } from '../../api/analytics';
+import { useUserStore } from '../../store/userStore';
 import { toast } from 'sonner';
 
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 1 });
@@ -9,6 +11,7 @@ function firstOfMonth(d = new Date()) { return new Date(d.getFullYear(), d.getMo
 function iso(d: Date) { return d.toISOString().slice(0, 10); }
 
 export function OwnerAnalytics() {
+    const currentUser = useUserStore(s => s.currentUser);
     const today = new Date();
     const [from, setFrom] = useState(iso(firstOfMonth()));
     const [to, setTo] = useState(iso(today));
@@ -45,6 +48,11 @@ export function OwnerAnalytics() {
     };
 
     const maxHistRev = useMemo(() => Math.max(1, ...history.map(h => h.revenue)), [history]);
+
+    // Строго персональный доступ — даже по прямой ссылке (бэкенд тоже вернёт 403).
+    if (currentUser && (currentUser.email || '').toLowerCase() !== 'koren.nikolas@gmail.com') {
+        return <Navigate to="/admin" replace />;
+    }
 
     return (
         <div style={{ padding: '20px clamp(12px,3vw,28px) 80px', maxWidth: 1200, margin: '0 auto', fontFamily: GH_SANS, color: GH.ink }}>

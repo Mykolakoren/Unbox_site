@@ -41,8 +41,8 @@ export function AdminLayout() {
         if (canAccessFinance) {
             items.splice(2, 0, { path: '/admin/finance', icon: Wallet, label: 'Финансы' });
         }
-        // Аналитика (owner/senior_admin) — после Финансов
-        if (canAccessRights) {
+        // Аналитика — строго персонально владельцу (не роль, конкретный аккаунт).
+        if ((currentUser?.email || '').toLowerCase() === 'koren.nikolas@gmail.com') {
             const at = items.findIndex(i => i.path === '/admin/finance');
             items.splice(at >= 0 ? at + 1 : 2, 0, { path: '/admin/analytics', icon: BarChart3, label: 'Аналитика' });
         }
