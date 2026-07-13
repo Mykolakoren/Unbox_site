@@ -18,6 +18,17 @@ class TimelineService:
         """
         Create a timeline entry.
         """
+        # Nearly every caller passes `str(user.id)` although the column is a
+        # UUID. psycopg2 adapts that silently, so it went unnoticed; any other
+        # driver raises inside the flush — and because log_event commits, that
+        # poisons the caller's whole transaction (the balance change it was
+        # logging gets rolled back with it). Coerce instead of trusting callers.
+        if isinstance(actor_id, str):
+            try:
+                actor_id = UUID(actor_id)
+            except ValueError:
+                actor_id = None  # type: ignore[assignment]
+
         event = TimelineEvent(
             actor_id=actor_id,
             actor_req_role=actor_role,

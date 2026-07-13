@@ -105,6 +105,14 @@ def recompute_chain_and_settle(
     settle the price delta on user.balance. Positive delta = client
     owes more (debit balance), negative = refund. Returns a structured
     log used by ``recompute_user_chains_for_day`` for the timeline row.
+
+    Only bookings whose money has ALREADY moved (``payment_status`` neither
+    ``pending`` nor ``waived``) settle against the balance. A pending booking
+    has not been charged yet — the T-24h cron will charge whatever final_price
+    says by then — so touching the balance for it invented money in both
+    directions: two future bookings forming a 2h chain credited the client the
+    10% "discount" on a charge that never happened, and cancelling one of them
+    debited a difference that was never taken.
     """
     if not chain:
         return {"chain_size": 0, "chain_hours": 0.0, "total_delta": 0.0, "per_booking": []}
@@ -136,11 +144,16 @@ def recompute_chain_and_settle(
         if abs(delta) < 0.01:
             continue
 
+        # Was this booking's money actually taken? `pending` = the cron hasn't
+        # charged it yet; `waived` = the charge was cancelled outright.
+        settled = b.payment_status not in ("pending", "waived")
+
         per_booking.append({
             "id": str(b.id),
             "old_final": round(old_final, 2),
             "new_final": round(new_final, 2),
             "delta": delta,
+            "settled": settled,
             "applied_rule": new_quote.applied_rule,
             "discount_percent": int(new_quote.discount_percent),
         })
@@ -151,8 +164,16 @@ def recompute_chain_and_settle(
         b.discount_amount = float(new_quote.discount_amount)
         b.discount_percent = int(new_quote.discount_percent)
         b.updated_at = datetime.now()
+
+        if settled:
+            # Money already moved for this row: settle the difference and keep
+            # charge_amount in step, so a later refund/waive gives back exactly
+            # what was taken.
+            charged = float(b.charge_amount if b.charge_amount is not None else old_final)
+            b.charge_amount = round(charged + delta, 2)
+            total_delta += delta
+
         session.add(b)
-        total_delta += delta
 
     if abs(total_delta) >= 0.01:
         # Positive delta = price went UP (e.g. chain shrank, lost discount) →
