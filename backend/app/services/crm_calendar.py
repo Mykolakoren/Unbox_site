@@ -247,7 +247,18 @@ def sync_from_calendar(
 
     # Build alias → client lookup (carries full client object so we can pull
     # alias_code / canonical name when building suggested summaries).
-    alias_map = {c.alias_code: c for c in clients if c.alias_code}
+    # 2026-07-13: учитываем и merged_alias_codes — коды слитых клиентов должны
+    # мапиться на клиента-цель, иначе событие со старым #кодом не находит цель
+    # → синк пересоздаёт дубль, и слияние «откатывается» при каждом синке.
+    # Активный alias_code имеет приоритет над merged (setdefault не перезапишет).
+    alias_map: dict = {}
+    for c in clients:
+        if c.alias_code:
+            alias_map.setdefault(c.alias_code, c)
+    for c in clients:
+        for mc in (getattr(c, "merged_alias_codes", None) or []):
+            if mc:
+                alias_map.setdefault(mc, c)
 
     # Build name → list of clients (1:many). If the same normalized name is
     # shared by several clients ("Александр" x 2), name-based matching is
