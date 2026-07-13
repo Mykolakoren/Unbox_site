@@ -412,8 +412,11 @@ def sync_from_calendar(
     # happened to client cffd5c45 (Анастасия Черепанова) on 2026-04-16.
     from datetime import timedelta as _td_cancel_guard
     _now = datetime.utcnow()
-    _recent_guard = _now - _td_cancel_guard(hours=48)
-    _cancel_window_start = _now - _td_cancel_guard(days=max(2, past_days))
+    # 2026-07-13 owner: «убрал из календаря → удали и прошедшее, но в рамках
+    # недели; старше — удалю вручную». Окно удаления расширено 48ч → 7 дней.
+    # Старше недели recurring-прошлое и брони по-прежнему защищены.
+    _recent_guard = _now - _td_cancel_guard(days=7)
+    _cancel_window_start = _now - _td_cancel_guard(days=max(7, past_days))
     deleted_on_cancel = 0
     for entry in result["matched"]:
         if entry.get("is_cancelled"):
@@ -541,7 +544,9 @@ def sync_from_calendar(
     # accepted but ignored, for backwards compat with old callers.
     from datetime import timedelta as _td
     now_utc = datetime.utcnow()
-    win_start = now_utc - _td(hours=48)
+    # 2026-07-13 owner: удаляем «осиротевшие» (исчезнувшие из календаря) сессии
+    # в пределах недели, включая прошедшие. Старше недели — не трогаем.
+    win_start = now_utc - _td(days=7)
     win_end = now_utc + _td(days=months_forward * 30)
 
     orphan_q = select(TherapySession).where(
