@@ -659,8 +659,13 @@ def create_link_token(
 # ── POST /telegram/webhook ────────────────────────────────────────────────────
 
 @router.post("/webhook")
-async def telegram_webhook(
-    request: Request,
+# Deliberately sync (`def`, not `async def`): the whole body — _handle_callback,
+# _send, _answer_callback — makes blocking `requests.post` calls to the Telegram
+# API (5s timeout) plus blocking DB queries. On an `async def` those run *on the
+# event loop*, so a slow Telegram API froze every other request in the process
+# (chessboard, CRM, booking). As a plain `def`, FastAPI runs it in the threadpool.
+def telegram_webhook(
+    update: dict[str, Any] = Body(default_factory=dict),
     session: Session = Depends(get_session),
     x_telegram_bot_api_secret_token: Optional[str] = Header(default=None),
 ) -> dict[str, Any]:
@@ -674,12 +679,6 @@ async def telegram_webhook(
     if x_telegram_bot_api_secret_token != expected:
         logger.warning("[tg:webhook] bad secret token — rejecting")
         raise HTTPException(status_code=403, detail="forbidden")
-
-    try:
-        update = await request.json()
-    except Exception:
-        logger.warning("[tg:webhook] invalid JSON body")
-        return {"ok": True}
 
     # ── Inline-keyboard callbacks (cabinet booking flow) ──────────────────
     callback = update.get("callback_query")

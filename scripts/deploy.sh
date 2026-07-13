@@ -5,14 +5,15 @@
 # Frontend: build locally (Droplet has only 458 MB RAM, Vite build OOMs
 #           there) → tar → scp → swap /var/www/unbox/dist with a dated
 #           backup → nginx reload.
-# Backend : git pull + systemctl restart unbox-api.service (reads code
-#           from /var/www/unbox-beta/backend, not /var/www/unbox — yes
-#           it's weird, yes that's how the Droplet is wired).
+# Backend : NOT deployed by this script. The server checkout diverged from
+#           main in both directions (live patches exist only on prod), so a
+#           git pull would either fail or destroy them. Deploy backend files
+#           by hand — docs/PROJECT-STATE-AND-AUDIT.md §3.
 #
 # Usage:
-#   ./scripts/deploy.sh           # front + back
+#   ./scripts/deploy.sh           # front only ("all" no longer touches the backend)
 #   ./scripts/deploy.sh front     # only front
-#   ./scripts/deploy.sh back      # only back
+#   ./scripts/deploy.sh back      # refuses — backend is deployed by hand, see §3
 # ──────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -80,26 +81,30 @@ deploy_front() {
 }
 
 deploy_back() {
-  banner "BACKEND pull + restart"
-  $SSH "set -e
-    for dir in $REMOTE_BACK_DIR $REMOTE_BACK_MIRROR; do
-      echo \"--- pulling \$dir\"
-      cd \"\$dir\" && git fetch origin main 2>/dev/null && git checkout main 2>/dev/null || true
-      git pull --ff-only origin main
-    done
-    echo '--- restart'
-    systemctl restart $SERVICE_NAME
-    sleep 4
-    systemctl is-active $SERVICE_NAME
-    echo '--- last 10 log lines'
-    tail -10 /var/log/unbox.log
-  "
+  cat >&2 <<'EOF'
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  ЗАПРЕЩЕНО: автоматический деплой бэкенда через git pull.                ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Серверный git-checkout разошёлся с main в ОБЕ стороны: на проде живут правки,
+которых нет в git (set_vacation, correct_user_balance, фильтры include_inactive).
+`git pull --ff-only` либо упадёт на грязном дереве, либо снесёт живые патчи —
+а отката у бэкенда нет.
+
+Бэкенд деплоится ТОЛЬКО хирургически, по файлам:
+  docs/PROJECT-STATE-AND-AUDIT.md §3 → «Бэкенд (ТОЛЬКО хирургически, по файлам)»
+
+Кратко: сверить серверную версию (scp+diff) → бэкап на сервере → scp файла →
+systemctl restart → health-check по реальному эндпоинту.
+EOF
+  exit 2
 }
 
 case "$MODE" in
   front|frontend) deploy_front ;;
   back|backend)   deploy_back ;;
-  all|"")         deploy_back; deploy_front ;;
+  all|"")         deploy_front ;;   # «all» = только фронт: бэк не деплоится автоматом (см. deploy_back)
   *)
     echo "unknown mode: $MODE"
     echo "usage: $0 [front|back|all]"
