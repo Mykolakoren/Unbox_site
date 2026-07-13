@@ -1,5 +1,6 @@
 import hashlib
 from typing import List
+from uuid import UUID as _UUID
 from sqlmodel import Session, select
 from sqlalchemy import text
 from datetime import datetime, timedelta
@@ -87,7 +88,17 @@ def check_availability(
     )
 
     if exclude_booking_id:
-        statement = statement.where(Booking.id != exclude_booking_id)
+        # Callers hand this in as a str while Booking.id is a UUID. Postgres'
+        # driver quietly adapts it; SQLite does not, so the comparison blew up
+        # in the driver. Coerce once here and both dialects behave the same.
+        exclude_id = exclude_booking_id
+        if isinstance(exclude_id, str):
+            try:
+                exclude_id = _UUID(exclude_id)
+            except ValueError:
+                exclude_id = None
+        if exclude_id is not None:
+            statement = statement.where(Booking.id != exclude_id)
 
     day_bookings = session.exec(statement).all()
 

@@ -3304,7 +3304,13 @@ def trim_booking(
     booking.applied_rule = kept_quote.applied_rule
     if booking.payment_method == "subscription":
         booking.hours_deducted = kept_quote.hours_deducted
-    if pending:
+    # charge_amount = what this row is actually holding of the client's money.
+    # It used to be re-stamped only for `pending` rows, so a PAID booking kept
+    # the pre-trim figure: trim 12:00-18:00 (charged 120₾) down to 13:00-15:00,
+    # get 40₾ back — and a later waive still refunded the full 120₾, gifting the
+    # client the 40₾ twice. Subscription rows are left alone: there charge_amount
+    # carries the hours snapshot and the refund path keys off hours_deducted.
+    if pending or booking.payment_method == "balance":
         booking.charge_amount = kept_quote.final_price
     booking.updated_at = datetime.now()
 
@@ -3334,8 +3340,16 @@ def trim_booking(
                 if booking.payment_method == "subscription"
                 else None
             ),
-            charge_amount=(rightQuote.final_price if pending else None),
-            charged_at=None,
+            # Same reasoning as the kept remnant above: for a paid balance row
+            # this half is holding rightQuote.final_price of the client's money,
+            # so say so instead of leaving it None (a None sends refunds back to
+            # the stale final_price fallback).
+            charge_amount=(
+                rightQuote.final_price
+                if (pending or booking.payment_method == "balance")
+                else None
+            ),
+            charged_at=(None if pending else booking.charged_at),
             crm_client_id=None,  # keep the CRM link only on the original
             recurring_group_id=None,
             gcal_event_id=None,
@@ -4176,16 +4190,29 @@ def extend_booking(
     booking.final_price = round((booking.final_price or 0) + extra_price, 2)
     booking.updated_at = datetime.now()
 
-    # Deduct from balance if applicable
+    # Charge the extra time to the booking's OWNER (never to whoever clicked).
+    #
+    # Three things were wrong here:
+    #  1. `UUID(booking.user_uuid)` — user_uuid is already a UUID, so this raised
+    #     and every non-admin extension died with a 500. The feature simply did
+    #     not work for regular users.
+    #  2. A `pending` booking (>24h out, not charged yet) had the extra deducted
+    #     immediately, and then the charge-due cron settled the *new* final_price
+    #     — which already includes the extension. The extra was paid twice.
+    #  3. On a `paid` booking, charge_amount stayed at the pre-extension figure,
+    #     so a later waive/refund gave back less than was actually taken.
     if extra_price > 0 and not current_user.role in ADMIN_ROLES:
-        target_user = session.get(User, UUID(booking.user_uuid)) if booking.user_uuid else None
-        if not target_user:
-            target_user = session.exec(
-                select(User).where(User.email == booking.user_id)
-            ).first()
-        if target_user:
+        target_user = _resolve_booking_owner(session, booking)
+        if target_user and booking.payment_status == "pending":
+            # Nothing has been charged yet — the cron will take the new total.
+            pass
+        elif target_user:
             target_user.balance = round((target_user.balance or 0) - extra_price, 2)
             session.add(target_user)
+            booking.charge_amount = round(
+                float(booking.charge_amount if booking.charge_amount is not None
+                      else (booking.final_price - extra_price)) + extra_price, 2
+            )
 
     session.add(booking)
     session.commit()

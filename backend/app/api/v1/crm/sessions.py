@@ -560,7 +560,14 @@ def quick_pay_session(
     current_user: User = Depends(deps.require_specialist),
 ):
     """Mark session as paid and create a payment record. Optionally override account."""
-    ts = session.get(TherapySession, session_id)
+    # SELECT … FOR UPDATE: a double-tap on «Оплачено» (common on mobile when the
+    # first tap lags) used to let both requests read is_paid=False before either
+    # committed, so both inserted a TherapistPayment — the client's income was
+    # counted twice and their debt went negative. unmark-paid only deletes the
+    # first payment it finds, so the duplicate stayed forever.
+    ts = session.exec(
+        select(TherapySession).where(TherapySession.id == session_id).with_for_update()
+    ).first()
     if not ts or ts.specialist_id != str(current_user.id):
         raise HTTPException(404, "Session not found")
     if ts.is_paid:

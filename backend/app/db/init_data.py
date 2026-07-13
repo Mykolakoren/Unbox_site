@@ -295,6 +295,12 @@ def migrate_add_columns():
             # pass. Both weekly_rebate (cron) and weekly_cashback (manual) write here.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_rebate_user_week "
             "ON weekly_rebates (user_id, week_start)",
+            # One payment per CRM session. quick-pay now takes a row lock, but the
+            # DB is the only thing that can't be raced: a partial unique index
+            # (session_id IS NOT NULL) still allows the many ad-hoc payments that
+            # carry no session_id at all.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_therapist_payment_session "
+            "ON therapist_payments (session_id) WHERE session_id IS NOT NULL",
         ]
         with engine.connect() as conn:
             for stmt in _INDEXES:

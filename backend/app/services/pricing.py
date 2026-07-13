@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from uuid import UUID as _UUID
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -6,6 +7,17 @@ from app.models.user import User
 from app.models.resource import Resource
 from app.models.booking import Booking
 from app.services import subscription_pool
+
+def _as_uuid(value):
+    """Booking.id is a UUID; callers pass a str. psycopg2 adapts it silently,
+    SQLite does not — coerce once so both dialects behave the same."""
+    if isinstance(value, str):
+        try:
+            return _UUID(value)
+        except ValueError:
+            return None
+    return value
+
 
 class PriceBreakdown(BaseModel):
     base_price: float
@@ -402,7 +414,9 @@ class PricingService:
             Booking.date < day_end,
         )
         if exclude_booking_id:
-            q = q.where(Booking.id != exclude_booking_id)  # type: ignore[arg-type]
+            _ex = _as_uuid(exclude_booking_id)
+            if _ex is not None:
+                q = q.where(Booking.id != _ex)
         others = self.session.exec(q).all()
 
         # Convert all into (start_min, end_min) ranges.
@@ -463,7 +477,9 @@ class PricingService:
             Booking.date < end_of_week,
         )
         if exclude_booking_id:
-            stmt = stmt.where(Booking.id != exclude_booking_id)  # type: ignore[arg-type]
+            _ex = _as_uuid(exclude_booking_id)
+            if _ex is not None:
+                stmt = stmt.where(Booking.id != _ex)
         bookings = self.session.exec(stmt).all()
         return sum(b.duration / 60.0 for b in bookings)
 
