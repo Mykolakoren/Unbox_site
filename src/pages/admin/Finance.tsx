@@ -102,16 +102,16 @@ export function AdminFinance() {
     const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions, shiftReports } = useCashboxStore();
 
     // Yesterday's shift status (Excel #61) — was yesterday closed?
-    const yesterdayShiftStatus = useMemo(() => {
-        const now = new Date();
-        const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-        const yEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const closedYesterday = shiftReports.some(r => {
-            const endTs = new Date(r.shiftEnd).getTime();
-            return endTs >= yStart.getTime() && endTs < yEnd.getTime();
-        });
-        return closedYesterday ? 'closed' : 'missed';
-    }, [shiftReports]);
+    // «Вчера не закрыта» — теперь по РЕАЛЬНОМУ состоянию смен (бэкенд
+    // /shifts/pending-close): филиал, где смена открыта и не закрыта с прошлого
+    // дня. Раньше проверялось «был ли close с датой ровно вчера», но смену
+    // закрывают наутро (shift_end = сегодня) → надпись висела после закрытия.
+    const yesterdayShiftStatus = useMemo<'closed' | 'missed'>(() => {
+        if (selectedBranch) {
+            return pendingCloseBranches.includes(selectedBranch) ? 'missed' : 'closed';
+        }
+        return pendingCloseBranches.length > 0 ? 'missed' : 'closed';
+    }, [pendingCloseBranches, selectedBranch]);
     const canManageCategories = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
     const canCorrectBalance = currentUser?.role === 'senior_admin' || currentUser?.role === 'owner';
 
@@ -138,6 +138,8 @@ export function AdminFinance() {
     // nothing happen? let me click again" — which then spawns duplicate
     // open events.
     const [currentOpenShift, setCurrentOpenShift] = useState<any | null>(null);
+    // Филиалы с «зависшей» вчерашней сменой (открыта и не закрыта с прошлого дня).
+    const [pendingCloseBranches, setPendingCloseBranches] = useState<string[]>([]);
     const refetchShiftState = useCallback(async () => {
         try {
             const { cashboxApi } = await import('../../api/cashbox');
@@ -145,6 +147,13 @@ export function AdminFinance() {
             setCurrentOpenShift(open);
         } catch {
             setCurrentOpenShift(null);
+        }
+        try {
+            const { cashboxApi } = await import('../../api/cashbox');
+            const p = await cashboxApi.getPendingCloseShifts();
+            setPendingCloseBranches((p.pending || []).map(x => x.branch));
+        } catch {
+            setPendingCloseBranches([]);
         }
     }, [selectedBranch]);
     useEffect(() => { refetchShiftState(); }, [refetchShiftState]);

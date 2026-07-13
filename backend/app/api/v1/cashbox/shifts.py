@@ -154,6 +154,55 @@ def get_current_open_shift(
     return last_open
 
 
+@router.get("/shifts/pending-close")
+def pending_close_shifts(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_reports),
+):
+    """Филиалы, где смена открыта и НЕ закрыта с прошлого дня (т.е. «вчера не
+    закрыли»). Раньше баннер строился на «был ли close с датой ровно вчера»,
+    но смену закрывают НАУТРО (shift_end = сегодня), из-за чего надпись «вчера
+    не закрыта» висела даже после закрытия. Тут — честно: для каждого филиала
+    берём последнее открытие и последнее закрытие (в т.ч. глобальное branch=NULL);
+    смена «висит», если открытие новее закрытия И открыта ДО начала сегодняшнего
+    дня (по Тбилиси, UTC+4). Открытая сегодня утром смена — это текущая работа,
+    не «вчерашний хвост».
+    """
+    now = datetime.utcnow()
+    tb_today = (now + timedelta(hours=4)).date()
+    # начало сегодняшнего тбилисского дня в UTC (таймстемпы в БД — UTC-naive)
+    today_start_utc = datetime(tb_today.year, tb_today.month, tb_today.day) - timedelta(hours=4)
+
+    branches: set[str] = set()
+    for b in session.exec(select(ShiftOpenLog.branch).distinct()).all():
+        if b:
+            branches.add(b)
+
+    pending = []
+    for br in branches:
+        last_open = session.exec(
+            select(ShiftOpenLog).where(ShiftOpenLog.branch == br)
+            .order_by(desc(ShiftOpenLog.opened_at)).limit(1)
+        ).first()
+        if not last_open:
+            continue
+        # последнее закрытие: филиальное ИЛИ глобальное (branch IS NULL закрывает всё)
+        last_close = session.exec(
+            select(ShiftReport)
+            .where((ShiftReport.branch == br) | (ShiftReport.branch.is_(None)))  # type: ignore
+            .order_by(desc(ShiftReport.shift_end)).limit(1)
+        ).first()
+        is_open = last_close is None or last_close.shift_end < last_open.opened_at
+        if is_open and last_open.opened_at < today_start_utc:
+            pending.append({
+                "branch": br,
+                "opened_at": last_open.opened_at.isoformat(),
+                "admin_name": last_open.admin_name,
+            })
+
+    return {"any_pending": len(pending) > 0, "pending": pending}
+
+
 @router.get("/shifts", response_model=List[ShiftReportRead])
 def list_shifts(
     session: Session = Depends(get_session),

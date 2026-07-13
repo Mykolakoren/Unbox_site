@@ -209,6 +209,12 @@ export const cashboxApi = {
         return data ?? null;
     },
 
+    /** Филиалы, где смена открыта и не закрыта с прошлого дня («вчера не закрыли»). */
+    getPendingCloseShifts: async (): Promise<{ anyPending: boolean; pending: { branch: string; openedAt: string; adminName: string }[] }> => {
+        const { data } = await api.get('/cashbox/shifts/pending-close');
+        return data;
+    },
+
     getAnalytics: async (dateFrom?: string, dateTo?: string): Promise<CashboxAnalytics> => {
         const { data } = await api.get('/cashbox/analytics', {
             params: { date_from: dateFrom, date_to: dateTo },
