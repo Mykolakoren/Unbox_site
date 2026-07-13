@@ -262,6 +262,43 @@ def migrate_add_columns():
         except Exception:
             conn.rollback()
 
+    # ── Hot-path indexes (2026-07-13 audit) ───────────────────────────────
+    # `booking` carried indexes only on user_id / created_at / payment_status /
+    # reminder_sent_at / created_by_id, while ~69 queries filter on date,
+    # resource_id and status: the chessboard, every availability check, the
+    # analytics sweep and the Telegram digests all ran seq scans. Same story for
+    # timelineevent.timestamp, which is ORDER BY DESC'd on the fastest-growing
+    # table in the schema (a row per booking/cancel/charge, never pruned).
+    #
+    # These live here, not as index=True on the models: SQLModel.create_all only
+    # creates indexes when it creates the table, so a plain field flag would
+    # never reach an existing production table.
+    if dialect == 'postgresql':
+        _INDEXES = [
+            # (resource, date) — the chessboard and check_availability both ask
+            # "what is booked in this room on this day", so one composite index
+            # serves them and the plain resource_id lookups alike.
+            "CREATE INDEX IF NOT EXISTS ix_booking_resource_date ON booking (resource_id, date)",
+            # Date-window scans that span rooms: analytics, digests, cron sweeps.
+            "CREATE INDEX IF NOT EXISTS ix_booking_date ON booking (date)",
+            # find_due_pending() and every "active bookings" listing filter on
+            # status first; partial-free plain index keeps it simple.
+            "CREATE INDEX IF NOT EXISTS ix_booking_status_date ON booking (status, date)",
+            "CREATE INDEX IF NOT EXISTS ix_booking_location_date ON booking (location_id, date)",
+            # Audit feed: ORDER BY timestamp DESC LIMIT 50 over the whole table.
+            "CREATE INDEX IF NOT EXISTS ix_timelineevent_timestamp ON timelineevent (timestamp DESC)",
+            # Cashbox balance aggregates group by payment_method over all history.
+            "CREATE INDEX IF NOT EXISTS ix_cashbox_payment_method ON cashbox_transactions (payment_method)",
+        ]
+        with engine.connect() as conn:
+            for stmt in _INDEXES:
+                try:
+                    conn.execute(text(stmt))
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    logger.warning("Index migration skipped (%s): %s", stmt.split()[5], e)
+
     # Seed the cash-reconciliation category. When a shift closes with a
     # non-zero discrepancy, end_shift writes a balancing CashboxTransaction
     # under this category so the lifetime cash sum stays aligned with the
