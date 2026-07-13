@@ -2012,9 +2012,12 @@ def get_recurring_groups(
         # for myself, supervision, etc.) stay visible via the user_uuid leg.
         from app.models.therapist_client import TherapistClient
 
-        my_client_ids = list(session.exec(
-            select(TherapistClient.id).where(TherapistClient.specialist_id == current_user.id)
-        ).all())
+        # TherapistClient.specialist_id и Booking.crm_client_id — VARCHAR, а
+        # current_user.id — UUID. Сравнение varchar=uuid роняет запрос в
+        # Postgres (500 → фронт глотал ошибку → «Серий нет»). Кастуем в str.
+        my_client_ids = [str(cid) for cid in session.exec(
+            select(TherapistClient.id).where(TherapistClient.specialist_id == str(current_user.id))
+        ).all()]
 
         prior_emails: set[str] = set()
         for entry in (current_user.comment_history or []):
