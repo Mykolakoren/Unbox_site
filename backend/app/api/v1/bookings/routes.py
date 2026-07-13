@@ -4190,18 +4190,25 @@ def extend_booking(
     booking.final_price = round((booking.final_price or 0) + extra_price, 2)
     booking.updated_at = datetime.now()
 
-    # Charge the extra time to the booking's OWNER (never to whoever clicked).
+    # Charge the extra time to the booking's OWNER — always, whoever clicked.
     #
-    # Three things were wrong here:
-    #  1. `UUID(booking.user_uuid)` — user_uuid is already a UUID, so this raised
+    # Four things were wrong here:
+    #  1. Extra time added by an ADMIN was free: the deduction was guarded by
+    #     `not current_user.role in ADMIN_ROLES`, i.e. charged only when the
+    #     client extended it themselves. But the main use of this button is an
+    #     admin adding time after the fact (see the past-booking branch above:
+    #     "клиент часто занимается дольше заказанного") — the client used the
+    #     room, so the client pays. 2026-07-14 owner: «админ продлевает бронь
+    #     за счёт клиента, а не бесплатно».
+    #  2. `UUID(booking.user_uuid)` — user_uuid is already a UUID, so this raised
     #     and every non-admin extension died with a 500. The feature simply did
     #     not work for regular users.
-    #  2. A `pending` booking (>24h out, not charged yet) had the extra deducted
+    #  3. A `pending` booking (>24h out, not charged yet) had the extra deducted
     #     immediately, and then the charge-due cron settled the *new* final_price
     #     — which already includes the extension. The extra was paid twice.
-    #  3. On a `paid` booking, charge_amount stayed at the pre-extension figure,
+    #  4. On a `paid` booking, charge_amount stayed at the pre-extension figure,
     #     so a later waive/refund gave back less than was actually taken.
-    if extra_price > 0 and not current_user.role in ADMIN_ROLES:
+    if extra_price > 0:
         target_user = _resolve_booking_owner(session, booking)
         if target_user and booking.payment_status == "pending":
             # Nothing has been charged yet — the cron will take the new total.
