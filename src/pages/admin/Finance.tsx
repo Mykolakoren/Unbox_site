@@ -102,6 +102,8 @@ export function AdminFinance() {
     const { fetchBalance, fetchTransactions, fetchCategories, fetchShiftReports, fetchAnalytics, transactions, shiftReports } = useCashboxStore();
 
     // Yesterday's shift status (Excel #61) — was yesterday closed?
+    // Филиалы с «зависшей» вчерашней сменой (открыта и не закрыта с прошлого дня).
+    const [pendingCloseBranches, setPendingCloseBranches] = useState<string[]>([]);
     // «Вчера не закрыта» — теперь по РЕАЛЬНОМУ состоянию смен (бэкенд
     // /shifts/pending-close): филиал, где смена открыта и не закрыта с прошлого
     // дня. Раньше проверялось «был ли close с датой ровно вчера», но смену
@@ -138,8 +140,6 @@ export function AdminFinance() {
     // nothing happen? let me click again" — which then spawns duplicate
     // open events.
     const [currentOpenShift, setCurrentOpenShift] = useState<any | null>(null);
-    // Филиалы с «зависшей» вчерашней сменой (открыта и не закрыта с прошлого дня).
-    const [pendingCloseBranches, setPendingCloseBranches] = useState<string[]>([]);
     const refetchShiftState = useCallback(async () => {
         try {
             const { cashboxApi } = await import('../../api/cashbox');
