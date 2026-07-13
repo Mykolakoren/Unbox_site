@@ -162,19 +162,42 @@ def list_clients(
     # Enrich with stats: sessionCount, totalPaid, unpaidSum.
     # Stats key off `target_uid` so admin-proxy views read the right specialist's
     # session/payment rows (using current_user.id would zero out everything).
+    #
+    # Two queries for the whole list, not two per client: this loop used to fire
+    # a sessions SELECT and a payments SELECT for every single client, so a
+    # specialist with 100 clients paid 201 round-trips to open the main CRM
+    # screen. Fetch both sets in one go and group them in memory.
+    from app.models.therapist_payment import TherapistPayment as _TP
+    from collections import defaultdict
+
+    client_ids = [str(c.id) for c in clients]
+    sessions_by_client: dict[str, list] = defaultdict(list)
+    paid_by_client: dict[str, float] = defaultdict(float)
+
+    if client_ids:
+        for s in session.exec(
+            select(TherapySession).where(
+                TherapySession.specialist_id == target_uid,
+                TherapySession.client_id.in_(client_ids),
+                TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
+            )
+        ).all():
+            sessions_by_client[s.client_id].append(s)
+
+        for p in session.exec(
+            select(_TP).where(
+                _TP.specialist_id == target_uid,
+                _TP.client_id.in_(client_ids),
+            )
+        ).all():
+            paid_by_client[p.client_id] += float(p.amount or 0)
+
     result = []
     for c in clients:
         c_dict = TherapistClientRead.model_validate(c).model_dump()
         base = c.base_price or 0
+        sessions_all = sessions_by_client.get(str(c.id), [])
 
-        # Session count (non-cancelled)
-        sessions_all = session.exec(
-            select(TherapySession).where(
-                TherapySession.specialist_id == target_uid,
-                TherapySession.client_id == str(c.id),
-                TherapySession.status.notin_(["CANCELLED_CLIENT", "CANCELLED_THERAPIST"]),
-            )
-        ).all()
         c_dict["sessionCount"] = len(sessions_all)
         c_dict["totalCost"] = sum((s.price if s.price is not None else base) for s in sessions_all)
 
@@ -195,14 +218,7 @@ def list_clients(
         # an actual payment row (Petrov: 54 sessions × 5000 RUB = 270 000
         # while only 7 real payments totalling 35 000 ever landed).
         # Real payments are the source of truth — that's the actual money.
-        from app.models.therapist_payment import TherapistPayment as _TP
-        client_payments = session.exec(
-            select(_TP).where(
-                _TP.specialist_id == target_uid,
-                _TP.client_id == str(c.id),
-            )
-        ).all()
-        c_dict["totalPaid"] = round(sum(float(p.amount or 0) for p in client_payments), 2)
+        c_dict["totalPaid"] = round(paid_by_client.get(str(c.id), 0.0), 2)
 
         result.append(c_dict)
 
