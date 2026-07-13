@@ -5,7 +5,7 @@ Owner 2026-06-16: недельная скидка применяется не в
 кредитом в конце недели на ВСЕ часы по итоговому тарифу. Эта таблица —
 защита от двойного начисления: одна строка на (user_id, week_start).
 """
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, UniqueConstraint
 from typing import Optional
 from datetime import date, datetime
 from uuid import UUID
@@ -14,6 +14,12 @@ import uuid
 
 class WeeklyRebate(SQLModel, table=True):
     __tablename__ = "weekly_rebates"  # type: ignore
+    # Защита от двойного начисления живёт В БАЗЕ, а не только в SELECT-проверке
+    # перед вставкой: два параллельных прогона (крон + ручной запуск, два таба)
+    # оба видели «строки нет» и оба кредитовали баланс. Теперь второй упадёт на
+    # констрейнте. Индекс создаётся в run_migrations() — для уже существующей
+    # таблицы create_all() его не добавит.
+    __table_args__ = (UniqueConstraint("user_id", "week_start", name="uq_weekly_rebate_user_week"),)
 
     id: UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: UUID = Field(index=True)

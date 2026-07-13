@@ -289,6 +289,12 @@ def migrate_add_columns():
             "CREATE INDEX IF NOT EXISTS ix_timelineevent_timestamp ON timelineevent (timestamp DESC)",
             # Cashbox balance aggregates group by payment_method over all history.
             "CREATE INDEX IF NOT EXISTS ix_cashbox_payment_method ON cashbox_transactions (payment_method)",
+            # Weekly volume credit: one row per (user, week) — the anti-double-credit
+            # journal the model docstring always claimed to be. Until now it was
+            # enforced only by a SELECT-before-INSERT, which two parallel runs both
+            # pass. Both weekly_rebate (cron) and weekly_cashback (manual) write here.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_rebate_user_week "
+            "ON weekly_rebates (user_id, week_start)",
         ]
         with engine.connect() as conn:
             for stmt in _INDEXES:

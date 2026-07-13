@@ -19,8 +19,19 @@ Design notes
   the 5h tier, the tier becomes 0 and no cashback is owed.
 * Bookings already at a higher discount (PERSONAL, SUBSCRIPTION) are
   skipped — we don't undo a richer discount.
-* Idempotent: running twice for the same week is a no-op (we mark
-  bookings with ``cashback_applied_at`` to skip them).
+* Idempotent: a credit is recorded in the ``weekly_rebates`` journal — one row
+  per (user, week) — and a second run for the same week skips the user.
+
+  This docstring used to promise a ``cashback_applied_at`` marker that was never
+  implemented anywhere: re-running the endpoint (a retry, a second tab, a manual
+  curl) simply credited every active client's balance a second time, with nothing
+  in the schema to notice.
+
+  ⚠️ The journal is shared with ``weekly_rebate`` on purpose. Both services credit
+  the balance for the SAME thing — the weekly volume discount — and only
+  ``weekly_rebate`` runs from cron (Mon 01:00). Sharing the journal makes them
+  mutually exclusive, so a week can never be paid out twice. Worth deciding which
+  of the two is the real mechanism and retiring the other.
 """
 from __future__ import annotations
 
@@ -93,8 +104,9 @@ def compute_weekly_cashback_for_user(
     """Compute the GEL cashback owed to ``user`` for the past week.
 
     Returns a structured summary used both by the Telegram digest and by
-    the audit timeline event. When ``apply=True`` the balance is
-    credited and a ``weekly_cashback`` timeline row is logged.
+    the audit timeline event. When ``apply=True`` the balance is credited, a
+    ``weekly_cashback`` timeline row is logged, and the week is recorded in the
+    ``weekly_rebates`` journal so it can never be paid out twice.
     """
     bookings = _confirmed_balance_bookings_in_week(session, user, week_start, week_end)
     total_minutes = sum(int(b.duration or 0) for b in bookings)
@@ -147,6 +159,35 @@ def compute_weekly_cashback_for_user(
     }
 
     if apply and cashback > 0:
+        # Idempotency gate. The journal is keyed (user_id, week_start) and shared
+        # with weekly_rebate — see the module docstring. Without it, a retry or a
+        # second manual run credited every client all over again.
+        from app.models.weekly_rebate import WeeklyRebate
+
+        week_start_date = week_start.date() if isinstance(week_start, datetime) else week_start
+        already = session.exec(
+            select(WeeklyRebate).where(
+                WeeklyRebate.user_id == user.id,
+                WeeklyRebate.week_start == week_start_date,
+            )
+        ).first()
+        if already:
+            logger.info(
+                "[weekly_cashback] skip %s: week %s already credited (%.2f₾)",
+                user.email, week_start_date, float(already.amount or 0),
+            )
+            summary["skipped"] = "already_credited"
+            summary["cashback"] = 0.0
+            return summary
+
+        session.add(WeeklyRebate(
+            user_id=user.id,
+            week_start=week_start_date,
+            total_hours=round(total_hours, 1),
+            tier_percent=tier_pct,
+            amount=cashback,
+        ))
+
         # Credit balance, log timeline. We do NOT mutate booking rows —
         # the audit row holds the per-booking deltas. This keeps the
         # original booking history intact ("paid X at the time", "later
