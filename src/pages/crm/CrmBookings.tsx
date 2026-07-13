@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
 import { type CrmClient } from '../../api/crm';
@@ -572,15 +572,16 @@ export function CrmBookings() {
     // Load recurring groups when series tab opens.
     // scope=mine forces backend to scope by current user even when the caller
     // is an admin — /crm/bookings is a per-specialist page, not a global view.
+    const reloadGroups = useCallback(() => {
+        setLoadingGroups(true);
+        return bookingsApi.getRecurringGroups({ scope: 'mine' })
+            .then(setRecurringGroups)
+            .catch(() => {})
+            .finally(() => setLoadingGroups(false));
+    }, []);
     useEffect(() => {
-        if (viewMode === 'series') {
-            setLoadingGroups(true);
-            bookingsApi.getRecurringGroups({ scope: 'mine' })
-                .then(setRecurringGroups)
-                .catch(() => {})
-                .finally(() => setLoadingGroups(false));
-        }
-    }, [viewMode]);
+        if (viewMode === 'series') reloadGroups();
+    }, [viewMode, reloadGroups]);
 
     const handleCancelSeries = async (groupId: string) => {
         setCancellingGroupId(groupId);
@@ -740,6 +741,7 @@ export function CrmBookings() {
             recurringGroups={recurringGroups}
             confirmCancelGroupId={confirmCancelGroupId} setConfirmCancelGroupId={setConfirmCancelGroupId}
             cancellingGroupId={cancellingGroupId} handleCancelSeries={handleCancelSeries}
+            reloadGroups={reloadGroups}
             handleOpenModal={handleOpenModal}
             sessionsByBookingId={sessionsByBookingId} clientById={clientById}
             clients={clients}
@@ -769,6 +771,7 @@ interface GHCrmBookingsProps {
     setConfirmCancelGroupId: (id: string | null) => void;
     cancellingGroupId: string | null;
     handleCancelSeries: (groupId: string) => Promise<void>;
+    reloadGroups: () => Promise<void> | void;
     handleOpenModal: (booking: BookingHistoryItem, existingSessionId?: string, existingClientId?: string) => void;
     sessionsByBookingId: Map<string, any[]>;
     clientById: Map<string, CrmClient>;
@@ -788,7 +791,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
     const {
         viewMode, setViewMode, filter, setFilter, stats, filteredBookings,
         loadingClients, loadingGroups, recurringGroups,
-        confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries,
+        confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries, reloadGroups,
         handleOpenModal, sessionsByBookingId, clientById, clients,
         modalBooking, setModalBooking, modalExistingClientId,
         setModalExistingSessionId, setModalExistingClientId, handleLinkSession,
@@ -928,7 +931,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                         loadingGroups={loadingGroups} recurringGroups={recurringGroups}
                         confirmCancelGroupId={confirmCancelGroupId} setConfirmCancelGroupId={setConfirmCancelGroupId}
                         cancellingGroupId={cancellingGroupId} handleCancelSeries={handleCancelSeries}
-                        clientById={clientById}
+                        clientById={clientById} reloadGroups={reloadGroups}
                     />
                 ) : (
                     <>
@@ -1214,12 +1217,36 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
 
 // ─── GH: Вид серий ───────────────────────────────────────────────────────────
 
-function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries, clientById }: {
+function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, setConfirmCancelGroupId, cancellingGroupId, handleCancelSeries, clientById, reloadGroups }: {
     loadingGroups: boolean; recurringGroups: any[];
     confirmCancelGroupId: string | null; setConfirmCancelGroupId: (id: string | null) => void;
     cancellingGroupId: string | null; handleCancelSeries: (groupId: string) => Promise<void>;
     clientById: Map<string, CrmClient>;
+    reloadGroups: () => Promise<void> | void;
 }) {
+    // Продление серии (Q2 owner): периодичность + по числу / до даты.
+    const [extendFor, setExtendFor] = useState<string | null>(null);
+    const [exPattern, setExPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
+    const [exMode, setExMode] = useState<'count' | 'until'>('count');
+    const [exCount, setExCount] = useState(4);
+    const [exUntil, setExUntil] = useState('');
+    const [exBusy, setExBusy] = useState(false);
+    const submitExtend = async () => {
+        if (!extendFor) return;
+        if (exMode === 'until' && !exUntil) { toast.error('Укажите дату «до»'); return; }
+        setExBusy(true);
+        try {
+            const r = await bookingsApi.extendRecurringSeries(extendFor,
+                exMode === 'until' ? { untilDate: exUntil, pattern: exPattern } : { addOccurrences: exCount, pattern: exPattern });
+            toast.success(`Добавлено ${r.created} сессий${r.totalCost ? ` (+${r.totalCost.toFixed(0)} ₾)` : ''}`);
+            setExtendFor(null);
+            await reloadGroups();
+        } catch (e: any) {
+            const d = e?.response?.data?.detail;
+            toast.error(typeof d === 'string' ? d : (d?.message || 'Не удалось продлить серию'));
+        } finally { setExBusy(false); }
+    };
+
     if (loadingGroups) {
         return <div style={{ padding: '80px 0', textAlign: 'center' }}><div style={ghMono}>Загрузка...</div></div>;
     }
@@ -1291,15 +1318,54 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                                     </button>
                                 </div>
                             ) : (
-                                <button onClick={() => setConfirmCancelGroupId(g.recurringGroupId)}
-                                    style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer' }}>
-                                    Отменить
-                                </button>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                    <button onClick={() => { setExtendFor(g.recurringGroupId); setExPattern((g.pattern as any) || 'weekly'); }}
+                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}>
+                                        Продлить
+                                    </button>
+                                    <button onClick={() => setConfirmCancelGroupId(g.recurringGroupId)}
+                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer' }}>
+                                        Отменить
+                                    </button>
+                                </div>
                             )}
                         </div>
                     </div>
                 );
             })}
+
+            {extendFor && (() => {
+                const chip = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 11, cursor: 'pointer', background: active ? GH.ink : 'transparent', color: active ? GH.paper : GH.ink60 });
+                const inp: React.CSSProperties = { padding: '8px 10px', border: `1px solid ${GH.ink10}`, fontFamily: 'inherit', fontSize: 14, width: 170 };
+                return (
+                    <div onClick={() => !exBusy && setExtendFor(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,14,14,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div onClick={e => e.stopPropagation()} style={{ background: GH.paper, padding: 24, width: 'min(420px, 92vw)', border: `1px solid ${GH.ink}` }}>
+                            <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Продлить серию</div>
+                            <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>ПЕРИОДИЧНОСТЬ</div>
+                            <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                                {([['weekly', 'Еженед.'], ['biweekly', 'Раз в 2 нед.'], ['monthly', 'Ежемес.']] as const).map(([p, l]) => (
+                                    <button key={p} onClick={() => setExPattern(p)} style={chip(exPattern === p)}>{l}</button>
+                                ))}
+                            </div>
+                            <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>СКОЛЬКО ДОБАВИТЬ</div>
+                            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                                {([['count', 'По числу'], ['until', 'До даты']] as const).map(([m, l]) => (
+                                    <button key={m} onClick={() => setExMode(m)} style={chip(exMode === m)}>{l}</button>
+                                ))}
+                            </div>
+                            {exMode === 'count' ? (
+                                <input type="number" min={1} max={52} value={exCount} onChange={e => setExCount(Math.max(1, Math.min(52, Number(e.target.value))))} style={inp} />
+                            ) : (
+                                <input type="date" value={exUntil} min={new Date().toISOString().slice(0, 10)} onChange={e => setExUntil(e.target.value)} style={inp} />
+                            )}
+                            <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+                                <button onClick={submitExtend} disabled={exBusy} style={{ padding: '9px 16px', background: GH.ink, color: GH.paper, border: 'none', fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.08em', cursor: 'pointer', opacity: exBusy ? 0.6 : 1 }}>{exBusy ? 'Добавляю…' : 'Добавить'}</button>
+                                <button onClick={() => setExtendFor(null)} style={{ padding: '9px 16px', background: 'transparent', color: GH.ink60, border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 11, cursor: 'pointer' }}>Отмена</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }
