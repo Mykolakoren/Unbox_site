@@ -2078,10 +2078,16 @@ def get_recurring_groups(
     for gid, g in groups.items():
         dates_sorted = sorted(group_dates[gid])
         if len(dates_sorted) >= 2:
-            delta = (dates_sorted[1] - dates_sorted[0]).days
+            # МИНИМАЛЬНЫЙ интервал между соседними датами, а не первый попавшийся:
+            # если между двумя датами пропуск (отменённая/пропущенная сессия),
+            # интервал = кратное базовому (14→28), и «раз в 2 недели» ошибочно
+            # определялось как «ежемес». Минимум даёт базовую периодичность.
+            deltas = [(dates_sorted[i + 1] - dates_sorted[i]).days for i in range(len(dates_sorted) - 1)]
+            deltas = [d for d in deltas if d > 0]
+            delta = min(deltas) if deltas else 7
             if delta <= 8:
                 g["pattern"] = "weekly"
-            elif delta <= 16:
+            elif delta <= 20:
                 g["pattern"] = "biweekly"
             else:
                 g["pattern"] = "monthly"
