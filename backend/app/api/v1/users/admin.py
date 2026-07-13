@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.api import deps
 from app.db.session import get_session
 from app.models.user import User, UserRead, UserUpdateAdmin
+from app.services import subscription_pool
 
 router = APIRouter()
 
@@ -212,21 +213,26 @@ def toggle_subscription_freeze(
 
     from datetime import timedelta
 
-    new_sub = user.subscription.copy()
-    is_frozen = new_sub.get("is_frozen", False)
-    freeze_count = new_sub.get("freeze_count", 0)
+    # Both dialects again: the freeze flag was written snake-only, while the UI
+    # reads isFrozen — so a frozen subscription still rendered as active.
+    is_frozen = bool(subscription_pool.get(user.subscription, "is_frozen", False))
+    freeze_count = int(subscription_pool.get_float(user.subscription, "freeze_count"))
 
     if not is_frozen:
         if freeze_count >= 1:
             raise HTTPException(
                 status_code=400, detail="Subscription has already been frozen once"
             )
-        new_sub["is_frozen"] = True
-        new_sub["freeze_count"] = freeze_count + 1
-        new_sub["frozen_until"] = (datetime.now() + timedelta(days=7)).isoformat()
+        new_sub = subscription_pool.update(
+            user.subscription,
+            is_frozen=True,
+            freeze_count=freeze_count + 1,
+            frozen_until=(datetime.now() + timedelta(days=7)).isoformat(),
+        )
     else:
-        new_sub["is_frozen"] = False
-        new_sub["frozen_until"] = None
+        new_sub = subscription_pool.update(
+            user.subscription, is_frozen=False, frozen_until=None
+        )
 
     user.subscription = new_sub
     session.add(user)
@@ -552,12 +558,16 @@ def topup_subscription(
     if hours <= 0:
         raise HTTPException(400, "Hours must be positive")
 
-    subscription = dict(user.subscription or {})
-    current_hours = float(subscription.get("remainingHours", 0))
-    total_hours = float(subscription.get("totalHours", 0))
-    subscription["remainingHours"] = round(current_hours + hours, 2)
-    subscription["totalHours"] = round(total_hours + hours, 2)
-    user.subscription = subscription
+    # Write both dialects: this used to be camelCase-only, so billing_defer
+    # (snake-only) saw remaining_hours=0, fell back to cash and charged the
+    # client's balance for hours they had just paid for. See subscription_pool.
+    current_hours = subscription_pool.get_float(user.subscription, "remaining_hours")
+    total_hours = subscription_pool.get_float(user.subscription, "total_hours")
+    user.subscription = subscription_pool.update(
+        user.subscription,
+        remaining_hours=round(current_hours + hours, 2),
+        total_hours=round(total_hours + hours, 2),
+    )
 
     comment_history = list(user.comment_history or [])
     log_text = (

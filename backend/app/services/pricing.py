@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from app.models.user import User
 from app.models.resource import Resource
 from app.models.booking import Booking
+from app.services import subscription_pool
 
 class PriceBreakdown(BaseModel):
     base_price: float
@@ -476,19 +477,22 @@ class PricingService:
         """
         Attempts to apply subscription logic. Returns True if applied.
         """
-        if not user.subscription or user.subscription.get("is_frozen", user.subscription.get("isFrozen", False)):
+        if not user.subscription or subscription_pool.get(user.subscription, "is_frozen", False):
             return False
-            
-        # Handle both snake_case (stored via API) and camelCase (stored via direct logic) for safety
-        plan_id = user.subscription.get("plan_id", user.subscription.get("planId"))
-        included_formats = user.subscription.get("included_formats", user.subscription.get("includedFormats", ["individual"]))
-        
+
+        # The pool is written in both dialects (snake for the backend, camel for
+        # the UI) — subscription_pool reads whichever one is present.
+        plan_id = subscription_pool.get(user.subscription, "plan_id")
+        included_formats = subscription_pool.get(
+            user.subscription, "included_formats", ["individual"]
+        )
+
         # 1. Format Check
         if format_type not in included_formats:
             return False
-            
+
         # 2. Check Remaining Hours
-        remaining = float(user.subscription.get("remaining_hours", user.subscription.get("remainingHours", 0)))
+        remaining = subscription_pool.get_float(user.subscription, "remaining_hours")
         
         if remaining >= breakdown.booked_hours - 0.01: # Float safety
             # Full coverage by hours

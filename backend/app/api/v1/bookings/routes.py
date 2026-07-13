@@ -12,6 +12,7 @@ from app.models.booking import Booking, BookingCreate, BookingRead, BookingPubli
 from app.models.user import User
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
+from app.services import subscription_pool
 from app.services.booking import check_availability, find_re_rent_conflicts
 from app.services.email import email_service
 from app.services.telegram import telegram_service
@@ -256,18 +257,16 @@ def _refund_booking_to_owner(
             )
             refund_hours = round(full_hours * refund_percent, 4)
             retained_hours = round(full_hours - refund_hours, 4)
-            rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
-            new_sub["remaining_hours"] = float(rem) + refund_hours
-            if "remainingHours" in new_sub:
-                del new_sub["remainingHours"]
+            rem = subscription_pool.get_float(new_sub, "remaining_hours")
             # Mirror waive_charge in billing_defer.py: refunding hours back to
             # the pool must also decrement used_hours, or the pool drifts
             # (remaining + used no longer sums to the plan total).
-            used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
-            new_sub["used_hours"] = max(0.0, float(used) - refund_hours)
-            if "usedHours" in new_sub:
-                del new_sub["usedHours"]
-            owner.subscription = new_sub
+            used = subscription_pool.get_float(new_sub, "used_hours")
+            owner.subscription = new_sub = subscription_pool.update(
+                new_sub,
+                remaining_hours=rem + refund_hours,
+                used_hours=max(0.0, used - refund_hours),
+            )
             session.add(owner)
             refund_meta["refunded_hours"] = refund_hours
             refund_meta["retained_hours_unbox_income"] = retained_hours
@@ -857,20 +856,13 @@ def create_booking(
                     detail="Insufficient subscription hours or invalid format for plan",
                 )
             if not defer_charge_single and booking_owner.subscription:
-                new_sub = booking_owner.subscription.copy()
-                rem = new_sub.get(
-                    "remaining_hours", new_sub.get("remainingHours", 0)
+                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
+                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
+                booking_owner.subscription = subscription_pool.update(
+                    booking_owner.subscription,
+                    remaining_hours=max(0.0, rem - quote.hours_deducted),
+                    used_hours=used + quote.hours_deducted,
                 )
-                used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
-                new_sub["remaining_hours"] = max(
-                    0, float(rem) - quote.hours_deducted
-                )
-                new_sub["used_hours"] = float(used) + quote.hours_deducted
-                if "remainingHours" in new_sub:
-                    del new_sub["remainingHours"]
-                if "usedHours" in new_sub:
-                    del new_sub["usedHours"]
-                booking_owner.subscription = new_sub
         else:
             if not defer_charge_single:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -943,12 +935,13 @@ def create_booking(
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
-                    new_sub = booking_owner.subscription.copy()
-                    rem = new_sub.get("remaining_hours", 0)
-                    used = new_sub.get("used_hours", 0)
-                    new_sub["remaining_hours"] = float(rem) + quote.hours_deducted
-                    new_sub["used_hours"] = max(0, float(used) - quote.hours_deducted)
-                    booking_owner.subscription = new_sub
+                    rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
+                    used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
+                    booking_owner.subscription = subscription_pool.update(
+                        booking_owner.subscription,
+                        remaining_hours=rem + quote.hours_deducted,
+                        used_hours=max(0.0, used - quote.hours_deducted),
+                    )
 
             booking_in.status = "pending_approval"
 
@@ -1376,23 +1369,19 @@ def create_multi_slot_booking(
                 # either convention; reading only camelCase wrongly rejects
                 # or never decrements a snake_case pool. Mirror the
                 # single/recurring paths and normalize to snake on write.
-                remaining = new_sub.get(
-                    "remaining_hours", new_sub.get("remainingHours", 0)
-                ) or 0
-                used = new_sub.get("used_hours", new_sub.get("usedHours", 0)) or 0
+                remaining = subscription_pool.get_float(new_sub, "remaining_hours")
+                used = subscription_pool.get_float(new_sub, "used_hours")
                 hours_deducted = quote.hours_deducted or 0
-                if float(remaining) < hours_deducted:
+                if remaining < hours_deducted:
                     raise HTTPException(
                         400,
                         f"Not enough subscription hours for slot {s.date} {s.start_time}",
                     )
-                new_sub["remaining_hours"] = max(0, float(remaining) - hours_deducted)
-                new_sub["used_hours"] = float(used) + hours_deducted
-                if "remainingHours" in new_sub:
-                    del new_sub["remainingHours"]
-                if "usedHours" in new_sub:
-                    del new_sub["usedHours"]
-                booking_owner.subscription = new_sub
+                booking_owner.subscription = new_sub = subscription_pool.update(
+                    new_sub,
+                    remaining_hours=max(0.0, remaining - hours_deducted),
+                    used_hours=used + hours_deducted,
+                )
         else:  # balance
             if not defer_charge_multi:
                 available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
@@ -1775,16 +1764,13 @@ def create_recurring_booking(
                     400, f"Subscription insufficient for {d.strftime('%Y-%m-%d')}"
                 )
             if not defer_charge and booking_owner.subscription:
-                new_sub = booking_owner.subscription.copy()
-                rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
-                new_sub["remaining_hours"] = max(0, float(rem) - quote.hours_deducted)
-                used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
-                new_sub["used_hours"] = float(used) + quote.hours_deducted
-                if "remainingHours" in new_sub:
-                    del new_sub["remainingHours"]
-                if "usedHours" in new_sub:
-                    del new_sub["usedHours"]
-                booking_owner.subscription = new_sub
+                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
+                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
+                booking_owner.subscription = subscription_pool.update(
+                    booking_owner.subscription,
+                    remaining_hours=max(0.0, rem - quote.hours_deducted),
+                    used_hours=used + quote.hours_deducted,
+                )
         else:
             if not defer_charge:
                 available_funds = booking_owner.balance + booking_owner.credit_limit
@@ -3246,20 +3232,16 @@ def trim_booking(
             + ((rightQuote.hours_deducted or 0) if right > 0 else 0)
         )
         removed_hours = round(orig_hours - new_hours, 4)
-        # Refund the removed hours to the pool using the SAME dual-key
-        # (snake+camel) pattern as _refund_booking_to_owner: bump
-        # remaining_hours, drop used_hours (floored at 0), delete camel keys.
+        # Refund the removed hours to the pool: bump remaining_hours, drop
+        # used_hours (floored at 0) — subscription_pool keeps both dialects.
         if not pending and removed_hours > 0 and owner and owner.subscription:
-            new_sub = owner.subscription.copy()
-            rem = new_sub.get("remaining_hours", new_sub.get("remainingHours", 0))
-            new_sub["remaining_hours"] = float(rem) + removed_hours
-            if "remainingHours" in new_sub:
-                del new_sub["remainingHours"]
-            used = new_sub.get("used_hours", new_sub.get("usedHours", 0))
-            new_sub["used_hours"] = max(0.0, float(used) - removed_hours)
-            if "usedHours" in new_sub:
-                del new_sub["usedHours"]
-            owner.subscription = new_sub
+            rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
+            used = subscription_pool.get_float(owner.subscription, "used_hours")
+            owner.subscription = subscription_pool.update(
+                owner.subscription,
+                remaining_hours=rem + removed_hours,
+                used_hours=max(0.0, used - removed_hours),
+            )
             session.add(owner)
         # Peak-hour surcharge on a subscription booking is charged to BALANCE at
         # creation (final_price = subscription_peak_debt). If the trimmed slice
@@ -3833,16 +3815,13 @@ def change_booking_format(
     settled_now = False
     if booking.payment_status == "paid":
         if (booking.payment_method or "").lower() == "subscription":
-            sub = dict(booking_owner.subscription or {})
-            rem = float(sub.get("remaining_hours") or sub.get("remainingHours") or 0)
-            used = float(sub.get("used_hours") or sub.get("usedHours") or 0)
-            sub["remaining_hours"] = max(0.0, rem - delta_hours)
-            sub["used_hours"] = max(0.0, used + delta_hours)
-            if "remainingHours" in sub:
-                del sub["remainingHours"]
-            if "usedHours" in sub:
-                del sub["usedHours"]
-            booking_owner.subscription = sub
+            rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
+            used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
+            booking_owner.subscription = subscription_pool.update(
+                booking_owner.subscription,
+                remaining_hours=max(0.0, rem - delta_hours),
+                used_hours=max(0.0, used + delta_hours),
+            )
         else:
             booking_owner.balance = round((booking_owner.balance or 0) - delta_price, 2)
         booking.charge_amount = new_price
@@ -3993,16 +3972,13 @@ def set_booking_price(
             old_hours = float(booking.hours_deducted or (booking.duration or 0) / 60.0)
             new_hours = old_hours * (new_price / old_price) if old_price > 0 else old_hours
             hours_delta = round(old_hours - new_hours, 4)
-            sub = dict(booking_owner.subscription or {})
-            rem = float(sub.get("remaining_hours") or sub.get("remainingHours") or 0)
-            used = float(sub.get("used_hours") or sub.get("usedHours") or 0)
-            sub["remaining_hours"] = rem + hours_delta
-            sub["used_hours"] = max(0.0, used - hours_delta)
-            if "remainingHours" in sub:
-                del sub["remainingHours"]
-            if "usedHours" in sub:
-                del sub["usedHours"]
-            booking_owner.subscription = sub
+            rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
+            used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
+            booking_owner.subscription = subscription_pool.update(
+                booking_owner.subscription,
+                remaining_hours=rem + hours_delta,
+                used_hours=max(0.0, used - hours_delta),
+            )
             booking.hours_deducted = round(new_hours, 4)
         else:
             booking_owner.balance = round((booking_owner.balance or 0) + delta, 2)
@@ -4322,12 +4298,13 @@ def shorten_booking(
             target_user = session.exec(select(User).where(User.email == booking.user_id)).first()
         if target_user:
             if (booking.payment_method or "").lower() == "subscription" and refund_hours > 0:
-                sub = dict(target_user.subscription or {})
-                rem = float(sub.get("remaining_hours") or 0)
-                used = float(sub.get("used_hours") or 0)
-                sub["remaining_hours"] = rem + refund_hours
-                sub["used_hours"] = max(0.0, used - refund_hours)
-                target_user.subscription = sub
+                rem = subscription_pool.get_float(target_user.subscription, "remaining_hours")
+                used = subscription_pool.get_float(target_user.subscription, "used_hours")
+                target_user.subscription = subscription_pool.update(
+                    target_user.subscription,
+                    remaining_hours=rem + refund_hours,
+                    used_hours=max(0.0, used - refund_hours),
+                )
             else:
                 target_user.balance = round((target_user.balance or 0) + refund_price, 2)
             session.add(target_user)
@@ -4513,12 +4490,14 @@ def approve_booking(
     if b_owner:
         if booking.payment_method == "subscription":
             if b_owner.subscription:
-                new_sub = b_owner.subscription.copy()
-                rem = new_sub.get("remaining_hours", 0)
-                used = new_sub.get("used_hours", 0)
-                new_sub["remaining_hours"] = max(0, float(rem) - (booking.hours_deducted or 0))
-                new_sub["used_hours"] = float(used) + (booking.hours_deducted or 0)
-                b_owner.subscription = new_sub
+                rem = subscription_pool.get_float(b_owner.subscription, "remaining_hours")
+                used = subscription_pool.get_float(b_owner.subscription, "used_hours")
+                hrs = float(booking.hours_deducted or 0)
+                b_owner.subscription = subscription_pool.update(
+                    b_owner.subscription,
+                    remaining_hours=max(0.0, rem - hrs),
+                    used_hours=used + hrs,
+                )
         else:
             b_owner.balance -= booking.final_price
         session.add(b_owner)

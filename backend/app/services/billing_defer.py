@@ -21,6 +21,7 @@ from sqlmodel import Session, select
 
 from app.models.booking import Booking
 from app.models.user import User
+from app.services import subscription_pool
 
 logger = logging.getLogger(__name__)
 
@@ -139,14 +140,19 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
     sub_fell_back_to_balance = False
 
     if method == "subscription":
-        sub = dict(user.subscription or {})
-        rem = float(sub.get("remaining_hours") or 0)
-        used = float(sub.get("used_hours") or 0)
+        # Read via subscription_pool: an admin top-up writes the camelCase pool,
+        # and reading snake-only here made those hours invisible — the booking
+        # then fell through to the cash fallback below and charged the client's
+        # balance for hours they had already paid for.
+        rem = subscription_pool.get_float(user.subscription, "remaining_hours")
+        used = subscription_pool.get_float(user.subscription, "used_hours")
         hrs = float(b.hours_deducted or (b.duration or 0) / 60.0)
         if rem >= hrs > 0:
-            sub["remaining_hours"] = max(0.0, rem - hrs)
-            sub["used_hours"] = used + hrs
-            user.subscription = sub
+            user.subscription = subscription_pool.update(
+                user.subscription,
+                remaining_hours=max(0.0, rem - hrs),
+                used_hours=used + hrs,
+            )
             snapshot = hrs
         else:
             # Subscription can't cover (expired / depleted) — fall back to
@@ -268,12 +274,13 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
     # → возврат ДЕНЕГ, иначе вернули бы фантомные часы в пул + не отдали деньги.
     hours_actually_used = float(b.hours_deducted or 0)
     if method == "subscription" and hours_actually_used > 0:
-        sub = dict(user.subscription or {})
-        rem = float(sub.get("remaining_hours") or 0)
-        used = float(sub.get("used_hours") or 0)
-        sub["remaining_hours"] = rem + hours_actually_used
-        sub["used_hours"] = max(0.0, used - hours_actually_used)
-        user.subscription = sub
+        rem = subscription_pool.get_float(user.subscription, "remaining_hours")
+        used = subscription_pool.get_float(user.subscription, "used_hours")
+        user.subscription = subscription_pool.update(
+            user.subscription,
+            remaining_hours=rem + hours_actually_used,
+            used_hours=max(0.0, used - hours_actually_used),
+        )
     else:
         user.balance = round((user.balance or 0) + amount, 2)
 

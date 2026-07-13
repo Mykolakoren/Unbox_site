@@ -52,6 +52,7 @@ from app.models.resource import Resource
 from app.models.user import User
 from app.models.waitlist import Waitlist
 from app.services.telegram import telegram_service
+from app.services import subscription_pool
 
 logger = logging.getLogger(__name__)
 
@@ -1049,7 +1050,7 @@ def _handle_balance(chat_id: int, user: Optional[User]) -> dict:
     sub = user.subscription or {}
     if sub and sub.get("plan"):
         plan = sub.get("plan", "—")
-        hrs = sub.get("remaining_hours", 0)
+        hrs = subscription_pool.get_float(sub, "remaining_hours")
         lines.append(f"🎫 <b>Абонемент:</b> {escape(str(plan))} · осталось {hrs:g} ч")
     else:
         lines.append("🎫 Абонемент не активен")
@@ -1960,12 +1961,14 @@ def _handle_hot_booking_callback(
         if owner:
             if (booking.payment_method or "").lower() == "subscription":
                 if owner.subscription:
-                    sub = dict(owner.subscription)
-                    rem = float(sub.get("remaining_hours") or 0)
-                    used = float(sub.get("used_hours") or 0)
-                    sub["remaining_hours"] = max(0.0, rem - float(booking.hours_deducted or 0))
-                    sub["used_hours"] = used + float(booking.hours_deducted or 0)
-                    owner.subscription = sub
+                    rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
+                    used = subscription_pool.get_float(owner.subscription, "used_hours")
+                    hrs = float(booking.hours_deducted or 0)
+                    owner.subscription = subscription_pool.update(
+                        owner.subscription,
+                        remaining_hours=max(0.0, rem - hrs),
+                        used_hours=used + hrs,
+                    )
             else:
                 owner.balance = round((owner.balance or 0) - float(booking.final_price or 0), 2)
             session.add(owner)
