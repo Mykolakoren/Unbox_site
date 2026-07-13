@@ -124,6 +124,72 @@ def _try_move_linked_booking(
                 booking.id, new_booking_date.date(), new_start_time, len(alternatives))
 
 
+def _cancel_booking_behind_session(session: Session, ts: TherapySession, reason: str) -> bool:
+    """Cancel the cabinet booking behind a session that vanished from Google Calendar.
+
+    Sync used to just flip the booking to `cancelled` — no refund, no cleanup:
+    a booking the client had already PAID for was cancelled with the money kept,
+    and its cabinet event stayed in Google (slot free in the chessboard, busy in
+    the calendar). Now it goes through the same refund path as a manual cancel,
+    and the cabinet's own GCal event is removed.
+
+    Returns True when a booking was actually cancelled.
+    """
+    if not ts.booking_id:
+        return False
+
+    # Imported lazily: bookings.routes is a router module, and importing it at
+    # module scope risks an import cycle.
+    from app.models.booking import Booking
+    from app.api.v1.bookings.routes import (
+        _refund_booking_to_owner,
+        _resolve_booking_owner,
+    )
+    from app.services.google_calendar import gcal_service
+
+    log = logging.getLogger(__name__)
+    try:
+        # TherapySession.booking_id is a str, Booking.id is a UUID — hand
+        # session.get() a real UUID or the lookup blows up inside the driver
+        # (the old code swallowed that in a broad except and cancelled nothing).
+        from uuid import UUID as _UUID
+        bid = ts.booking_id
+        if isinstance(bid, str):
+            try:
+                bid = _UUID(bid)
+            except ValueError:
+                log.warning("[crm-sync] booking_id %r is not a UUID", ts.booking_id)
+                return False
+
+        b = session.get(Booking, bid)
+        if not b or b.status != "confirmed":
+            return False
+
+        owner = _resolve_booking_owner(session, b)
+        if owner:
+            # Skips `pending`/`waived` internally — nothing was charged there.
+            _refund_booking_to_owner(session, b, owner, refund_percent=1.0)
+        else:
+            log.warning("[crm-sync] booking %s cancelled without refund: owner not found", b.id)
+
+        if b.gcal_event_id:
+            try:
+                gcal_service.delete_event(b.gcal_event_id, b.resource_id)
+            except Exception as e:
+                log.warning("[crm-sync] cabinet GCal delete failed for booking %s: %r", b.id, e)
+            b.gcal_event_id = None
+
+        b.status = "cancelled"
+        b.cancellation_reason = reason
+        b.cancelled_by = "auto-sync"
+        b.updated_at = datetime.now()
+        session.add(b)
+        return True
+    except Exception as e:
+        log.warning("[crm-sync] failed to cancel linked booking %s: %r", ts.booking_id, e)
+        return False
+
+
 def _delete_session_safely(session: Session, ts: TherapySession) -> None:
     """Hard-delete a CRM session, nulling FK refs on payments/notes first.
 
@@ -446,21 +512,9 @@ def sync_from_calendar(
                 # CRM (no CANCELLED_* status). Detach any linked cabinet
                 # booking first so the slot frees up automatically — same
                 # behaviour as the admin pressing "Отменить" in the sheet.
-                if existing.booking_id:
-                    try:
-                        from app.models.booking import Booking
-                        b = session.get(Booking, existing.booking_id)
-                        if b and b.status == "confirmed":
-                            b.status = "cancelled"
-                            b.cancellation_reason = "Сессия отменена в Google Calendar"
-                            b.cancelled_by = "auto-sync"
-                            b.updated_at = datetime.now()
-                            session.add(b)
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(
-                            "[crm-sync] failed to cancel linked booking %s: %r",
-                            existing.booking_id, e,
-                        )
+                _cancel_booking_behind_session(
+                    session, existing, "Сессия отменена в Google Calendar"
+                )
                 _delete_session_safely(session, existing)
                 deleted_on_cancel += 1
             continue
@@ -555,27 +609,31 @@ def sync_from_calendar(
         TherapySession.date >= win_start,
         TherapySession.date <= win_end,
     )
+    orphans_in_window = session.exec(orphan_q).all()
     orphans_cancelled = 0
-    for ts in session.exec(orphan_q).all():
+
+    # Kill-switch: an empty `seen_gcal_ids` means Google listed NO events at all.
+    # In practice that is never "the specialist deleted their whole week" — it is
+    # a lost service-account grant, a changed calendar_id, or an API hiccup, all
+    # of which return 200 with an empty list. Sweeping on that signal would wipe
+    # every session in the window and cancel every cabinet booking behind them.
+    # Do nothing and say so loudly.
+    if orphans_in_window and not seen_gcal_ids:
+        logging.getLogger(__name__).error(
+            "[crm-sync] ABORTING orphan sweep for specialist %s: Google returned 0 events "
+            "while %d sessions exist in the window. Refusing to delete them — check the "
+            "service-account access and calendar_id.",
+            uid, len(orphans_in_window),
+        )
+        orphans_in_window = []
+
+    for ts in orphans_in_window:
         if ts.google_event_id in seen_gcal_ids:
             continue
         # Same "GCal-cancel = delete" rule applies to orphan rows whose
-        # GCal event vanished from the sync window.
-        if ts.booking_id:
-            try:
-                from app.models.booking import Booking
-                b = session.get(Booking, ts.booking_id)
-                if b and b.status == "confirmed":
-                    b.status = "cancelled"
-                    b.cancellation_reason = "Сессия удалена из Google Calendar"
-                    b.cancelled_by = "auto-sync"
-                    b.updated_at = datetime.now()
-                    session.add(b)
-            except Exception as e:
-                logging.getLogger(__name__).warning(
-                    "[crm-sync] orphan: failed to cancel linked booking %s: %r",
-                    ts.booking_id, e,
-                )
+        # GCal event vanished from the sync window. Refunds the client and
+        # clears the cabinet's own GCal event — see _cancel_booking_behind_session.
+        _cancel_booking_behind_session(session, ts, "Сессия удалена из Google Calendar")
         _delete_session_safely(session, ts)
         orphans_cancelled += 1
 
