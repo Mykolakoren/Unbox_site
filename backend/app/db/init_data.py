@@ -291,8 +291,8 @@ def migrate_add_columns():
             "CREATE INDEX IF NOT EXISTS ix_cashbox_payment_method ON cashbox_transactions (payment_method)",
             # Weekly volume credit: one row per (user, week) — the anti-double-credit
             # journal the model docstring always claimed to be. Until now it was
-            # enforced only by a SELECT-before-INSERT, which two parallel runs both
-            # pass. Both weekly_rebate (cron) and weekly_cashback (manual) write here.
+            # enforced only by a SELECT-before-INSERT, which two parallel runs
+            # (cron + the admin button, or two tabs) both pass.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_rebate_user_week "
             "ON weekly_rebates (user_id, week_start)",
             # One payment per CRM session. quick-pay now takes a row lock, but the

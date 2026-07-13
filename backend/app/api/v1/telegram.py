@@ -458,97 +458,19 @@ def daily_summary_endpoint(
     }
 
 
-# ── POST /telegram/weekly-cashback ────────────────────────────────────────────
-# Monday-morning settlement: for each user with confirmed balance-paid
-# bookings during the previous Mon–Sun, find the weekly_progressive tier
-# they fulfilled, refund the per-booking delta to their balance, and
-# send them a Telegram digest of the past week. Cron from ops:
-#   curl -X POST 'https://unbox.com.ge/api/v1/telegram/weekly-cashback?secret=<SECRET>'
-# Optional `?user_id=<uuid>&dry_run=true` for ops-only test runs.
+# ── weekly-cashback: УДАЛЁН (2026-07-14) ──────────────────────────────────────
+# Недельная скидка за объём была реализована ДВАЖДЫ: здесь (weekly_cashback) и
+# в services/weekly_rebate.py. Обе кредитовали баланс за одно и то же.
+# Владелец: оставить ту, что считает корректнее → остался weekly_rebate:
+#   * тариф недели считается по ВСЕМ подтверждённым часам (кэшбэк брал только
+#     оплаченные с баланса → клиент с абонементом получал заниженный тариф);
+#   * добор идёт от discountable_base (без пиковой надбавки), а не от base_price;
+#   * comp/personal-аккаунты дают 0, а не лишний кредит;
+#   * есть cutover-гард против ретро-начисления и проводка в кассу для аудита.
+# Живой путь: POST /pricing/weekly-rebate/run (кнопка в админке) + cron пн 01:00
+# (run_weekly_rebate.py). Этот эндпоинт не вызывался ниоткуда — ни фронтом, ни
+# кроном, — так что удаление ничего не ломает.
 
-@router.post("/weekly-cashback")
-def weekly_cashback_endpoint(
-    secret: Optional[str] = None,
-    user_id: Optional[str] = None,
-    dry_run: bool = False,
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    # Only a dedicated TELEGRAM_REMINDER_SECRET is accepted — no bot-token
-    # fallback. Fail closed if it's unset.
-    # TODO: move the secret to an Authorization header (kept as `?secret=`
-    # for now to avoid breaking existing cron jobs; it leaks via access logs).
-    expected = getattr(settings, "TELEGRAM_REMINDER_SECRET", None)
-    if not expected:
-        raise HTTPException(status_code=503, detail="Telegram not configured")
-    if secret != expected:
-        raise HTTPException(status_code=401, detail="Invalid secret")
-
-    from app.services.weekly_cashback import (
-        previous_tbilisi_week_bounds,
-        compute_weekly_cashback_for_user,
-        format_telegram_digest,
-    )
-    from app.services.telegram import telegram_service
-
-    week_start, week_end = previous_tbilisi_week_bounds()
-
-    # Pick users to process. Default: anyone with a confirmed booking in
-    # the window. Caller can scope to a single user via ?user_id.
-    if user_id:
-        try:
-            target = session.get(User, UUID(user_id))
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid user_id")
-        if not target:
-            raise HTTPException(status_code=404, detail="User not found")
-        users = [target]
-    else:
-        rows = session.exec(
-            select(User).where(
-                User.id.in_(  # type: ignore[attr-defined]
-                    select(Booking.user_uuid).where(
-                        Booking.status == "confirmed",
-                        Booking.payment_method == "balance",
-                        Booking.date >= week_start,
-                        Booking.date < week_end,
-                    )
-                )
-            )
-        ).all()
-        users = list(rows)
-
-    processed = 0
-    cashback_total = 0.0
-    sent = 0
-    samples = []
-    for u in users:
-        summary = compute_weekly_cashback_for_user(
-            session=session,
-            user=u,
-            week_start=week_start,
-            week_end=week_end,
-            apply=not dry_run,
-        )
-        processed += 1
-        cashback_total += summary["cashback"]
-        if not dry_run and u.telegram_id:
-            text = format_telegram_digest(u, summary)
-            ok = telegram_service.send_message(chat_id=str(u.telegram_id), text=text)
-            if ok:
-                sent += 1
-        if dry_run and len(samples) < 3:
-            samples.append({"user": u.email, **summary})
-
-    return {
-        "ok": True,
-        "dry_run": dry_run,
-        "week_start": week_start.strftime("%Y-%m-%d"),
-        "week_end": (week_end - timedelta(days=1)).strftime("%Y-%m-%d"),
-        "users_processed": processed,
-        "cashback_total": round(cashback_total, 2),
-        "tg_sent": sent,
-        "samples": samples,
-    }
 
 
 # ── POST /telegram/resolve-username ───────────────────────────────────────────
