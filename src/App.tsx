@@ -10,22 +10,28 @@ import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 import { useBookingStore } from './store/bookingStore';
 import { useUserStore } from './store/userStore';
 
-// Public pages (loaded eagerly — critical path)
+// "/" — the only page on the critical path, so it is the only eager one.
+// Everything below used to be eager too, which meant a visitor landing on "/"
+// downloaded MyBookingsPage (3.9k lines), the dashboard and its @dnd-kit board
+// before the map could render. They all sit behind their own routes (most behind
+// auth), and the whole <Routes> tree is already wrapped in <Suspense>, so lazy()
+// is a drop-in here.
 import { ExplorePage } from './pages/ExplorePage';
-import { SpecialistsPage } from './pages/SpecialistsPage';
-import { SpecialistProfilePage } from './pages/SpecialistProfilePage';
-import { LocationDetailsPage } from './pages/LocationDetailsPage';
-import { CabinetPage } from './pages/CabinetPage';
-import { LoginPage } from './pages/LoginPage';
 import { DashboardLayout } from './components/DashboardLayout';
-import { MyBookingsPage } from './pages/MyBookingsPage';
-import { MyWaitlistPage } from './pages/MyWaitlistPage';
-import { BonusesInfoPage } from './pages/BonusesInfoPage';
-import { ProfilePage } from './pages/ProfilePage';
-import { DashboardOverview } from './pages/DashboardOverview';
-import { TestPage } from './pages/TestPage';
-import { SubscriptionsPage } from './pages/SubscriptionsPage';
-import { BookingRulesPage } from './pages/BookingRulesPage';
+
+const SpecialistsPage = lazy(() => import('./pages/SpecialistsPage').then(m => ({ default: m.SpecialistsPage })));
+const SpecialistProfilePage = lazy(() => import('./pages/SpecialistProfilePage').then(m => ({ default: m.SpecialistProfilePage })));
+const LocationDetailsPage = lazy(() => import('./pages/LocationDetailsPage').then(m => ({ default: m.LocationDetailsPage })));
+const CabinetPage = lazy(() => import('./pages/CabinetPage').then(m => ({ default: m.CabinetPage })));
+const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const MyBookingsPage = lazy(() => import('./pages/MyBookingsPage').then(m => ({ default: m.MyBookingsPage })));
+const MyWaitlistPage = lazy(() => import('./pages/MyWaitlistPage').then(m => ({ default: m.MyWaitlistPage })));
+const BonusesInfoPage = lazy(() => import('./pages/BonusesInfoPage').then(m => ({ default: m.BonusesInfoPage })));
+const ProfilePage = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+const DashboardOverview = lazy(() => import('./pages/DashboardOverview').then(m => ({ default: m.DashboardOverview })));
+const TestPage = lazy(() => import('./pages/TestPage').then(m => ({ default: m.TestPage })));
+const SubscriptionsPage = lazy(() => import('./pages/SubscriptionsPage').then(m => ({ default: m.SubscriptionsPage })));
+const BookingRulesPage = lazy(() => import('./pages/BookingRulesPage').then(m => ({ default: m.BookingRulesPage })));
 const BecomeSpecialistPage = lazy(() => import('./pages/BecomeSpecialistPage').then(m => ({ default: m.BecomeSpecialistPage })));
 // Контент-блок: новости/анонсы + статьи специалистов (lazy — публичный, но не на каждой сессии)
 const PostListPage = lazy(() => import('./pages/content/PostListPage').then(m => ({ default: m.PostListPage })));
