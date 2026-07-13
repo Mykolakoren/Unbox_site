@@ -143,6 +143,20 @@ def _gcal_recreate_in_background(booking_id: str, user_name: str, old_event_id: 
         logger.warning(f"[GCal recreate bg] Failed for {booking_id}: {e}")
 
 
+def _gcal_delete_in_background(event_id: str, resource_id: Optional[str]) -> None:
+    """Drop a GCal event after the cancellation has already been committed.
+
+    Cancellation holds a row lock on the booking (against double-refunds), and
+    a synchronous delete_event kept that lock — plus a pooled DB connection and
+    a threadpool slot — open for the whole round-trip to Google. Nothing in the
+    cancellation depends on the result, so it goes to a BackgroundTask instead.
+    """
+    try:
+        gcal_service.delete_event(event_id, resource_id)
+    except Exception as e:
+        logger.warning(f"[GCal cancel bg] delete_event failed for event={event_id}: {e}")
+
+
 def _gcal_create_in_background(booking_id: str, user_name: str) -> None:
     """Push a booking to Google Calendar from a FastAPI BackgroundTask.
 
@@ -943,6 +957,15 @@ def create_booking(
                         used_hours=max(0.0, used - quote.hours_deducted),
                     )
 
+            # The money was just handed back, so the row must stop claiming it
+            # was paid. It used to keep payment_status="paid" + charge_amount
+            # from the block above: cancelling a pending_approval booking then
+            # took that at face value and refunded a charge that never happened
+            # (book → cancel → +final_price on the balance, repeatable).
+            # `approve` re-charges and re-stamps these on the way to confirmed.
+            booking_in.payment_status = "pending"
+            booking_in.charged_at = None
+            booking_in.charge_amount = None
             booking_in.status = "pending_approval"
 
         session.add(booking_owner)
@@ -2520,6 +2543,7 @@ def cancel_recurring_bookings(
 @router.delete("/{booking_id}", response_model=BookingRead)
 def cancel_booking(
     booking_id: str,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user),
     # Excel #66 — admin-only cancellation policy override.
@@ -2534,7 +2558,15 @@ def cancel_booking(
     except ValueError:
         raise HTTPException(status_code=404, detail="Invalid Booking ID")
 
-    booking = session.get(Booking, b_uuid)
+    # SELECT … FOR UPDATE, same as `trim` and `approve`. A plain read let a
+    # double-click (or a client retry after a timeout) run two cancellations at
+    # once: both saw `confirmed`, both spent seconds inside gcal delete_event,
+    # and both then refunded — the second one re-reading the already-credited
+    # balance and adding the refund on top. The row lock makes the second
+    # request wait, and the `cancelled` short-circuit below then returns cleanly.
+    booking = session.exec(
+        select(Booking).where(Booking.id == b_uuid).with_for_update()
+    ).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
@@ -2583,14 +2615,13 @@ def cancel_booking(
         )
 
     # ── Google Calendar Sync (Delete) ──
+    # Scheduled, not awaited: we hold a row lock on the booking here (see the
+    # FOR UPDATE above), and a synchronous Google round-trip would keep it —
+    # along with a DB connection and a threadpool slot — for seconds.
     if booking.gcal_event_id:
-        try:
-            gcal_service.delete_event(booking.gcal_event_id, booking.resource_id)
-        except Exception as e:
-            logger.warning(
-                f"[GCal Cancel] delete_event failed for "
-                f"booking={booking.id} event={booking.gcal_event_id}: {e}"
-            )
+        background_tasks.add_task(
+            _gcal_delete_in_background, booking.gcal_event_id, booking.resource_id
+        )
         booking.gcal_event_id = None
 
     # ── Refund to booking OWNER (not current_user!) ──
@@ -4503,6 +4534,14 @@ def approve_booking(
         session.add(b_owner)
 
     booking.status = "confirmed"
+    # We just took the money — say so on the row. The hot gate leaves the
+    # booking `pending` (it hands the charge back), and once status flips to
+    # `confirmed` the charge-due cron picks up every confirmed+pending booking
+    # inside T-24h — a hot booking is inside that window by definition, so
+    # leaving it `pending` here would have the cron charge it a second time.
+    booking.payment_status = "paid"
+    booking.charged_at = datetime.utcnow()
+    booking.charge_amount = booking.final_price
     booking.updated_at = datetime.now()
     session.add(booking)
     session.commit()
