@@ -10,13 +10,15 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
+from contextlib import contextmanager
+
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlmodel import Session
 
 from app.api import deps
 from app.core.config import settings
 from app.core.permissions import ADMIN_ROLES
-from app.db.session import get_session
+from app.db.session import engine, get_session
 from app.models.booking import Booking
 from app.models.location import Location
 from app.models.resource import Resource
@@ -35,6 +37,52 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Arbitrary but stable key for the charge-due advisory lock. Any Postgres
+# session asking for the same key gets refused while the sweep holds it.
+_CHARGE_DUE_LOCK_KEY = 481516_2342
+
+
+@contextmanager
+def _charge_due_lock():
+    """Hold a Postgres advisory lock for the whole charge-due sweep.
+
+    Two overlapping sweeps could each SELECT the same still-`pending` booking
+    and settle it twice — the cron fires every 10 min while a sweep with slow
+    Telegram calls can run longer than that, and a manual curl can land on top
+    of a running cron. `find_due_pending` takes no row locks, so nothing else
+    stops that.
+
+    The lock lives on its OWN connection: the sweep commits after every booking,
+    which hands the request's connection back to the pool — a session-level lock
+    taken on it would be lost (or worse, ride a pooled connection). Closing this
+    connection releases the lock even if the sweep dies mid-way.
+
+    Yields True when the lock was acquired, False when another sweep holds it.
+    On SQLite (dev) there is nothing to guard — always yields True.
+    """
+    if engine.dialect.name != "postgresql":
+        yield True
+        return
+
+    conn = engine.connect()
+    acquired = False
+    try:
+        acquired = bool(
+            conn.exec_driver_sql(
+                "SELECT pg_try_advisory_lock(%s)", (_CHARGE_DUE_LOCK_KEY,)
+            ).scalar()
+        )
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                conn.exec_driver_sql(
+                    "SELECT pg_advisory_unlock(%s)", (_CHARGE_DUE_LOCK_KEY,)
+                )
+            except Exception:
+                logger.warning("[billing] advisory unlock failed", exc_info=True)
+        conn.close()
+
 
 @router.post("/charge-due")
 def charge_due_bookings(
@@ -43,9 +91,10 @@ def charge_due_bookings(
 ) -> dict[str, Any]:
     """Cron: settle every confirmed `pending` booking inside the T-24h window.
 
-    Idempotent — bookings flip to `paid` once and the next run skips them.
-    Failures (e.g., a single user row gone) are isolated per-booking so one
-    bad row can't stall the whole sweep.
+    Idempotent — bookings flip to `paid` once and the next run skips them, and
+    an advisory lock keeps two overlapping sweeps from charging the same booking
+    twice. Failures (e.g., a single user row gone) are isolated per-booking so
+    one bad row can't stall the whole sweep.
     """
     # Only a dedicated TELEGRAM_REMINDER_SECRET is accepted — no bot-token
     # fallback (this endpoint mutates balances, so the gate must be a real
@@ -58,6 +107,18 @@ def charge_due_bookings(
     if secret != expected:
         raise HTTPException(status_code=401, detail="Invalid secret")
 
+    with _charge_due_lock() as acquired:
+        if not acquired:
+            # Another sweep is still running (slow TG calls outlast the 10-min
+            # cron interval). Skipping is the whole point — money moves here.
+            logger.warning("[billing] charge-due already in progress — skipping this run")
+            return {"ok": True, "skipped": "already_running", "candidates": 0,
+                    "settled": 0, "failures": []}
+        return _sweep_due_bookings(session)
+
+
+def _sweep_due_bookings(session: Session) -> dict[str, Any]:
+    """The actual sweep. Only ever called while the advisory lock is held."""
     due = find_due_pending(session, lookahead_hours=24.0)
     settled = 0
     failures: list[dict] = []
