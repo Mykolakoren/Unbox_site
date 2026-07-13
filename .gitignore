@@ -76,3 +76,6 @@ coverage.xml
 # ─── Misc ────────────────────────────────────────────────────────────────────
 .cache/
 tmp/
+
+# Graphify knowledge graph (генерируется локально)
+graphify-out/
