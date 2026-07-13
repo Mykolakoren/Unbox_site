@@ -1,0 +1,19 @@
+# /etc/systemd/system/unbox-api.service
+[Unit]
+Description=Unbox API (FastAPI/Uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/unbox/backend
+ExecStart=/var/www/unbox/backend/venv/bin/python3 /var/www/unbox/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/unbox.log
+StandardError=append:/var/log/unbox.log
+Environment=PATH=/var/www/unbox/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
