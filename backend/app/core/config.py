@@ -1,14 +1,29 @@
 import os
 import secrets
 import logging
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
+# backend/.env — по АБСОЛЮТНОМУ пути от этого файла, а не относительно CWD.
+#
+# Раньше здесь стоял просто ".env", т.е. поиск шёл от текущей директории. Любой
+# запуск не из backend/ (разовый скрипт, миграция, cron без `cd`) не находил
+# файл → DATABASE_URL пустой → приложение молча уезжало на SQLite. Хуже того,
+# ENVIRONMENT читается из того же .env, поэтому fail-fast в db/session.py тоже
+# не срабатывал: он ждёт ENVIRONMENT=production, а его тоже не было.
+# config.py лежит в backend/app/core/ → три уровня вверх = backend/.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Unbox Booking API"
     API_V1_STR: str = "/api/v1"
+    # "production" на дроплете, "development" локально. Раньше читалось только из
+    # окружения процесса, хотя лежит в .env — из-за чего защиты, завязанные на
+    # него (fail-fast против SQLite), молчали в скриптах и cron-задачах.
+    ENVIRONMENT: str = "development"
     SECRET_KEY: str = "changethis-generate-secure-key-in-prod"
     ALGORITHM: str = "HS256"
     # 30 дней. Owner 2026-07-11: «не разлогинивай, если не пользовался». Токен
@@ -93,9 +108,16 @@ class Settings(BaseSettings):
     SMTP_FROM: Optional[str] = None  # e.g. "Unbox <noreply@unbox.com.ge>"
     SMTP_USE_TLS: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra='ignore')
+    model_config = SettingsConfigDict(env_file=str(ENV_FILE), case_sensitive=True, extra='ignore')
 
 settings = Settings()
+
+# ENVIRONMENT живёт в том же .env, что и всё остальное. Пробрасываем его в
+# os.environ, чтобы проверки ниже и fail-fast в db/session.py видели значение
+# даже когда переменная не была экспортирована в окружение процесса (systemd
+# передаёт .env через EnvironmentFile, а вот разовый скрипт — нет).
+if settings.ENVIRONMENT and not os.getenv("ENVIRONMENT"):
+    os.environ["ENVIRONMENT"] = settings.ENVIRONMENT
 
 # Runtime safety check: warn if using default SECRET_KEY
 if settings.SECRET_KEY == "changethis-generate-secure-key-in-prod":
