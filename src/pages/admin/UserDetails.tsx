@@ -8,6 +8,7 @@ import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrection
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
+import { subscriptionBadge } from '../../utils/subscription';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
@@ -1186,9 +1187,14 @@ export function AdminUserDetails() {
                                             </div>
                                             {user.subscription && (
                                                 <div className="text-right">
-                                                    <div className={clsx("px-2 py-0.5 rounded text-[10px] font-bold uppercase mb-2 inline-block", user.subscription.isFrozen ? "bg-blue-200 text-blue-800" : "bg-green-200 text-green-800")}>
-                                                        {user.subscription.isFrozen ? 'Заморожен' : 'Активен'}
-                                                    </div>
+                                                    {(() => {
+                                                        const badge = subscriptionBadge(user.subscription as any);
+                                                        return (
+                                                            <div className={clsx("px-2 py-0.5 rounded text-[10px] font-bold uppercase mb-2 inline-block", badge.cls)}>
+                                                                {badge.label}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     <div className="text-xs text-purple-600">
                                                         {isEditingExpiry ? (
                                                             <div className="flex items-center gap-1.5 mt-1">
