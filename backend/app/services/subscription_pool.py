@@ -21,6 +21,7 @@ the two dialects in sync, so neither side can starve the other. Legacy one-sided
 pools are read correctly and repaired on the next write — no migration needed.
 """
 
+from datetime import datetime
 from typing import Any, Optional
 
 # snake_case (backend) → camelCase (frontend). Every field either side writes.
@@ -32,11 +33,19 @@ _ALIASES: dict[str, str] = {
     "is_frozen": "isFrozen",
     "freeze_count": "freezeCount",
     "frozen_until": "frozenUntil",
+    "frozen_at": "frozenAt",
     "expiry_date": "expiryDate",
     "plan_id": "planId",
     "free_reschedules": "freeReschedules",
     "included_formats": "includedFormats",
     "discount_percent": "discountPercent",
+    # Особые условия клиента: абонемент без ограничения срока (owner-решение,
+    # напр. Светлана Розова — «добивает часы вне рамок сроков»). Такой пул
+    # никогда не истекает и не переходит в «завершён».
+    "flexible": "flexible",
+    # Жизненный цикл: active | frozen | completed. Стамп ставит крон/ревизор;
+    # РЕАЛЬНЫЙ гейт денег — is_active(), считается вживую, а не по этому полю.
+    "status": "status",
 }
 
 
@@ -77,3 +86,68 @@ def sync(sub: Optional[dict]) -> dict:
         elif camel in new and snake not in new:
             new[snake] = new[camel]
     return new
+
+
+# ── Жизненный цикл абонемента ────────────────────────────────────────────────
+# Единый источник правды: истёк / на паузе / активен. И движок цен, и статус-
+# стамп спрашивают отсюда, чтобы правило не разъехалось по файлам (ровно так
+# рождались прошлые денежные баги).
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    """ISO-строка (в т.ч. с Z) → naive datetime. None на мусоре — не роняем цену."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return None
+
+
+def is_flexible(sub: Optional[dict]) -> bool:
+    """Особые условия: пул без ограничения срока (owner-решение по клиенту)."""
+    return bool(get(sub, "flexible", False))
+
+
+def is_expired(sub: Optional[dict], now: datetime) -> bool:
+    """Срок действия закончился (с учётом пауз и особых условий).
+
+    - flexible → никогда не истекает (Светлана: часы вне рамок сроков).
+    - на паузе → не истёк (часы заблокированы, но клиент своё время не теряет).
+      Срок продлевается на длительность паузы в момент разморозки, поэтому
+      здесь достаточно сравнить now с expiry_date.
+    - нет expiry_date → легаси-пул без срока, не истекает.
+    """
+    if not sub or is_flexible(sub):
+        return False
+    if get(sub, "is_frozen", False):
+        return False
+    expiry = _parse_dt(get(sub, "expiry_date"))
+    if expiry is None:
+        return False
+    return now > expiry
+
+
+def is_active(sub: Optional[dict], now: datetime) -> bool:
+    """Может ли абонемент СЕЙЧАС покрыть бронь.
+
+    Существует, не на паузе, не истёк. Остаток часов проверяется отдельно
+    в _apply_subscription — тут только про статус пула, не про баланс часов.
+    """
+    if not sub:
+        return False
+    if get(sub, "is_frozen", False):
+        return False
+    if is_expired(sub, now):
+        return False
+    return True
+
+
+def lifecycle_status(sub: Optional[dict], now: datetime) -> str:
+    """active | frozen | completed | none — для отображения и стампа."""
+    if not sub:
+        return "none"
+    if get(sub, "is_frozen", False):
+        return "frozen"
+    if is_expired(sub, now):
+        return "completed"
+    return "active"

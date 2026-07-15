@@ -815,7 +815,7 @@ def create_booking(
         # (booking_owner already resolved above, before check_availability)
 
         # Pricing & Payment
-        from app.services.pricing import PricingService
+        from app.services.pricing import PricingService, resolve_payment_method
 
         try:
             h, m = map(int, booking_in.start_time.split(":"))
@@ -862,6 +862,13 @@ def create_booking(
         from datetime import timedelta as _td_single
         _now_tb_single = datetime.utcnow() + _td_single(hours=4)
         defer_charge_single = (start_dt - _now_tb_single).total_seconds() > 24 * 3600
+
+        # Ярлык оплаты обязан следовать за котировкой: если движок покрыл слот
+        # абонементом, а бронь осталась помечена `balance`, часы не спишет никто
+        # (списание везде завязано на payment_method) — кабинет уйдёт за 0 ₾.
+        # Делать это НАДО до гейтов ниже: от ярлыка зависят и списание часов,
+        # и проверка средств, и пиковая надбавка.
+        booking_in.payment_method = resolve_payment_method(booking_in.payment_method, quote)
 
         if booking_in.payment_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
@@ -1277,7 +1284,7 @@ def create_multi_slot_booking(
     """
     deps.require_can_book(current_user)
 
-    from app.services.pricing import PricingService
+    from app.services.pricing import PricingService, resolve_payment_method
     from uuid import uuid4 as gen_uuid4
 
     if not data.slots:
@@ -1380,7 +1387,12 @@ def create_multi_slot_booking(
         _now_tb_multi = datetime.utcnow() + _td_multi(hours=4)
         defer_charge_multi = (start_dt - _now_tb_multi).total_seconds() > 24 * 3600
 
-        if data.payment_method == "subscription":
+        # Ярлык решается ПО СЛОТУ, а не на всю пачку: часы абонемента могут
+        # кончиться на середине, и тогда следующие слоты честно уйдут на баланс.
+        # `data.payment_method` не трогаем — он общий на весь запрос.
+        slot_method = resolve_payment_method(data.payment_method, quote)
+
+        if slot_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
                 raise HTTPException(
                     400,
@@ -1430,9 +1442,9 @@ def create_multi_slot_booking(
             applied_rule=quote.applied_rule,
             discount_amount=quote.discount_amount,
             discount_percent=quote.discount_percent,
-            payment_method=data.payment_method,
+            payment_method=slot_method,
             payment_source=(
-                "subscription" if data.payment_method == "subscription" else "deposit"
+                "subscription" if slot_method == "subscription" else "deposit"
             ),
             hours_deducted=quote.hours_deducted,
             format=s.format,
@@ -1613,7 +1625,7 @@ def create_recurring_booking(
     """
     deps.require_can_book(current_user)
 
-    from app.services.pricing import PricingService
+    from app.services.pricing import PricingService, resolve_payment_method
     from uuid import uuid4 as gen_uuid4
 
     # Determine booking owner
@@ -1781,7 +1793,11 @@ def create_recurring_booking(
         _now_tb = datetime.utcnow() + _td_recur(hours=4)
         defer_charge = (_start_tb - _now_tb).total_seconds() > 24 * 3600
 
-        if data.payment_method == "subscription":
+        # Ярлык — по каждому вхождению серии: часы абонемента могут кончиться
+        # в середине, и остаток серии честно уйдёт на баланс.
+        occ_method = resolve_payment_method(data.payment_method, quote)
+
+        if occ_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
                 raise HTTPException(
                     400, f"Subscription insufficient for {d.strftime('%Y-%m-%d')}"
@@ -1818,8 +1834,8 @@ def create_recurring_booking(
             applied_rule=quote.applied_rule,
             discount_amount=quote.discount_amount,
             discount_percent=quote.discount_percent,
-            hours_deducted=quote.hours_deducted if data.payment_method == "subscription" else None,
-            payment_method=data.payment_method,
+            hours_deducted=quote.hours_deducted if occ_method == "subscription" else None,
+            payment_method=occ_method,
             format=data.format,
             extras=[],
             user_id=booking_owner.email,
@@ -4257,6 +4273,99 @@ def extend_booking(
     except Exception as e:
         logger.warning(f"[GCal Extend] create_event failed for booking {booking.id}: {e}")
 
+    return enrich_booking_status(booking)
+
+
+# ─── Add extras to an existing booking ───────────────────────────────────────
+# Клиент в моменте дозаказывает кофе / песочницу и т.п., чего не указывал при
+# брони. Админ добавляет доп к СЕГОДНЯШНЕЙ броне. Оплата на выбор:
+#   cash/card → приход в кассу отдельной проводкой, цену брони НЕ трогаем
+#               (иначе крон при balance-броне спишет доп ещё и с депозита —
+#               двойная оплата);
+#   balance   → доп идёт в цену брони и списывается с депозита владельца,
+#               как /extend.
+_LOCATION_TO_BRANCH = {"unbox_one": "Unbox One", "unbox_uni": "Unbox Uni", "neo_school": "Neo School"}
+
+
+class AddExtrasRequest(PydanticBaseModel):
+    extras: List[str]                 # id-шники допов (coffee_meama, sandbox, ...)
+    payment_method: str = "cash"      # cash | card_tbc | card_bog | balance
+
+
+@router.patch("/{booking_id}/add-extras", response_model=BookingRead)
+def add_booking_extras(
+    booking_id: str,
+    payload: AddExtrasRequest,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Добавить допы (кофе и т.п.) к брони в моменте. Только админ."""
+    if current_user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Только администратор может добавлять допы")
+
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status != "confirmed":
+        raise HTTPException(status_code=400, detail="Допы можно добавить только к подтверждённой броне")
+
+    from app.services.pricing import PricingService
+
+    ids = [e for e in (payload.extras or []) if e]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Не переданы допы")
+    unknown = PricingService.validate_extras(ids)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Неизвестные допы: {', '.join(unknown)}")
+
+    price = round(float(PricingService.calculate_extras_price(ids)), 2)
+    method = (payload.payment_method or "cash").lower()
+
+    # Допы всегда фиксируем в составе брони — для персонала (подготовить кабинет)
+    # и для TG/чека. Это НЕ влияет на пересчёт цены (extras прибавляются к
+    # котировке только при создании; recompute/rebate их не трогают).
+    booking.extras = list(booking.extras or []) + ids
+    booking.updated_at = datetime.now()
+
+    if price > 0:
+        if method == "balance":
+            booking.final_price = round((booking.final_price or 0) + price, 2)
+            owner = _resolve_booking_owner(session, booking)
+            if owner and booking.payment_status != "pending":
+                owner.balance = round((owner.balance or 0) - price, 2)
+                session.add(owner)
+                booking.charge_amount = round(
+                    float(booking.charge_amount if booking.charge_amount is not None
+                          else (booking.final_price - price)) + price, 2
+                )
+            # pending (>24ч) → крон спишет новый итог с учётом допа
+        else:
+            # cash / card — оплата на месте, отдельным приходом в кассу.
+            from app.models.cashbox_transaction import CashboxTransaction
+            owner = _resolve_booking_owner(session, booking)
+            branch = _LOCATION_TO_BRANCH.get(booking.location_id)
+            session.add(CashboxTransaction(
+                type="income",
+                amount=price,
+                currency="GEL",
+                payment_method=method,
+                category_id="cat-other",
+                description=f"Допы к броне (дозаказ): {', '.join(ids)}",
+                branch=branch,
+                date=datetime.now(),
+                admin_id=str(current_user.id),
+                admin_name=current_user.name or "",
+                client_id=str(owner.id) if owner else None,
+                client_name=(owner.name if owner else None),
+            ))
+
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
     return enrich_booking_status(booking)
 
 

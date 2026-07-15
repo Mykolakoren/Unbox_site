@@ -218,21 +218,35 @@ def toggle_subscription_freeze(
     is_frozen = bool(subscription_pool.get(user.subscription, "is_frozen", False))
     freeze_count = int(subscription_pool.get_float(user.subscription, "freeze_count"))
 
+    now = datetime.now()
     if not is_frozen:
         if freeze_count >= 1:
             raise HTTPException(
                 status_code=400, detail="Subscription has already been frozen once"
             )
+        # frozen_at — момент старта паузы: на разморозке по нему продлеваем срок
+        # ровно на проведённое в паузе время, чтобы пауза не съедала срок.
         new_sub = subscription_pool.update(
             user.subscription,
             is_frozen=True,
             freeze_count=freeze_count + 1,
-            frozen_until=(datetime.now() + timedelta(days=7)).isoformat(),
+            frozen_at=now.isoformat(),
+            frozen_until=(now + timedelta(days=7)).isoformat(),
         )
     else:
-        new_sub = subscription_pool.update(
-            user.subscription, is_frozen=False, frozen_until=None
+        # Разморозка: срок действия сдвигается вперёд на длительность паузы.
+        # Без этого истечение считалось бы так, будто клиент паузой не
+        # пользовался, и абонемент завершался бы раньше оплаченного.
+        fields = dict(is_frozen=False, frozen_until=None, frozen_at=None)
+        frozen_at = subscription_pool._parse_dt(
+            subscription_pool.get(user.subscription, "frozen_at")
         )
+        expiry = subscription_pool._parse_dt(
+            subscription_pool.get(user.subscription, "expiry_date")
+        )
+        if frozen_at and expiry:
+            fields["expiry_date"] = (expiry + (now - frozen_at)).isoformat()
+        new_sub = subscription_pool.update(user.subscription, **fields)
 
     user.subscription = new_sub
     session.add(user)

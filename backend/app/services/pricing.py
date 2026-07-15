@@ -49,6 +49,29 @@ class PriceBreakdown(BaseModel):
     is_non_refundable: bool = False
     is_non_reschedulable: bool = False
 
+# Способы оплаты, за которыми стоят деньги клиента. Служебные брони
+# (`service`, `cash` от админа) сюда не входят — их ярлык трогать нельзя.
+_CLIENT_PAID_METHODS = {"balance", "bonus"}
+
+
+def resolve_payment_method(requested: Optional[str], quote: PriceBreakdown) -> str:
+    """Привести ярлык оплаты брони в соответствие с котировкой.
+
+    `_apply_subscription` — приоритет №1: движок применяет абонемент всякий раз,
+    когда план покрывает слот, и НЕ смотрит, что клиент выбрал в интерфейсе.
+    А списывают часы только там, где `payment_method == "subscription"`.
+    Из-за этого бронь с абонементной ценой, но ярлыком `balance`, отдавала
+    кабинет за 0 ₾ и не жгла часы: 63 брони, 84.5 ч, ~1630 ₾ до этого фикса.
+    Telegram-бот подставлял `balance` жёстко, поэтому через него текло всегда.
+
+    Ярлык обязан следовать за деньгами.
+    """
+    method = (requested or "balance").lower()
+    if quote.applied_rule == "SUBSCRIPTION" and method in _CLIENT_PAID_METHODS:
+        return "subscription"
+    return method
+
+
 class PricingService:
     def __init__(self, session: Session):
         self.session = session
@@ -493,7 +516,13 @@ class PricingService:
         """
         Attempts to apply subscription logic. Returns True if applied.
         """
-        if not user.subscription or subscription_pool.get(user.subscription, "is_frozen", False):
+        # Единый гейт: нет пула / на паузе / ИСТЁК → абонемент не покрывает бронь,
+        # цена уходит на баланс. Раньше срок не проверялся вообще: истёкший
+        # абонемент с остатком часов бесконечно давал бесплатный кабинет
+        # (напр. Надежда Мирошина — истёк 09.07, часы продолжали «работать»).
+        # Особые условия (flexible) is_active пропускает — Светлана добивает
+        # часы вне рамок сроков.
+        if not subscription_pool.is_active(user.subscription, datetime.utcnow()):
             return False
 
         # The pool is written in both dialects (snake for the backend, camel for
