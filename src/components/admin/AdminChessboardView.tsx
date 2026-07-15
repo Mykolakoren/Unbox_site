@@ -17,6 +17,7 @@ import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
+import { ExtendBookingModal, AddExtrasModal } from './BookingTodayEditModals';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
@@ -49,6 +50,20 @@ export function AdminChessboardView() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [selectedBooking, setSelectedBooking] = useState<BookingHistoryItem | null>(null);
+    // Правки сегодняшней брони (в т.ч. завершившейся): продление с выбором
+    // времени и дозаказ допов — общие модалки со списком броней.
+    const [extendModalId, setExtendModalId] = useState<string | null>(null);
+    const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
+    const bookingIsToday = (b: BookingHistoryItem | null): boolean => {
+        if (!b?.date) return false;
+        const raw: any = b.date;
+        const day = typeof raw === 'string'
+            ? raw.split('T')[0].split(' ')[0]
+            : new Date(raw).toISOString().split('T')[0];
+        const n = new Date();
+        const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+        return day === today;
+    };
     // Slot-watch — admin can subscribe themselves to a slot (e.g. monitor
     // when a busy room frees up so they can offer it to a walk-in client).
     const [waitlistTarget, setWaitlistTarget] = useState<{
@@ -1114,7 +1129,10 @@ export function AdminChessboardView() {
                                 <div className="space-y-1.5">
                                     <div className="grid grid-cols-2 gap-1.5">
                                         <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
-                                        <button onClick={() => handleExtend(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">Продлить +30 мин</button>
+                                        <button onClick={() => setExtendModalId(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">Продлить</button>
+                                        {bookingIsToday(selectedBooking) && (
+                                            <button onClick={() => setExtrasModalId(selectedBooking.id)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-teal-50 text-teal-700">+ Доп (кофе и т.п.)</button>
+                                        )}
                                         {(selectedBooking.duration || 60) > 60 && (
                                             <button onClick={() => handleShorten(selectedBooking)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700">Сократить (— минут)</button>
                                         )}
@@ -1194,6 +1212,16 @@ export function AdminChessboardView() {
                         </div>
                     </div>
                 )}
+                <ExtendBookingModal
+                    bookingId={extendModalId}
+                    onClose={() => setExtendModalId(null)}
+                    onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+                />
+                <AddExtrasModal
+                    bookingId={extrasModalId}
+                    onClose={() => setExtrasModalId(null)}
+                    onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+                />
             </div>
         );
     }
@@ -1595,17 +1623,41 @@ export function AdminChessboardView() {
                         const isPastB = bookEnd < new Date();
 
                         return isPastB ? (
-                            <div className="px-3 pb-3">
+                            // Завершившаяся бронь. Для СЕГОДНЯШНЕЙ админ всё ещё может
+                            // добить время по факту, дозаказать допы и поправить цену
+                            // (в базе статус ещё confirmed — бэкенд эти правки принимает).
+                            <div className="px-3 pb-3 space-y-1.5">
                                 <div className="py-1.5 text-xs font-medium rounded-lg bg-gray-50 text-gray-500 text-center border border-gray-200">
                                     ☑️ Завершено
                                 </div>
+                                {bookingIsToday(selectedBooking) && (
+                                    <div className="grid grid-cols-3 gap-1.5">
+                                        <button
+                                            onClick={() => setExtendModalId(selectedBooking.id)}
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                                        >
+                                            Продлить
+                                        </button>
+                                        <button
+                                            onClick={() => setExtrasModalId(selectedBooking.id)}
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 transition-colors"
+                                        >
+                                            + Доп
+                                        </button>
+                                        <button
+                                            onClick={() => handleEditPrice(selectedBooking)}
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark transition-colors"
+                                        >
+                                            Цена
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             // Restored full action menu (Excel #28).
-                            // Layout: 2 wide buttons on top (Перенести,
-                            // Продлить +30 — primary "fix the time" actions
-                            // admins use most), then a 3-button row for
-                            // Цена / Пересдать / Удалить.
+                            // Layout: 2 wide buttons on top (Перенести, Продлить —
+                            // primary "fix the time" actions admins use most), then a
+                            // 3-button row for Цена / Пересдать / Удалить.
                             <div className="px-3 pb-3 space-y-1.5">
                                 <div className="grid grid-cols-2 gap-1.5">
                                     <button
@@ -1615,12 +1667,20 @@ export function AdminChessboardView() {
                                         Перенести
                                     </button>
                                     <button
-                                        onClick={() => handleExtend(selectedBooking)}
+                                        onClick={() => setExtendModalId(selectedBooking.id)}
                                         className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
                                     >
-                                        Продлить +30 мин
+                                        Продлить
                                     </button>
                                 </div>
+                                {bookingIsToday(selectedBooking) && (
+                                    <button
+                                        onClick={() => setExtrasModalId(selectedBooking.id)}
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 transition-colors"
+                                    >
+                                        + Доп (кофе и т.п.)
+                                    </button>
+                                )}
                                 <div className="grid grid-cols-3 gap-1.5">
                                     <button
                                         onClick={() => handleEditPrice(selectedBooking)}
@@ -1653,6 +1713,16 @@ export function AdminChessboardView() {
                 </div>
             )}
 
+            <ExtendBookingModal
+                bookingId={extendModalId}
+                onClose={() => setExtendModalId(null)}
+                onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+            />
+            <AddExtrasModal
+                bookingId={extrasModalId}
+                onClose={() => setExtrasModalId(null)}
+                onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+            />
             {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
                 <CancelBookingChoiceModal
                     bookingId={seriesCancelTarget.id}

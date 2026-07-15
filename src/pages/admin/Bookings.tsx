@@ -833,6 +833,36 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     </button>
                                                 </>
                                             )}
+                                            {/* Завершившаяся СЕГОДНЯШНЯЯ бронь: админ всё ещё
+                                                может добить время по факту, дозаказать допы и
+                                                поправить цену. В базе статус ещё 'confirmed'
+                                                (completed — только в ответе API), поэтому
+                                                бэкенд эти правки принимает. */}
+                                            {booking.status === 'completed' && bookingBucket(bookingStartMs(booking)) === 'today' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleExtend(booking.id)}
+                                                        disabled={extendingId === booking.id}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        title="Добить время по факту — клиент занимался дольше"
+                                                    >
+                                                        {extendingId === booking.id ? '...' : 'Продлить'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleAddExtras(booking.id)}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        title="Дозаказ — добавить кофе и т.п."
+                                                    >
+                                                        + Доп
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
+                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                    >
+                                                        Цена
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -1009,10 +1039,19 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         onClick={() => handleExtend(booking.id)}
                                                         disabled={extendingId === booking.id}
                                                         style={ghTableLinkBtn(GH.ink60)}
-                                                        title="Продлить +30 мин"
+                                                        title="Продлить бронь — выбрать время"
                                                     >
-                                                        +30
+                                                        {extendingId === booking.id ? '...' : 'Продлить'}
                                                     </button>
+                                                    {bookingBucket(bookingStartMs(booking)) === 'today' && (
+                                                        <button
+                                                            onClick={() => handleAddExtras(booking.id)}
+                                                            style={ghTableLinkBtn(GH.ink60)}
+                                                            title="Дозаказ — добавить кофе и т.п."
+                                                        >
+                                                            + Доп
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
                                                         style={ghTableLinkBtn(GH.ink60)}
@@ -1031,6 +1070,33 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         style={ghTableLinkBtn(GH.danger)}
                                                     >
                                                         Отмена
+                                                    </button>
+                                                </>
+                                            )}
+                                            {/* Завершившаяся сегодняшняя бронь — правки по факту
+                                                (в базе статус ещё confirmed, бэкенд принимает). */}
+                                            {booking.status === 'completed' && bookingBucket(bookingStartMs(booking)) === 'today' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleExtend(booking.id)}
+                                                        disabled={extendingId === booking.id}
+                                                        style={ghTableLinkBtn(GH.ink60)}
+                                                        title="Добить время по факту"
+                                                    >
+                                                        {extendingId === booking.id ? '...' : 'Продлить'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleAddExtras(booking.id)}
+                                                        style={ghTableLinkBtn(GH.ink60)}
+                                                        title="Дозаказ — добавить кофе и т.п."
+                                                    >
+                                                        + Доп
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
+                                                        style={ghTableLinkBtn(GH.ink60)}
+                                                    >
+                                                        Цена
                                                     </button>
                                                 </>
                                             )}
