@@ -203,6 +203,21 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    // Дозаказ допов (кофе и т.п.) к сегодняшней броне в моменте.
+    // paymentMethod: 'cash' | 'card_tbc' | 'card_bog' → приход в кассу;
+    //                'balance' → списание с депозита владельца.
+    addBookingExtras: async (
+        bookingId: string,
+        extras: string[],
+        paymentMethod: 'cash' | 'card_tbc' | 'card_bog' | 'balance' = 'cash',
+    ) => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/add-extras`, {
+            extras,
+            payment_method: paymentMethod,
+        });
+        return mapToFrontend(response.data);
+    },
+
     // Hot booking approval
     getPendingApprovals: async (): Promise<BookingHistoryItem[]> => {
         const response = await api.get<any[]>('/bookings/pending-approval');

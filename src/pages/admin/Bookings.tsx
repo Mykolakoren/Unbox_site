@@ -12,8 +12,36 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
 import { ConfirmationModal, PromptModal } from '../../components/ui/ConfirmationModal';
 import { AdminCancelBookingModal } from '../../components/admin/AdminCancelBookingModal';
+import { ExtendBookingModal, AddExtrasModal } from '../../components/admin/BookingTodayEditModals';
 
 type ViewMode = 'list' | 'grid';
+type TimeFilter = 'all' | 'today' | 'upcoming' | 'completed';
+
+// Момент начала брони в мс (Тбилиси-наивно, как хранится). Для хронологической
+// сортировки и группировки список раньше сортировался по createdAt — «когда
+// оформили», а не «когда бронь» — из-за чего порядок выглядел хаотично.
+function bookingStartMs(b: BookingHistoryItem): number {
+    try {
+        const raw: any = b.date;
+        const day = typeof raw === 'string'
+            ? raw.split('T')[0].split(' ')[0]
+            : new Date(raw).toISOString().split('T')[0];
+        const t = (b as any).startTime || '00:00';
+        const ms = new Date(`${day}T${t}`).getTime();
+        return isNaN(ms) ? 0 : ms;
+    } catch {
+        return 0;
+    }
+}
+
+// Куда бронь попадает относительно сегодняшнего дня (Тбилиси = локальное время
+// админки). today | upcoming | past.
+function bookingBucket(ms: number, now: Date = new Date()): 'today' | 'upcoming' | 'past' {
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+    if (ms >= todayStart && ms < todayEnd) return 'today';
+    return ms >= todayEnd ? 'upcoming' : 'past';
+}
 
 // Grid House style primitives — survive the dual-UI cleanup. These were
 // originally declared at the bottom of the file alongside the inlined GH
@@ -61,6 +89,7 @@ export function AdminBookings() {
     const navigate = useNavigate();
     const { bookings, users, fetchUsers, cancelBooking, listForReRent, fetchBookings } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
+    const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
     // Default view = chessboard (admin team works in shahmatka day-to-day).
     // Honour ?view=list in the URL so deep-links/bookmarks still open in
@@ -70,6 +99,8 @@ export function AdminBookings() {
     // Modal state for replacing native confirm/prompt
     const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; destructive?: boolean }>({ open: false, title: '', message: '', onConfirm: () => {} });
     const [priceModal, setPriceModal] = useState<{ open: boolean; bookingId: string; currentPrice: number }>({ open: false, bookingId: '', currentPrice: 0 });
+    const [extendModalId, setExtendModalId] = useState<string | null>(null);
+    const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
 
     useEffect(() => {
         // На mount — один раз. Дополнительно дёргаем при возврате на вкладку,
@@ -99,9 +130,16 @@ export function AdminBookings() {
         return (email || '').slice(0, 12) || 'Гость';
     };
 
+    const nowRef = new Date();
     const filteredBookings = bookings
         .filter(b => {
             if (filterStatus !== 'all' && b.status !== filterStatus) return false;
+            if (timeFilter !== 'all') {
+                const bk = bookingBucket(bookingStartMs(b), nowRef);
+                if (timeFilter === 'today' && bk !== 'today') return false;
+                if (timeFilter === 'upcoming' && bk !== 'upcoming') return false;
+                if (timeFilter === 'completed' && bk !== 'past') return false;
+            }
             if (search) {
                 const term = search.toLowerCase();
                 const userName = (getUserName(b.userId) || '').toLowerCase();
@@ -111,7 +149,22 @@ export function AdminBookings() {
             }
             return true;
         })
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        // Хронологически: сначала СЕГОДНЯШНИЕ (по времени), затем предстоящие
+        // (по времени), затем прошлые (свежие сверху). Раньше сортировали по
+        // createdAt — «когда оформили», из-за чего порядок не совпадал с днём.
+        .sort((a, b) => {
+            const ma = bookingStartMs(a);
+            const mb = bookingStartMs(b);
+            const rank = (ms: number) => {
+                const bk = bookingBucket(ms, nowRef);
+                return bk === 'today' ? 0 : bk === 'upcoming' ? 1 : 2;
+            };
+            const ra = rank(ma);
+            const rb = rank(mb);
+            if (ra !== rb) return ra - rb;
+            // сегодня и предстоящие — раньше выше; прошлые — свежие выше
+            return ra === 2 ? mb - ma : ma - mb;
+        });
 
     const handleEditPrice = (bookingId: string, currentPrice: number) => {
         setPriceModal({ open: true, bookingId, currentPrice });
@@ -206,27 +259,11 @@ export function AdminBookings() {
         });
     };
 
-    // Excel #28 — restore the lost "Продлить +30 мин" action for admins.
-    const [extendingId, setExtendingId] = useState<string | null>(null);
-    const handleExtend = (bookingId: string) => {
-        setConfirmModal({
-            open: true,
-            title: 'Продлить бронь на 30 минут',
-            message: 'Увеличит длительность текущей брони на 30 минут. Проверит, что следующий слот свободен.',
-            onConfirm: async () => {
-                setExtendingId(bookingId);
-                try {
-                    await bookingsApi.extendBooking(bookingId, 30);
-                    toast.success('Бронь продлена на 30 минут');
-                    useUserStore.getState().fetchAllBookings();
-                } catch (e: any) {
-                    toast.error(e?.response?.data?.detail || 'Не удалось продлить — возможно, следующий слот занят');
-                } finally {
-                    setExtendingId(null);
-                }
-            },
-        });
-    };
+    // Excel #28 — restore the lost "Продлить" action for admins. Теперь с
+    // выбором времени (30/60/90/120), а не жёстко +30.
+    const [extendingId] = useState<string | null>(null);
+    const handleExtend = (bookingId: string) => setExtendModalId(bookingId);
+    const handleAddExtras = (bookingId: string) => setExtrasModalId(bookingId);
 
     // Excel #59 — "Перенести" navigates to the grid view with this booking
     // highlighted and scrolled into view. The admin then drags it to the new
@@ -338,6 +375,16 @@ export function AdminBookings() {
                     return null;
                 }}
             />
+            <ExtendBookingModal
+                bookingId={extendModalId}
+                onClose={() => setExtendModalId(null)}
+                onDone={() => useUserStore.getState().fetchAllBookings()}
+            />
+            <AddExtrasModal
+                bookingId={extrasModalId}
+                onClose={() => setExtrasModalId(null)}
+                onDone={() => useUserStore.getState().fetchAllBookings()}
+            />
         </>
     );
 
@@ -350,6 +397,7 @@ export function AdminBookings() {
                 filteredBookings={filteredBookings}
                 viewMode={viewMode} setViewMode={setViewMode}
                 filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+                timeFilter={timeFilter} setTimeFilter={setTimeFilter}
                 search={search} setSearch={setSearch}
                 navigate={navigate}
                 getUserName={getUserName}
@@ -357,6 +405,7 @@ export function AdminBookings() {
                 handleCancel={handleCancel}
                 handleReRent={handleReRent}
                 handleExtend={handleExtend}
+                handleAddExtras={handleAddExtras}
                 handleMove={handleMove}
                 handleApprove={handleApprove}
                 handleReject={handleReject}
@@ -373,6 +422,7 @@ type GHAdminBookingsProps = {
     filteredBookings: BookingHistoryItem[];
     viewMode: ViewMode; setViewMode: (m: ViewMode) => void;
     filterStatus: string; setFilterStatus: (s: string) => void;
+    timeFilter: TimeFilter; setTimeFilter: (t: TimeFilter) => void;
     search: string; setSearch: (s: string) => void;
     navigate: ReturnType<typeof useNavigate>;
     getUserName: (email: string) => string;
@@ -380,6 +430,7 @@ type GHAdminBookingsProps = {
     handleCancel: (id: string) => void;
     handleReRent: (id: string) => void;
     handleExtend: (id: string) => void;
+    handleAddExtras: (id: string) => void;
     handleMove: (id: string) => void;
     handleApprove: (id: string) => Promise<void>;
     handleReject: (id: string) => void;
@@ -391,9 +442,9 @@ type GHAdminBookingsProps = {
 function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     const {
         bookings, filteredBookings, viewMode, setViewMode,
-        filterStatus, setFilterStatus, search, setSearch,
+        filterStatus, setFilterStatus, timeFilter, setTimeFilter, search, setSearch,
         navigate, getUserName, handleEditPrice, handleCancel,
-        handleReRent, handleExtend, handleMove, handleApprove, handleReject,
+        handleReRent, handleExtend, handleAddExtras, handleMove, handleApprove, handleReject,
         approvingId, rejectingId, extendingId,
     } = props;
 
@@ -592,6 +643,40 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 );
                             })}
                         </div>
+                        {/* Фильтр по времени: сегодня / предстоящие / завершённые */}
+                        <div style={{ display: 'flex', gap: 0, border: `1px solid ${GH.ink}`, borderTop: 'none', flexWrap: 'wrap', overflowX: 'auto' }}>
+                            {([
+                                { value: 'all', label: 'Все дни' },
+                                { value: 'today', label: 'Сегодня' },
+                                { value: 'upcoming', label: 'Предстоящие' },
+                                { value: 'completed', label: 'Завершённые' },
+                            ] as { value: TimeFilter; label: string }[]).map((o) => {
+                                const active = timeFilter === o.value;
+                                return (
+                                    <button
+                                        key={o.value}
+                                        onClick={() => setTimeFilter(o.value)}
+                                        style={{
+                                            fontFamily: GH_MONO,
+                                            fontSize: narrow ? 9 : 10,
+                                            fontWeight: 600,
+                                            letterSpacing: '0.12em',
+                                            textTransform: 'uppercase',
+                                            padding: narrow ? '8px 10px' : '10px 14px',
+                                            background: active ? GH.ink : 'transparent',
+                                            color: active ? GH.paper : GH.ink,
+                                            border: 'none',
+                                            borderRight: `1px solid ${GH.ink10}`,
+                                            cursor: 'pointer',
+                                            flex: narrow ? 1 : undefined,
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                    >
+                                        {o.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
 
                     {filteredBookings.length === 0 ? (
@@ -714,10 +799,19 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         onClick={() => handleExtend(booking.id)}
                                                         disabled={extendingId === booking.id}
                                                         style={ghActionBtn(GH.ink60, GH.ink10)}
-                                                        title="Продлить бронь на 30 минут"
+                                                        title="Продлить бронь — выбрать время"
                                                     >
-                                                        {extendingId === booking.id ? '...' : '+30 мин'}
+                                                        {extendingId === booking.id ? '...' : 'Продлить'}
                                                     </button>
+                                                    {bookingBucket(bookingStartMs(booking)) === 'today' && (
+                                                        <button
+                                                            onClick={() => handleAddExtras(booking.id)}
+                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            title="Дозаказ — добавить кофе и т.п."
+                                                        >
+                                                            + Доп
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
                                                         style={ghActionBtn(GH.ink60, GH.ink10)}
