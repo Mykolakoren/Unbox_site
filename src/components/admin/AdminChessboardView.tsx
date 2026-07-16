@@ -55,6 +55,8 @@ export function AdminChessboardView() {
     const [extendModalId, setExtendModalId] = useState<string | null>(null);
     const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
     const [moveModalBooking, setMoveModalBooking] = useState<BookingHistoryItem | null>(null);
+    // Перетаскиваемая бронь (drag-and-drop переноса по сетке, десктоп).
+    const [draggedBooking, setDraggedBooking] = useState<BookingHistoryItem | null>(null);
     const bookingIsToday = (b: BookingHistoryItem | null): boolean => {
         if (!b?.date) return false;
         const raw: any = b.date;
@@ -753,6 +755,29 @@ export function AdminChessboardView() {
         setMoveModalBooking(b);
     };
 
+    /** Drag-and-drop: бросили бронь на свободную ячейку (кабинет+время).
+     *  Дата — текущий показываемый день. Бэкенд проверит, что слот свободен
+     *  под всю длительность; если нет — вернёт ошибку. */
+    const handleDropMove = async (targetResourceId: string, targetSlot: string) => {
+        const b = draggedBooking;
+        setDraggedBooking(null);
+        if (!b) return;
+        const newDate = format(selectedDate, 'yyyy-MM-dd');
+        // Ничего не изменилось — не дёргаем бэкенд.
+        if (targetResourceId === b.resourceId && targetSlot === b.startTime) return;
+        try {
+            await bookingsApi.rescheduleBooking(b.id, {
+                newDate, newStartTime: targetSlot, newResourceId: targetResourceId,
+            });
+            const movedRoom = targetResourceId !== b.resourceId;
+            toast.success(movedRoom ? 'Бронь перенесена в другой кабинет' : `Бронь перенесена на ${targetSlot}`);
+            await fetchAllBookings();
+            setSelectedBooking(null);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось перенести — слот занят или не помещается');
+        }
+    };
+
     /** Собственно перенос — вызывается из MoveBookingModal с выбранными
      *  датой/временем/кабинетом. Серия → отдельная модалка (this vs +будущие). */
     const doMove = async (b: BookingHistoryItem, newDate: string, newStartTime: string, newResourceId: string) => {
@@ -1373,15 +1398,18 @@ export function AdminChessboardView() {
                                                     className="p-0.5 border-r border-unbox-light/40"
                                                 >
                                                     <button
+                                                        draggable
+                                                        onDragStart={(e) => { setDraggedBooking(b); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', b.id); }}
+                                                        onDragEnd={() => setDraggedBooking(null)}
                                                         onClick={() => setSelectedBooking(isSelected ? null : b)}
                                                         className={clsx(
-                                                            'w-full h-[38px] rounded border px-1 py-0.5 text-left overflow-hidden transition-all',
+                                                            'w-full h-[38px] rounded border px-1 py-0.5 text-left overflow-hidden transition-all cursor-grab active:cursor-grabbing',
                                                             getBookingStyle(b),
                                                             isSelected
                                                                 ? 'ring-2 ring-unbox-green ring-offset-1 shadow-sm'
                                                                 : 'hover:brightness-95 hover:shadow-sm'
                                                         )}
-                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${b.finalPrice}₾`}
+                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${b.finalPrice}₾ — перетащи, чтобы перенести`}
                                                     >
                                                         <div className="font-semibold truncate text-[10px] leading-tight flex items-center gap-0.5">
                                                             {/* Recurring marker — orange star for series. */}
@@ -1433,8 +1461,11 @@ export function AdminChessboardView() {
                                                         handleNewDragDown(resource.id, cell.slot, 'new');
                                                     }}
                                                     onPointerEnter={() => handleNewDragEnter(resource.id, cell.slot)}
+                                                    onDragOver={(e) => { if (draggedBooking && !cell.past) e.preventDefault(); }}
+                                                    onDrop={(e) => { e.preventDefault(); if (!cell.past) handleDropMove(resource.id, cell.slot); }}
                                                     className={clsx(
                                                         "w-full h-full flex items-center justify-center text-[9px] relative select-none touch-none transition-colors",
+                                                        draggedBooking && !cell.past && "ring-1 ring-inset ring-unbox-green/40 bg-unbox-green/5",
                                                         cell.past
                                                             ? "bg-gray-50/60"
                                                             : newSel
