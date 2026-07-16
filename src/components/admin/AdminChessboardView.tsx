@@ -17,7 +17,7 @@ import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
-import { ExtendBookingModal, AddExtrasModal } from './BookingTodayEditModals';
+import { ExtendBookingModal, AddExtrasModal, MoveBookingModal } from './BookingTodayEditModals';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
@@ -54,6 +54,7 @@ export function AdminChessboardView() {
     // времени и дозаказ допов — общие модалки со списком броней.
     const [extendModalId, setExtendModalId] = useState<string | null>(null);
     const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
+    const [moveModalBooking, setMoveModalBooking] = useState<BookingHistoryItem | null>(null);
     const bookingIsToday = (b: BookingHistoryItem | null): boolean => {
         if (!b?.date) return false;
         const raw: any = b.date;
@@ -744,35 +745,27 @@ export function AdminChessboardView() {
         }
     };
 
-    /** "Перенести" — prompt for new date + time, then PATCH /reschedule.
-     *  Resource stays the same (admin can change it later via separate
-     *  flow). Inputs use ISO format prefilled from the current booking so
-     *  the admin only edits what they need. */
-    const handleMove = async (b: BookingHistoryItem) => {
-        const currentDate = format(parseUTC(b.date), 'yyyy-MM-dd');
-        const newDate = prompt('Новая дата (YYYY-MM-DD):', currentDate);
-        if (!newDate) return;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
-            toast.error('Дата должна быть в формате YYYY-MM-DD');
-            return;
-        }
-        const newStartTime = prompt('Новое время (HH:MM):', b.startTime || '10:00');
-        if (!newStartTime) return;
-        if (!/^\d{2}:\d{2}$/.test(newStartTime)) {
-            toast.error('Время должно быть в формате HH:MM');
-            return;
-        }
-        // Series → defer to choice modal so admin picks "this only" vs
-        // "this + every later sibling". Otherwise call the single-booking
-        // reschedule endpoint directly.
+    /** "Перенести" — открывает модалку выбора даты, времени И КАБИНЕТА.
+     *  Бэкенд reschedule принимает new_resource_id и переносит бронь в другой
+     *  кабинет (проверяет, что целевой слот свободен). Раньше кабинет сменить
+     *  было нельзя — только время в рамках того же кабинета. */
+    const handleMove = (b: BookingHistoryItem) => {
+        setMoveModalBooking(b);
+    };
+
+    /** Собственно перенос — вызывается из MoveBookingModal с выбранными
+     *  датой/временем/кабинетом. Серия → отдельная модалка (this vs +будущие). */
+    const doMove = async (b: BookingHistoryItem, newDate: string, newStartTime: string, newResourceId: string) => {
         if (b.recurringGroupId) {
-            setSeriesMoveTarget({ booking: b, newDate, newStartTime });
+            setSeriesMoveTarget({ booking: b, newDate, newStartTime, newResourceId });
             setSelectedBooking(null);
+            setMoveModalBooking(null);
             return;
         }
         try {
-            await bookingsApi.rescheduleBooking(b.id, { newDate, newStartTime });
-            toast.success(`Бронь перенесена на ${newDate} ${newStartTime}`);
+            await bookingsApi.rescheduleBooking(b.id, { newDate, newStartTime, newResourceId });
+            const movedRoom = newResourceId !== b.resourceId;
+            toast.success(movedRoom ? 'Бронь перенесена в другой кабинет' : `Бронь перенесена на ${newDate} ${newStartTime}`);
             await fetchAllBookings();
             setSelectedBooking(null);
         } catch (e: any) {
@@ -1221,6 +1214,11 @@ export function AdminChessboardView() {
                     bookingId={extrasModalId}
                     onClose={() => setExtrasModalId(null)}
                     onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+                />
+                <MoveBookingModal
+                    booking={moveModalBooking}
+                    onClose={() => setMoveModalBooking(null)}
+                    onSubmit={(d, t, r) => moveModalBooking ? doMove(moveModalBooking, d, t, r) : undefined}
                 />
             </div>
         );
@@ -1722,6 +1720,11 @@ export function AdminChessboardView() {
                 bookingId={extrasModalId}
                 onClose={() => setExtrasModalId(null)}
                 onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+            />
+            <MoveBookingModal
+                booking={moveModalBooking}
+                onClose={() => setMoveModalBooking(null)}
+                onSubmit={(d, t, r) => moveModalBooking ? doMove(moveModalBooking, d, t, r) : undefined}
             />
             {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
                 <CancelBookingChoiceModal

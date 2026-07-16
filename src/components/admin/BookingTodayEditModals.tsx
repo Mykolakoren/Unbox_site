@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
-import { EXTRAS } from '../../utils/data';
+import { EXTRAS, RESOURCES, LOCATIONS } from '../../utils/data';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import type { BookingHistoryItem } from '../../store/types';
 
 /**
  * Быстрые правки СЕГОДНЯШНЕЙ брони для админа:
@@ -177,6 +178,80 @@ export function AddExtrasModal({
                     <button style={{ ...btnPrimary, flex: 1, opacity: (!ids.length || busy) ? 0.5 : 1 }}
                         disabled={!ids.length || busy} onClick={submit}>
                         Добавить {total > 0 ? `· ${total} ₾` : ''}
+                    </button>
+                    <button style={btnGhost} onClick={onClose} disabled={busy}>Отмена</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Перенос брони (дата + время + КАБИНЕТ) ──────────────────────────────────
+// Бэкенд reschedule умеет менять кабинет (new_resource_id) — не хватало выбора
+// в интерфейсе. Раньше «Перенести» спрашивало только дату/время (тот же кабинет).
+
+function _bookingDay(raw: any): string {
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw.split('T')[0].split(' ')[0];
+    try { return new Date(raw).toISOString().split('T')[0]; } catch { return ''; }
+}
+
+export function MoveBookingModal({
+    booking, onClose, onSubmit,
+}: {
+    booking: BookingHistoryItem | null;
+    onClose: () => void;
+    onSubmit: (newDate: string, newStartTime: string, newResourceId: string) => Promise<void> | void;
+}) {
+    const [date, setDate] = useState(() => _bookingDay(booking?.date));
+    const [time, setTime] = useState(() => booking?.startTime || '10:00');
+    const [resourceId, setResourceId] = useState(() => booking?.resourceId || '');
+    const [busy, setBusy] = useState(false);
+    if (!booking) return null;
+
+    const submit = async () => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast.error('Дата: ГГГГ-ММ-ДД'); return; }
+        if (!/^\d{2}:\d{2}$/.test(time)) { toast.error('Время: ЧЧ:ММ'); return; }
+        if (!resourceId) { toast.error('Выберите кабинет'); return; }
+        setBusy(true);
+        try {
+            await onSubmit(date, time, resourceId);
+            onClose();
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div style={overlay} onClick={onClose}>
+            <div style={card} onClick={(e) => e.stopPropagation()}>
+                <div style={title}>Перенести бронь</div>
+
+                <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Дата</label>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                    style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 14, fontFamily: GH_SANS, fontSize: 14 }} />
+
+                <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Время начала</label>
+                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} step={1800}
+                    style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 14, fontFamily: GH_SANS, fontSize: 14 }} />
+
+                <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Кабинет</label>
+                <select value={resourceId} onChange={(e) => setResourceId(e.target.value)}
+                    style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 20, fontFamily: GH_SANS, fontSize: 14, background: GH.paper }}>
+                    {LOCATIONS.map((loc) => (
+                        <optgroup key={loc.id} label={loc.name}>
+                            {RESOURCES.filter((r) => r.locationId === loc.id).map((r) => (
+                                <option key={r.id} value={r.id}>
+                                    {r.name}{r.id === booking.resourceId ? ' (текущий)' : ''}
+                                </option>
+                            ))}
+                        </optgroup>
+                    ))}
+                </select>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button style={{ ...btnPrimary, flex: 1, opacity: busy ? 0.5 : 1 }} disabled={busy} onClick={submit}>
+                        Перенести
                     </button>
                     <button style={btnGhost} onClick={onClose} disabled={busy}>Отмена</button>
                 </div>
