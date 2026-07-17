@@ -92,8 +92,12 @@ def _sync_linked_session_to_booking(db_session: Session, booking: Booking) -> No
     try:
         from app.models.therapy_session import TherapySession as _TS
         from app.services.crm_calendar import tbilisi_naive_to_utc_naive as _t2u
+        # booking_id — varchar-колонка, booking.id — UUID. Без str() Postgres
+        # падает (varchar = uuid), ошибка аварийно закрывает транзакцию, и
+        # следующий commit в reschedule рискует уронить перенос в 500. Плюс из-за
+        # этого автосинк CRM-сессии не работал ни разу.
         linked = db_session.exec(
-            select(_TS).where(_TS.booking_id == booking.id)
+            select(_TS).where(_TS.booking_id == str(booking.id))
         ).first()
         if not linked:
             return
@@ -116,6 +120,12 @@ def _sync_linked_session_to_booking(db_session: Session, booking: Booking) -> No
             db_session.add(linked)
     except Exception:
         logger.exception("[autosync] failed to sync session for booking %s", booking.id)
+        # Сбрасываем возможно-сломанную транзакцию, чтобы следующий commit
+        # переноса не упал вслед за нашей ошибкой (перенос уже закоммичен выше).
+        try:
+            db_session.rollback()
+        except Exception:
+            logger.exception("[autosync] rollback after sync failure also failed")
 
 
 def _gcal_recreate_in_background(booking_id: str, user_name: str, old_event_id: Optional[str], old_resource_id: Optional[str]) -> None:
@@ -2900,12 +2910,16 @@ def reschedule_booking(
     booking_owner = None
 
     if room_changed or duration_changed:
-        # Block room/duration change for subscription bookings (complex hour recalc)
-        if booking.payment_method == "subscription":
-            what = "комнату" if room_changed else "длительность"
+        # Абонемент: смену ДЛИТЕЛЬНОСТИ блокируем — нужен пересчёт часов пула.
+        # А перенос в другой КАБИНЕТ/время при той же длительности разрешаем:
+        # абонемент уже покрыл этот слот, часы списаны при создании, релокация
+        # coverage не меняет. Цену для абонемента НЕ пересчитываем: при
+        # исчерпанном пуле calculate_price увидел бы «часов нет» (они уже вычтены
+        # этой же бронью) и ошибочно вернул бы полную цену — списал бы деньги.
+        if booking.payment_method == "subscription" and duration_changed:
             raise HTTPException(
                 status_code=400,
-                detail=f"Нельзя менять {what} для бронирований по абонементу. "
+                detail="Нельзя менять длительность для бронирований по абонементу. "
                 "Отмените текущее и создайте новое.",
             )
 
@@ -2916,55 +2930,58 @@ def reschedule_booking(
                 detail="Не удалось определить владельца бронирования для перерасчёта",
             )
 
-        from app.services.pricing import PricingService
+        # Пересчёт цены — только для balance/bonus. Абонемент релоцируется как
+        # есть: final_price / hours_deducted / applied_rule не трогаем.
+        if booking.payment_method != "subscription":
+            from app.services.pricing import PricingService
 
-        try:
-            h, m = map(int, data.new_start_time.split(":"))
-            new_start_dt = new_date.replace(hour=h, minute=m, second=0, microsecond=0)
-        except Exception:
-            new_start_dt = new_date
+            try:
+                h, m = map(int, data.new_start_time.split(":"))
+                new_start_dt = new_date.replace(hour=h, minute=m, second=0, microsecond=0)
+            except Exception:
+                new_start_dt = new_date
 
-        pricing_service = PricingService(session)
-        new_quote = pricing_service.calculate_price(
-            user=booking_owner,
-            resource_id=new_resource,
-            start_time=new_start_dt,
-            duration_minutes=new_duration,
-            format_type=booking.format,
-        )
+            pricing_service = PricingService(session)
+            new_quote = pricing_service.calculate_price(
+                user=booking_owner,
+                resource_id=new_resource,
+                start_time=new_start_dt,
+                duration_minutes=new_duration,
+                format_type=booking.format,
+            )
 
-        new_price = new_quote.final_price
-        price_diff = new_price - old_price
+            new_price = new_quote.final_price
+            price_diff = new_price - old_price
 
-        # `pending` bookings haven't been charged yet — the T-24h cron will
-        # capture the (new) final_price in full. Touching the balance here
-        # would double-charge on a price increase (or hand a phantom refund
-        # on a decrease). For pending we just update final_price below and let
-        # the cron settle. All other statuses (paid, NULL=legacy-paid) keep the
-        # original immediate diff-settlement behavior.
-        if booking.payment_status != "pending":
-            if price_diff > 0:
-                # Price increased — check funds and charge
-                available_funds = booking_owner.balance + booking_owner.credit_limit
-                if available_funds < price_diff:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Недостаточно средств для перерасчёта. "
-                        f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
-                    )
-                booking_owner.balance = round((booking_owner.balance or 0) - price_diff, 2)
-                session.add(booking_owner)
-            elif price_diff < 0:
-                # Price decreased — refund the difference
-                booking_owner.balance = round((booking_owner.balance or 0) + abs(price_diff), 2)
-                session.add(booking_owner)
+            # `pending` bookings haven't been charged yet — the T-24h cron will
+            # capture the (new) final_price in full. Touching the balance here
+            # would double-charge on a price increase (or hand a phantom refund
+            # on a decrease). For pending we just update final_price below and let
+            # the cron settle. All other statuses (paid, NULL=legacy-paid) keep the
+            # original immediate diff-settlement behavior.
+            if booking.payment_status != "pending":
+                if price_diff > 0:
+                    # Price increased — check funds and charge
+                    available_funds = booking_owner.balance + booking_owner.credit_limit
+                    if available_funds < price_diff:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Недостаточно средств для перерасчёта. "
+                            f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
+                        )
+                    booking_owner.balance = round((booking_owner.balance or 0) - price_diff, 2)
+                    session.add(booking_owner)
+                elif price_diff < 0:
+                    # Price decreased — refund the difference
+                    booking_owner.balance = round((booking_owner.balance or 0) + abs(price_diff), 2)
+                    session.add(booking_owner)
 
-        # Update booking price fields
-        booking.final_price = new_quote.final_price
-        booking.base_price = new_quote.base_price
-        booking.applied_rule = new_quote.applied_rule
-        booking.discount_amount = new_quote.discount_amount
-        booking.discount_percent = new_quote.discount_percent
+            # Update booking price fields
+            booking.final_price = new_quote.final_price
+            booking.base_price = new_quote.base_price
+            booking.applied_rule = new_quote.applied_rule
+            booking.discount_amount = new_quote.discount_amount
+            booking.discount_percent = new_quote.discount_percent
 
     # Drop extras the NEW room can't host — e.g. couch when moving from a
     # cabinet to a capsule, sandbox when moving to a room without one.
