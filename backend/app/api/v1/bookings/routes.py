@@ -3016,6 +3016,14 @@ def reschedule_booking(
     booking.date = new_date
     booking.start_time = data.new_start_time
     booking.resource_id = new_resource
+    # Синхронизируем локацию с новым кабинетом — межлокационный перенос (UNI↔ONE,
+    # напр. drag) иначе оставлял старый location_id: бронь пропадала из фильтра
+    # по филиалу, календарь и уведомления показывали не ту локацию.
+    if room_changed:
+        from app.models.resource import Resource as _ResLoc
+        _nr = session.get(_ResLoc, new_resource)
+        if _nr and _nr.location_id:
+            booking.location_id = _nr.location_id
     booking.duration = new_duration
     booking.updated_at = datetime.now()
 
@@ -3063,6 +3071,29 @@ def reschedule_booking(
             notify_waitlist_for_freed_slot(session, freed)
         except Exception:
             logger.exception("Failed to notify waitlist on reschedule")
+
+    # ── Уведомить КЛИЕНТА о переносе (Telegram) ──
+    # owner 2026-07-17 (admin Лиза): бот молчал при переносе. Метод
+    # send_booking_rescheduled уже существовал — его просто не вызывали отсюда.
+    if slot_moved:
+        try:
+            _notify_user = booking_owner or _resolve_booking_owner(session, booking)
+            if _notify_user and _notify_user.telegram_id:
+                from app.models.resource import Resource as _ResN
+                _new_res = session.get(_ResN, new_resource)
+                background_tasks.add_task(
+                    telegram_service.send_booking_rescheduled,
+                    chat_id=str(_notify_user.telegram_id),
+                    resource_name=(_new_res.name if _new_res else new_resource),
+                    old_date=old_date,
+                    old_start_time=old_time,
+                    new_date=new_date,
+                    new_start_time=data.new_start_time,
+                    duration_minutes=booking.duration,
+                    booking_id=str(booking.id),
+                )
+        except Exception:
+            logger.warning("[reschedule notify] non-blocking failure", exc_info=True)
 
     timeline_service.log_event(
         session=session,
