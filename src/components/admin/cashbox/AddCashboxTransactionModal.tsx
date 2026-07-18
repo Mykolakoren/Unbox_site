@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import clsx from 'clsx';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
 import { formatBatumi } from '../../../utils/dateUtils';
@@ -111,6 +112,28 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             toast.error('Счёт-источник и счёт-получатель должны отличаться');
             return;
         }
+
+        // ── Подстраховка от главной ошибки в балансах (owner 2026-07-18) ──
+        // Приход, который НЕ попадёт на баланс клиента, — самая частая причина
+        // расхождений: платёж внесли, а копилка клиента не пополнилась.
+        // Пропустить зачисление теперь можно только осознанно.
+        if (type === 'income' && clientId && !creditUserBalance) {
+            const nm = bookingUsers.find(c => c.id === clientId)?.name || 'клиента';
+            if (!window.confirm(
+                `Сумма ${value} ₾ НЕ будет зачислена на баланс: ${nm}.\n\n` +
+                `Обычно оплата клиента идёт на баланс (копилку). Не зачислять — только для штрафа/компенсации.\n\n` +
+                `Точно не зачислять на баланс?`
+            )) return;
+        }
+        if (type === 'income' && !clientId) {
+            if (!window.confirm(
+                `Клиент не выбран.\n\n` +
+                `Деньги попадут только в кассу и НЕ зачислятся ни на чей баланс. ` +
+                `Если это оплата клиента — закрой окно и выбери клиента, тогда сумма пойдёт на его баланс.\n\n` +
+                `Всё равно записать без клиента?`
+            )) return;
+        }
+
         setSaving(true);
         try {
             // Send local time as-is (no UTC conversion) — backend stores it verbatim
@@ -396,19 +419,28 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                 )}
                                 {/* Credit-to-balance toggle (Excel #43) */}
                                 {clientId && (
-                                    <label className="mt-2 flex items-start gap-2 cursor-pointer select-none text-xs">
+                                    <label className={clsx(
+                                        "mt-2 flex items-start gap-2 cursor-pointer select-none text-xs rounded-lg px-2 py-1.5",
+                                        creditUserBalance ? 'bg-emerald-50' : 'bg-amber-50 ring-1 ring-amber-300'
+                                    )}>
                                         <input
                                             type="checkbox"
                                             checked={creditUserBalance}
                                             onChange={e => setCreditUserBalance(e.target.checked)}
                                             className="mt-0.5 accent-unbox-green cursor-pointer"
                                         />
-                                        <span className={creditUserBalance ? 'text-emerald-700' : 'text-gray-500'}>
+                                        <span className={creditUserBalance ? 'text-emerald-700' : 'text-amber-800 font-medium'}>
                                             {creditUserBalance
-                                                ? 'Зачислить сумму на баланс клиента (рекомендуется для пополнений)'
-                                                : 'Не зачислять на баланс — это прочий приход (напр., штраф, компенсация)'}
+                                                ? 'Зачислить сумму на баланс клиента (копилку) — рекомендуется'
+                                                : '⚠️ НЕ зачисляется на баланс! Только для штрафа/компенсации. Для оплаты клиента — верни галочку.'}
                                         </span>
                                     </label>
+                                )}
+                                {/* Подсказка: приход без клиента не попадёт ни на чей баланс */}
+                                {type === 'income' && !clientId && (
+                                    <div className="mt-2 text-xs text-amber-800 bg-amber-50 ring-1 ring-amber-300 rounded-lg px-2 py-1.5">
+                                        ⚠️ Клиент не выбран — деньги пойдут только в кассу, на баланс никому не зачислятся. Для оплаты клиента выбери его выше.
+                                    </div>
                                 )}
                                 {showClientDropdown && !clientId && (
                                     <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
