@@ -189,11 +189,10 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
                 b.id, rem, hrs, cash_amount,
             )
     elif method == "bonus":
-        # Bonus pool is FIFO with expiry. We don't decrement the pool here —
-        # the existing /bonuses path already does it on cancel/refund — to
-        # keep this MVP simple we just charge balance instead. TODO: hook
-        # into BonusService.consume() when we wire bonuses into deferred
-        # billing properly.
+        # Бесплатные часы уже списаны при СОЗДАНИИ брони (bonus_service.
+        # consume_free_hours в create_booking), и final_price там уменьшен до
+        # НЕпокрытой части. Здесь просто снимаем этот остаток с баланса —
+        # ровно как для balance-брони. Пул бонусов тут не трогаем.
         user.balance = round((user.balance or 0) - amount, 2)
         snapshot = amount
     else:

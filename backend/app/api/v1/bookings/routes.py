@@ -257,6 +257,15 @@ def _refund_booking_to_owner(
     nothing to give back. Without this guard a series-cancel right after
     creation would credit the user phantom money that was never deducted.
     """
+    # Бонусные часы тратятся при СОЗДАНИИ брони (не при списании), поэтому
+    # возвращаем их при любой отмене — включая pending: деньги там не списаны,
+    # но бесплатный час уже потрачен, и его надо вернуть клиенту.
+    if booking.payment_method == "bonus" and (booking.hours_deducted or 0) > 0:
+        from app.services.bonus_service import refund_free_hours
+        _refund_bonus_h = round(float(booking.hours_deducted) * refund_percent, 2)
+        if _refund_bonus_h > 0:
+            refund_free_hours(session, owner.id, _refund_bonus_h)
+
     if booking.payment_status in ("pending", "waived"):
         return {
             "refunded_to": str(owner.id),
@@ -880,6 +889,19 @@ def create_booking(
         # и проверка средств, и пиковая надбавка.
         booking_in.payment_method = resolve_payment_method(booking_in.payment_method, quote)
 
+        # ── Бонусные часы (owner 2026-07-20): выданное бонусом — бесплатно, всё
+        # сверх — по обычной цене. Тратим бесплатные часы клиента (FIFO), а цену
+        # оставляем только за НЕпокрытую часть — она уйдёт с баланса ниже. Раньше
+        # «бонус» списывал полную цену с баланса, а сам бонус не трогал (клиент −20).
+        bonus_covered = 0.0
+        if booking_in.payment_method == "bonus":
+            from app.services.bonus_service import consume_free_hours
+            _bonus_hrs = (booking_in.duration or 0) / 60.0
+            bonus_covered = consume_free_hours(session, booking_owner.id, _bonus_hrs)
+            if _bonus_hrs > 0 and bonus_covered > 0:
+                _uncovered = max(0.0, _bonus_hrs - bonus_covered)
+                quote.final_price = round(float(quote.final_price or 0) * (_uncovered / _bonus_hrs), 2)
+
         if booking_in.payment_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
                 raise HTTPException(
@@ -917,6 +939,10 @@ def create_booking(
         booking_in.discount_amount = quote.discount_amount
         booking_in.discount_percent = quote.discount_percent
         booking_in.hours_deducted = quote.hours_deducted
+        # Бонусная бронь: запомним, сколько бесплатных часов потрачено — чтобы
+        # вернуть их при отмене (payment_method='bonus' + hours_deducted).
+        if booking_in.payment_method == "bonus" and bonus_covered > 0:
+            booking_in.hours_deducted = bonus_covered
         # Stamp payment_status here on the pydantic input — the actual
         # Booking row is built from booking_in down below.
         booking_in.payment_status = "pending" if defer_charge_single else "paid"
