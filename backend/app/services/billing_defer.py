@@ -22,6 +22,7 @@ from sqlmodel import Session, select
 from app.models.booking import Booking
 from app.models.user import User
 from app.services import subscription_pool
+from app.services import wallet
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,9 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
                     "[billing] booking %s sub-fallback price recompute failed: %r; using stored %.2f₾",
                     b.id, e, amount,
                 )
-            user.balance = round((user.balance or 0) - cash_amount, 2)
+            wallet.debit(session, user, cash_amount, reason="booking_charge",
+                         description="абонемент исчерпан → списание с баланса (T-24ч)",
+                         ref_type="booking", ref_id=str(b.id))
             snapshot = cash_amount
             sub_fell_back_to_balance = True
             # §5#12: часы НЕ списаны (ушли в баланс) — обнуляем hours_deducted,
@@ -193,11 +196,15 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
         # consume_free_hours в create_booking), и final_price там уменьшен до
         # НЕпокрытой части. Здесь просто снимаем этот остаток с баланса —
         # ровно как для balance-брони. Пул бонусов тут не трогаем.
-        user.balance = round((user.balance or 0) - amount, 2)
+        wallet.debit(session, user, amount, reason="booking_charge",
+                     description="бонус: остаток сверх бесплатного (T-24ч)",
+                     ref_type="booking", ref_id=str(b.id))
         snapshot = amount
     else:
         # balance (default) and unknown methods
-        user.balance = round((user.balance or 0) - amount, 2)
+        wallet.debit(session, user, amount, reason="booking_charge",
+                     description="списание с баланса (T-24ч)",
+                     ref_type="booking", ref_id=str(b.id))
         snapshot = amount
 
     b.payment_status = "paid"
@@ -281,7 +288,9 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
             used_hours=max(0.0, used - hours_actually_used),
         )
     else:
-        user.balance = round((user.balance or 0) + amount, 2)
+        wallet.credit(session, user, amount, reason="booking_refund",
+                      description="снятие штрафа (waive) — возврат на баланс",
+                      ref_type="booking", ref_id=str(b.id), actor=by_user)
 
     b.payment_status = "waived"
     b.waiver_reason = reason.strip()

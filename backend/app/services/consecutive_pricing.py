@@ -178,8 +178,10 @@ def recompute_chain_and_settle(
     if abs(total_delta) >= 0.01:
         # Positive delta = price went UP (e.g. chain shrank, lost discount) →
         # client owes more, so debit balance. Negative = refund.
-        user.balance = round((user.balance or 0.0) - total_delta, 2)
-        session.add(user)
+        from app.services import wallet
+        wallet.apply(session, user, -total_delta, reason="consecutive_recompute",
+                     description="Пересчёт по правилу «часы подряд»",
+                     ref_type="user", ref_id=str(user.id))
 
     return {
         "chain_size": len(chain),

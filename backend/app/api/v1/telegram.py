@@ -813,7 +813,11 @@ def _merge_into(session: Session, *, absorb: User, keep: User) -> None:
     for attr in ("name", "phone", "avatar_url", "google_id"):
         if not getattr(keep, attr, None) and getattr(absorb, attr, None):
             setattr(keep, attr, getattr(absorb, attr))
-    keep.balance = float(keep.balance or 0) + float(absorb.balance or 0)
+    if abs(float(absorb.balance or 0)) >= 0.01:
+        from app.services import wallet as _wallet
+        _wallet.apply(session, keep, float(absorb.balance or 0), reason="merge",
+                      description=f"Слияние баланса из {absorb.email}",
+                      ref_type="user", ref_id=str(absorb.id))
     keep.credit_limit = max(float(keep.credit_limit or 0), float(absorb.credit_limit or 0))
     if not keep.subscription and absorb.subscription:
         keep.subscription = absorb.subscription
@@ -1891,9 +1895,12 @@ def _handle_hot_booking_callback(
                         remaining_hours=max(0.0, rem - hrs),
                         used_hours=used + hrs,
                     )
+                session.add(owner)
             else:
-                owner.balance = round((owner.balance or 0) - float(booking.final_price or 0), 2)
-            session.add(owner)
+                from app.services import wallet as _wallet
+                _wallet.debit(session, owner, float(booking.final_price or 0),
+                              reason="booking_charge", description="Бронь через Telegram-бот",
+                              ref_type="booking", ref_id=str(booking.id))
 
         booking.status = "confirmed"
         booking.updated_at = datetime.utcnow()

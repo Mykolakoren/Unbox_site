@@ -1,6 +1,9 @@
 from sqlmodel import Session, select
 from app.models.user import User, UserCreate
 from app.models.resource import Resource
+# Регистрируем модель ленты баланса, чтобы create_all() создал таблицу
+# balance_ledger при старте (Шаг 3 — единый кошелёк с аудитом).
+from app.models.balance_ledger import BalanceLedger  # noqa: F401
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.db.session import engine

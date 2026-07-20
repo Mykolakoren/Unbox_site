@@ -179,8 +179,10 @@ def run_weekly_rebates(
 
         if not dry_run:
             # 1. Кредит на баланс.
-            user.balance = round(float(user.balance or 0) + rebate, 2)
-            session.add(user)
+            from app.services import wallet
+            wallet.credit(session, user, rebate, reason="weekly_rebate",
+                          description=f"Недельная скидка за объём ({tier}%, {round(total_hours,1)} ч)",
+                          ref_type="weekly_rebate", ref_id=str(user.id))
             # 2. Проводка в кассу (аудит). type=expense — деньги «возвращены»
             #    клиенту в виде кредита на баланс.
             tx = CashboxTransaction(

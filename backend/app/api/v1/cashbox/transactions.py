@@ -240,8 +240,10 @@ def create_transaction(
     session.add(tx)
 
     if target_user is not None:
-        target_user.balance = float(target_user.balance or 0) + float(payload.amount)
-        session.add(target_user)
+        from app.services import wallet
+        wallet.credit(session, target_user, float(payload.amount), reason="topup",
+                      description=f"Пополнение через кассу ({payload.payment_method})",
+                      ref_type="cashbox_tx", ref_id=str(tx.id), actor=current_user)
 
     session.commit()
     session.refresh(tx)
@@ -293,8 +295,10 @@ def delete_transaction(
         except (ValueError, AttributeError):
             target = None
         if target:
-            target.balance = float(target.balance or 0) - float(tx.amount)
-            session.add(target)
+            from app.services import wallet
+            wallet.debit(session, target, float(tx.amount), reason="topup_reversal",
+                         description="Удаление кассовой проводки — откат зачисления",
+                         ref_type="cashbox_tx", ref_id=str(tx.id), actor=current_user)
 
     session.delete(tx)
     session.commit()
@@ -364,8 +368,10 @@ def update_transaction(
             else:
                 delta = float(tx.amount or 0) - old_amount
             if delta != 0:
-                target.balance = float(target.balance or 0) + delta
-                session.add(target)
+                from app.services import wallet
+                wallet.apply(session, target, delta, reason="topup_adjust",
+                             description="Правка кассовой проводки — пересчёт зачисления",
+                             ref_type="cashbox_tx", ref_id=str(tx.id), actor=current_user)
 
     # Resolve category name for response
     cat_name = None

@@ -391,8 +391,9 @@ def correct_user_balance(
     if abs(delta) < 0.01:
         raise HTTPException(status_code=400, detail="Новое значение совпадает с текущим балансом")
 
-    user.balance = round(new_balance, 2)
-    session.add(user)
+    from app.services import wallet
+    wallet.set_balance(session, user, new_balance, reason="correction",
+                       description=f"Ручная корректировка: {reason}", actor=current_user)
 
     # Audit row in cashbox so the change shows up in finance history (positive
     # delta → income, negative → expense). adjustment is its own type so it
@@ -851,7 +852,10 @@ def merge_users(
     if not tgt.name and src.name:
         tgt.name = src.name
     # Sum balances; src can be negative (debt) — we honour that.
-    tgt.balance = float(tgt.balance or 0) + float(src.balance or 0)
+    from app.services import wallet as _wallet
+    if abs(float(src.balance or 0)) >= 0.01:
+        _wallet.apply(session, tgt, float(src.balance or 0), reason="merge",
+                      description=f"Слияние баланса из {src.email}", actor=current_user)
     # Take the higher credit limit / personal discount
     tgt.credit_limit = max(float(tgt.credit_limit or 0), float(src.credit_limit or 0))
     tgt.personal_discount_percent = max(
