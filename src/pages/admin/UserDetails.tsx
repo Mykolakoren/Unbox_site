@@ -30,6 +30,7 @@ import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
 import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLimitModal';
 import { api } from '../../api/client';
+import { cashboxApi } from '../../api/cashbox';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 
 const ghudMono: React.CSSProperties = {
@@ -78,6 +79,14 @@ export function AdminUserDetails() {
     const [savingName, setSavingName] = useState(false);
     const [topupForm, setTopupForm] = useState({ hours: '', amount: '', payment_method: 'cash', note: '' });
     const [topupSaving, setTopupSaving] = useState(false);
+    // «Общая сумма оплат» — из реального бэкенда (кассовые приходы клиента),
+    // а не из фронтового стора, который пустой на перезагрузке.
+    const [totalPaid, setTotalPaid] = useState<number | null>(null);
+    const reloadTotalPaid = async () => {
+        if (!user) return;
+        try { setTotalPaid(await cashboxApi.getClientTotalPaid(user.id || user.email)); }
+        catch { /* нет доступа к кассе у этого админа — оставим прочерк */ }
+    };
 
     // CRM Access state
     const [crmAccess, setCrmAccess] = useState<(CrmAccessStatus & { profession?: string; message?: string; submittedAt?: string }) | null>(null);
@@ -119,6 +128,12 @@ export function AdminUserDetails() {
         // direct-link problem there.
         if (bookings.length === 0) fetchAllBookings();
     }, [users.length, bookings.length, fetchUsers, fetchAllBookings]);
+
+    // «Общая сумма оплат» — тянем с бэка, когда клиент определился.
+    useEffect(() => {
+        if (user) reloadTotalPaid();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id, user?.email]);
 
     if (!user) {
         // While the initial fetch is in flight, show a spinner instead of
@@ -164,32 +179,29 @@ export function AdminUserDetails() {
 
 
     const handleAddFunds = async (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => {
-        updateUserById(user.email, { balance: user.balance + amount });
-
-        addTransaction({
-            userId: user.email,
-            type: 'deposit',
-            amount: amount,
-            paymentMethod: method,
-            adminId: currentUser?.email,
-            adminName: currentUser?.name || 'Admin',
-            description: 'Пополнение баланса'
-        });
-
-        // Auto-create cashbox income with proper category
+        // ЕДИНАЯ операция пополнения — одна и та же везде (карточка И Финансы):
+        // приход в кассу + зачисление на баланс клиента, атомарно на бэкенде
+        // (credit_user_balance). Раньше баланс правился отдельно на фронте, а
+        // касса — отдельным вызовом без привязки клиента, отсюда рассинхрон.
         const methodMap: Record<string, string> = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog' };
         try {
-            await api.post('/cashbox/transactions', {
+            await cashboxApi.createTransaction({
                 type: 'income',
                 amount,
                 payment_method: methodMap[method] || 'cash',
                 category_id: 'cat-topup',
                 description: `Пополнение баланса: ${user.name}`,
                 branch: branch || undefined,
-            });
-        } catch { /* cashbox may not be accessible for this admin */ }
-
-        toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
+                client_id: user.id || user.email,
+                credit_user_balance: true,
+            } as any);
+            // Баланс посчитал бэк — подтягиваем свежие данные и сумму оплат.
+            await fetchUsers();
+            await reloadTotalPaid();
+            toast.success(`Баланс пополнен на ${amount} ₾ (${method})`);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось пополнить баланс (нужен доступ к кассе)');
+        }
     };
 
     const handleUpdateCreditLimit = (limit: number) => {
@@ -1103,13 +1115,7 @@ export function AdminUserDetails() {
                                     <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
                                         <div className="text-sm text-unbox-grey mb-1">Общая сумма оплат</div>
                                         <div className="text-2xl font-bold">
-                                            {(() => {
-                                                const userTransactions = useUserStore.getState().getTransactionsByUser(user.email);
-                                                const realMoneyTransactions = userTransactions
-                                                    .filter(t => ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod))
-                                                    .reduce((sum, t) => sum + t.amount, 0);
-                                                return realMoneyTransactions;
-                                            })()} ₾
+                                            {totalPaid !== null ? totalPaid.toFixed(2) : '—'} ₾
                                         </div>
                                         <div
                                             className="text-xs text-unbox-grey mt-1 flex items-center gap-1.5 cursor-pointer group/balance"
@@ -1465,13 +1471,7 @@ export function AdminUserDetails() {
                                 <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
                                     <div className="text-sm text-unbox-grey mb-1">Общая сумма оплат</div>
                                     <div className="text-2xl font-bold">
-                                        {(() => {
-                                            const userTransactions = useUserStore.getState().getTransactionsByUser(user.email);
-                                            const realMoneyTransactions = userTransactions
-                                                .filter(t => ['cash', 'tbc', 'bog', 'card', 'transfer'].includes(t.paymentMethod))
-                                                .reduce((sum, t) => sum + t.amount, 0);
-                                            return realMoneyTransactions;
-                                        })()} ₾
+                                        {totalPaid !== null ? totalPaid.toFixed(2) : '—'} ₾
                                     </div>
                                     <div className="text-xs text-unbox-grey mt-1">Баланс: {user.balance} ₾</div>
                                     {/* Credit Limit UI */}

@@ -84,6 +84,38 @@ def get_balance(
     }
 
 
+@router.get("/client-total-paid/{user_id}")
+def client_total_paid(
+    user_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_cashbox),
+):
+    """«Общая сумма оплат» клиента — из РЕАЛЬНЫХ кассовых приходов, привязанных
+    к нему (credited_user_id). Раньше это число считалось из фронтового стора,
+    который пустой на перезагрузке — отсюда «не работает через Финансы».
+    Теперь единый бэкенд-источник: и «Пополнить», и «Новая операция» пишут
+    привязанный приход → оба видны здесь.
+    """
+    # user_id может прийти как UUID или email — приводим к user.id.
+    from uuid import UUID as _UUID
+    target = None
+    try:
+        target = session.get(User, _UUID(str(user_id)))
+    except (ValueError, TypeError):
+        target = None
+    if target is None:
+        target = session.exec(select(User).where(User.email == user_id)).first()
+    if target is None:
+        return {"total_paid": 0.0}
+
+    total = session.exec(
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "income")
+        .where(CashboxTransaction.credited_user_id == str(target.id))
+    ).one()
+    return {"total_paid": round(float(total), 2)}
+
+
 @router.get("/transactions", response_model=List[CashboxTransactionRead])
 def list_transactions(
     session: Session = Depends(get_session),

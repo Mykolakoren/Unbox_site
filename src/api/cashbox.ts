@@ -103,6 +103,13 @@ export const cashboxApi = {
         return data;
     },
 
+    // «Общая сумма оплат» клиента — из реальных кассовых приходов (backend),
+    // а не из фронтового стора. userId — UUID или email.
+    getClientTotalPaid: async (userId: string): Promise<number> => {
+        const { data } = await api.get(`/cashbox/client-total-paid/${encodeURIComponent(userId)}`);
+        return Number(data?.total_paid || 0);
+    },
+
     getTransactions: async (params?: {
         dateFrom?: string;
         dateTo?: string;
