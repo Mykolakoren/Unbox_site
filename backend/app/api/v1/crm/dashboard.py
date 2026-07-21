@@ -23,6 +23,17 @@ def crm_dashboard(
     uid = str(current_user.id)
     now = datetime.now()
 
+    # Курсы в лари — единый источник (app_settings.exchange_rates, тот же, что
+    # читает фронт). Нужны СРАЗУ: специалист принимает оплату в пяти валютах,
+    # и любая итоговая сумма обязана пересчитываться, иначе рубль складывается
+    # с лари один к одному. Именно так «доход» раздувался на треть:
+    # 162 500 ₽ показывались как 162 500 ₾ вместо 5 525 ₾.
+    from app.api.v1.settings import get_exchange_rates
+    GEL_RATES = get_exchange_rates(session)
+
+    def _to_gel(amount, currency) -> float:
+        return float(amount or 0) * GEL_RATES.get((currency or "GEL").upper(), 1)
+
     # Parse month parameter or use current month
     if month:
         try:
@@ -74,7 +85,8 @@ def crm_dashboard(
             TherapistPayment.date < month_end,
         )
     ).all()
-    payments_this_month = sum(float(p.amount or 0) for p in month_payments)
+    # В лари: карточка «Доход за месяц» на мобильном показывает именно это число.
+    payments_this_month = sum(_to_gel(p.amount, p.currency) for p in month_payments)
 
     # Revenue grouped by currency
     rev_by_currency: dict = {}
@@ -106,13 +118,7 @@ def crm_dashboard(
 
     # --- Extended stats ---
 
-    # Monthly stats (12 months) — convert to GEL equivalent.
-    # Single source of truth: app_settings.exchange_rates (managed via
-    # /settings/exchange_rates GET/PUT). Same numbers the frontend uses,
-    # so the top "ДОХОД" card and the chart's "Получено" can never drift.
-    from app.api.v1.settings import get_exchange_rates
-    GEL_RATES = get_exchange_rates(session)
-
+    # Monthly stats (12 months) — тоже в лари, курсы уже взяты выше (GEL_RATES).
     monthly_stats = []
     for i in range(11, -1, -1):
         m_start = (now.replace(day=1) - timedelta(days=30 * i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -231,7 +237,8 @@ def crm_dashboard(
             TherapistPayment.specialist_id == uid,
         )
     ).all()
-    total_payments_all = sum(float(p.amount or 0) for p in all_payments)
+    # В лари — иначе «средний чек в час» считается из смеси валют.
+    total_payments_all = sum(_to_gel(p.amount, p.currency) for p in all_payments)
 
     completed_sessions = session.exec(
         select(TherapySession).where(
@@ -267,7 +274,9 @@ def crm_dashboard(
         debt_by_currency[cur] = debt_by_currency.get(cur, 0) + d["total_debt"]
     debt_by_currency = {k: round(v, 2) for k, v in debt_by_currency.items() if v > 0}
 
-    total_active_debt = sum(d["total_debt"] for d in debt_by_client)
+    # В лари: у клиентов разные валюты, и карточка «Долг (всего)» на мобильном
+    # показывает эту сумму напрямую — складывать рубли с лари нельзя.
+    total_active_debt = sum(_to_gel(d["total_debt"], d.get("currency")) for d in debt_by_client)
 
     return {
         "active_clients": active_clients,

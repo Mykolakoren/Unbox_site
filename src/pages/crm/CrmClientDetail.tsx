@@ -250,6 +250,17 @@ export function CrmClientDetail() {
         }
     };
 
+    const handleDeletePayment = async (paymentId: string) => {
+        if (!window.confirm('Удалить эту оплату? Если она была единственной по своей сессии, сессия снова станет неоплаченной.')) return;
+        try {
+            await crmApi.deletePayment(paymentId);
+            toast.success('Оплата удалена');
+            await loadData();
+        } catch {
+            toast.error('Ошибка удаления');
+        }
+    };
+
     // ── Render ────────────────────────────────────────────────────────────────
 
     if (loading) {
@@ -309,6 +320,7 @@ export function CrmClientDetail() {
             setShowNoteForm={setShowNoteForm}
             handleAddNote={handleAddNote}
             handleDeleteNote={handleDeleteNote}
+            handleDeletePayment={handleDeletePayment}
             editingSession={editingSession}
             setEditingSession={setEditingSession}
             editSessionPrice={editSessionPrice}
@@ -436,6 +448,7 @@ interface GHClientDetailProps {
     setShowNoteForm: (v: boolean) => void;
     handleAddNote: (content: string, tags?: string) => Promise<void>;
     handleDeleteNote: (noteId: string) => Promise<void>;
+    handleDeletePayment: (paymentId: string) => Promise<void>;
     editingSession: string | null;
     setEditingSession: (id: string | null) => void;
     editSessionPrice: string;
@@ -486,7 +499,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
     const {
         client, sessions: _sessions, notes, payments, stats, futureSessions, pastSessions, notesBySession,
         editingProfile, editForm, setEditForm, openEditProfile, handleSaveProfile, setEditingProfile,
-        showNoteForm, setShowNoteForm, handleAddNote, handleDeleteNote,
+        showNoteForm, setShowNoteForm, handleAddNote, handleDeleteNote, handleDeletePayment,
         editingSession, setEditingSession, editSessionPrice, setEditSessionPrice,
         editSessionAccount, setEditSessionAccount, handleUpdateSession,
         handleQuickPay, handleUnmarkPaid, handleMarkAllPaid, markingAll,
@@ -1247,8 +1260,20 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                 {paymentAccounts.find(a => a.id === p.account)?.label || p.account}
                                             </div>
                                         </div>
-                                        <div style={{ ...ghMono, fontSize: 9 }}>
-                                            {format(parseISO(p.date || p.createdAt), 'dd.MM.yyyy', { locale: ru })}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <div style={{ ...ghMono, fontSize: 9 }}>
+                                                {format(parseISO(p.date || p.createdAt), 'dd.MM.yyyy', { locale: ru })}
+                                            </div>
+                                            <button
+                                                onClick={() => handleDeletePayment(p.id)}
+                                                title="Удалить оплату"
+                                                style={{
+                                                    background: 'none', border: 'none', cursor: 'pointer',
+                                                    padding: 4, lineHeight: 0, color: GH.ink30,
+                                                }}
+                                            >
+                                                <Trash2 size={13} />
+                                            </button>
                                         </div>
                                     </div>
                                 ))}

@@ -415,6 +415,11 @@ export const crmApi = {
         return response.data;
     },
 
+    /** Удалить платёж. Если он был последним по своей сессии, с неё снимается «оплачено». */
+    deletePayment: async (paymentId: string): Promise<void> => {
+        await api.delete(`/crm/payments/${paymentId}`);
+    },
+
     // Notes
     getNotes: async (clientId?: string, specialistId?: string): Promise<CrmNote[]> => {
         const response = await api.get('/crm/notes', {

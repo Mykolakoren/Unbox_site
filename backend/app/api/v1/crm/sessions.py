@@ -627,14 +627,16 @@ def unmark_paid_session(
     ts.updated_at = datetime.now()
     session.add(ts)
 
-    # Remove related payment if exists
-    payment = session.exec(
+    # Убираем ВСЕ платежи по сессии, а не первый попавшийся. Раньше здесь
+    # стоял .first(): если по сессии почему-то оказалось два платежа (старая
+    # гонка при двойном нажатии «Оплачено» или частичные оплаты), лишние
+    # оставались навсегда и завышали доход.
+    for payment in session.exec(
         select(TherapistPayment).where(
             TherapistPayment.session_id == session_id,
             TherapistPayment.specialist_id == str(current_user.id),
         )
-    ).first()
-    if payment:
+    ).all():
         session.delete(payment)
 
     session.commit()
