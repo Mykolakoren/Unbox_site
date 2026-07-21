@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     SMTP_FROM: Optional[str] = None  # e.g. "Unbox <noreply@unbox.com.ge>"
     SMTP_USE_TLS: bool = True
 
+    # Ключ шифрования заметок терапевта (см. services/note_crypto).
+    # ОБЯЗАТЕЛЬНО читать отсюда, а не из os.getenv: pydantic забирает .env
+    # в этот объект, но в переменные окружения процесса ничего не кладёт, а
+    # EnvironmentFile у systemd-юнита нет. Через os.getenv ключ не виден —
+    # шифрование молча выключалось бы, а заметки писались открытым текстом.
+    NOTES_ENCRYPTION_KEY: Optional[str] = None
+
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), case_sensitive=True, extra='ignore')
 
 settings = Settings()

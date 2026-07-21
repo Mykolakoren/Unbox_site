@@ -4,7 +4,10 @@ TherapistNote — заметки специалиста по клиентам.
 from typing import Optional
 from uuid import uuid4
 from datetime import datetime
+from sqlalchemy import Column
 from sqlmodel import SQLModel, Field
+
+from app.services.note_crypto import EncryptedText
 
 
 class TherapistNoteBase(SQLModel):
@@ -16,6 +19,11 @@ class TherapistNoteBase(SQLModel):
 
 class TherapistNote(TherapistNoteBase, table=True):
     __tablename__ = "therapist_notes"
+
+    # Текст заметки шифруется в самой колонке (см. services/note_crypto).
+    # Переопределяем поле только здесь, в таблице: TherapistNoteRead и
+    # TherapistNoteCreate наследуют обычный str и работают как раньше.
+    content: str = Field(sa_column=Column("content", EncryptedText, nullable=False))
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     specialist_id: str = Field(index=True)  # User UUID as string (no FK due to SQLite UUID limitation)

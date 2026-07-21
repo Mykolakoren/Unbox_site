@@ -5,7 +5,10 @@ TherapySession — сессии терапии.
 from typing import Optional
 from uuid import uuid4
 from datetime import datetime
+from sqlalchemy import Column
 from sqlmodel import SQLModel, Field
+
+from app.services.note_crypto import EncryptedText
 
 
 class TherapySessionBase(SQLModel):
@@ -30,6 +33,12 @@ class TherapySessionBase(SQLModel):
 
 class TherapySession(TherapySessionBase, table=True):
     __tablename__ = "therapy_sessions"
+
+    # Заметка внутри сессии — такой же чувствительный текст, как отдельная
+    # заметка, поэтому шифруется той же колонкой (см. services/note_crypto).
+    notes: Optional[str] = Field(
+        default=None, sa_column=Column("notes", EncryptedText, nullable=True)
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     specialist_id: str = Field(index=True)  # User UUID as string (no FK due to SQLite UUID limitation)
