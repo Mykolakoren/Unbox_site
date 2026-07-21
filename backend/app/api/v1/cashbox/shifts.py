@@ -13,6 +13,38 @@ from app.api.v1.cashbox import require_cashbox, require_reports
 
 router = APIRouter()
 
+# Категория авто-проводок, которыми выравнивается касса при закрытии смены.
+RECON_CAT = "cash_reconciliation"
+
+
+def _lifetime_cash(session: Session, branch: Optional[str]) -> float:
+    """Наличные «за всё время» — ровно то число, что показано в Финансах.
+
+    Это и есть эталон для сверки смены. Раньше `expected` считался как
+    «остаток прошлой смены + движение за окно», и любая проводка, попавшая
+    мимо окна (задним числом, или заведённая без филиала), навсегда
+    расходила показанный итог с физическим пересчётом — расхождение
+    всплывало снова на каждом следующем закрытии.
+
+    Считая от лайфтайм-суммы, выравнивание самолечащееся: после записи
+    корректировки итог кассы РАВЕН пересчитанным деньгам, всегда.
+    Recon-проводки здесь НЕ исключаются — они часть этого итога.
+    """
+    inc_q = (
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "income")
+        .where(CashboxTransaction.payment_method == "cash")
+    )
+    exp_q = (
+        select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
+        .where(CashboxTransaction.type == "expense")
+        .where(CashboxTransaction.payment_method == "cash")
+    )
+    if branch:
+        inc_q = inc_q.where(CashboxTransaction.branch == branch)
+        exp_q = exp_q.where(CashboxTransaction.branch == branch)
+    return round(float(session.exec(inc_q).one()) - float(session.exec(exp_q).one()), 2)
+
 
 @router.post("/shifts/open", response_model=ShiftOpenLogRead)
 def open_shift(
@@ -67,14 +99,10 @@ def preview_close_shift(
     shift_start = last_shift.shift_end if last_shift else datetime.min
     starting_balance = float(last_shift.actual_balance) if last_shift else 0.0
 
-    # Exclude reconciliation entries from the shift window. They're auto-created
-    # at the previous close (date == prev shift_end) and would otherwise be
-    # double-counted: once via `starting_balance = previous actual` (which
-    # already bakes in the discrepancy) and once via this query (it falls on
-    # the boundary `date >= shift_start`). Result: every closed-with-delta
-    # shift inflated the *next* shift's `expected` by exactly that delta.
-    RECON_CAT = "cash_reconciliation"
-
+    # cash_in/cash_out — справочное «движение за смену» (что админ увидит в
+    # разбивке). Recon-проводки прошлого закрытия из окна исключаем: они уже
+    # зашиты в starting_balance = actual прошлой смены, иначе тот же дельта
+    # показывался бы фантомом на каждой следующей смене.
     cash_in_q = (
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "income")
@@ -95,7 +123,9 @@ def preview_close_shift(
 
     cash_in = float(session.exec(cash_in_q).one())
     cash_out = float(session.exec(cash_out_q).one())
-    expected = round(starting_balance + cash_in - cash_out, 2)
+    # Эталон — итог кассы за всё время, а не арифметика окна (см. _lifetime_cash).
+    expected = _lifetime_cash(session, branch)
+    window_expected = round(starting_balance + cash_in - cash_out, 2)
 
     # Count of transactions that make up this window — gives the admin a
     # "did I expect this many?" sanity check. Same recon exclusion.
@@ -114,6 +144,11 @@ def preview_close_shift(
         "cash_in": round(cash_in, 2),
         "cash_out": round(cash_out, 2),
         "expected": expected,
+        # Диагностика: если window_expected != expected, значит какая-то
+        # наличная проводка прошла мимо окна смены (задним числом или без
+        # филиала). На сверку не влияет — expected берётся от итога кассы.
+        "window_expected": window_expected,
+        "off_window": round(expected - window_expected, 2),
         "tx_count": tx_count,
         "shift_start": shift_start.isoformat() if shift_start != datetime.min else None,
         "now": now.isoformat(),
@@ -248,14 +283,8 @@ def end_shift(
     shift_start = last_shift.shift_end if last_shift else datetime.min
     starting_balance = float(last_shift.actual_balance) if last_shift else 0.0
 
-    # Sum cash movements for this shift window. For branch closes, also
-    # filter by branch. Exclude prior reconciliation entries — they're baked
-    # into starting_balance via the previous shift's actual_balance, so
-    # counting them here would double-apply the discrepancy. (Excel #13 bug
-    # admin-Ира reported: every shift after a delta-closed shift kept
-    # showing that same delta as a phantom carryover.)
-    RECON_CAT = "cash_reconciliation"
-
+    # Движение за смену — справочные цифры для отчёта. Recon прошлого
+    # закрытия исключаем: он уже сидит в starting_balance.
     cash_in_q = (
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "income")
@@ -277,7 +306,10 @@ def end_shift(
     cash_in = float(session.exec(cash_in_q).one())
     cash_out = float(session.exec(cash_out_q).one())
 
-    expected = round(starting_balance + cash_in - cash_out, 2)
+    # Сверяемся с итогом кассы за всё время (см. _lifetime_cash), а не с
+    # арифметикой окна — иначе расхождение переживает закрытие и всплывает
+    # снова. После recon-проводки ниже итог кассы == пересчитанным деньгам.
+    expected = _lifetime_cash(session, branch)
     discrepancy = round(payload.actual_balance - expected, 2)
 
     # Keep legacy [Branch] prefix in notes for UI back-compat with older clients

@@ -183,13 +183,17 @@ def run_weekly_rebates(
             wallet.credit(session, user, rebate, reason="weekly_rebate",
                           description=f"Недельная скидка за объём ({tier}%, {round(total_hours,1)} ч)",
                           ref_type="weekly_rebate", ref_id=str(user.id))
-            # 2. Проводка в кассу (аудит). type=expense — деньги «возвращены»
-            #    клиенту в виде кредита на баланс.
+            # 2. Проводка в кассу — ТОЛЬКО для аудита. Скидка уходит клиенту
+            #    кредитом на баланс, из денежного ящика ничего не вынимают,
+            #    поэтому payment_method='adjustment': такие проводки видны в
+            #    ленте, но не входят в остатки кассы (get_balance считает лишь
+            #    cash/card_tbc/card_bog). Раньше стояло 'cash' — и каждая
+            #    скидка занижала наличные в общем итоге (набежало 463.50 ₾).
             tx = CashboxTransaction(
                 type="expense",
                 amount=rebate,
                 currency="GEL",
-                payment_method="cash",
+                payment_method="adjustment",
                 description=f"Недельная скидка за объём ({tier}%, {round(total_hours,1)} ч) — неделя с {week_start.isoformat()}",
                 date=datetime.utcnow(),
                 client_name=user.name,
