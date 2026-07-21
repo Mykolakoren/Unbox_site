@@ -204,7 +204,16 @@ class PricingService:
         format_type: str = "individual",
         consecutive_total_hours: Optional[float] = None,
         exclude_booking_id: Optional[str] = None,  # for recompute: skip self
+        ignore_subscription: bool = False,
     ) -> PriceBreakdown:
+        """`ignore_subscription=True` — посчитать цену так, будто абонемента нет.
+
+        Нужно недельному перерасчёту: он смотрит на брони ПРОШЕДШЕЙ недели,
+        оплаченные с баланса, а абонемент читается ТЕКУЩИЙ. Если клиент купил
+        абонемент под конец недели, обычный расчёт срабатывал по нему, выходил
+        раньше времени и оставлял discountable_base=0 — клиент терял всю
+        недельную скидку за неделю, которую честно оплатил деньгами.
+        """
 
         # 1. Fetch Resource
         resource = self.session.get(Resource, resource_id)
@@ -300,7 +309,7 @@ class PricingService:
         # Order: Subscription -> Manual (N/A here) -> Max(Weekly, Duration, Hot)
 
         # A. Subscription (Priority 1)
-        if self._apply_subscription(user, breakdown, resource, format_type):
+        if not ignore_subscription and self._apply_subscription(user, breakdown, resource, format_type):
             return breakdown
 
         # B. Personal pricing takes EXCLUSIVE priority over tier discounts.

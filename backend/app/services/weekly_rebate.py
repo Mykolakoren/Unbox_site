@@ -15,7 +15,12 @@ Owner 2026-06-16: недельная скидка за объём применя
   5. Идемпотентность: одна запись WeeklyRebate на (user_id, week_start).
 
 Исключения: personal-discount и comp-аккаунты (их брони дают
-discountable_base=0 → вклад 0), брони по абонементу/бонусам (не balance).
+discountable_base=0 → вклад 0), брони по абонементу/бонусам (не balance),
+а также брони, за которые деньги ещё не списаны (payment_status pending/waived).
+
+Цена для добора считается с ignore_subscription=True: клиент платил за эти
+брони деньгами, и абонемент, купленный позже в ту же неделю, не должен задним
+числом обнулять заработанную скидку.
 """
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -130,6 +135,14 @@ def run_weekly_rebates(
         for b in user_bookings:
             if b.payment_method != "balance":
                 continue
+            # Скидка — это ВОЗВРАТ переплаты. Возвращать можно только то, что
+            # реально списано. Бронь со статусом pending (деньги ещё не сняты,
+            # снимутся за 24 ч) или waived (списание прощено) ничего не
+            # оплатила — кредит за неё был бы подарком из воздуха, а если её
+            # потом отменят, деньги останутся у клиента насовсем.
+            # None — старые брони до отложенного списания, они оплачены сразу.
+            if b.payment_status in ("pending", "waived"):
+                continue
             try:
                 breakdown = pricing.calculate_price(
                     user=user,
@@ -138,6 +151,10 @@ def run_weekly_rebates(
                     duration_minutes=b.duration,
                     format_type=b.format or "individual",
                     exclude_booking_id=b.id,
+                    # Считаем как обычную платную бронь: клиент заплатил за неё
+                    # деньгами с баланса. Абонемент, купленный позже, не должен
+                    # задним числом обнулять уже заработанную скидку.
+                    ignore_subscription=True,
                 )
             except Exception:
                 continue

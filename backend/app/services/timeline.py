@@ -3,6 +3,12 @@ from uuid import UUID
 from sqlmodel import Session
 from app.models.timeline import TimelineEvent, TimelineEventCreate
 
+# Актор для действий, которые совершил не человек, а система (крон, скрипты).
+# Колонка actor_id — UUID NOT NULL, поэтому «ничей» актор должен быть не None,
+# а вот этим нулевым UUID: иначе вставка падает и валит транзакцию вызывающего.
+SYSTEM_ACTOR_ID = UUID("00000000-0000-0000-0000-000000000000")
+
+
 class TimelineService:
     @staticmethod
     def log_event(
@@ -27,7 +33,14 @@ class TimelineService:
             try:
                 actor_id = UUID(actor_id)
             except ValueError:
-                actor_id = None  # type: ignore[assignment]
+                # Раньше здесь стояло None — и вставка падала на NOT NULL,
+                # утаскивая за собой всю транзакцию вызывающего (log_event
+                # делает commit). Так молча ломался ночной скрипт завершения
+                # абонементов: он передаёт actor_id="system". Теперь любой
+                # нечеловеческий актор пишется системным UUID.
+                actor_id = SYSTEM_ACTOR_ID
+        if actor_id is None:
+            actor_id = SYSTEM_ACTOR_ID
 
         event = TimelineEvent(
             actor_id=actor_id,
