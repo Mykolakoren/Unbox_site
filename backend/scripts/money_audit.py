@@ -182,6 +182,27 @@ CHECKS: list[Check] = [
         """,
     ),
     Check(
+        key="balance_vs_ledger",
+        title="Баланс клиента не сходится с лентой операций",
+        why=(
+            "Каждое изменение баланса обязано идти через кошелёк (wallet) и писать строку "
+            "в balance_ledger. Если баланс ≠ сумме ленты — значит кто-то изменил баланс "
+            "МИМО кошелька: прямой правкой в БД или новым кодом в обход. Это главный "
+            "сторож против повторения истории с расползающимися балансами."
+        ),
+        sql="""
+            SELECT u.email, u.name,
+                   round(u.balance::numeric, 2) AS balance,
+                   round(coalesce(sum(l.delta), 0)::numeric, 2) AS ledger_sum,
+                   round((u.balance - coalesce(sum(l.delta), 0))::numeric, 2) AS diff
+            FROM "user" u
+            LEFT JOIN balance_ledger l ON l.user_id = u.id::text
+            GROUP BY u.id, u.email, u.name, u.balance
+            HAVING abs(u.balance - coalesce(sum(l.delta), 0)) > 0.01
+            ORDER BY abs(u.balance - coalesce(sum(l.delta), 0)) DESC
+        """,
+    ),
+    Check(
         key="over_credit_limit",
         title="Долг клиента превысил кредитный лимит",
         why=(
