@@ -13,6 +13,7 @@ from app.models.user import User
 from app.services.google_calendar import gcal_service
 from app.services.timeline import timeline_service
 from app.services import subscription_pool
+from app.services import wallet
 from app.services.booking import check_availability, find_re_rent_conflicts
 from app.services.email import email_service
 from app.services.telegram import telegram_service
@@ -310,8 +311,10 @@ def _refund_booking_to_owner(
         full_amount = booking.final_price if booking.final_price is not None else 0.0
         refund_amount = round(full_amount * refund_percent, 2)
         retained_amount = round(full_amount - refund_amount, 2)
-        owner.balance += refund_amount
-        session.add(owner)
+        if abs(refund_amount) >= 0.01:
+            wallet.credit(session, owner, refund_amount, reason="booking_refund",
+                          description="Возврат при отмене брони",
+                          ref_type="booking", ref_id=str(booking.id))
         refund_meta["refunded_amount"] = refund_amount
         refund_meta["retained_amount_unbox_income"] = retained_amount
 
@@ -928,10 +931,8 @@ def create_booking(
                         f"(баланс: {booking_owner.balance}₾, кредит: {booking_owner.credit_limit}₾). "
                         f"Пополните баланс перед бронированием.",
                     )
-                # round(..., 2) — float arithmetic accumulates fractional cents
-                # over thousands of bookings; without rounding the displayed
-                # balance and audit total drift apart.
-                booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
+                wallet.debit(session, booking_owner, quote.final_price, reason="booking_charge",
+                             description="Оплата брони с баланса (при создании)", ref_type="booking")
 
         booking_in.final_price = quote.final_price
         booking_in.base_price = quote.base_price
@@ -955,7 +956,8 @@ def create_booking(
         # for the cron to handle alongside the main charge.
         peak_debt = quote.subscription_peak_debt
         if not defer_charge_single and peak_debt > 0 and booking_in.payment_method == "subscription":
-            booking_owner.balance = round((booking_owner.balance or 0) - peak_debt, 2)
+            wallet.debit(session, booking_owner, peak_debt, reason="booking_charge",
+                         description="Пиковая надбавка абонемента (при создании)", ref_type="booking")
 
         # ── Hot Booking Approval Gate ──
         # Approval threshold depends on the WEEKDAY of the booking start:
@@ -987,8 +989,8 @@ def create_booking(
             # Don't deduct balance — set status to pending_approval
             # Revert balance deduction that happened above
             if booking_in.payment_method != "subscription":
-                # undo deduction (rounded — see comment above)
-                booking_owner.balance = round((booking_owner.balance or 0) + quote.final_price, 2)
+                wallet.credit(session, booking_owner, quote.final_price, reason="booking_charge_revert",
+                              description="Откат списания — бронь ушла на подтверждение (hot)", ref_type="booking")
             else:
                 # Undo subscription deduction
                 if booking_owner.subscription:
@@ -1462,7 +1464,9 @@ def create_multi_slot_booking(
                         f"Insufficient balance for slot {s.date} {s.start_time}. "
                         f"Need {quote.final_price}₾, have {available_funds}₾.",
                     )
-                booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
+                wallet.debit(session, booking_owner, quote.final_price, reason="booking_charge",
+                             description=f"Оплата брони с баланса (мульти-слот {s.date} {s.start_time})",
+                             ref_type="booking")
 
         total_cost += quote.final_price
 
@@ -1854,7 +1858,9 @@ def create_recurring_booking(
                         400,
                         f"Insufficient funds for {d.strftime('%Y-%m-%d')}. Required: {quote.final_price}, Available: {available_funds}",
                     )
-                booking_owner.balance = round((booking_owner.balance or 0) - quote.final_price, 2)
+                wallet.debit(session, booking_owner, quote.final_price, reason="booking_charge",
+                             description=f"Оплата брони с баланса (серия {d.strftime('%Y-%m-%d')})",
+                             ref_type="booking")
 
         session.add(booking_owner)
 
@@ -2995,12 +3001,14 @@ def reschedule_booking(
                             detail=f"Недостаточно средств для перерасчёта. "
                             f"Доплата: {price_diff}₾, доступно: {available_funds}₾.",
                         )
-                    booking_owner.balance = round((booking_owner.balance or 0) - price_diff, 2)
-                    session.add(booking_owner)
+                    wallet.debit(session, booking_owner, price_diff, reason="reschedule_diff",
+                                 description="Доплата при переносе (цена выросла)",
+                                 ref_type="booking", ref_id=str(booking.id), actor=current_user)
                 elif price_diff < 0:
                     # Price decreased — refund the difference
-                    booking_owner.balance = round((booking_owner.balance or 0) + abs(price_diff), 2)
-                    session.add(booking_owner)
+                    wallet.credit(session, booking_owner, abs(price_diff), reason="reschedule_diff",
+                                  description="Возврат при переносе (цена упала)",
+                                  ref_type="booking", ref_id=str(booking.id), actor=current_user)
 
             # Update booking price fields
             booking.final_price = new_quote.final_price
@@ -3034,8 +3042,9 @@ def reschedule_booking(
                 booking.final_price = round(float(booking.final_price or 0) - refund, 2)
                 # Refund the same amount to user's balance if booking was paid
                 if booking.payment_status == "paid" and refund > 0 and booking_owner:
-                    booking_owner.balance = round((booking_owner.balance or 0) + refund, 2)
-                    session.add(booking_owner)
+                    wallet.credit(session, booking_owner, refund, reason="extras_refund",
+                                  description="Возврат за допы, недоступные в новом кабинете",
+                                  ref_type="booking", ref_id=str(booking.id), actor=current_user)
         except Exception as e:
             logger.warning(f"[Reschedule] extras-filter failed: {e}")
 
@@ -3340,8 +3349,9 @@ def trim_booking(
         # the (new, smaller) final_price. Touching the balance here would hand
         # a phantom refund. Only settle when already charged.
         if not pending and removed_value > 0 and owner:
-            owner.balance = round((owner.balance or 0) + removed_value, 2)
-            session.add(owner)
+            wallet.credit(session, owner, removed_value, reason="trim_refund",
+                          description="Возврат за отрезанное время брони",
+                          ref_type="booking", ref_id=str(booking.id), actor=current_user)
     elif booking.payment_method == "subscription":
         orig_hours = (
             booking.hours_deducted
@@ -3370,8 +3380,9 @@ def trim_booking(
         # would silently keep the peak surcharge.
         removed_peak_money = round((booking.final_price or 0) - new_total_price, 2)
         if not pending and removed_peak_money > 0 and owner:
-            owner.balance = round((owner.balance or 0) + removed_peak_money, 2)
-            session.add(owner)
+            wallet.credit(session, owner, removed_peak_money, reason="trim_refund",
+                          description="Возврат пиковой надбавки за отрезанное время",
+                          ref_type="booking", ref_id=str(booking.id), actor=current_user)
 
     # ── Apply the split ──
     # The original row becomes the LEFT remnant when left>0, else it becomes
@@ -3958,7 +3969,10 @@ def change_booking_format(
                 used_hours=max(0.0, used + delta_hours),
             )
         else:
-            booking_owner.balance = round((booking_owner.balance or 0) - delta_price, 2)
+            # delta_price знаковая: >0 — доплата, <0 — возврат.
+            wallet.apply(session, booking_owner, -delta_price, reason="format_change",
+                         description="Пересчёт при смене формата брони",
+                         ref_type="booking", ref_id=str(booking.id), actor=current_user)
         booking.charge_amount = new_price
         settled_now = True
 
@@ -4116,7 +4130,10 @@ def set_booking_price(
             )
             booking.hours_deducted = round(new_hours, 4)
         else:
-            booking_owner.balance = round((booking_owner.balance or 0) + delta, 2)
+            # delta знаковая: >0 — возврат клиенту, <0 — доплата.
+            wallet.apply(session, booking_owner, delta, reason="price_change",
+                         description="Ручное изменение цены брони админом",
+                         ref_type="booking", ref_id=str(booking.id), actor=current_user)
         booking.charge_amount = new_price
         settled_now = True
 
@@ -4304,8 +4321,9 @@ def extend_booking(
             # Nothing has been charged yet — the cron will take the new total.
             pass
         elif target_user:
-            target_user.balance = round((target_user.balance or 0) - extra_price, 2)
-            session.add(target_user)
+            wallet.debit(session, target_user, extra_price, reason="extend_charge",
+                         description="Доплата за продление брони",
+                         ref_type="booking", ref_id=str(booking.id), actor=current_user)
             booking.charge_amount = round(
                 float(booking.charge_amount if booking.charge_amount is not None
                       else (booking.final_price - extra_price)) + extra_price, 2
@@ -4410,8 +4428,9 @@ def add_booking_extras(
             booking.final_price = round((booking.final_price or 0) + price, 2)
             owner = _resolve_booking_owner(session, booking)
             if owner and booking.payment_status != "pending":
-                owner.balance = round((owner.balance or 0) - price, 2)
-                session.add(owner)
+                wallet.debit(session, owner, price, reason="extras_charge",
+                             description="Дозаказ допов с баланса",
+                             ref_type="booking", ref_id=str(booking.id), actor=current_user)
                 booking.charge_amount = round(
                     float(booking.charge_amount if booking.charge_amount is not None
                           else (booking.final_price - price)) + price, 2
@@ -4554,7 +4573,9 @@ def shorten_booking(
                     used_hours=max(0.0, used - refund_hours),
                 )
             else:
-                target_user.balance = round((target_user.balance or 0) + refund_price, 2)
+                wallet.credit(session, target_user, refund_price, reason="shorten_refund",
+                              description="Возврат за сокращённое время брони",
+                              ref_type="booking", ref_id=str(booking.id), actor=current_user)
             session.add(target_user)
 
     booking.duration = new_duration
@@ -4747,7 +4768,9 @@ def approve_booking(
                     used_hours=used + hrs,
                 )
         else:
-            b_owner.balance -= booking.final_price
+            wallet.debit(session, b_owner, float(booking.final_price or 0), reason="booking_charge",
+                         description="Списание при подтверждении брони (approve)",
+                         ref_type="booking", ref_id=str(booking.id), actor=current_user)
         session.add(b_owner)
 
     booking.status = "confirmed"
