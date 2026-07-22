@@ -8,7 +8,9 @@ import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrection
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
-import { subscriptionBadge } from '../../utils/subscription';
+import { subscriptionBadge, subscriptionLifecycle } from '../../utils/subscription';
+import { bookingsApi } from '../../api/bookings';
+import type { BookingHistoryItem } from '../../store/types';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
@@ -37,10 +39,18 @@ const ghudMono: React.CSSProperties = {
     fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
 };
 
+/** Заголовок блока абонемента под его реальный статус. */
+const SUB_TITLE: Record<string, string> = {
+    active: 'Активный абонемент',
+    frozen: 'Абонемент на паузе',
+    completed: 'Завершённый абонемент',
+    none: 'Абонемент',
+};
+
 export function AdminUserDetails() {
     const { email } = useParams<{ email: string }>();
     const navigate = useNavigate();
-    const { users, updateUserById, bookings, addTransaction, currentUser, cancelBooking } = useUserStore();
+    const { users, updateUserById, addTransaction, currentUser, cancelBooking } = useUserStore();
 
     /** The URL param can arrive in three forms — already-decoded, %-encoded,
      *  or with stray whitespace from a copy-paste. Normalize to lowercase
@@ -121,13 +131,29 @@ export function AdminUserDetails() {
     // who exist — admins reported `/admin/users/psy_ann@bk.ru` doing
     // exactly that.
     const fetchUsers = useUserStore(s => s.fetchUsers);
-    const fetchAllBookings = useUserStore(s => s.fetchAllBookings);
     useEffect(() => {
         if (users.length === 0) fetchUsers();
-        // Bookings are also accessed below for "Активность клиента"; same
-        // direct-link problem there.
-        if (bookings.length === 0) fetchAllBookings();
-    }, [users.length, bookings.length, fetchUsers, fetchAllBookings]);
+    }, [users.length, fetchUsers]);
+
+    // Брони ЭТОГО клиента — с сервера, а не фильтром общего списка.
+    // Общий список обрезан потолком в 5000, а броней уже 6115: хвост молча
+    // отбрасывался, и в карточке показывалось «0 часов / 0 бронирований»
+    // либо заниженные цифры (у Нади Мирошиной 10 броней из 45 не попадали).
+    // Дальше было бы только хуже. У одного человека броней десятки — потолок
+    // тут не мешает, и заодно в браузер не тянется вся база броней.
+    const [userBookings, setUserBookings] = useState<BookingHistoryItem[]>([]);
+    const [bookingsLoading, setBookingsLoading] = useState(true);
+    const reloadUserBookings = async (email?: string) => {
+        if (!email) return;
+        setBookingsLoading(true);
+        try { setUserBookings(await bookingsApi.getUserBookings(email)); }
+        catch { setUserBookings([]); }
+        finally { setBookingsLoading(false); }
+    };
+    useEffect(() => {
+        reloadUserBookings(user?.email);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.email]);
 
     // «Общая сумма оплат» — тянем с бэка, когда клиент определился.
     useEffect(() => {
@@ -171,9 +197,8 @@ export function AdminUserDetails() {
         }
     };
 
-    // derived data
-    const sortedBookings = bookings
-        .filter(b => b.userId === user.email)
+    // derived data — уже только этого клиента (пришли с сервера отфильтрованными)
+    const sortedBookings = [...userBookings]
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
 
@@ -1144,13 +1169,13 @@ export function AdminUserDetails() {
                                     <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
                                         <div className="text-sm text-unbox-grey mb-1">Всего часов</div>
                                         <div className="text-2xl font-bold">
-                                            {bookings
-                                                .filter(b => b.userId === user.email && (b.status === 'completed' || b.status === 'confirmed'))
+                                            {bookingsLoading ? '…' : userBookings
+                                                .filter(b => b.status === 'completed' || b.status === 'confirmed')
                                                 .reduce((sum, b) => sum + (b.duration / 60), 0)
                                                 .toFixed(1)} ч
                                         </div>
                                         <div className="text-xs text-unbox-grey mt-1">
-                                            {sortedBookings.length} бронирований
+                                            {bookingsLoading ? '…' : sortedBookings.length} бронирований
                                         </div>
                                     </div>
 
@@ -1159,7 +1184,7 @@ export function AdminUserDetails() {
                                         <div className="text-sm text-unbox-grey mb-1">Средний чек</div>
                                         <div className="text-2xl font-bold">
                                             {(() => {
-                                                const completed = bookings.filter(b => b.userId === user.email && b.status === 'completed');
+                                                const completed = userBookings.filter(b => b.status === 'completed');
                                                 if (completed.length === 0) return '0';
                                                 const totalValue = completed.reduce((sum, b) => sum + b.finalPrice, 0);
                                                 return (totalValue / completed.length).toFixed(0);
@@ -1172,12 +1197,19 @@ export function AdminUserDetails() {
                                     <div className={clsx("rounded-xl p-4 border relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-3", user.subscription ? "bg-purple-50 border-purple-100" : "bg-unbox-light/30 border-unbox-light")}>
                                         <div className="relative z-10 flex justify-between items-start">
                                             <div>
-                                                <div className="text-sm text-unbox-grey mb-1">Активный абонемент</div>
+                                                {/* Заголовок следует РЕАЛЬНОМУ статусу. Раньше здесь было
+                                                    жёстко зашито «Активный абонемент», и у завершённого
+                                                    выходило «Активный» рядом с плашкой «ЗАВЕРШЁН». */}
+                                                <div className="text-sm text-unbox-grey mb-1">
+                                                    {SUB_TITLE[subscriptionLifecycle(user.subscription as any)]}
+                                                </div>
                                                 {user.subscription ? (
                                                     <>
                                                         <div className="text-xl font-bold text-purple-900 mb-1">{user.subscription.name}</div>
                                                         <div className="text-sm text-purple-700 font-mono">
-                                                            Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч
+                                                            {subscriptionLifecycle(user.subscription as any) === 'completed'
+                                                                ? <>Использовано: <b>{(user.subscription.totalHours + (user.subscription.bonusHours || 0)) - user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч</>
+                                                                : <>Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч</>}
                                                         </div>
                                                         <button
                                                             onClick={() => setIsTopupOpen(o => !o)}
@@ -1493,13 +1525,13 @@ export function AdminUserDetails() {
                                 <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
                                     <div className="text-sm text-unbox-grey mb-1">Всего часов</div>
                                     <div className="text-2xl font-bold">
-                                        {bookings
-                                            .filter(b => b.userId === user.email && (b.status === 'completed' || b.status === 'confirmed'))
+                                        {bookingsLoading ? '…' : userBookings
+                                            .filter(b => b.status === 'completed' || b.status === 'confirmed')
                                             .reduce((sum, b) => sum + (b.duration / 60), 0)
                                             .toFixed(1)} ч
                                     </div>
                                     <div className="text-xs text-unbox-grey mt-1">
-                                        {sortedBookings.length} бронирований
+                                        {bookingsLoading ? '…' : sortedBookings.length} бронирований
                                     </div>
                                 </div>
 
@@ -1508,7 +1540,7 @@ export function AdminUserDetails() {
                                     <div className="text-sm text-unbox-grey mb-1">Средний чек</div>
                                     <div className="text-2xl font-bold">
                                         {(() => {
-                                            const completed = bookings.filter(b => b.userId === user.email && b.status === 'completed');
+                                            const completed = userBookings.filter(b => b.status === 'completed');
                                             if (completed.length === 0) return '0';
                                             const totalValue = completed.reduce((sum, b) => sum + b.finalPrice, 0);
                                             return (totalValue / completed.length).toFixed(0);
@@ -1534,7 +1566,7 @@ export function AdminUserDetails() {
                         <ClientTimeline
                             user={user}
                             transactions={useUserStore.getState().getTransactionsByUser(user.email)}
-                            bookings={bookings.filter(b => b.userId === user.email)}
+                            bookings={userBookings}
                         />
                     )}
                 </div>

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from app.core.rate_limit import limiter
+from sqlalchemy import or_
 from sqlmodel import select, Session
 from pydantic import BaseModel as PydanticBaseModel
 from app.api import deps
@@ -470,6 +471,11 @@ def read_bookings(
     session: Session = Depends(deps.get_session),
     skip: int = 0,
     limit: int = Query(5000, le=20000),
+    user_id: Optional[str] = Query(
+        None,
+        description="Только брони этого клиента (email или UUID). "
+                    "Карточка клиента обязана фильтровать здесь, а не в браузере.",
+    ),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
     """Retrieve all bookings (Admin only).
@@ -481,12 +487,23 @@ def read_bookings(
     placed) silently fell off the end past the 1000-row limit and didn't
     render on the chessboard. Limit raised to 5000 to give breathing room
     on top of the sort, and capped at 20k just in case.
+
+    `user_id` (2026-07-22): карточка клиента раньше тянула ВЕСЬ список и
+    фильтровала его в браузере. Броней стало 6115 при потолке 5000 — хвост
+    молча отбрасывался, и у клиента показывалось «0 часов / 0 бронирований»
+    или заниженные цифры. Фильтр по клиенту в SQL снимает потолок как
+    проблему: у одного человека броней десятки, а не тысячи.
     """
+    stmt = select(Booking)
+    if user_id:
+        cond = [Booking.user_id == user_id]
+        try:
+            cond.append(Booking.user_uuid == UUID(str(user_id)))
+        except (ValueError, TypeError):
+            pass
+        stmt = stmt.where(or_(*cond))
     bookings = session.exec(
-        select(Booking)
-        .order_by(Booking.date.desc())
-        .offset(skip)
-        .limit(limit)
+        stmt.order_by(Booking.date.desc()).offset(skip).limit(limit)
     ).all()
     return [enrich_booking_status(b) for b in bookings]
 

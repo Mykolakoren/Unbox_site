@@ -75,6 +75,19 @@ export const bookingsApi = {
         return response.data.map(mapToFrontend);
     },
 
+    /** Брони ОДНОГО клиента (email или UUID) — фильтрует сервер.
+     *
+     *  Карточка клиента раньше брала общий список и фильтровала его в
+     *  браузере, но общий список обрезан потолком в 5000, а броней уже
+     *  6115 — хвост молча терялся, и в карточке показывалось «0 часов /
+     *  0 бронирований». У одного человека броней десятки, потолок не мешает. */
+    getUserBookings: async (userId: string) => {
+        const response = await api.get<any[]>('/bookings', {
+            params: { user_id: userId, limit: 5000 }
+        });
+        return response.data.map(mapToFrontend);
+    },
+
     getPublicBookings: async () => {
         const response = await api.get<any[]>('/bookings/public');
         return response.data.map(mapToFrontend);
