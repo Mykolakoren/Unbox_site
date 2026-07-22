@@ -27,7 +27,7 @@ type Tab = 'transactions' | 'categories' | 'shifts';
 type PeriodMode = 'day' | 'week' | 'month' | 'custom';
 type TxType = 'all' | 'income' | 'expense';
 
-const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
+const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
 const TABS: { id: Tab; label: string }[] = [
     { id: 'transactions', label: 'Транзакции' },
@@ -443,7 +443,6 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 <option value="">Все филиалы</option>
                                 <option value="Unbox Uni">Unbox Uni</option>
                                 <option value="Unbox One">Unbox One</option>
-                                <option value="Neo School">Neo School</option>
                             </select>
                             <button
                                 onClick={() => p.setShowCloseChecklist(true)}

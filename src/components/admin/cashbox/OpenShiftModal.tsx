@@ -14,7 +14,7 @@ interface Props {
     branch?: string;
 }
 
-const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
+const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
 /**
  * "Открыть смену" — Excel #61, Иры. Audit-only event with a UX badge:

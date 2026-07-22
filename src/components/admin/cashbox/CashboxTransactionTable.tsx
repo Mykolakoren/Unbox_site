@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { CashboxTransaction } from '../../../api/cashbox';
 import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
 
-const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
+const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
 const getMethodIcon = (m: string) => {
     switch (m) {

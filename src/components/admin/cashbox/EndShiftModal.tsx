@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import { cashboxApi } from '../../../api/cashbox';
 
-const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'] as const;
+const BRANCHES = ['Unbox Uni', 'Unbox One'] as const;
 
 interface Props {
     isOpen: boolean;

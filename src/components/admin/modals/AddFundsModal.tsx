@@ -17,7 +17,9 @@ const PAYMENT_METHODS = [
     { id: 'bog', label: 'BOG (Ge)', icon: '🟠' },
 ] as const;
 
-const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
+// Филиалы кассы — только эти два (owner 2026-07-22). Neo School остаётся
+// локацией для броней, но денег там не считают: операций по нему ноль.
+const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
 export function AddFundsModal({ isOpen, onClose, onConfirm, userName }: AddFundsModalProps) {
     const [amount, setAmount] = useState('');

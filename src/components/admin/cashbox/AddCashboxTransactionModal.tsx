@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import clsx from 'clsx';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
 import { formatBatumi } from '../../../utils/dateUtils';
@@ -35,7 +34,13 @@ const PAYMENT_METHODS = [
     },
 ] as const;
 
-const BRANCHES = ['Unbox Uni', 'Unbox One', 'Neo School'];
+// Два действующих филиала. Neo School убран (owner 2026-07-22) — операций
+// по нему нет, а лишний пункт провоцировал промах. Значение — то, что
+// уходит в базу; label — то, что видит админ.
+const BRANCHES = [
+    { id: 'Unbox Uni', label: 'Uni' },
+    { id: 'Unbox One', label: 'One' },
+];
 
 function flattenCategories(cats: ExpenseCategory[], txType?: 'income' | 'expense' | 'transfer'): { id: string; name: string; depth: number; icon?: string }[] {
     const result: { id: string; name: string; depth: number; icon?: string }[] = [];
@@ -84,8 +89,6 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const [showClientDropdown, setShowClientDropdown] = useState(false);
     const clientInputRef = useRef<HTMLInputElement>(null);
     const [bookingUsers, setBookingUsers] = useState<{id: string; name: string; email: string}[]>([]);
-    // Topping up client balance (Excel #43) — default on for income with a selected client
-    const [creditUserBalance, setCreditUserBalance] = useState(true);
 
     // Fetch booking Users (not CRM clients — those are specialist-only)
     useEffect(() => {
@@ -114,17 +117,9 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
         }
 
         // ── Подстраховка от главной ошибки в балансах (owner 2026-07-18) ──
-        // Приход, который НЕ попадёт на баланс клиента, — самая частая причина
-        // расхождений: платёж внесли, а копилка клиента не пополнилась.
-        // Пропустить зачисление теперь можно только осознанно.
-        if (type === 'income' && clientId && !creditUserBalance) {
-            const nm = bookingUsers.find(c => c.id === clientId)?.name || 'клиента';
-            if (!window.confirm(
-                `Сумма ${value} ₾ НЕ будет зачислена на баланс: ${nm}.\n\n` +
-                `Обычно оплата клиента идёт на баланс (копилку). Не зачислять — только для штрафа/компенсации.\n\n` +
-                `Точно не зачислять на баланс?`
-            )) return;
-        }
+        // Приход без клиента не попадает ни на чью копилку — самая частая
+        // причина расхождений. (Приход С клиентом теперь зачисляется всегда,
+        // отключить это нельзя — см. комментарий у поля клиента.)
         if (type === 'income' && !clientId) {
             if (!window.confirm(
                 `Клиент не выбран.\n\n` +
@@ -171,7 +166,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                     date: dateValue,
                     client_id: (type === 'income' && clientId) ? clientId : undefined,
                     client_name: (type === 'income' && clientId) ? bookingUsers.find(c => c.id === clientId)?.name : undefined,
-                    credit_user_balance: (type === 'income' && !!clientId && creditUserBalance),
+                    // Клиент выбран → деньги его, зачисляем всегда.
+                    credit_user_balance: (type === 'income' && !!clientId),
                 } as any);
                 toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
             }
@@ -417,24 +413,15 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                         <X size={14} />
                                     </button>
                                 )}
-                                {/* Credit-to-balance toggle (Excel #43) */}
-                                {clientId && (
-                                    <label className={clsx(
-                                        "mt-2 flex items-start gap-2 cursor-pointer select-none text-xs rounded-lg px-2 py-1.5",
-                                        creditUserBalance ? 'bg-emerald-50' : 'bg-amber-50 ring-1 ring-amber-300'
-                                    )}>
-                                        <input
-                                            type="checkbox"
-                                            checked={creditUserBalance}
-                                            onChange={e => setCreditUserBalance(e.target.checked)}
-                                            className="mt-0.5 accent-unbox-green cursor-pointer"
-                                        />
-                                        <span className={creditUserBalance ? 'text-emerald-700' : 'text-amber-800 font-medium'}>
-                                            {creditUserBalance
-                                                ? 'Зачислить сумму на баланс клиента (копилку) — рекомендуется'
-                                                : '⚠️ НЕ зачисляется на баланс! Только для штрафа/компенсации. Для оплаты клиента — верни галочку.'}
-                                        </span>
-                                    </label>
+                                {/* Клиент выбран → сумма всегда идёт на его баланс.
+                                    Галочка «зачислить» убрана (owner 2026-07-22): выбор
+                                    клиента и означает, что деньги его. Возможность снять
+                                    галочку была лишним шагом и главным источником
+                                    расхождений — платёж вносили, копилка не пополнялась. */}
+                                {type === 'income' && clientId && (
+                                    <div className="mt-2 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-2 py-1.5">
+                                        Сумма зачислится на баланс клиента (копилку).
+                                    </div>
                                 )}
                                 {/* Подсказка: приход без клиента не попадёт ни на чей баланс */}
                                 {type === 'income' && !clientId && (
@@ -475,19 +462,33 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                         );
                     })()}
 
-                    {/* Branch */}
+                    {/* Филиал — две кнопки вместо выпадающего списка. Повторное
+                        нажатие снимает выбор: операции без филиала бывают
+                        (общие расходы по проекту), но теперь это видимое
+                        решение, а не молчаливое значение по умолчанию. */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Филиал</label>
-                        <select
-                            value={branch}
-                            onChange={e => setBranch(e.target.value)}
-                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm bg-white"
-                        >
-                            <option value="">Не указан</option>
+                        <div className="grid grid-cols-2 gap-2">
                             {BRANCHES.map(b => (
-                                <option key={b} value={b}>{b}</option>
+                                <button
+                                    key={b.id}
+                                    type="button"
+                                    onClick={() => setBranch(branch === b.id ? '' : b.id)}
+                                    className={`p-2 rounded-lg border text-sm transition-all ${
+                                        branch === b.id
+                                            ? 'border-unbox-green bg-gray-50 text-unbox-dark font-medium'
+                                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                                    }`}
+                                >
+                                    {b.label}
+                                </button>
                             ))}
-                        </select>
+                        </div>
+                        {!branch && (
+                            <p className="mt-2 text-[11px] text-amber-700 leading-snug">
+                                Филиал не выбран — операция не попадёт в остаток ни Uni, ни One.
+                            </p>
+                        )}
                     </div>
 
                     {/* Description */}
