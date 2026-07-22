@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../../ui/Button';
 import { X, CreditCard } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -25,6 +25,15 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName }: AddFunds
     const [amount, setAmount] = useState('');
     const [method, setMethod] = useState<'cash' | 'tbc' | 'bog'>('cash');
     const [branch, setBranch] = useState('');
+
+    // Сумма обнуляется при каждом открытии. Окно не пересоздаётся (ниже просто
+    // return null), поэтому после «Отмены» введённая сумма оставалась в поле —
+    // и следующему клиенту можно было записать чужие деньги. Способ оплаты и
+    // филиал специально НЕ трогаем: за смену они одни и те же, их повторный
+    // выбор — как раз лишняя работа.
+    useEffect(() => {
+        if (isOpen) setAmount('');
+    }, [isOpen]);
 
     if (!isOpen) return null;
 

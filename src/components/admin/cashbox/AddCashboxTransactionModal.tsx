@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
@@ -100,6 +100,32 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     }, []);
     const [saving, setSaving] = useState(false);
 
+    const resetForm = useCallback(() => {
+        setType('income');
+        setAmount('');
+        setPaymentMethod('cash');
+        setCategoryId('');
+        setSelectedPlan('');
+        setDescription('');
+        setBranch('');
+        setTransferTo('card_tbc');
+        setClientId('');
+        setClientSearch('');
+        setShowClientDropdown(false);
+        setTxDate(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
+    }, []);
+
+    // Чистая карточка при каждом открытии (owner 2026-07-22).
+    // Окно не пересоздаётся — при закрытии оно лишь возвращает null, а вся
+    // введённая информация продолжает жить до перезагрузки страницы. Из-за
+    // этого в поле клиента оставался тот, кого выбирали в прошлый раз, и его
+    // приходилось стирать вручную; после «Отмены» так же залипали сумма и
+    // описание. За день два прихода от одного клиента — редкость, поэтому
+    // подставлять прошлого смысла нет: чаще мешает, чем помогает.
+    useEffect(() => {
+        if (isOpen) resetForm();
+    }, [isOpen, resetForm]);
+
     if (!isOpen) return null;
 
     const flatCats = flattenCategories(categories, type);
@@ -171,11 +197,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                 } as any);
                 toast.success(type === 'income' ? 'Приход записан' : 'Расход записан');
             }
-            setAmount('');
-            setDescription('');
-            setCategoryId('');
-            setBranch('');
-            setTxDate(formatBatumi(new Date(), "yyyy-MM-dd'T'HH:mm"));
+            resetForm();
             onClose();
         } catch {
             toast.error('Ошибка при сохранении');
