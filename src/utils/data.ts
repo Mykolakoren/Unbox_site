@@ -267,7 +267,12 @@ export function availableExtrasForResource(
     });
 }
 
-/** Subscription plans — fallback, fetched from API at runtime */
+/** ЕДИНЫЙ источник цен тарифов. Отсюда админка назначает абонемент (реальные
+ *  деньги) И отсюда же страница тарифов рисует инфографику «выгоды».
+ *  Значения сверены с карточками на сайте (эталон, owner 2026-07-24):
+ *  Регулярный 350, Профи+ 650, Групповой 450. Раньше тут стояли 340/640/420 —
+ *  из-за этого админка списывала не ту сумму, а на сайте «разные цены».
+ *  Меняешь цену — меняешь ТОЛЬКО здесь. */
 export let SUBSCRIPTION_PLANS = [
     {
         id: 'WARM_START',
@@ -282,7 +287,7 @@ export let SUBSCRIPTION_PLANS = [
         id: 'REGULAR_PRACTITIONER',
         name: 'Регулярный практик',
         hours: 20,
-        price: 340,
+        price: 350,
         durationDays: 30,
         discountPercent: 15,
         formats: ['individual'],
@@ -293,7 +298,7 @@ export let SUBSCRIPTION_PLANS = [
         name: 'Профи+',
         hours: 40,
         bonusHours: 2,
-        price: 640,
+        price: 650,
         durationDays: 45,
         discountPercent: 20,
         formats: ['individual', 'group', 'intervision'],
@@ -302,9 +307,9 @@ export let SUBSCRIPTION_PLANS = [
     {
         id: 'GROUP_MASTER',
         name: 'Групповой мастер',
-        hours: 16,
-        price: 420,
-        durationDays: 30,
+        hours: 20,
+        price: 450,
+        durationDays: 45,
         discountPercent: 25,
         formats: ['group'],
         perks: ['Анонс по базе']

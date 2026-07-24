@@ -4,6 +4,7 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { MinimalLayout } from '../components/MinimalLayout';
+import { SUBSCRIPTION_PLANS } from '../utils/data';
 
 // ── Standard Prices ──────────────────────────────────────────────────────────
 const STANDARD_PRICES = [
@@ -945,23 +946,30 @@ function GridHouseSubscriptions() {
    Effective price chart — pricing infographic
    ═══════════════════════════════════════════════════════════════ */
 
-/** Числа в синке с SUBSCRIPTION_PLANS в data.ts.
- *  Профи+: 40 базовых часов + 2 бонусных = 42 ч; делим 640 на 42.
- *  «Без абонемента» появляется в обеих группах как 100% — точка отсчёта
- *  для своего тарифа.
- *  2026-06-07 owner: разделено на 2 шкалы по формату. Раньше мешали
- *  индивид. + группу в один список, и визуально групповая полоса
- *  казалась длиннее «без абонемента» индивид. */
+/** Инфографика «выгоды» БЕРЁТ цены и часы из SUBSCRIPTION_PLANS (data.ts) —
+ *  единого источника. Раньше числа были прописаны тут отдельно (340/640/420)
+ *  и разъехались с карточками (350/650/450). Теперь разъехаться нечему:
+ *  меняешь цену в data.ts — меняется и здесь.
+ *  Профи+: 40 базовых + 2 бонусных = 42 ч (по ним и считаем эффективную цену).
+ *  «Без абонемента» — точка отсчёта 100% для своего формата.
+ *  2026-06-07 owner: две шкалы по формату, чтобы групповая полоса визуально
+ *  не казалась длиннее индивидуальной. */
+const _plan = (id: string) => SUBSCRIPTION_PLANS.find(p => p.id === id);
+const _hours = (id: string) => {
+    const p = _plan(id);
+    return (p?.hours ?? 0) + ((p as any)?.bonusHours ?? 0);
+};
+
 const INDIVIDUAL_PLANS = [
     { name: 'Без абонемента',     price: 20,  hours: 1,  ref: 20 },
-    { name: 'Тёплый старт',       price: 180, hours: 10, ref: 20 },
-    { name: 'Регулярный практик', price: 340, hours: 20, ref: 20 },
-    { name: 'Профи+',             price: 640, hours: 42, ref: 20, accent: true },
+    { name: 'Тёплый старт',       price: _plan('WARM_START')!.price,           hours: _hours('WARM_START'),           ref: 20 },
+    { name: 'Регулярный практик', price: _plan('REGULAR_PRACTITIONER')!.price, hours: _hours('REGULAR_PRACTITIONER'), ref: 20 },
+    { name: 'Профи+',             price: _plan('PRO_PLUS')!.price,             hours: _hours('PRO_PLUS'),             ref: 20, accent: true },
 ];
 
 const GROUP_PLANS = [
     { name: 'Без абонемента',     price: 35,  hours: 1,  ref: 35 },
-    { name: 'Групповой мастер',   price: 420, hours: 16, ref: 35, accent: true },
+    { name: 'Групповой мастер',   price: _plan('GROUP_MASTER')!.price, hours: _hours('GROUP_MASTER'), ref: 35, accent: true },
 ];
 
 /** Скидка за длительность непрерывной брони в ОДНОМ кабинете.
