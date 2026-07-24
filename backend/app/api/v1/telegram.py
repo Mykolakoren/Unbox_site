@@ -1764,6 +1764,12 @@ def _book_do_confirm(
     _answer_callback(callback_id, "Готово!")
 
     # ── Admin alert: new booking through bot ──
+    # Горячая бронь (pending_approval) обязана нести кнопки ✅/❌ прямо в
+    # алерте. Бронь с сайта их получает через send_admin_event; бронь из
+    # бота идёт этим путём, и раньше кнопок тут НЕ БЫЛО — админ видел
+    # «На согласовании», а подтвердить из чата не мог. Кнопки шлём тем же
+    # форматом callback_data "ba:<id>" / "br:<id>", что и веб-путь, так что
+    # обработчик _handle_hot_booking_callback ловит их без изменений.
     try:
         who = escape(user.name or user.email or "—")
         badge = "⏳ На согласовании" if status == "pending_approval" else "🆕 Новая бронь"
@@ -1771,12 +1777,22 @@ def _book_do_confirm(
             f"\n💸 {final_price:g} ₾" if final_price is not None and applied_rule != "SUBSCRIPTION"
             else "\n🎫 Абонемент" if applied_rule == "SUBSCRIPTION" else ""
         )
+        alert_markup = None
+        booking_id = getattr(result, "id", None)
+        if status == "pending_approval" and booking_id:
+            alert_markup = {
+                "inline_keyboard": [[
+                    {"text": "✅ Подтвердить", "callback_data": f"ba:{booking_id}"},
+                    {"text": "❌ Отклонить",   "callback_data": f"br:{booking_id}"},
+                ]]
+            }
         telegram_service.send_admin_alert(
             f"{badge} — через TG-бот\n\n"
             f"👤 {who}\n"
             f"🏢 {escape(_loc_label(location))} · {escape(resource.name)}\n"
             f"📅 {day_label}  ⏰ {time_str}–{end_label}"
-            f"{price_line}"
+            f"{price_line}",
+            reply_markup=alert_markup,
         )
     except Exception as _e:
         logger.warning("[tg:admin-alert] booking alert failed: %r", _e)

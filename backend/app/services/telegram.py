@@ -410,18 +410,29 @@ class TelegramService:
 
     # ─── Admin alerts (TELEGRAM_ADMIN_CHAT_ID group) ─────────────────────────
 
-    def send_admin_alert(self, text: str, parse_mode: str = "HTML") -> bool:
+    def send_admin_alert(
+        self, text: str, parse_mode: str = "HTML",
+        reply_markup: Optional[dict] = None,
+    ) -> bool:
         """Post to the private admin group (TELEGRAM_ADMIN_CHAT_ID).
 
         Used for: new bookings via bot, /help escalations, bot fallbacks,
         daily summaries. Silently no-ops if the chat id is unset so dev
         environments don't crash — only prod should have it configured.
+
+        `reply_markup` (optional) — inline keyboard, e.g. ✅/❌ на горячей
+        броне из бота. Раньше его тут не было: бронь через бот шла на
+        подтверждение, а кнопок в алерте не было — админ видел заявку, но
+        подтвердить её из чата не мог.
         """
         chat_id = settings.TELEGRAM_ADMIN_CHAT_ID
         if not chat_id:
             logger.debug("[tg:admin-alert] TELEGRAM_ADMIN_CHAT_ID unset, skipping")
             return False
-        return self._send_message(chat_id=str(chat_id), text=text, parse_mode=parse_mode)
+        return self._send_message(
+            chat_id=str(chat_id), text=text, parse_mode=parse_mode,
+            reply_markup=reply_markup,
+        )
 
     def send_owner_summary(self, text: str, parse_mode: str = "HTML") -> bool:
         """Post to the owner-only chat (TELEGRAM_OWNER_CHAT_ID).
