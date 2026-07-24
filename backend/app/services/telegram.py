@@ -492,6 +492,19 @@ class TelegramService:
         "booking_with_extras":       ("🧰", "Бронь с допуслугами — нужно подготовить"),
     }
 
+    @staticmethod
+    def hot_booking_markup(booking_id) -> dict:
+        """Кнопки ✅/❌ для срочной брони. ЕДИНОЕ место сборки — раньше этот
+        inline_keyboard собирался руками в трёх местах (веб-путь, бот-путь),
+        и когда в бот-пути его забыли, кнопки пропали. Теперь один источник,
+        покрытый тестом (tests/test_regression_guard.py)."""
+        return {
+            "inline_keyboard": [[
+                {"text": "✅ Подтвердить", "callback_data": f"ba:{booking_id}"},
+                {"text": "❌ Отклонить",   "callback_data": f"br:{booking_id}"},
+            ]]
+        }
+
     def send_admin_event(self, *, event: str, fields: dict, reply_markup: Optional[dict] = None,
                          dm_copy: bool = False) -> bool:
         """Structured admin alert. `fields` is rendered as `key: value` lines

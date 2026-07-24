@@ -1247,12 +1247,7 @@ def create_booking(
             # 64 байта TG-лимита даже с длинными UUID.
             tg_markup: Optional[dict] = None
             if booking.status == "pending_approval":
-                tg_markup = {
-                    "inline_keyboard": [[
-                        {"text": "✅ Подтвердить", "callback_data": f"ba:{booking.id}"},
-                        {"text": "❌ Отклонить",   "callback_data": f"br:{booking.id}"},
-                    ]]
-                }
+                tg_markup = telegram_service.hot_booking_markup(booking.id)
             background_tasks.add_task(
                 telegram_service.send_admin_event,
                 event=event_type,

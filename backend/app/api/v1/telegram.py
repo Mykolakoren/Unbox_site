@@ -1780,12 +1780,7 @@ def _book_do_confirm(
         alert_markup = None
         booking_id = getattr(result, "id", None)
         if status == "pending_approval" and booking_id:
-            alert_markup = {
-                "inline_keyboard": [[
-                    {"text": "✅ Подтвердить", "callback_data": f"ba:{booking_id}"},
-                    {"text": "❌ Отклонить",   "callback_data": f"br:{booking_id}"},
-                ]]
-            }
+            alert_markup = telegram_service.hot_booking_markup(booking_id)
         alert_text = (
             f"{badge} — через TG-бот\n\n"
             f"👤 {who}\n"
