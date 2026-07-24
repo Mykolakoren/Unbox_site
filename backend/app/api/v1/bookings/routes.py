@@ -1258,6 +1258,8 @@ def create_booking(
                 event=event_type,
                 fields=fields_dict,
                 reply_markup=tg_markup,
+                # Срочную бронь дублируем в личку админам (не теряется в ленте).
+                dm_copy=(booking.status == "pending_approval"),
             )
 
             # Separate, prep-focused alert when extras are present. The

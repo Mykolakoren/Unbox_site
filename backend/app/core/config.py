@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # roll-up without the per-event noise. If unset, daily summary
     # falls back to TELEGRAM_ADMIN_CHAT_ID (legacy behaviour).
     TELEGRAM_OWNER_CHAT_ID: Optional[str] = None
+    # Личные чаты, куда ДУБЛИРУЕТСЯ срочная бронь (pending_approval) вдобавок
+    # к общему чату — Егор просил, чтобы срочные не терялись в общей ленте.
+    # Список chat_id через запятую. Кнопки ✅/❌ в личке работают только у
+    # привязанного админа (авторизация _handle_hot_booking_callback), поэтому
+    # сюда — только telegram_id админов. Читать через settings, не os.getenv.
+    TELEGRAM_HOT_BOOKING_DM_IDS: Optional[str] = None
 
     # First Superuser (for auto-creation on deploy) — MUST be overridden via
     # env vars in production. The literal "CHANGE_ME_ON_FIRST_DEPLOY" default

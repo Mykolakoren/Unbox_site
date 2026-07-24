@@ -1786,14 +1786,18 @@ def _book_do_confirm(
                     {"text": "❌ Отклонить",   "callback_data": f"br:{booking_id}"},
                 ]]
             }
-        telegram_service.send_admin_alert(
+        alert_text = (
             f"{badge} — через TG-бот\n\n"
             f"👤 {who}\n"
             f"🏢 {escape(_loc_label(location))} · {escape(resource.name)}\n"
             f"📅 {day_label}  ⏰ {time_str}–{end_label}"
-            f"{price_line}",
-            reply_markup=alert_markup,
+            f"{price_line}"
         )
+        telegram_service.send_admin_alert(alert_text, reply_markup=alert_markup)
+        # Срочную бронь дублируем в личку админам (просьба Егора — в общем
+        # чате теряются). Кнопки те же, у привязанного админа они работают.
+        if status == "pending_approval":
+            telegram_service.send_hot_booking_dms(alert_text, alert_markup)
     except Exception as _e:
         logger.warning("[tg:admin-alert] booking alert failed: %r", _e)
 

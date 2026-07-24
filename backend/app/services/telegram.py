@@ -434,6 +434,25 @@ class TelegramService:
             reply_markup=reply_markup,
         )
 
+    def send_hot_booking_dms(self, text: str, reply_markup: Optional[dict] = None) -> int:
+        """Дублирует срочную бронь в личные чаты из TELEGRAM_HOT_BOOKING_DM_IDS.
+
+        Егор просил: в общем чате срочные брони теряются. Шлём копию с теми же
+        кнопками ✅/❌ каждому id из списка. Отдельная ошибка (кто-то не начал
+        диалог с ботом) не рушит остальных. Возвращает число успешных отправок.
+        """
+        raw = settings.TELEGRAM_HOT_BOOKING_DM_IDS or ""
+        ids = [x.strip() for x in raw.split(",") if x.strip()]
+        sent = 0
+        for cid in ids:
+            try:
+                if self._send_message(chat_id=cid, text=text, parse_mode="HTML",
+                                      reply_markup=reply_markup):
+                    sent += 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[tg:hot-dm] failed for %s: %r", cid, e)
+        return sent
+
     def send_owner_summary(self, text: str, parse_mode: str = "HTML") -> bool:
         """Post to the owner-only chat (TELEGRAM_OWNER_CHAT_ID).
 
@@ -473,13 +492,18 @@ class TelegramService:
         "booking_with_extras":       ("🧰", "Бронь с допуслугами — нужно подготовить"),
     }
 
-    def send_admin_event(self, *, event: str, fields: dict, reply_markup: Optional[dict] = None) -> bool:
+    def send_admin_event(self, *, event: str, fields: dict, reply_markup: Optional[dict] = None,
+                         dm_copy: bool = False) -> bool:
         """Structured admin alert. `fields` is rendered as `key: value` lines
         in insertion order. Falsy values are skipped so optional keys can be
         passed unconditionally without producing empty rows.
 
         `reply_markup` (optional) — inline keyboard JSON dict, e.g. for
         approve/reject buttons on hot-bookings. Forwarded as-is to TG API.
+
+        `dm_copy` — продублировать это же сообщение (с кнопками) в личные чаты
+        из TELEGRAM_HOT_BOOKING_DM_IDS. Для срочных броней, чтобы не терялись
+        в общей ленте (просьба Егора).
         """
         chat_id = settings.TELEGRAM_ADMIN_CHAT_ID
         if not chat_id:
@@ -496,12 +520,16 @@ class TelegramService:
         tb_now = datetime.now(_tz.utc) + _td(hours=4)
         lines.append("")
         lines.append(f"<i>{tb_now.strftime('%H:%M · %d.%m.%Y')} (Батуми)</i>")
-        return self._send_message(
+        text = "\n".join(lines)
+        ok = self._send_message(
             chat_id=str(chat_id),
-            text="\n".join(lines),
+            text=text,
             parse_mode="HTML",
             reply_markup=reply_markup,
         )
+        if dm_copy:
+            self.send_hot_booking_dms(text, reply_markup)
+        return ok
 
     # ─── Excel #58 — cancel / reschedule / reminder ──────────────────────────
 
