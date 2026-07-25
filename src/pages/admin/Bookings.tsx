@@ -13,6 +13,7 @@ import type { BookingHistoryItem } from '../../store/types';
 import { ConfirmationModal, PromptModal } from '../../components/ui/ConfirmationModal';
 import { AdminCancelBookingModal } from '../../components/admin/AdminCancelBookingModal';
 import { ExtendBookingModal, AddExtrasModal } from '../../components/admin/BookingTodayEditModals';
+import { subscriptionLifecycle } from '../../utils/subscription';
 
 type ViewMode = 'list' | 'grid';
 type TimeFilter = 'all' | 'today' | 'upcoming' | 'completed';
@@ -265,6 +266,38 @@ export function AdminBookings() {
     const handleExtend = (bookingId: string) => setExtendModalId(bookingId);
     const handleAddExtras = (bookingId: string) => setExtrasModalId(bookingId);
 
+    // Перевод брони с баланса на абонемент (owner 2026-07-25). Показывается
+    // только для сегодняшних броней, оплаченных с баланса, у клиента с
+    // действующим абонементом. Деньги вернутся на баланс, часы спишутся.
+    const [convertingId, setConvertingId] = useState<string | null>(null);
+    // Можно ли предложить перевод: сегодня + не абонемент + у клиента активный абон.
+    const canToSubscription = (b: BookingHistoryItem): boolean => {
+        if (bookingBucket(bookingStartMs(b)) !== 'today') return false;
+        if (b.paymentMethod === 'subscription') return false;
+        const client = users.find(u => u.email === b.userId || u.id === b.userId);
+        return subscriptionLifecycle(client?.subscription as any) === 'active';
+    };
+    const handleToSubscription = (bookingId: string) => {
+        setConfirmModal({
+            open: true,
+            title: 'Списать с абонемента',
+            message: 'Перевести эту бронь на списание с абонемента? '
+                + 'Деньги вернутся на баланс клиента, а часы спишутся с его абонемента.',
+            destructive: false,
+            onConfirm: async () => {
+                setConvertingId(bookingId);
+                try {
+                    await bookingsApi.convertToSubscription(bookingId);
+                    toast.success('Бронь переведена на абонемент');
+                    useUserStore.getState().fetchAllBookings();
+                } catch (e: any) {
+                    toast.error(e?.response?.data?.detail || 'Не удалось перевести на абонемент');
+                }
+                setConvertingId(null);
+            },
+        });
+    };
+
     // Excel #59 — "Перенести" navigates to the grid view with this booking
     // highlighted and scrolled into view. The admin then drags it to the new
     // slot using the existing drag-to-move handler in AdminChessboardView.
@@ -406,6 +439,9 @@ export function AdminBookings() {
                 handleReRent={handleReRent}
                 handleExtend={handleExtend}
                 handleAddExtras={handleAddExtras}
+                handleToSubscription={handleToSubscription}
+                canToSubscription={canToSubscription}
+                convertingId={convertingId}
                 handleMove={handleMove}
                 handleApprove={handleApprove}
                 handleReject={handleReject}
@@ -431,6 +467,9 @@ type GHAdminBookingsProps = {
     handleReRent: (id: string) => void;
     handleExtend: (id: string) => void;
     handleAddExtras: (id: string) => void;
+    handleToSubscription: (id: string) => void;
+    canToSubscription: (b: BookingHistoryItem) => boolean;
+    convertingId: string | null;
     handleMove: (id: string) => void;
     handleApprove: (id: string) => Promise<void>;
     handleReject: (id: string) => void;
@@ -444,7 +483,8 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
         bookings, filteredBookings, viewMode, setViewMode,
         filterStatus, setFilterStatus, timeFilter, setTimeFilter, search, setSearch,
         navigate, getUserName, handleEditPrice, handleCancel,
-        handleReRent, handleExtend, handleAddExtras, handleMove, handleApprove, handleReject,
+        handleReRent, handleExtend, handleAddExtras, handleToSubscription, canToSubscription,
+        convertingId, handleMove, handleApprove, handleReject,
         approvingId, rejectingId, extendingId,
     } = props;
 
@@ -812,6 +852,16 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                             + Доп
                                                         </button>
                                                     )}
+                                                    {canToSubscription(booking) && (
+                                                        <button
+                                                            onClick={() => handleToSubscription(booking.id)}
+                                                            disabled={convertingId === booking.id}
+                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
+                                                        >
+                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
                                                         style={ghActionBtn(GH.ink60, GH.ink10)}
@@ -855,6 +905,16 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     >
                                                         + Доп
                                                     </button>
+                                                    {canToSubscription(booking) && (
+                                                        <button
+                                                            onClick={() => handleToSubscription(booking.id)}
+                                                            disabled={convertingId === booking.id}
+                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
+                                                        >
+                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
                                                         style={ghActionBtn(GH.ink60, GH.ink10)}
@@ -1052,6 +1112,16 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                             + Доп
                                                         </button>
                                                     )}
+                                                    {canToSubscription(booking) && (
+                                                        <button
+                                                            onClick={() => handleToSubscription(booking.id)}
+                                                            disabled={convertingId === booking.id}
+                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
+                                                        >
+                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
                                                         style={ghTableLinkBtn(GH.ink60)}
@@ -1092,6 +1162,16 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     >
                                                         + Доп
                                                     </button>
+                                                    {canToSubscription(booking) && (
+                                                        <button
+                                                            onClick={() => handleToSubscription(booking.id)}
+                                                            disabled={convertingId === booking.id}
+                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
+                                                        >
+                                                            {convertingId === booking.id ? '...' : 'На абонемент'}
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
                                                         style={ghTableLinkBtn(GH.ink60)}

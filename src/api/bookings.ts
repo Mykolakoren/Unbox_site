@@ -231,6 +231,13 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /** Перевести бронь с баланса на списание с абонемента.
+     *  Деньги вернутся на баланс, часы спишутся с абонемента. */
+    convertToSubscription: async (bookingId: string) => {
+        const response = await api.patch<any>(`/bookings/${bookingId}/to-subscription`, {});
+        return mapToFrontend(response.data);
+    },
+
     // Hot booking approval
     getPendingApprovals: async (): Promise<BookingHistoryItem[]> => {
         const response = await api.get<any[]>('/bookings/pending-approval');
