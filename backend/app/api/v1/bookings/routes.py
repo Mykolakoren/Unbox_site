@@ -4476,6 +4476,134 @@ def add_booking_extras(
     return enrich_booking_status(booking)
 
 
+# ─── Перевод брони на абонемент ──────────────────────────────────────────────
+# Клиент оплатил бронь с баланса, а потом выяснилось, что у него есть активный
+# абонемент (или админ провёл бронь балансом по ошибке). Эта функция переводит
+# уже созданную бронь на списание с абонемента: возвращает деньги на баланс,
+# списывает часы с абонемента, перекрашивает способ оплаты.
+#
+# Ядро вынесено в helper — им пользуется и эндпоинт (кнопка «На абонемент»),
+# и разовый скрипт правки исторических броней (fix_*_to_subscription).
+def _convert_booking_to_subscription(session: Session, booking: Booking, actor: User | None):
+    """Перевести бронь balance→subscription. Возвращает dict с итогом.
+
+    Бросает ValueError с человекочитаемой причиной, если перевести нельзя
+    (уже на абонементе / нет активного абонемента / не хватает часов / формат
+    не входит в тариф / истёк срок).
+    """
+    from app.services.pricing import PricingService
+
+    if booking.payment_method == "subscription":
+        raise ValueError("Бронь уже списана с абонемента")
+
+    owner = _resolve_booking_owner(session, booking)
+    if owner is None:
+        raise ValueError("Не найден владелец брони")
+
+    if not subscription_pool.is_active(owner.subscription, datetime.utcnow()):
+        raise ValueError("У клиента нет активного абонемента")
+
+    # Движок сам применит абонемент, раз он активен. Если applied_rule вышел
+    # SUBSCRIPTION — тариф покрывает эту бронь (часы есть, формат подходит,
+    # срок не вышел). Иначе честно говорим, почему нельзя.
+    ps = PricingService(session)
+    quote = ps.calculate_price(
+        user=owner,
+        resource_id=booking.resource_id,
+        start_time=booking.date,
+        duration_minutes=booking.duration,
+        format_type=booking.format or "individual",
+        exclude_booking_id=booking.id,
+    )
+    if quote.applied_rule != "SUBSCRIPTION":
+        raise ValueError(
+            "Абонемент не покрывает эту бронь — не хватает часов, "
+            "не тот формат или вышел срок"
+        )
+
+    hours = round(float(quote.hours_deducted or (booking.duration / 60.0)), 4)
+
+    # 1. Возврат денег на баланс. Возвращаем ровно то, что было списано, за
+    #    вычетом остатка, который абонемент не покрыл (пиковая надбавка).
+    #    Для pending/waived денег не списывали — возвращать нечего.
+    old_charge = float(
+        booking.charge_amount if booking.charge_amount is not None
+        else (booking.final_price or 0)
+    )
+    peak_left = round(float(quote.final_price or 0), 2)  # обычно 0, иногда пик
+    refund = round(old_charge - peak_left, 2)
+    refunded = 0.0
+    if booking.payment_status not in ("pending", "waived") and refund > 0:
+        wallet.credit(
+            session, owner, refund, reason="booking_to_subscription",
+            description="Возврат: бронь переведена на абонемент",
+            ref_type="booking", ref_id=str(booking.id), actor=actor,
+        )
+        refunded = refund
+
+    # 2. Списание часов с абонемента.
+    rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
+    used = subscription_pool.get_float(owner.subscription, "used_hours")
+    owner.subscription = subscription_pool.update(
+        owner.subscription,
+        remaining_hours=max(0.0, rem - hours),
+        used_hours=used + hours,
+    )
+    session.add(owner)
+
+    # 3. Перекраска брони.
+    booking.payment_method = "subscription"
+    booking.applied_rule = "SUBSCRIPTION"
+    booking.hours_deducted = hours
+    booking.final_price = peak_left
+    booking.charge_amount = peak_left
+    booking.updated_at = datetime.now()
+    session.add(booking)
+
+    return {
+        "booking_id": str(booking.id),
+        "client": owner.name or owner.email,
+        "hours_deducted": hours,
+        "refunded_to_balance": refunded,
+        "remaining_hours_after": subscription_pool.get_float(owner.subscription, "remaining_hours"),
+    }
+
+
+@router.patch("/{booking_id}/to-subscription", response_model=BookingRead)
+def convert_booking_to_subscription(
+    booking_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Перевести оплату брони с баланса на абонемент. Только админ."""
+    if current_user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Только администратор")
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status not in ("confirmed",):
+        raise HTTPException(status_code=400, detail="Перевести можно только подтверждённую бронь")
+
+    try:
+        result = _convert_booking_to_subscription(session, booking, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    session.commit()
+    session.refresh(booking)
+    logger.info("[to-subscription] %s", result)
+    # Синхронизируем связанную CRM-сессию, если есть (цена стала 0/пик).
+    try:
+        _sync_linked_session_to_booking(session, booking)
+    except Exception:
+        session.rollback()
+    return enrich_booking_status(booking)
+
+
 # ─── Shorten booking ─────────────────────────────────────────────────────────
 # Дополнение к /extend. Юзер забронировал 2 часа, потом хочет освободить
 # один — раньше приходилось отменять всю бронь и заново ставить, теперь

@@ -129,6 +129,27 @@ def test_expired_subscription_is_not_active():
     assert subscription_pool.is_active(active, datetime.utcnow()) is True
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 2026-07-25 — перевод брони на абонемент. Двойной перевод НЕ должен второй
+# раз списать часы: если бронь уже на абонементе — отказ.
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_convert_to_subscription_rejects_already_subscription():
+    """Перевод брони, которая уже на абонементе, обязан падать — иначе часы
+    спишутся дважды."""
+    from app.api.v1.bookings.routes import _convert_booking_to_subscription
+    from app.models.booking import Booking
+
+    class _FakeBooking:
+        payment_method = "subscription"
+
+    try:
+        _convert_booking_to_subscription(None, _FakeBooking(), None)
+        raise AssertionError("ожидали ValueError, а перевод прошёл")
+    except ValueError as e:
+        assert "уже" in str(e).lower(), f"неожиданная причина: {e}"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
