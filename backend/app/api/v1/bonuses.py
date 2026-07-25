@@ -80,6 +80,12 @@ def create_bonus(
     - owner/senior_admin: auto-approved (status=active)
     - admin with bonuses.grant permission: status=pending (needs approval)
     """
+    # Основание обязательно (owner 2026-07-25) — ручной бонус без причины
+    # не оставляет следа в аудите. Приветственный час идёт мимо этого
+    # эндпоинта (_create_welcome_bonus), его это не касается.
+    if not (data.description or "").strip():
+        raise HTTPException(400, "Укажите основание начисления бонуса")
+
     # Verify target user exists
     from uuid import UUID as UUIDType
     try:

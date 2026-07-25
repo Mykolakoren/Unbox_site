@@ -275,6 +275,15 @@ export function availableExtrasForResource(
  *  Меняешь цену — меняешь ТОЛЬКО здесь. */
 export let SUBSCRIPTION_PLANS = [
     {
+        id: 'TRIAL',
+        name: 'Пробный',
+        hours: 4,
+        price: 70,
+        durationDays: 14,
+        discountPercent: 0,
+        formats: ['individual']
+    },
+    {
         id: 'WARM_START',
         name: 'Тёплый старт',
         hours: 10,

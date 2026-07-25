@@ -57,6 +57,12 @@ export function UserBonuses({ user, currentUser }: Props) {
             toast.error('Укажите количество часов');
             return;
         }
+        // Основание обязательно (owner 2026-07-25): бонус без причины —
+        // дыра в аудите, потом не разобрать, за что начислили.
+        if (!form.description.trim()) {
+            toast.error('Укажите основание начисления');
+            return;
+        }
         setSaving(true);
         try {
             await bonusesApi.createBonus({
@@ -145,7 +151,7 @@ export function UserBonuses({ user, currentUser }: Props) {
                     </div>
                     <input
                         type="text"
-                        placeholder="Описание (напр. Новогодний бонус)"
+                        placeholder="Основание * (напр. компенсация за отмену)"
                         value={form.description}
                         onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                         className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 focus:outline-none focus:border-amber-400 bg-white"
