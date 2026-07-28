@@ -120,14 +120,15 @@ CHECKS: list[Check] = [
         key="broken_subscription_pool",
         title="Пул абонемента не сходится сам с собой",
         why=(
-            "remaining_hours + used_hours обязано равняться total_hours. Пул пишется в "
-            "двух диалектах (snake_case с бэкенда, camelCase из UI) — рассинхрон уже "
-            "приводил к двойному списанию: админ пополнял camelCase, а крон читал snake "
-            "и не видел часов."
+            "remaining_hours + used_hours обязано равняться total_hours + bonus_hours "
+            "(бонусные часы — часть пула, напр. Профи+ = 40+2). Пул пишется в двух "
+            "диалектах (snake_case с бэкенда, camelCase из UI) — рассинхрон уже приводил "
+            "к двойному списанию: админ пополнял camelCase, а крон читал snake."
         ),
         sql="""
             SELECT u.email,
                    coalesce(u.subscription->>'total_hours',     u.subscription->>'totalHours')     AS total,
+                   coalesce(u.subscription->>'bonus_hours',     u.subscription->>'bonusHours', '0') AS bonus,
                    coalesce(u.subscription->>'used_hours',      u.subscription->>'usedHours')      AS used,
                    coalesce(u.subscription->>'remaining_hours', u.subscription->>'remainingHours') AS remaining
             FROM "user" u
@@ -140,6 +141,7 @@ CHECKS: list[Check] = [
                     coalesce(u.subscription->>'remaining_hours', u.subscription->>'remainingHours')::float
                   + coalesce(u.subscription->>'used_hours',      u.subscription->>'usedHours', '0')::float
                   - coalesce(u.subscription->>'total_hours',     u.subscription->>'totalHours')::float
+                  - coalesce(u.subscription->>'bonus_hours',     u.subscription->>'bonusHours', '0')::float
               ) > 0.01
             ORDER BY u.email
         """,
