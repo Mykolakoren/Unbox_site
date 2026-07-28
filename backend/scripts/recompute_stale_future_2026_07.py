@@ -72,6 +72,12 @@ def run(dry_run: bool) -> int:
                 continue
             if EXCLUDE_NAME_LIKE in (u.name or "").lower():
                 continue  # Галина — пропуск
+            # Уже оплаченные (charge_amount проставлен) НЕ трогаем: поменять
+            # ценник без движения денег = final_price разойдётся с charge_amount,
+            # и ревизор это поймает. Правим только НЕоплаченные (крон спишет по
+            # новой цене, charge_amount проставится тогда же и совпадёт).
+            if b.charge_amount is not None:
+                continue
             try:
                 bd = ps.calculate_price(
                     user=u, resource_id=b.resource_id, start_time=_start_dt(b),
