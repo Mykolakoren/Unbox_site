@@ -22,6 +22,7 @@ import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { parseUTC, tbilisiNow } from '../../utils/dateUtils';
+import { subscriptionLifecycle } from '../../utils/subscription';
 // 2026-06-06 owner (Фаза 3 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md):
 // TIME_SLOTS / timeToMin / parseBookingDate раньше дублировались в
 // AdminChessboardView и CrmChessboardView. Теперь — общие. parseUTC
@@ -685,6 +686,28 @@ export function AdminChessboardView() {
             toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
         }
     };
+    // Перевод брони с баланса на абонемент — та же правка, что в списке.
+    // Показываем, когда бронь сегодня, не на абонементе, а у клиента есть
+    // действующий абонемент. Деньги вернутся на баланс, спишутся часы.
+    const canToSubscription = (b: BookingHistoryItem | null): boolean => {
+        if (!b || !bookingIsToday(b)) return false;
+        if (b.paymentMethod === 'subscription') return false;
+        const client = users.find(u => u.email === b.userId || u.id === b.userId);
+        return subscriptionLifecycle((client as any)?.subscription) === 'active';
+    };
+    const handleToSubscription = async (b: BookingHistoryItem) => {
+        if (!window.confirm('Перевести эту бронь на списание с абонемента? '
+            + 'Деньги вернутся на баланс клиента, а часы спишутся с абонемента.')) return;
+        try {
+            await bookingsApi.convertToSubscription(b.id);
+            toast.success('Бронь переведена на абонемент');
+            setSelectedBooking(null);
+            await fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось перевести на абонемент');
+        }
+    };
+
     // Excel #67: previously this fired listForReRent and dropped the dialog
     // immediately — if the request errored or was slow, the admin saw "nothing
     // happened" with no feedback. Now we await so the toast (success or
@@ -1143,30 +1166,47 @@ export function AdminChessboardView() {
                                     </div>
                                 </div>
                             )}
-                            {selectedBooking.status === 'confirmed' && (
+            {/* Правки показываем и для ЗАВЕРШИВШЕЙСЯ сегодня брони (не только
+                confirmed) — раньше по прошествии времени статус становился
+                'completed' и все кнопки исчезали, а админ узнавал о переработке
+                пост-фактум и не мог добавить время/допы (жалоба Лизы 2026-07).
+                Набор правок — тот же, что в списке /admin/bookings. */}
+                            {(selectedBooking.status === 'confirmed'
+                              || (selectedBooking.status === 'completed' && bookingIsToday(selectedBooking))) && (() => {
+                                const bCompleted = selectedBooking.status === 'completed';
+                                return (
                                 <div className="space-y-1.5">
                                     <div className="grid grid-cols-2 gap-1.5">
-                                        <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
-                                        <button onClick={() => setExtendModalId(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">Продлить</button>
+                                        {!bCompleted && (
+                                            <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
+                                        )}
+                                        <button onClick={() => setExtendModalId(selectedBooking.id)} className={clsx("py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700", bCompleted && "col-span-2")}>Продлить</button>
                                         {bookingIsToday(selectedBooking) && (
                                             <button onClick={() => setExtrasModalId(selectedBooking.id)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-teal-50 text-teal-700">+ Доп (кофе и т.п.)</button>
                                         )}
-                                        {(selectedBooking.duration || 60) > 60 && (
+                                        {canToSubscription(selectedBooking) && (
+                                            <button onClick={() => handleToSubscription(selectedBooking)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-purple-50 text-purple-700">На абонемент</button>
+                                        )}
+                                        {!bCompleted && (selectedBooking.duration || 60) > 60 && (
                                             <button onClick={() => handleShorten(selectedBooking)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700">Сократить (— минут)</button>
                                         )}
                                     </div>
-                                    <div className="grid grid-cols-3 gap-1.5">
+                                    <div className={clsx("grid gap-1.5", bCompleted ? "grid-cols-1" : "grid-cols-3")}>
                                         <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
-                                        <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
-                                            {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
-                                        </button>
-                                        <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Удалить</button>
+                                        {!bCompleted && (
+                                            <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
+                                                {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
+                                            </button>
+                                        )}
+                                        {!bCompleted && (
+                                            <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Удалить</button>
+                                        )}
                                     </div>
                                     {/* Format change — useful when client picked the wrong rate
                                         at checkout. Only shown for cabinets that actually have a
                                         group rate (7/8 — see RESOURCES). For others the toggle
-                                        would be a no-op. */}
-                                    {(() => {
+                                        would be a no-op. Для завершённых не показываем. */}
+                                    {!bCompleted && (() => {
                                         // Cab 2 in One ("мини-группы" — до 4 чел) добавлен по запросу
                                         // админа: помещение хоть и небольшое, но позволяет вести группу
                                         // или семью. Кабинеты 7/8 — большие групповые залы (20 чел).
@@ -1196,7 +1236,7 @@ export function AdminChessboardView() {
                                     })()}
                                     {/* Waive — only relevant while charge is still on the table.
                                         For `waived` rows the panel above already shows the reason. */}
-                                    {(selectedBooking.paymentStatus === 'pending' || selectedBooking.paymentStatus === 'paid') && (
+                                    {!bCompleted && (selectedBooking.paymentStatus === 'pending' || selectedBooking.paymentStatus === 'paid') && (
                                         <button
                                             onClick={async () => {
                                                 const reason = window.prompt('Причина снятия штрафа (обязательно):', '');
@@ -1219,14 +1259,17 @@ export function AdminChessboardView() {
                                             🩹 Снять штраф (с причиной)
                                         </button>
                                     )}
-                                    <button
-                                        onClick={() => { const b = selectedBooking; setSelectedBooking(null); openWaitlistFor(b); }}
-                                        className="w-full py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700 flex items-center justify-center gap-1.5"
-                                    >
-                                        <Bell size={12} /> Следить за слотом
-                                    </button>
+                                    {!bCompleted && (
+                                        <button
+                                            onClick={() => { const b = selectedBooking; setSelectedBooking(null); openWaitlistFor(b); }}
+                                            className="w-full py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700 flex items-center justify-center gap-1.5"
+                                        >
+                                            <Bell size={12} /> Следить за слотом
+                                        </button>
+                                    )}
                                 </div>
-                            )}
+                                );
+                            })()}
                         </div>
                     </div>
                 )}
@@ -1642,14 +1685,15 @@ export function AdminChessboardView() {
                     </div>
 
                     {/* Actions */}
-                    {selectedBooking.status === 'confirmed' && (() => {
+                    {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'completed') && (() => {
                         const rawTime = (typeof selectedBooking.startTime === 'string' && selectedBooking.startTime.includes(':'))
                             ? selectedBooking.startTime
                             : '00:00';
                         const [bh, bm] = rawTime.split(':').map(Number);
                         const bookEnd = new Date(selectedBooking.date);
                         bookEnd.setHours(bh || 0, (bm || 0) + (selectedBooking.duration || 60), 0, 0);
-                        const isPastB = bookEnd < new Date();
+                        // 'completed' от бэка ИЛИ время уже прошло → завершившаяся.
+                        const isPastB = selectedBooking.status === 'completed' || bookEnd < new Date();
 
                         return isPastB ? (
                             // Завершившаяся бронь. Для СЕГОДНЯШНЕЙ админ всё ещё может
@@ -1681,6 +1725,14 @@ export function AdminChessboardView() {
                                         </button>
                                     </div>
                                 )}
+                                {canToSubscription(selectedBooking) && (
+                                    <button
+                                        onClick={() => handleToSubscription(selectedBooking)}
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 transition-colors"
+                                    >
+                                        На абонемент
+                                    </button>
+                                )}
                             </div>
                         ) : (
                             // Restored full action menu (Excel #28).
@@ -1708,6 +1760,14 @@ export function AdminChessboardView() {
                                         className="w-full py-1.5 text-xs font-medium rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 transition-colors"
                                     >
                                         + Доп (кофе и т.п.)
+                                    </button>
+                                )}
+                                {canToSubscription(selectedBooking) && (
+                                    <button
+                                        onClick={() => handleToSubscription(selectedBooking)}
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 transition-colors"
+                                    >
+                                        На абонемент
                                     </button>
                                 )}
                                 <div className="grid grid-cols-3 gap-1.5">
