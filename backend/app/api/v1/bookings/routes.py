@@ -4506,11 +4506,19 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
     # Движок сам применит абонемент, раз он активен. Если applied_rule вышел
     # SUBSCRIPTION — тариф покрывает эту бронь (часы есть, формат подходит,
     # срок не вышел). Иначе честно говорим, почему нельзя.
+    # Время старта из date + start_time — движок берёт час пик отсюда.
+    # Передавать booking.date (полночь) НЕЛЬЗЯ: пиковая надбавка потеряется,
+    # и peak_left выйдет 0 даже для брони в час пик → перевозврат.
+    try:
+        _h, _m = map(int, (booking.start_time or "0:0").split(":"))
+        _start_dt = booking.date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+    except Exception:
+        _start_dt = booking.date
     ps = PricingService(session)
     quote = ps.calculate_price(
         user=owner,
         resource_id=booking.resource_id,
-        start_time=booking.date,
+        start_time=_start_dt,
         duration_minutes=booking.duration,
         format_type=booking.format or "individual",
         exclude_booking_id=booking.id,
