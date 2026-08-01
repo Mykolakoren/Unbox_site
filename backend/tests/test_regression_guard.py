@@ -150,6 +150,38 @@ def test_convert_to_subscription_rejects_already_subscription():
         assert "уже" in str(e).lower(), f"неожиданная причина: {e}"
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 2026-08 — «полуночный» баг цены. calculate_price берёт час пик из времени
+# старта; если передать b.date (полночь), пик теряется и цена/скидка считаются
+# неверно. Встречался дважды: в пересчёте цен и в weekly_rebate (кредит за
+# объём выходил завышенным у клиентов с бронями в пик). Сторож ловит паттерн
+# `start_time=<...>.date` без `.replace(hour=...)` в денежных модулях.
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_no_midnight_pricing_pattern_in_money_code():
+    """Ни один денежный модуль не должен звать calculate_price со временем-
+    полночью. Правильно — строить start из date+start_time (.replace(hour=...))."""
+    import re
+    base = os.path.join(os.path.dirname(__file__), "..")
+    targets = [
+        "app/services/weekly_rebate.py",
+        "app/api/v1/bookings/routes.py",
+    ]
+    # «start_time=<что-то>.date» на конце токена (не .date.replace(...))
+    bad = re.compile(r"start_time\s*=\s*[A-Za-z_][\w.]*\.date\b(?!\.replace)")
+    offenders = []
+    for rel in targets:
+        p = os.path.join(base, rel)
+        if not os.path.exists(p):
+            continue
+        for i, line in enumerate(open(p, encoding="utf-8"), 1):
+            if bad.search(line):
+                offenders.append(f"{rel}:{i}: {line.strip()}")
+    assert not offenders, (
+        "полуночный паттерн цены (start_time=...date без времени):\n  "
+        + "\n  ".join(offenders))
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

@@ -144,10 +144,19 @@ def run_weekly_rebates(
             if b.payment_status in ("pending", "waived"):
                 continue
             try:
+                # Время старта — из date + start_time, КАК в create_booking.
+                # Раньше передавали b.date (полночь) → движок не видел час пик,
+                # база скидки считалась неверно, и недельный кредит выходил
+                # завышенным у клиентов с бронями в пик (утро 9-10, вечер 20-22).
+                try:
+                    _h, _m = map(int, (b.start_time or "0:0").split(":"))
+                    _start = b.date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+                except Exception:
+                    _start = b.date
                 breakdown = pricing.calculate_price(
                     user=user,
                     resource_id=b.resource_id,
-                    start_time=b.date,
+                    start_time=_start,
                     duration_minutes=b.duration,
                     format_type=b.format or "individual",
                     exclude_booking_id=b.id,
