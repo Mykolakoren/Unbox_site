@@ -662,7 +662,13 @@ function GridHouseSubscriptions() {
             {/* Subscription plans */}
             <div style={{ ...ghsubMono, color: GH.label, marginBottom: 16 }}>АБОНЕМЕНТЫ</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16, marginBottom: 48 }}>
-                {SUBSCRIPTIONS.map(plan => (
+                {SUBSCRIPTIONS.map(plan => {
+                    // Эффективная цена за час — то, что делает выгоду понятной
+                    // прямо в карточке (раньше была только в инфографике ниже).
+                    // Групповой мастер считается от 35 ₾/час, остальные — от 20.
+                    const perHour = Math.round((plan.price / Math.max(plan.hours, 1)) * 10) / 10;
+                    const stdBase = plan.id === 'group' ? 35 : 20;
+                    return (
                     <div key={plan.id} style={{ border: plan.popular ? `2px solid ${GH.ink}` : ghsubHairline, padding: 24, display: 'flex', flexDirection: 'column' }}>
                         {plan.badge && (
                             <span style={{ ...ghsubMono, color: plan.popular ? GH.accent : GH.ink30, fontSize: 9, marginBottom: 8 }}>
@@ -680,6 +686,10 @@ function GridHouseSubscriptions() {
                                     {plan.fullPrice} ₾
                                 </span>
                             )}
+                        </div>
+                        {/* Эффективная цена за час — ключевой аргумент выгоды */}
+                        <div style={{ fontFamily: GH_MONO, fontSize: 13, color: GH.ink60, marginBottom: 16 }}>
+                            ≈ {perHour} ₾/час <span style={{ color: GH.ink30 }}>· стандарт {stdBase}</span>
                         </div>
                         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                             <span style={{ ...ghsubMono, fontSize: 9, color: GH.accent, padding: '2px 8px', border: `1px solid ${GH.accent}30` }}>
@@ -725,10 +735,11 @@ function GridHouseSubscriptions() {
                                 fontWeight: 700, fontSize: 13, fontFamily: GH_SANS, textDecoration: 'none', cursor: 'pointer',
                             }}
                         >
-                            Оформить →
+                            Оформить «{plan.name}» →
                         </a>
                     </div>
-                ))}
+                    );
+                })}
             </div>
 
             {/* ═══ Эффективная цена часа — pricing infographic ═══════════════
