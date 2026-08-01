@@ -313,7 +313,13 @@ body.scroll-locked [data-mobile-scroll] {
 
 @layer base {
   body {
-    @apply bg-unbox-light text-unbox-dark antialiased;
+    /* Нейтральный кремовый фон — виден только при overscroll. Раньше был
+       bg-unbox-light (#D4E2E1, зелёный из старого glass-дизайна на фото-фоне),
+       и при оттягивании страницы вниз из-под кремовых Grid House-страниц
+       проглядывал зелёный. Все живые страницы ставят свой фон (десктоп GH.paper
+       #FAFAF7, мобилка #F4F4F2), на body-фон не полагаются — смена безопасна. */
+    @apply text-unbox-dark antialiased;
+    background-color: #F4F4F2;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
