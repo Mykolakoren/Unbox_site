@@ -139,8 +139,15 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
             if (userId && userId !== specialist.userId) {
                 payload.userId = userId;
             }
-            await api.patch(`/specialists/admin/${specialist.id}`, payload);
-            toast.success('Специалист обновлён');
+            if (specialist.id) {
+                await api.patch(`/specialists/admin/${specialist.id}`, payload);
+                toast.success('Специалист обновлён');
+            } else {
+                // Создание админом: карточка сразу в каталог, без анкеты и без
+                // обязательного аккаунта (бэкенд: user_id опционален).
+                await api.post('/specialists/admin/create', payload);
+                toast.success('Специалист добавлен в каталог');
+            }
             onSaved();
             onClose();
         } catch {
@@ -155,7 +162,9 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                 <div className="sticky top-0 bg-white border-b border-unbox-light px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
                     <h3 className="font-bold text-lg text-unbox-dark">
-                        Редактирование: {specialist.firstName} {specialist.lastName}
+                        {specialist.id
+                            ? `Редактирование: ${specialist.firstName} ${specialist.lastName}`
+                            : 'Новый специалист в каталог'}
                     </h3>
                     <button onClick={onClose} className="text-unbox-dark/40 hover:text-unbox-dark">
                         <X size={18} />
@@ -1116,6 +1125,21 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                         Специалисты
                     </h1>
                     {activeTab === 'specialists' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {/* Добавить специалиста в каталог ЗА человека (owner 2026-08).
+                                Открывает ту же форму с пустой карточкой (id='' →
+                                режим создания). Аккаунт не обязателен — каталожная
+                                карточка живёт и без логина. */}
+                            <button
+                                onClick={() => setEditing({ id: '', firstName: '', lastName: '', isVerified: true } as any)}
+                                style={{
+                                    padding: '8px 16px', border: 'none', cursor: 'pointer',
+                                    background: GH.ink, color: GH.paper,
+                                    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em',
+                                    textTransform: 'uppercase', borderRadius: 8,
+                                }}>
+                                + Добавить специалиста
+                            </button>
                         <div style={{ display: 'flex' }}>
                             {(['table', 'cards'] as const).map((m, i) => (
                                 <button key={m} onClick={() => setViewMode(m)}
@@ -1131,6 +1155,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                     {m === 'table' ? 'ТАБЛИЦА' : 'КАРТОЧКИ'}
                                 </button>
                             ))}
+                        </div>
                         </div>
                     )}
                 </div>

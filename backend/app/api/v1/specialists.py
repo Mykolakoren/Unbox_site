@@ -144,6 +144,44 @@ def update_specialist_admin(
     return specialist
 
 
+@router.post("/admin/create", response_model=SpecialistRead)
+def create_specialist_admin(
+    *,
+    specialist_in: SpecialistCreate,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
+    """Admin: завести специалиста в каталог ЗА человека (не самообслуживание).
+
+    Нужно, чтобы админ мог добавить каталожные карточки (напр. 17 реальных
+    специалистов), не заставляя их подавать анкету самим. Ключевое:
+    `user_id` НЕОБЯЗАТЕЛЕН — карточка живёт в каталоге и без аккаунта.
+    `application_status=NULL` = создан админом, минуя очередь на проверку.
+    По умолчанию verified (админ ручается). Если user_id задан и уже занят
+    другим профилем — снимаем оттуда (UNIQUE-констрейнт).
+    """
+    data = specialist_in.model_dump(exclude_unset=True)
+    if data.get("badges"):
+        data["badges"] = [b for b in data["badges"] if b in ALLOWED_BADGES]
+    # админ-создание = сразу в каталог, verified по умолчанию
+    data.setdefault("is_verified", True)
+    data.setdefault("is_public", True)
+
+    uid = data.get("user_id")
+    if uid is not None:
+        prev = session.exec(select(Specialist).where(Specialist.user_id == uid)).first()
+        if prev:
+            prev.user_id = None  # type: ignore
+            session.add(prev)
+
+    specialist = Specialist(**data)
+    specialist.application_status = None  # админ-создан, не в очереди
+    session.add(specialist)
+    session.commit()
+    session.refresh(specialist)
+    return specialist
+
+
 class ReorderItem(BaseModel):
     id: UUID
     sort_order: int
