@@ -165,8 +165,21 @@ def update_user(
                 raise HTTPException(status_code=400, detail="Cannot demote the last Owner")
 
     user_data = user_in.dict(exclude_unset=True)
+    # БАЛАНС — только через wallet, иначе движение не попадает в ленту и
+    # инвариант «сумма ленты == баланс» ломается. Так было с выдачей абонемента
+    # «за счёт баланса»: фронт слал сюда новый balance напрямую (UserDetails
+    # handleAssignSubscription), деньги списывались молча, а в истории пусто —
+    # у Валерии Костенецкой так «исчезли» 650₾ за Профи+.
+    _new_balance = user_data.pop("balance", None)
     for key, value in user_data.items():
         setattr(user, key, value)
+    if _new_balance is not None:
+        from app.services import wallet as _wallet
+        _wallet.set_balance(
+            session, user, float(_new_balance), reason="correction",
+            description="Изменение баланса через админку",
+            ref_type="user", ref_id=str(user.id), actor=current_user,
+        )
 
     # Sync is_admin flag based on role for backward compatibility
     if user.role in ["owner", "senior_admin", "admin"]:
