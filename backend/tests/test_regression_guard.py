@@ -182,6 +182,205 @@ def test_no_midnight_pricing_pattern_in_money_code():
         + "\n  ".join(offenders))
 
 
+def test_monthly_recurrence_is_four_weeks_not_calendar_month():
+    """«Раз в 4 недели» должно шагать ровно 28 днями (день недели фиксирован),
+    а НЕ календарным месяцем. Владелец: серия обязана попадать на тот же день
+    недели. Регресс = возврат relativedelta(months=...) или step_days=30."""
+    import re
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    # Ветка создания серии monthly должна давать 28-дневный шаг.
+    assert re.search(r'pattern\s*==\s*"monthly"\s*:\s*\n\s*#.*\n(?:\s*#.*\n)*\s*dates\s*=\s*\[first\s*\+\s*timedelta\(weeks=i\s*\*\s*4\)', src), \
+        "monthly-серия должна строиться как first + timedelta(weeks=i*4) (28 дней)"
+    # Календарный месяц не должен вернуться (ловим импорт/вызов, не упоминание в коммент.).
+    assert "dateutil" not in src and "rdelta(" not in src and "relativedelta(" not in src, \
+        "relativedelta (календарный месяц) не должен использоваться в сериях броней"
+    # Продление серии для monthly — шаг 28, а не 30.
+    assert re.search(r'pattern_override\s*==\s*"monthly"\s*:\s*\n\s*step_days\s*=\s*28\b', src), \
+        "продление monthly-серии должно шагать 28 днями, не 30"
+
+
+def test_session_payments_dated_by_operation_day_not_session_date():
+    """Обе кнопки оплаты сессии (quick_pay_session И mark_all_sessions_paid)
+    должны датировать TherapistPayment ДНЁМ ОПЛАТЫ (datetime.now()), а НЕ датой
+    сессии (ts.date). Иначе оплата старого долга задним числом меняет «кассу»
+    прошлого месяца и ломает кэш-флоу. Владелец: касса = когда деньги пришли."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/crm/sessions.py"), encoding="utf-8").read()
+    # В создании платежа не должно быть date=ts.date (обе ветки — операционный день).
+    assert "date=ts.date" not in src, (
+        "платёж за сессию датируется ts.date — верни datetime.now() (день оплаты)")
+    # Обе платёжные ветки (quick_pay + mark_all) создают платёж с датой now().
+    assert src.count("date=datetime.now()") >= 2, (
+        "ожидаем ≥2 платёжных путей с date=datetime.now() (quick_pay + mark_all)")
+
+
+def test_booking_wizard_bonus_filter_matches_free_hour():
+    """Мастер брони (ConfirmationStep.tsx) фильтрует подарочные бонусы. Бэкенд
+    хранит тип 'free_hour' (auth._create_welcome_bonus). Если фильтр ищет только
+    'freeHour' (camelCase) — опция «оплатить бонусом» не показывается и подарочный
+    час нельзя использовать (кейс Оксаны, −20). Значит фильтр обязан принимать
+    'free_hour'."""
+    base = os.path.join(os.path.dirname(__file__), "..", "..")
+    p = os.path.join(base, "src/components/Wizard/ConfirmationStep.tsx")
+    if not os.path.exists(p):
+        return  # фронт может отсутствовать в некоторых окружениях — не валим
+    src = open(p, encoding="utf-8").read()
+    # Бэкенд выдаёт 'free_hour' — фронт обязан его принимать.
+    assert "'free_hour'" in src or '"free_hour"' in src, (
+        "фильтр бонусов в ConfirmationStep.tsx не принимает 'free_hour' — "
+        "подарочный час снова станет невыбираемым (см. кейс Оксаны)")
+
+
+def test_deferred_charge_claims_booking_row_with_lock():
+    """settle_pending_charge обязан «застолбить» бронь блокировкой строки
+    (with_for_update) ПЕРЕД списанием — иначе два прогона крона внахлёст
+    спишут одну бронь дважды без возврата (12 случаев за 21.07–07.08.2026).
+    Проверка payment_status без FOR UPDATE недостаточна."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/services/billing_defer.py"), encoding="utf-8").read()
+    assert "with_for_update()" in src, (
+        "settle_pending_charge не блокирует строку брони (with_for_update) — "
+        "вернётся двойное списание при параллельных прогонах крона")
+    # Лок должен реально уходить в БД, а не отдавать кэш identity-map.
+    assert "populate_existing=True" in src, (
+        "нужен populate_existing=True, иначе FOR UPDATE вернёт кэш без блокировки")
+
+
+def test_refund_of_subscription_fallback_to_balance_returns_money():
+    """Отмена абонементной брони, которая ушла в баланс-долг (исчерпан пул,
+    hours_deducted=0, method остался 'subscription') должна вернуть ДЕНЬГИ, а
+    не 0 часов. _refund_booking_to_owner обязан гейтить возврат часов на
+    hours_deducted>0 (иначе деньги клиента пропадают при отмене)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    assert "and (booking.hours_deducted or 0) > 0" in src, (
+        "_refund_booking_to_owner не гейтит возврат часов на hours_deducted>0 — "
+        "вернётся баг: отмена абонемент→баланс брони теряет деньги клиента")
+
+
+def test_reschedule_updates_charge_amount():
+    """Перенос брони со сменой цены обязан обновлять charge_amount (как /extend,
+    /trim, /format), иначе charge_amount навсегда расходится с final_price и
+    портит будущие возвраты (waive, перевод на абонемент) и дашборд."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.rfind('reason="reschedule_diff"')
+    assert i != -1, "не найден блок reschedule_diff"
+    j = src.find("# Update booking price fields", i)
+    assert j != -1 and "charge_amount" in src[i:j], (
+        "reschedule не обновляет charge_amount после доплаты/возврата — "
+        "charge_amount разойдётся с final_price (см. money_audit charge_amount_mismatch)")
+
+
+def test_merge_paths_move_balance_and_zero_source():
+    """Слияние аккаунтов не должно оставлять деньги на мёртвом профиле.
+    - /users/merge (admin): переносит баланс на tgt И удаляет src (session.delete).
+    - _merge_into (Telegram auto): переносит на keep И обнуляет absorb (иначе
+      баланс задваивается + виснет — как 31 легаси-случай)."""
+    import re
+    base = os.path.join(os.path.dirname(__file__), "..")
+    admin = open(os.path.join(base, "app/api/v1/users/admin.py"), encoding="utf-8").read()
+    tg = open(os.path.join(base, "app/api/v1/telegram.py"), encoding="utf-8").read()
+    # admin merge: переносит баланс на tgt и удаляет src.
+    assert re.search(r'_wallet\.apply\(session, tgt,', admin), \
+        "/users/merge не переносит баланс на tgt"
+    assert "session.delete(src)" in admin, "/users/merge не удаляет источник"
+    # telegram auto-merge: переносит на keep И обнуляет absorb.
+    assert re.search(r'apply\(session, keep,', tg), "_merge_into не переносит баланс на keep"
+    assert re.search(r'apply\(session, absorb, -', tg), \
+        "_merge_into не обнуляет источник — баланс задвоится и зависнет на мёртвом профиле"
+
+
+def test_cron_charges_subscription_peak_surcharge():
+    """Крон (settle_pending_charge), когда абонемент покрыл часы, обязан всё равно
+    списать пиковую надбавку (final_price = subscription_peak_debt) — иначе Unbox
+    недополучает ~5₾/ч на пиковых абонементных бронях, забронированных заранее."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/services/billing_defer.py"), encoding="utf-8").read()
+    assert "пиковая надбавка абонемента (T-24ч)" in src, (
+        "крон не списывает пиковую надбавку абонемента в ветке «часы покрыли» — "
+        "Unbox недополучает деньги за пик")
+
+
+def test_reject_refunds_bonus_hour():
+    """reject_booking (отклонение горячей брони) должен вернуть бонусный час —
+    hot-gate его не откатывает, а reject раньше вообще ничего не возвращал."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def reject_booking")
+    assert i != -1, "reject_booking не найден"
+    j = src.find("\ndef ", i + 10)
+    body = src[i:j if j != -1 else len(src)]
+    assert "_refund_booking_to_owner" in body, (
+        "reject_booking не возвращает бонусный час (нет вызова _refund_booking_to_owner)")
+
+
+def test_recurring_recomputes_consecutive_chain():
+    """Создание СЕРИИ обязано пересчитывать цепочку смежных часов, как это уже
+    делают одиночная бронь и мульти-слот. Иначе новая бронь получает скидку за
+    смежность, а её сосед остаётся по полной цене (кейс Натальи Ященко 12.08:
+    11:00 — 18₾ со скидкой, смежная 12:00 — 20₾ без; клиент ушёл в минус)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def create_recurring_booking")
+    assert i != -1, "create_recurring_booking не найден"
+    j = src.find("\n@router.", i + 10)
+    body = src[i:j if j != -1 else len(src)]
+    assert "recompute_user_chains_for_day" in body, (
+        "создание серии не пересчитывает цепочку смежных часов — "
+        "соседняя бронь останется без скидки за длительность")
+
+
+def test_group_rate_has_no_per_room_exceptions():
+    """Владелец 2026-08-12: групповой тариф ЕДИНЫЙ (35₾/ч), интервизия 30₾/ч —
+    никаких исключений «в этом кабинете группа по индивидуальной ставке».
+    Такое исключение уже было (Кабинет 2) и создавало расхождение: фронт
+    показывал 35₾, бэк списывал 20₾. Сторож не даёт ему вернуться."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    back = open(os.path.join(base, "app/services/pricing.py"), encoding="utf-8").read()
+    assert "MINI_GROUP_ROOMS" not in back, (
+        "в бэкенде вернулось кабинетное исключение группового тарифа")
+    # Базовые ставки на месте и совпадают с политикой владельца.
+    assert '"GRP": 35.0' in back and '"INTV": 30.0' in back, (
+        "базовые ставки группы/интервизии изменились — сверить с владельцем")
+    front_path = os.path.join(base, "..", "src/utils/pricing.ts")
+    if os.path.exists(front_path):
+        front = open(front_path, encoding="utf-8").read()
+        assert "MINI_GROUP_ROOMS" not in front, (
+            "во фронте вернулось кабинетное исключение группового тарифа")
+
+
+def test_tg_approve_marks_booking_paid():
+    """Подтверждение горячей брони ЧЕРЕЗ TELEGRAM-БОТ обязано ставить
+    payment_status='paid' сразу после списания. Иначе крон T-24ч видит бронь
+    как confirmed+pending и списывает второй раз (кейс Алёны Ловиц 13.08:
+    бот снял 20₾ в 06:50, крон снял ещё 20₾ в 07:00)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/telegram.py"), encoding="utf-8").read()
+    i = src.find('description="Бронь через Telegram-бот"')
+    assert i != -1, "не найдено списание в tg-approve"
+    tail = src[i:i + 1500]
+    assert 'payment_status = "paid"' in tail, (
+        "tg-approve не помечает бронь оплаченной — крон спишет второй раз")
+
+
+def test_admin_user_update_routes_balance_through_wallet():
+    """PATCH /users/{id} не должен писать balance напрямую через setattr —
+    только через wallet.set_balance, иначе движение не попадает в ленту и
+    ломается инвариант «сумма ленты == баланс». Так молча исчезли 650₾ у
+    Валерии Костенецкой при выдаче абонемента «за счёт баланса»."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/users/admin.py"), encoding="utf-8").read()
+    i = src.find("def update_user(")
+    assert i != -1, "update_user не найден"
+    body = src[i:i + 4000]
+    assert 'user_data.pop("balance"' in body, (
+        "update_user не вынимает balance из общего setattr — баланс запишется мимо ленты")
+    assert "set_balance(" in body, (
+        "update_user не проводит баланс через wallet.set_balance")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
