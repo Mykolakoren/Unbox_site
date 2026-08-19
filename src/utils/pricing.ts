@@ -85,6 +85,8 @@ const getBaseRate = (resourceId: string, format: Format): number => {
         format === 'group' ? 'GRP' :
         format === 'intervision' ? 'INTV' : 'IND';
 
+    // Исключений по кабинетам НЕТ: мини-группа считается как обычная группа
+    // (35₾/ч), интервизия — 30₾/ч. Зеркалит backend/app/services/pricing.py.
     // Lookup Rate
     return PRICING_CONFIG.base_rates[spaceType][formatCode];
 };

@@ -38,7 +38,9 @@ export const RESOURCES: Resource[] = [
         locationId: 'unbox_one',
         area: 12,
         minBookingHours: 1,
-        formats: ['individual'],
+        // Мини-группы и интервизии (до 4 чел). Тарифы стандартные:
+        // индивидуально 20₾/ч, группа 35₾/ч, интервизия 30₾/ч.
+        formats: ['individual', 'group', 'intervision'],
         description: 'Просторный кабинет 12 м² в нейтральных тонах — спокойная атмосфера для индивидуальных сессий, парной и семейной терапии. Естественный свет, комфортный диван, звукоизоляция. Кондиционер, Wi-Fi, чай-кофе.',
         photos: [
             '/img/cabinets/one/cab2/01.jpg',
@@ -82,7 +84,8 @@ export const RESOURCES: Resource[] = [
         locationId: 'unbox_uni',
         area: 16,
         minBookingHours: 1,
-        formats: ['individual'],
+        // Мини-группы и интервизии (до 4 чел) — как у Кабинета 2.
+        formats: ['individual', 'group', 'intervision'],
         // 2026-06-03 owner: убрали песочницу — Яна больше не предоставляет
         // игрушки другим специалистам.
         description: 'Просторный кабинет 16 м² — индивидуальная, детская и семейная терапия, работа с подростками. Естественный свет, диван, кондиционер, Wi-Fi.',

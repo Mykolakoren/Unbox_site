@@ -231,13 +231,11 @@ class PricingService:
         format_code = self.FORMAT_CODES.get(format_type, "IND")
         if resource.location_id == "neo_school":
             base_rate = float(resource.hourly_rate)
-        # Cabinet 2 in Unbox One can host mini-groups (до 4 чел), но остаётся
-        # маленькой комнатой — групповой тариф больших залов (35₾/ч на cab 7/8)
-        # тут неуместен. Берём индивидуальный рейт независимо от выбранного
-        # формата, чтобы цена не прыгала когда юзер ставит "group" на Cab 2.
-        elif resource.id == "unbox_one_room_2":
-            rate_table = self.BASE_RATES.get(space_type, {})
-            base_rate = rate_table.get("IND", resource.hourly_rate)
+        # 2026-08-12 владелец: НИКАКИХ исключений по кабинетам для группового
+        # тарифа. Мини-группа (в т.ч. Кабинеты 2 и 6) считается как обычная
+        # группа — 35₾/ч, интервизия — 30₾/ч. Раньше здесь висело исключение
+        # «Кабинет 2 = индивидуальная ставка», из-за которого показанная цена
+        # (35₾ на фронте) расходилась бы со списанием (20₾ на бэке).
         else:
             rate_table = self.BASE_RATES.get(space_type, {})
             # Fallback: resource.hourly_rate if format_code missing (defensive)
