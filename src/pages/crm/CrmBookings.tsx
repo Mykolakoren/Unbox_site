@@ -1273,7 +1273,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
             </div>
             {recurringGroups.map(g => {
                 const resource = RESOURCES.find((r: any) => r.id === g.resourceId);
-                const patternLabel = g.pattern === 'monthly' ? 'Ежемес.' : g.pattern === 'biweekly' ? '2 нед.' : 'Еженед.';
+                const patternLabel = g.pattern === 'monthly' ? '4 нед.' : g.pattern === 'biweekly' ? '2 нед.' : 'Еженед.';
                 const isConfirming = confirmCancelGroupId === g.recurringGroupId;
                 const isCancelling = cancellingGroupId === g.recurringGroupId;
                 return (
@@ -1343,7 +1343,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                             <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Продлить серию</div>
                             <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>ПЕРИОДИЧНОСТЬ</div>
                             <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-                                {([['weekly', 'Еженед.'], ['biweekly', 'Раз в 2 нед.'], ['monthly', 'Ежемес.']] as const).map(([p, l]) => (
+                                {([['weekly', 'Еженед.'], ['biweekly', 'Раз в 2 нед.'], ['monthly', '4 недели']] as const).map(([p, l]) => (
                                     <button key={p} onClick={() => setExPattern(p)} style={chip(exPattern === p)}>{l}</button>
                                 ))}
                             </div>

@@ -99,7 +99,7 @@ function CrmQuickBookModal({
                     pattern: recurringPattern,
                     crmClientId: selectedClientId || undefined,
                 });
-                const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+                const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
                 toast.success(`Серия создана: ${result.created} бронирований (${patternLabel})`);
                 await useUserStore.getState().fetchBookings();
                 onClose();
@@ -274,7 +274,7 @@ function CrmQuickBookModal({
                             { id: '', label: 'Разово' },
                             { id: 'weekly', label: 'Кажд. неделю' },
                             { id: 'biweekly', label: 'Раз в 2 нед.' },
-                            { id: 'monthly', label: 'Ежемесячно' },
+                            { id: 'monthly', label: 'Раз в 4 недели' },
                         ] as const).map(p => (
                             <button
                                 key={p.id}
@@ -306,7 +306,7 @@ function CrmQuickBookModal({
                             />
                             <span className="text-xs text-gray-500">
                                 повторений · {recurringPattern === 'monthly'
-                                    ? `≈ ${recurringOccurrences} мес.`
+                                    ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                     : recurringPattern === 'biweekly'
                                         ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
                                         : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
@@ -651,7 +651,7 @@ function LinkBookingModal({
                                 { id: '', label: 'Не повторять' },
                                 { id: 'weekly', label: 'Каждую неделю' },
                                 { id: 'biweekly', label: 'Раз в 2 недели' },
-                                { id: 'monthly', label: 'Раз в месяц' },
+                                { id: 'monthly', label: 'Раз в 4 недели' },
                             ] as const).map(p => (
                                 <button
                                     key={p.id}
@@ -1274,8 +1274,8 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 7 * n);
                     } else if (opts.recurringPattern === 'biweekly') {
                         nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 14 * n);
-                    } else { // monthly
-                        nextDate = new Date(baseDate); nextDate.setMonth(nextDate.getMonth() + n);
+                    } else { // «раз в 4 недели» — +28 дней, день недели фиксирован
+                        nextDate = new Date(baseDate); nextDate.setDate(nextDate.getDate() + 28 * n);
                     }
                     const nextDateStr = format(nextDate, 'yyyy-MM-dd');
                     for (const slot of slotAssignments) {

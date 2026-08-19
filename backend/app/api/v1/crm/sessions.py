@@ -686,7 +686,11 @@ def mark_all_sessions_paid(
                 amount=price,
                 currency=client.currency,
                 account=client.default_account,
-                date=ts.date,
+                # Дата платежа = ДЕНЬ ОПЛАТЫ (как в quick_pay_session), а НЕ дата
+                # сессии. Иначе оплата старого долга задним числом меняла кассу
+                # прошлого месяца, а «касса за месяц» переставала быть кэш-флоу.
+                # «Заработано» считается по дате сессии и от этого не зависит.
+                date=datetime.now(),
                 session_id=ts.id,
             )
             session.add(payment)

@@ -127,6 +127,18 @@ export function CrmSessions() {
         fetchClients();
     }, [fetchClients]);
 
+    // При заходе на «Сессии» — как и на Дашборде — авто-завершаем прошедшие PLANNED
+    // сессии в БАЗЕ. Иначе их статус висит PLANNED, пока кто-то не откроет Дашборд,
+    // и долг клиента на карточке / в общем долге недосчитывается (эффективный статус
+    // «прошла → завершена» существует только на фронте). Идемпотентно, один раз на маунт;
+    // если что-то завершилось — перечитываем сессии, чтобы счётчики отражали правду БД.
+    useEffect(() => {
+        crmApi.autoCompleteSessions()
+            .then(res => { if (res.autoCompleted > 0) fetchSessions({ dateFrom, dateTo }); })
+            .catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Fetch ALL sessions for the period (no status filter on API), filter on frontend by effective status
     useEffect(() => {
         fetchSessions({
@@ -225,7 +237,28 @@ export function CrmSessions() {
             ? debtEntries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
             : '';
 
-        // Revenue grouped by currency — from real payments with actual currency
+        // «Заработано» — из ЗАВЕРШЁННЫХ ОПЛАЧЕННЫХ сессий этого месяца (по дате сессии).
+        // Это то, что владелец интуитивно ждёт рядом с «N завершено». В отличие от
+        // «кассы» ниже (все платежи месяца), сюда НЕ попадает оплата прошлых долгов и
+        // пополнения без сессии. Цена/валюта — как в строке списка (session.price ?? client.basePrice).
+        const earnedByCur: Record<string, number> = {};
+        monthSessions.forEach(s => {
+            if (getEffectiveStatus(s) !== 'COMPLETED' || !s.isPaid) return;
+            const client = clientMap.get(s.clientId);
+            const cur = client?.currency || 'GEL';
+            const price = s.price ?? client?.basePrice ?? 0;
+            if (price > 0) earnedByCur[cur] = (earnedByCur[cur] || 0) + price;
+        });
+        const earnedEntries = Object.entries(earnedByCur).filter(([, v]) => v > 0);
+        const earnedLabel = earnedEntries.length > 0
+            ? earnedEntries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+            : '0';
+        const earnedGelTotal = earnedEntries.reduce((s, [cur, val]) => s + toGel(val, cur), 0);
+        const earnedGel = earnedEntries.length > 1 ? `≈ ${earnedGelTotal.toFixed(0)} ₾` : '';
+
+        // «Касса» — ВСЕ платежи, датированные месяцем (реальная валюта платежа).
+        // Включает оплату прошлых долгов и пополнения без сессии → это кэш-флоу, НЕ
+        // заработок за месяц. Отсюда бывает выше «Заработано».
         const revByCur: Record<string, number> = {};
         monthPayments.forEach(p => {
             const cur = p.currency || 'GEL';
@@ -239,7 +272,7 @@ export function CrmSessions() {
         const gelTotal = entries.reduce((s, [cur, val]) => s + toGel(val, cur), 0);
         const revenueGel = entries.length > 1 ? `≈ ${gelTotal.toFixed(0)} ₾` : '';
 
-        return { planned, completed, unpaidCount, debtLabel, revenueLabel, revenueGel };
+        return { planned, completed, unpaidCount, debtLabel, revenueLabel, revenueGel, earnedLabel, earnedGel };
     }, [sessions, monthPayments, monthStart, monthEnd, clientMap]);
 
     const handleSync = async (dryRun = false) => {
@@ -1190,7 +1223,7 @@ interface GHSessionsProps {
     syncMonthsBack: number; setSyncMonthsBack: (v: number) => void;
     syncMonthsForward: number; setSyncMonthsForward: (v: number) => void;
     syncResult: any; handleSync: (dryRun?: boolean) => Promise<void>;
-    stats: { planned: number; completed: number; unpaidCount: number; debtLabel: string; revenueLabel: string; revenueGel: string };
+    stats: { planned: number; completed: number; unpaidCount: number; debtLabel: string; revenueLabel: string; revenueGel: string; earnedLabel: string; earnedGel: string };
     upcomingGroups: [string, CrmSession[]][];
     pastGroups: [string, CrmSession[]][];
     sessions: CrmSession[];
@@ -1276,7 +1309,8 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         {[
                             { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false },
                             { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false },
-                            { label: 'Получено', value: p.stats.revenueLabel, color: GH.accent, sub: p.stats.revenueGel, multiline: true },
+                            { label: 'Заработано', value: p.stats.earnedLabel, color: GH.accent, sub: p.stats.earnedGel, multiline: true },
+                            { label: 'Касса · с долгами', value: p.stats.revenueLabel, color: GH.ink60, sub: p.stats.revenueGel, multiline: true },
                         ].map(kpi => (
                             <div key={kpi.label} style={{ textAlign: 'right' as const, minWidth: 0 }}>
                                 <div style={{
