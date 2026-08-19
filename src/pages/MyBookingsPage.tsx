@@ -654,7 +654,7 @@ function BookingsChessboard({
                 occurrences: recurringOccurrences,
                 pattern: recurringPattern,
             });
-            const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+            const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
             toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
             setNewSlots([]);
             setRecurringPattern('');
@@ -1176,7 +1176,7 @@ function BookingsChessboard({
                                     { id: '' as const, label: 'Разово' },
                                     { id: 'weekly' as const, label: 'Кажд. нед.' },
                                     { id: 'biweekly' as const, label: '2 нед.' },
-                                    { id: 'monthly' as const, label: 'Месяц' },
+                                    { id: 'monthly' as const, label: '4 нед.' },
                                 ]).map(p => (
                                     <button
                                         key={p.id}
@@ -1209,7 +1209,7 @@ function BookingsChessboard({
                                     />
                                     <span className="text-[11px] text-gray-500">
                                         повторений · {recurringPattern === 'monthly'
-                                            ? `≈ ${recurringOccurrences} мес.`
+                                            ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                             : recurringPattern === 'biweekly'
                                                 ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
                                                 : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
@@ -1795,7 +1795,7 @@ function BookingsChessboard({
                                     { id: '' as const, label: 'Разово' },
                                     { id: 'weekly' as const, label: 'Каждую неделю' },
                                     { id: 'biweekly' as const, label: 'Раз в 2 нед.' },
-                                    { id: 'monthly' as const, label: 'Ежемесячно' },
+                                    { id: 'monthly' as const, label: 'Раз в 4 недели' },
                                 ]).map(p => (
                                     <button
                                         key={p.id}
@@ -1826,7 +1826,7 @@ function BookingsChessboard({
                                     />
                                     <span className="text-xs text-gray-400 whitespace-nowrap">
                                         {recurringPattern === 'monthly'
-                                            ? `≈ ${recurringOccurrences} мес.`
+                                            ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                             : recurringPattern === 'biweekly'
                                                 ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
                                                 : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
@@ -2505,7 +2505,7 @@ function SeriesView({
             {grouped.map(([groupId, items]) => {
                 const head = items[0];
                 const info = seriesInfoMap.get(groupId);
-                const patternLabel = info?.pattern === 'monthly' ? 'Ежемес.'
+                const patternLabel = info?.pattern === 'monthly' ? '4 нед.'
                     : info?.pattern === 'biweekly' ? '2 нед.'
                     : 'Еженед.';
                 const resource = RESOURCES.find(r => r.id === head.resourceId);
@@ -2588,7 +2588,7 @@ function SeriesControls({
     const PATTERNS: { id: 'weekly' | 'biweekly' | 'monthly'; label: string }[] = [
         { id: 'weekly', label: 'Еженед.' },
         { id: 'biweekly', label: 'Раз в 2 нед.' },
-        { id: 'monthly', label: 'Ежемес.' },
+        { id: 'monthly', label: '4 нед.' },
     ];
 
     if (!open) {
@@ -3399,7 +3399,7 @@ function CrmQuickBookingModal({
                                 {([
                                     { id: 'weekly' as const, label: 'Кажд. нед.' },
                                     { id: 'biweekly' as const, label: '2 нед.' },
-                                    { id: 'monthly' as const, label: 'Месяц' },
+                                    { id: 'monthly' as const, label: '4 нед.' },
                                 ]).map(p => (
                                     <button
                                         key={p.id}

@@ -489,6 +489,9 @@ function App() {
           <Route path="location/:locationId" element={<LocationDetailsPage />} />
           <Route path="cabinet/:resourceId" element={<CabinetPage />} />
           <Route path="booking-rules" element={<BookingRulesPage />} />
+          {/* Тарифы внутри мобильной оболочки: раньше кнопки вели на /subscriptions
+              и клиент вылетал в «компьютерный» вид без нижнего меню. */}
+          <Route path="tariffs" element={<SubscriptionsPage />} />
         </Route>
 
         {/* Mobile CRM workspace — separate shell, separate tab bar. */}

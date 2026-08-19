@@ -101,10 +101,23 @@ export function MobileFind() {
         setSearchParamsState(sp, { replace: true });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dayOffset, customDate, duration]);
+    // Предвыбор кабинета: клиент пришёл из «Наши центры» → кабинет → «Забронировать»
+    // (CabinetPage/LocationDetailsPage передают ?cab=<resourceId>). Сужаем фильтры
+    // на локацию и тип этого кабинета, чтобы клиент сразу видел нужный кабинет, а не
+    // общий список. Фильтры остаются переключаемыми — можно расширить руками.
+    const cabParam = searchParams.get('cab');
+    const cabResource = cabParam ? RESOURCES.find(r => r.id === cabParam) : null;
+    const spaceOfRes = (r: any): SpaceType =>
+        r.type === 'capsule' ? 'capsule' : (r.formats?.includes('group') ? 'group' : 'individual');
+
     // Multi-select state — all checked by default; user uncheck to narrow.
     // Using Set lets us treat add/remove uniformly via toggle().
-    const [locs, setLocs] = useState<Set<string>>(new Set(['unbox_one', 'unbox_uni']));
-    const [spaces, setSpaces] = useState<Set<SpaceType>>(new Set(['individual', 'group', 'capsule']));
+    const [locs, setLocs] = useState<Set<string>>(() => {
+        const loc = cabResource?.locationId;   // Resource.locationId — string | undefined
+        return loc ? new Set([loc]) : new Set(['unbox_one', 'unbox_uni']);
+    });
+    const [spaces, setSpaces] = useState<Set<SpaceType>>(
+        () => cabResource ? new Set([spaceOfRes(cabResource)]) : new Set(['individual', 'group', 'capsule']));
     const [rescheduling, setRescheduling] = useState(false);
 
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
@@ -486,6 +499,11 @@ export function MobileFind() {
                             <input
                                 type="date"
                                 min={fmtDate(new Date(), 'yyyy-MM-dd')}
+                                // Сервер отдаёт занятость на 60 дней вперёд. Дальше этой
+                                // границы список показывал бы ВСЕ кабинеты свободными
+                                // (занятость не загружена) → клиент выбирал слот и получал
+                                // отказ уже на оформлении. Ограничиваем выбор.
+                                max={fmtDate(new Date(Date.now() + 60 * 24 * 3600 * 1000), 'yyyy-MM-dd')}
                                 value={customDate ? fmtDate(customDate, 'yyyy-MM-dd') : ''}
                                 onChange={e => {
                                     if (!e.target.value) return;
@@ -628,6 +646,13 @@ export function MobileFind() {
                                             >
                                                 {isReRent && <Repeat size={11} />}
                                                 {r?.name ?? rid}
+                                                {/* Ставка прямо на чипе: цена не должна
+                                                    появляться впервые только на оформлении. */}
+                                                {r?.hourlyRate != null && (
+                                                    <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.75 }}>
+                                                        {r.hourlyRate}₾/ч
+                                                    </span>
+                                                )}
                                                 {isReRent
                                                     ? <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>переаренда</span>
                                                     : <ArrowRight size={11} />}

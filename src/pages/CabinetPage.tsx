@@ -65,6 +65,13 @@ export function CabinetPage() {
         .filter((x): x is string => !!x);
 
     const handleBook = () => {
+        // На телефоне ведём в новый мобильный мастер /m/find (шаг слотов 30 мин,
+        // выбор длительности 1/1.5/2/3ч одним тапом). Старый /checkout на мобиле
+        // округлял старт к целому часу и требовал тыкать слоты по одному.
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+            navigate(`/m/find?cab=${resource.id}`);
+            return;
+        }
         setStep(2);
         navigate('/checkout');
     };

@@ -354,7 +354,14 @@ export const bookingsApi = {
         weeks?: number;  // backward compat
         targetUserId?: string;
         crmClientId?: string;
-    }): Promise<{ ok: boolean; recurringGroupId: string; created: number; totalCost: number; dates: string[]; bookingIds: string[] }> => {
+        /** Пропустить занятые даты и создать остальные (после подтверждения). */
+        skipConflicts?: boolean;
+    }): Promise<{
+        ok: boolean; recurringGroupId: string; created: number; totalCost: number;
+        dates: string[]; bookingIds: string[];
+        /** Даты, пропущенные как занятые (при skipConflicts). */
+        skipped?: Array<{ date: string; day?: string; reason?: string }>;
+    }> => {
         const response = await api.post('/bookings/recurring', {
             ...data,
             weeks: data.occurrences,  // backend compat

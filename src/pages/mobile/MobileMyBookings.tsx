@@ -26,6 +26,22 @@ export function MobileMyBookings() {
     const fetchBookings = useUserStore(s => s.fetchBookings);
     const [tab, setTab] = useState<Tab>('upcoming');
     const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
+    // Подтверждение постановки на пересдачу: свайп — жест лёгкий, а действие
+    // денежное (если слот заберут, вернётся 50%). «Отменить» подтверждение уже
+    // спрашивает — здесь было несимметрично. Снятие с пересдачи не спрашиваем:
+    // оно безопасное и обратимое.
+    const [confirmReRent, setConfirmReRent] = useState<BookingHistoryItem | null>(null);
+
+    const doToggleReRent = (b: BookingHistoryItem) => {
+        bookingsApi.toggleReRent(b.id)
+            .then(updated => {
+                fetchBookings();
+                toast.success(updated.isReRentListed
+                    ? 'Выставлено на пересдачу'
+                    : 'Снято с пересдачи');
+            })
+            .catch(() => toast.error('Не удалось обновить'));
+    };
     const [refreshing, setRefreshing] = useState(false);
     const pull = usePullToRefresh(async () => {
         setRefreshing(true);
@@ -165,16 +181,10 @@ export function MobileMyBookings() {
                                     label: '↪ Пересдать',
                                     color: '#0E0E0E',
                                     onAction: () => {
-                                        // Rerent toggle uses the existing API; keep
-                                        // confirmation lightweight via toast.
-                                        bookingsApi.toggleReRent(b.id)
-                                            .then(updated => {
-                                                fetchBookings();
-                                                toast.success(updated.isReRentListed
-                                                    ? 'Выставлено на пересдачу'
-                                                    : 'Снято с пересдачи');
-                                            })
-                                            .catch(() => toast.error('Не удалось обновить'));
+                                        // На пересдачу — только через подтверждение
+                                        // (денежное действие). Снятие — сразу.
+                                        if ((b as any).isReRentListed) doToggleReRent(b);
+                                        else setConfirmReRent(b);
                                     },
                                 }
                                 : {
@@ -237,6 +247,40 @@ export function MobileMyBookings() {
                     booking={openBooking}
                     onClose={() => setOpenBooking(null)}
                 />
+            )}
+
+            {confirmReRent && (
+                <div
+                    onClick={() => setConfirmReRent(null)}
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200,
+                             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+                >
+                    <div
+                        onClick={e => e.stopPropagation()}
+                        style={{ background: '#fff', borderRadius: 18, padding: 20, width: '100%', maxWidth: 380,
+                                 display: 'flex', flexDirection: 'column', gap: 12 }}
+                    >
+                        <div style={{ fontSize: 17, fontWeight: 800 }}>Выставить на пересдачу?</div>
+                        <div style={{ fontSize: 14, color: '#555', lineHeight: 1.5 }}>
+                            Слот появится у других как свободный. Если его заберут — вам вернётся
+                            <b> 50% стоимости</b>. Если не заберут — бронь останется за вами.
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                            <button
+                                onClick={() => setConfirmReRent(null)}
+                                style={{ flex: 1, padding: '13px 0', borderRadius: 12, fontFamily: 'inherit',
+                                         fontSize: 15, fontWeight: 700, cursor: 'pointer',
+                                         border: '1px solid rgba(0,0,0,0.12)', background: '#fff' }}
+                            >Отмена</button>
+                            <button
+                                onClick={() => { doToggleReRent(confirmReRent); setConfirmReRent(null); }}
+                                style={{ flex: 1, padding: '13px 0', borderRadius: 12, fontFamily: 'inherit',
+                                         fontSize: 15, fontWeight: 700, cursor: 'pointer',
+                                         border: 'none', background: '#0E0E0E', color: '#fff' }}
+                            >Выставить</button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

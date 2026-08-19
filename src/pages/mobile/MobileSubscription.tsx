@@ -70,7 +70,7 @@ export function MobileSubscription() {
             </h1>
 
             {!sub ? (
-                <EmptyState onChoose={() => navigate('/subscriptions')} />
+                <EmptyState onChoose={() => navigate('/m/tariffs')} />
             ) : (
                 <>
                     {/* Hero card with remaining hours */}
@@ -170,7 +170,7 @@ export function MobileSubscription() {
                     )}
 
                     <button
-                        onClick={() => navigate('/subscriptions')}
+                        onClick={() => navigate('/m/tariffs')}
                         style={{
                             width: '100%',
                             padding: '10px',

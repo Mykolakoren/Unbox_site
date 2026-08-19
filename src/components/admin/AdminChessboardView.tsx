@@ -690,7 +690,11 @@ export function AdminChessboardView() {
     // Показываем, когда бронь сегодня, не на абонементе, а у клиента есть
     // действующий абонемент. Деньги вернутся на баланс, спишутся часы.
     const canToSubscription = (b: BookingHistoryItem | null): boolean => {
-        if (!b || !bookingIsToday(b)) return false;
+        // Раньше кнопка показывалась ТОЛЬКО для броней «на сегодня», из-за чего
+        // будущую бронь, оплаченную деньгами, перевести было нечем (кейс Валерии
+        // 13.08: абонемент пополнили через 3 часа после брони). Бэкенд по дате не
+        // ограничивает — проверяет только активность абонемента и покрытие.
+        if (!b) return false;
         if (b.paymentMethod === 'subscription') return false;
         const client = users.find(u => u.email === b.userId || u.id === b.userId);
         return subscriptionLifecycle((client as any)?.subscription) === 'active';
@@ -1928,7 +1932,7 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
     if (!groupInfo) return null;
     const patternLabel = groupInfo.pattern === 'weekly' ? 'еженедельно'
         : groupInfo.pattern === 'biweekly' ? 'раз в 2 нед.'
-        : 'ежемесячно';
+        : 'раз в 4 нед.';
 
     return (
         <div className="mt-2 pt-2 border-t border-unbox-light/50">
@@ -2071,7 +2075,7 @@ function AdminQuickBookingModal({
                     targetUserId: selectedUser.email,
                     extras: effectiveExtras.length ? effectiveExtras : undefined,
                 } as any);
-                const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+                const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
                 toast.success(`Создано ${result.created} бронирований (${patternLabel}) на ${result.totalCost} ₾`);
             } else {
                 await bookingsApi.createBooking({
@@ -2292,7 +2296,7 @@ function AdminQuickBookingModal({
                             { id: '', label: 'Разово' },
                             { id: 'weekly', label: 'Еженед.' },
                             { id: 'biweekly', label: '2 нед.' },
-                            { id: 'monthly', label: 'Ежемес.' },
+                            { id: 'monthly', label: '4 нед.' },
                         ] as const).map(p => (
                             <button
                                 key={p.id}
@@ -2348,7 +2352,7 @@ function AdminQuickBookingModal({
                                     />
                                     <span className="text-xs text-unbox-grey">
                                         повторений · {recurringPattern === 'monthly'
-                                            ? `≈ ${recurringOccurrences} мес.`
+                                            ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                             : recurringPattern === 'biweekly'
                                                 ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
                                                 : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}

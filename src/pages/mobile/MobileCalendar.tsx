@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { addDays, format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Plus, List, LayoutGrid } from 'lucide-react';
+import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
@@ -84,16 +85,24 @@ export function MobileCalendar() {
         [],
     );
 
-    /** Quick-book: tap an empty hour → pre-fill /m/checkout with that slot. */
+    /** Тап по часу → сразу на страницу оформления с этим часом. Начало (шаг 30 мин),
+     *  длительность, формат, допуслуги и цена правятся уже ТАМ — на одной
+     *  скроллящейся странице, где ничего не перекрывается (всплывающая панель
+     *  прятала кнопку «Забронировать» и уводила от допов — убрали). */
     const quickBook = (hour: number) => {
-        const slotStrs = [`${activeResId}|${pad(hour)}:00`, `${activeResId}|${pad(hour)}:30`];
+        const startMin = hour * 60;
+        const endMin = startMin + 60;
+        if (roomBookings.some(x => x.startMin < endMin && x.endMin > startMin)) {
+            toast.error('Это время уже занято — выберите другое.');
+            return;
+        }
         const resource = RESOURCES.find(r => r.id === activeResId);
         reset();
         useBookingStore.setState({
             locationId: resource?.locationId || 'unbox_one',
             date: targetDate,
             format: (resource?.formats?.[0] as any) || 'individual',
-            selectedSlots: slotStrs,
+            selectedSlots: [`${activeResId}|${minToHHMM(startMin)}`, `${activeResId}|${minToHHMM(startMin + 30)}`],
             step: 3,
         });
         navigate('/m/checkout');

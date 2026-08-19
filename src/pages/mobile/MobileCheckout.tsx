@@ -6,7 +6,9 @@ import { ArrowLeft, Check, Clock, MapPin, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
+import { useCrmStore } from '../../store/crmStore';
 import { bookingsApi } from '../../api/bookings';
+import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../utils/data';
 import { calculatePrice } from '../../utils/pricing';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
@@ -46,6 +48,31 @@ export function MobileCheckout() {
     // вычисляется автоматически по шагу паттерна.
     const [recurMode, setRecurMode] = useState<'count' | 'until'>('count');
     const [recurUntil, setRecurUntil] = useState<string>('');
+    // Блок «Повторение» свёрнут по умолчанию — раскрывается по кнопке.
+    const [recurOpen, setRecurOpen] = useState(false);
+
+    // Привязка брони к клиенту Psy-CRM — как в десктопном мастере. Показывается
+    // только специалистам (у кого есть клиенты в CRM). Одиночная бронь просто
+    // помечается клиентом; сессию в CRM бэкенд создаёт только для серии — ровно
+    // то же поведение, что на компьютере, без нового риска дублей.
+    const { clients: crmClients, fetchClients: fetchCrmClients } = useCrmStore();
+    const [selectedCrmClientId, setSelectedCrmClientId] = useState<string>('');
+    useEffect(() => {
+        if (currentUser) fetchCrmClients(true, false).catch(() => {});
+    }, [currentUser, fetchCrmClients]);
+    // Занятые даты серии — показываем списком с выбором «создать остальные».
+    const [seriesConflicts, setSeriesConflicts] = useState<Array<{ date: string; reason?: string }> | null>(null);
+
+    // Активные подарочные часы (welcome bonus). Бэкенд хранит тип 'free_hour';
+    // принимаем и camelCase на случай легаси-записей (как в десктопном мастере).
+    const [activeBonuses, setActiveBonuses] = useState<Bonus[]>([]);
+    useEffect(() => {
+        if (!currentUser) return;
+        bonusesApi.getMyBonuses()
+            .then(bs => setActiveBonuses(bs.filter(b =>
+                b.status === 'active' && (b.type === 'free_hour' || b.type === 'freeHour'))))
+            .catch(() => {});
+    }, [currentUser]);
 
     // Admin actor flag — only admins/owner can book on behalf of a specialist.
     const isAdminActor = !!(currentUser && (
@@ -168,15 +195,70 @@ export function MobileCheckout() {
         return { eligible: true, reason: '' };
     }, [effectiveUser, totalDurationHours]);
 
+    // Бонусные часы. Право = бонус-часов хватает на всю бронь И это одиночная
+    // бронь (серию бонусом не покрываем — welcome bonus 1ч не хватит на серию).
+    const totalBonusHours = activeBonuses.reduce((s, b) => s + (b.quantity || 0), 0);
+    // !state.bookingForUser — в режиме «админ за клиента» бонусы принадлежат
+    // админу, не клиенту, поэтому бонусную оплату там не предлагаем.
+    const bonusEligible = recurPattern === 'once'
+        && !state.bookingForUser
+        && totalBonusHours > 0
+        && totalBonusHours >= totalDurationHours - 0.01;
+
     // Reset payment to balance if subscription got disabled by hours change.
     useEffect(() => {
         if (!subInfo.eligible && state.paymentMethod === 'subscription') {
             useBookingStore.setState({ paymentMethod: 'balance' });
         }
-    }, [subInfo.eligible, state.paymentMethod]);
+        if (!bonusEligible && state.paymentMethod === 'bonus') {
+            useBookingStore.setState({ paymentMethod: 'balance' });
+        }
+    }, [subInfo.eligible, bonusEligible, state.paymentMethod]);
 
     const firstSlot = priced.items[0];
     const resource = firstSlot ? RESOURCES.find(r => r.id === firstSlot.resourceId) : null;
+
+    // ── Редактор времени прямо на странице оформления ──
+    // Здесь же рядом — формат, допуслуги и цена, поэтому время правится в одном
+    // месте и ничего не перекрывает (всплывающая панель в Календаре прятала
+    // кнопку и уводила от допов — убрали). Работает для одиночной непрерывной
+    // брони одного кабинета; мульти-слот не трогаем.
+    const editSlot = cartItems.length === 1 ? cartItems[0] : null;
+    const curStartMin = editSlot
+        ? (() => { const [h, m] = editSlot.startTime.split(':').map(Number); return h * 60 + m; })()
+        : 0;
+    const curDurMin = editSlot ? editSlot.duration : 60;
+
+    // Занятость этого кабинета в этот день — чтобы нельзя было выбрать занятое.
+    const dayBusy = useMemo(() => {
+        if (!editSlot) return [] as { s: number; e: number }[];
+        const dayKey = fmtDate(state.date, 'yyyy-MM-dd');
+        return bookings
+            .filter(b => b.status === 'confirmed'
+                && b.resourceId === editSlot.resourceId
+                && b.date && fmtDate(new Date(b.date as any), 'yyyy-MM-dd') === dayKey)
+            .map(b => {
+                const [h, m] = (b.startTime || '00:00').split(':').map(Number);
+                const s = h * 60 + m;
+                return { s, e: s + (b.duration ?? 60) };
+            });
+    }, [bookings, state.date, editSlot?.resourceId]);
+
+    const DAY_MIN = 9 * 60, DAY_MAX = 22 * 60;
+    const isFree = (startMin: number, durMin: number) => {
+        const end = startMin + durMin;
+        if (startMin < DAY_MIN || end > DAY_MAX) return false;
+        return !dayBusy.some(x => x.s < end && x.e > startMin);
+    };
+    /** Перезаписываем слоты в сторе — цена/итог пересчитываются сами. */
+    const applyTime = (startMin: number, durMin: number) => {
+        if (!editSlot) return;
+        const slots: string[] = [];
+        for (let m = startMin; m < startMin + durMin; m += 30) {
+            slots.push(`${editSlot.resourceId}|${mmToHHMM(m)}`);
+        }
+        useBookingStore.setState({ selectedSlots: slots });
+    };
     const location = resource ? LOCATIONS.find(l => l.id === resource.locationId) : null;
 
     /** Available extras filtered by what the resource supports. Owner
@@ -195,12 +277,8 @@ export function MobileCheckout() {
         const base = new Date(state.date);
         base.setHours(0, 0, 0, 0);
         if (until.getTime() < base.getTime()) return 0;
-        const stepDays = recurPattern === 'weekly' ? 7 : recurPattern === 'biweekly' ? 14 : 0;
-        if (recurPattern === 'monthly') {
-            const months = (until.getFullYear() - base.getFullYear()) * 12
-                + (until.getMonth() - base.getMonth());
-            return Math.min(52, Math.max(1, months + 1));
-        }
+        // «monthly» = раз в 4 недели (28 дней), день недели фиксирован.
+        const stepDays = recurPattern === 'weekly' ? 7 : recurPattern === 'biweekly' ? 14 : recurPattern === 'monthly' ? 28 : 0;
         if (stepDays === 0) return 0;
         const diffDays = Math.floor((until.getTime() - base.getTime()) / 86400000);
         return Math.min(52, Math.max(1, Math.floor(diffDays / stepDays) + 1));
@@ -210,79 +288,88 @@ export function MobileCheckout() {
      *  glance-confirm what they're creating before tapping "Забронировать". */
     const recurDates = useMemo(() => {
         if (recurPattern === 'once' || !firstSlot || effectiveOccurrences === 0) return [];
-        const stepDays = recurPattern === 'weekly' ? 7 : recurPattern === 'biweekly' ? 14 : 0;
+        // «monthly» = раз в 4 недели (28 дней), день недели фиксирован.
+        const stepDays = recurPattern === 'weekly' ? 7 : recurPattern === 'biweekly' ? 14 : recurPattern === 'monthly' ? 28 : 0;
         const out: Date[] = [];
         const base = new Date(state.date);
         base.setHours(0, 0, 0, 0);
         for (let i = 0; i < effectiveOccurrences; i++) {
             const d = new Date(base);
-            if (recurPattern === 'monthly') {
-                d.setMonth(d.getMonth() + i);
-            } else {
-                d.setDate(d.getDate() + i * stepDays);
-            }
+            d.setDate(d.getDate() + i * stepDays);
             out.push(d);
         }
         return out;
     }, [recurPattern, effectiveOccurrences, firstSlot, state.date]);
 
+    const resolveFinalMethod = (): 'balance' | 'subscription' | 'bonus' =>
+        (bonusEligible && state.paymentMethod === 'bonus')
+            ? 'bonus'
+            : (subInfo.eligible && state.paymentMethod === 'subscription')
+                ? 'subscription'
+                : 'balance';
+
+    /** Создание серии. skipConflicts=true — пропустить занятые даты (после того,
+     *  как человек увидел их список и нажал «Создать остальные»). Раньше любой
+     *  конфликт валил всю пачку, и поправить конкретные даты было нельзя. */
+    const createSeries = async (skipConflicts: boolean) => {
+        if (!firstSlot) return;
+        if (effectiveOccurrences < 1) {
+            toast.error('Выбери число повторов или дату «до»');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            const result = await bookingsApi.createRecurringBooking({
+                resourceId: firstSlot.resourceId,
+                locationId: state.locationId || resource?.locationId || 'unbox_one',
+                startTime: firstSlot.startTime,
+                duration: firstSlot.duration,
+                format: state.format,
+                paymentMethod: resolveFinalMethod(),
+                firstDate: fmtDate(state.date, 'yyyy-MM-dd'),
+                occurrences: effectiveOccurrences,
+                pattern: recurPattern === 'once' ? 'weekly' : recurPattern,
+                targetUserId: state.bookingForUser || undefined,
+                crmClientId: selectedCrmClientId || undefined,
+                skipConflicts: skipConflicts || undefined,
+            });
+            await Promise.all([fetchCurrentUser(), fetchBookings()]);
+            useBookingStore.getState().reset();
+            setSeriesConflicts(null);
+            setConfirmed(true);
+            const skippedNote = result.skipped?.length
+                ? ` · пропущено занятых: ${result.skipped.length}`
+                : '';
+            toast.success(
+                `Серия создана: ${result.created} ${ruPlural(result.created, ['сессия', 'сессии', 'сессий'])} · ${result.totalCost.toFixed(0)} ₾${skippedNote}`,
+                { duration: 6000 },
+            );
+            // Navigate immediately — the toast container lives at app
+            // root, so the message survives the route change.
+            navigate('/m/bookings', { replace: true });
+        } catch (e: any) {
+            const detail = e?.response?.data?.detail;
+            if (typeof detail === 'object' && detail?.conflicts) {
+                // Показываем занятые даты и даём выбор — создать остальные.
+                setSeriesConflicts(detail.conflicts);
+            } else {
+                const msg = typeof detail === 'string' ? detail : (e.message || 'Не удалось создать серию');
+                toast.error(msg);
+            }
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     const submit = async () => {
         if (priced.items.length === 0 || !currentUser) return;
 
-        const finalMethod: 'balance' | 'subscription' = (subInfo.eligible && state.paymentMethod === 'subscription')
-            ? 'subscription'
-            : 'balance';
+        const finalMethod = resolveFinalMethod();
 
-        // Recurring series path: one API call creates N bookings atomically,
-        // all sharing the same `recurring_group_id`. Multi-slot pricing is
-        // out of scope here — series only supports a single contiguous block.
+        // Recurring series path: one API call creates N bookings,
+        // all sharing the same `recurring_group_id`.
         if (recurPattern !== 'once' && firstSlot) {
-            setSubmitting(true);
-            try {
-                if (effectiveOccurrences < 1) {
-                    toast.error('Выбери число повторов или дату «до»');
-                    setSubmitting(false);
-                    return;
-                }
-                const result = await bookingsApi.createRecurringBooking({
-                    resourceId: firstSlot.resourceId,
-                    locationId: state.locationId || resource?.locationId || 'unbox_one',
-                    startTime: firstSlot.startTime,
-                    duration: firstSlot.duration,
-                    format: state.format,
-                    paymentMethod: finalMethod,
-                    firstDate: fmtDate(state.date, 'yyyy-MM-dd'),
-                    occurrences: effectiveOccurrences,
-                    pattern: recurPattern,
-                    targetUserId: state.bookingForUser || undefined,
-                });
-                await Promise.all([fetchCurrentUser(), fetchBookings()]);
-                useBookingStore.getState().reset();
-                setConfirmed(true);
-                toast.success(
-                    `Серия создана: ${result.created} ${ruPlural(result.created, ['сессия', 'сессии', 'сессий'])} · ${result.totalCost.toFixed(0)} ₾`,
-                    { duration: 5000 },
-                );
-                // Navigate immediately — the toast container lives at app
-                // root, so the message survives the route change. The old
-                // setTimeout(800) kept us mounted during the toast animation
-                // and racing with Google-Translate-style DOM mutators
-                // produced 'insertBefore' crashes for Galina (2026-05-31).
-                navigate('/m/bookings', { replace: true });
-            } catch (e: any) {
-                const detail = e?.response?.data?.detail;
-                if (typeof detail === 'object' && detail?.conflicts) {
-                    toast.error(
-                        `Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`,
-                        { duration: 8000 },
-                    );
-                } else {
-                    const msg = typeof detail === 'string' ? detail : (e.message || 'Не удалось создать серию');
-                    toast.error(msg);
-                }
-            } finally {
-                setSubmitting(false);
-            }
+            await createSeries(false);
             return;
         }
 
@@ -304,6 +391,7 @@ export function MobileCheckout() {
 
         let paymentSource: 'subscription' | 'deposit' | 'credit' = 'deposit';
         if (finalMethod === 'subscription') paymentSource = 'subscription';
+        else if (finalMethod === 'bonus') paymentSource = 'deposit';
         else if ((effectiveUser?.balance ?? 0) < priced.total) paymentSource = 'credit';
 
         const newBookings = priced.items.map(item => ({
@@ -324,6 +412,7 @@ export function MobileCheckout() {
             paymentMethod: finalMethod,
             paymentSource,
             hoursDeducted: finalMethod === 'subscription' ? (item.duration / 60) : 0,
+            ...(selectedCrmClientId ? { crmClientId: selectedCrmClientId } : {}),
             // Admin-proxy: when bookingForUser is set, the booking is owned by
             // that target — backend resolves via target_user_id.
             ...(state.bookingForUser ? { targetUserId: state.bookingForUser } : {}),
@@ -346,7 +435,17 @@ export function MobileCheckout() {
                         { duration: 7000 },
                     );
                 } else {
-                    toast.success('Бронь создана');
+                    // «Ещё бронь» — быстрый повтор без полноценной корзины:
+                    // возвращает к выбору свободных окон на ту же дату.
+                    // Дата из уже собранной брони: стор к этому моменту сброшен.
+                    const _d = newBookings[0].date;
+                    toast.success('Бронь создана', {
+                        duration: 6000,
+                        action: {
+                            label: 'Ещё бронь',
+                            onClick: () => navigate(`/m/find?date=${_d}`),
+                        },
+                    });
                 }
                 navigate('/m/bookings', { replace: true });
             } else {
@@ -511,7 +610,96 @@ export function MobileCheckout() {
                     </div>
                 </div>
 
-                {/* Format */}
+                {/* Клиент Psy-CRM — только для специалистов (у кого есть клиенты). */}
+                {crmClients.length > 0 && (
+                    <Section title="Клиент (Psy-CRM)">
+                        <select
+                            value={selectedCrmClientId}
+                            onChange={e => setSelectedCrmClientId(e.target.value)}
+                            style={{
+                                width: '100%', padding: '12px 14px', borderRadius: 12,
+                                border: '1px solid rgba(0,0,0,0.12)', background: '#fff',
+                                fontFamily: 'inherit', fontSize: 14, color: '#0E0E0E',
+                            }}
+                        >
+                            <option value="">Без привязки к клиенту</option>
+                            {crmClients.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                        <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+                            Бронь будет помечена клиентом — видно в шахматке и в CRM.
+                        </div>
+                    </Section>
+                )}
+
+                {/* Время: начало (шаг 30 мин) + длительность. Прямо здесь, рядом с
+                    форматом/допами/ценой — ничего не перекрывает и всё видно. */}
+                {editSlot && (
+                    <Section title="Время">
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                <button
+                                    onClick={() => applyTime(curStartMin - 30, curDurMin)}
+                                    disabled={!isFree(curStartMin - 30, curDurMin)}
+                                    style={{
+                                        width: 96, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
+                                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                                        border: '1px solid rgba(0,0,0,0.12)', background: '#fff',
+                                        opacity: isFree(curStartMin - 30, curDurMin) ? 1 : 0.35,
+                                    }}
+                                >− 30 мин</button>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+                                        {mmToHHMM(curStartMin)}–{mmToHHMM(curStartMin + curDurMin)}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>начало · окончание</div>
+                                </div>
+                                <button
+                                    onClick={() => applyTime(curStartMin + 30, curDurMin)}
+                                    disabled={!isFree(curStartMin + 30, curDurMin)}
+                                    style={{
+                                        width: 96, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
+                                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                                        border: '1px solid rgba(0,0,0,0.12)', background: '#fff',
+                                        opacity: isFree(curStartMin + 30, curDurMin) ? 1 : 0.35,
+                                    }}
+                                >+ 30 мин</button>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                {[60, 90, 120, 180].map(d => {
+                                    const ok = isFree(curStartMin, d);
+                                    const active = curDurMin === d;
+                                    return (
+                                        <button
+                                            key={d}
+                                            onClick={() => ok && applyTime(curStartMin, d)}
+                                            disabled={!ok}
+                                            style={{
+                                                flex: 1, padding: '12px 0', borderRadius: 12, cursor: ok ? 'pointer' : 'default',
+                                                fontFamily: 'inherit', fontSize: 14, fontWeight: 700,
+                                                border: active ? 'none' : '1px solid rgba(0,0,0,0.12)',
+                                                background: active ? '#0E0E0E' : '#fff',
+                                                color: active ? '#fff' : '#0E0E0E',
+                                                opacity: ok ? 1 : 0.35,
+                                            }}
+                                        >
+                                            {d % 60 === 0 ? `${d / 60}ч` : `${Math.floor(d / 60)}.5ч`}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#888' }}>
+                                Серым — время, которое уже занято или выходит за 09:00–22:00.
+                            </div>
+                        </div>
+                    </Section>
+                )}
+
+                {/* Формат — показываем, только если у кабинета правда есть выбор.
+                    В большинстве кабинетов формат один (индивидуальный), и блок
+                    из трёх кнопок, где две серые, только удлинял страницу. */}
+                {(resource?.formats?.length ?? 1) > 1 && (
                 <Section title="Формат">
                     <div style={{
                         display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
@@ -548,6 +736,7 @@ export function MobileCheckout() {
                         })}
                     </div>
                 </Section>
+                )}
 
                 {/* Extras */}
                 {availableExtras.length > 0 && (
@@ -593,14 +782,30 @@ export function MobileCheckout() {
                     </Section>
                 )}
 
-                {/* Recurring */}
+                {/* Повторение — нужно редко, поэтому по умолчанию свёрнуто:
+                    у всех остальных путь до кнопки «Забронировать» короче. */}
+                {!recurOpen && recurPattern === 'once' ? (
+                    <div style={{ padding: '0 16px' }}>
+                        <button
+                            onClick={() => setRecurOpen(true)}
+                            style={{
+                                width: '100%', padding: '12px 14px', borderRadius: 12,
+                                border: '1px dashed rgba(0,0,0,0.18)', background: 'transparent',
+                                fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                                color: '#555', cursor: 'pointer', textAlign: 'left',
+                            }}
+                        >
+                            🔁 Повторять регулярно →
+                        </button>
+                    </div>
+                ) : (
                 <Section title="Повторение">
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {([
                             ['once', 'Разово'],
                             ['weekly', 'Каждую неделю'],
                             ['biweekly', 'Раз в 2 недели'],
-                            ['monthly', 'Ежемесячно'],
+                            ['monthly', 'Раз в 4 недели'],
                         ] as Array<['once' | 'weekly' | 'biweekly' | 'monthly', string]>).map(([id, label]) => {
                             const active = recurPattern === id;
                             return (
@@ -726,6 +931,7 @@ export function MobileCheckout() {
                         </div>
                     )}
                 </Section>
+                )}
 
                 {/* Payment */}
                 <Section title="Оплата">
@@ -741,10 +947,21 @@ export function MobileCheckout() {
                                 onClick={() => useBookingStore.setState({ paymentMethod: 'subscription' })}
                             />
                         )}
+                        {totalBonusHours > 0 && recurPattern === 'once' && !state.bookingForUser && (
+                            <PaymentRow
+                                label="Бонусные часы"
+                                sub={bonusEligible
+                                    ? `${totalBonusHours.toFixed(1)} ч бесплатно`
+                                    : `Нужно ${totalDurationHours.toFixed(1)} ч, есть ${totalBonusHours.toFixed(1)} ч`}
+                                disabled={!bonusEligible}
+                                active={state.paymentMethod === 'bonus'}
+                                onClick={() => bonusEligible && useBookingStore.setState({ paymentMethod: 'bonus' })}
+                            />
+                        )}
                         <PaymentRow
                             label="Баланс"
                             sub={currentUser ? `${(currentUser.balance ?? 0).toFixed(0)} ₾` : ''}
-                            active={state.paymentMethod !== 'subscription'}
+                            active={state.paymentMethod !== 'subscription' && state.paymentMethod !== 'bonus'}
                             onClick={() => useBookingStore.setState({ paymentMethod: 'balance' })}
                         />
                     </div>
@@ -774,6 +991,11 @@ export function MobileCheckout() {
                         {state.paymentMethod === 'subscription' && subInfo.eligible && (
                             <div style={{ fontSize: 12, color: '#666' }}>
                                 Спишется {totalDurationHours.toFixed(1)} ч с абонемента
+                            </div>
+                        )}
+                        {state.paymentMethod === 'bonus' && bonusEligible && (
+                            <div style={{ fontSize: 12, color: '#666' }}>
+                                Спишется {totalDurationHours.toFixed(1)} ч из бонуса — с баланса 0 ₾
                             </div>
                         )}
                     </div>
@@ -837,6 +1059,64 @@ export function MobileCheckout() {
                                     : `Забронировать · ${priced.total.toFixed(0)} ₾`}
                 </button>
             </div>
+
+            {/* Конфликты серии: показываем занятые даты и даём создать остальные,
+                вместо того чтобы валить всю пачку одним тостом. */}
+            {seriesConflicts && (
+                <div
+                    onClick={() => setSeriesConflicts(null)}
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 220,
+                             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+                >
+                    <div
+                        onClick={e => e.stopPropagation()}
+                        style={{ background: '#fff', borderRadius: 18, padding: 20, width: '100%', maxWidth: 400,
+                                 display: 'flex', flexDirection: 'column', gap: 12 }}
+                    >
+                        <div style={{ fontSize: 17, fontWeight: 800 }}>
+                            Часть дат занята
+                        </div>
+                        <div style={{ fontSize: 14, color: '#555', lineHeight: 1.5 }}>
+                            Занято {seriesConflicts.length} из {effectiveOccurrences}:
+                        </div>
+                        <div style={{ maxHeight: 160, overflowY: 'auto', background: '#F4F4F2', borderRadius: 12,
+                                      padding: '10px 12px', fontSize: 13, lineHeight: 1.7 }}>
+                            {seriesConflicts.map(c => (
+                                <div key={c.date}>
+                                    {(() => {
+                                        const [y, m, d] = c.date.split('-').map(Number);
+                                        return fmtDate(new Date(y, m - 1, d), 'd MMMM, EEEE', { locale: ru });
+                                    })()}
+                                </div>
+                            ))}
+                        </div>
+                        <div style={{ fontSize: 13, color: '#777' }}>
+                            Можно создать серию без этих дат — остальные встречи забронируются.
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                            <button
+                                onClick={() => createSeries(true)}
+                                disabled={submitting || seriesConflicts.length >= effectiveOccurrences}
+                                style={{ padding: '14px 0', borderRadius: 12, fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
+                                         border: 'none', color: '#fff',
+                                         background: seriesConflicts.length >= effectiveOccurrences ? '#BBB' : '#0E0E0E',
+                                         cursor: seriesConflicts.length >= effectiveOccurrences ? 'default' : 'pointer' }}
+                            >
+                                {submitting
+                                    ? 'Создаём…'
+                                    : `Создать остальные (${Math.max(0, effectiveOccurrences - seriesConflicts.length)})`}
+                            </button>
+                            <button
+                                onClick={() => setSeriesConflicts(null)}
+                                style={{ padding: '13px 0', borderRadius: 12, fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
+                                         border: '1px solid rgba(0,0,0,0.12)', background: '#fff', cursor: 'pointer' }}
+                            >
+                                Изменить время
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 }
@@ -906,4 +1186,10 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
             </div>
         </button>
     );
+}
+
+/** Минуты от полуночи → "HH:MM" (для сборки слотов редактора времени). */
+function mmToHHMM(m: number) {
+    const h = Math.floor(m / 60), mm = m % 60;
+    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }

@@ -198,8 +198,30 @@ export function AdminUserDetails() {
     };
 
     // derived data — уже только этого клиента (пришли с сервера отфильтрованными)
+    // ВНИМАНИЕ: sortedBookings отсортирован по дате СОЗДАНИЯ (createdAt) — на этом
+    // порядке завязан расчёт «первая/последняя встреча» ниже. Не менять.
     const sortedBookings = [...userBookings]
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Лиза (админ): перед отпуском специалиста админ отменяет брони диапазоном.
+    // Для этого список во вкладке «Бронирования» — в хронологическом порядке:
+    // ближайшие ПРЕДСТОЯЩИЕ сверху (по возрастанию даты), затем прошедшие
+    // (свежие выше). Так проще найти и отменить нужный будущий диапазон.
+    const bookingDateTime = (b: BookingHistoryItem) => {
+        const d = new Date(b.date);
+        if (b.startTime) {
+            const [h, m] = b.startTime.split(':').map(Number);
+            d.setHours(h || 0, m || 0, 0, 0);
+        }
+        return d.getTime();
+    };
+    const chronoBookings = [...userBookings].sort((a, b) => {
+        const now = Date.now();
+        const ta = bookingDateTime(a), tb = bookingDateTime(b);
+        const aUpcoming = ta >= now, bUpcoming = tb >= now;
+        if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1; // предстоящие выше прошедших
+        return aUpcoming ? ta - tb : tb - ta;                  // будущее ↑, прошлое ↓
+    });
 
 
 
@@ -294,6 +316,25 @@ export function AdminUserDetails() {
         if (confirm('Вы уверены, что хотите отменить это бронирование?')) {
             cancelBooking(id);
             toast.success('Бронирование отменено');
+        }
+    };
+
+    // «На абонемент» прямо из карточки клиента: клиент мог забронировать в момент,
+    // когда часы кончились (бронь ушла за деньги), а абонемент пополнили следом.
+    // Перевод вернёт деньги на баланс и спишет час. Кейс Валерии 13.08.
+    const [convertingId, setConvertingId] = useState<string | null>(null);
+    const handleToSubscription = async (bookingId: string) => {
+        if (!confirm('Перевести бронь на абонемент? Деньги вернутся на баланс, спишется час с абонемента.')) return;
+        setConvertingId(bookingId);
+        try {
+            await bookingsApi.convertToSubscription(bookingId);
+            await Promise.all([reloadUserBookings(user?.email), fetchUsers()]);
+            toast.success('Бронь переведена на абонемент');
+        } catch (e: any) {
+            const d = e?.response?.data?.detail;
+            toast.error(typeof d === 'string' ? d : 'Не удалось перевести на абонемент');
+        } finally {
+            setConvertingId(null);
         }
     };
 
@@ -1474,9 +1515,12 @@ export function AdminUserDetails() {
                                 </Button>
                             </div>
                             <UserBookingsTab
-                                bookings={sortedBookings}
+                                bookings={chronoBookings}
                                 onCancel={handleCancelBooking}
                                 onReschedule={handleRescheduleBooking}
+                                onToSubscription={handleToSubscription}
+                                hasActiveSubscription={subscriptionLifecycle(user.subscription) === 'active'}
+                                convertingId={convertingId}
                             />
                         </div>
                     )}

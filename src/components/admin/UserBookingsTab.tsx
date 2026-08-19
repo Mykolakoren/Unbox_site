@@ -9,12 +9,21 @@ interface UserBookingsTabProps {
     bookings: BookingHistoryItem[];
     onCancel: (bookingId: string) => void;
     onReschedule: (bookingId: string) => void;
+    /** Перевести бронь с денег на абонемент. Показывается, только если у клиента
+     *  активный абонемент и бронь оплачена деньгами (кейс: клиент бронировал,
+     *  когда часы кончились, а абонемент пополнили через пару часов). */
+    onToSubscription?: (bookingId: string) => void;
+    hasActiveSubscription?: boolean;
+    convertingId?: string | null;
 }
 
 import { useUserStore } from '../../store/userStore';
 import { toast } from 'sonner';
 
-export function UserBookingsTab({ bookings, onCancel: propOnCancel, onReschedule }: UserBookingsTabProps) {
+export function UserBookingsTab({
+    bookings, onCancel: propOnCancel, onReschedule,
+    onToSubscription, hasActiveSubscription, convertingId,
+}: UserBookingsTabProps) {
     const { cancelBooking, currentUser } = useUserStore();
 
     // Use internal onCancel if provided, but wrapping logic here for permissions is better 
@@ -229,6 +238,22 @@ export function UserBookingsTab({ bookings, onCancel: propOnCancel, onReschedule
                                             Перенести
                                         </button>
                                     </>
+                                )}
+
+                                {/* На абонемент — для оплаченных деньгами броней, когда
+                                    у клиента есть активный абонемент. Деньги вернутся,
+                                    спишется час. Дата брони не важна (бэк не ограничивает). */}
+                                {onToSubscription && hasActiveSubscription
+                                    && booking.paymentMethod !== 'subscription'
+                                    && booking.status !== 'cancelled' && (
+                                    <button
+                                        onClick={() => onToSubscription(booking.id)}
+                                        disabled={convertingId === booking.id}
+                                        className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-100 transition-colors flex items-center gap-1.5 disabled:opacity-60"
+                                        title="Вернуть деньги на баланс и списать час с абонемента"
+                                    >
+                                        {convertingId === booking.id ? '…' : 'На абонемент'}
+                                    </button>
                                 )}
 
                                 <a

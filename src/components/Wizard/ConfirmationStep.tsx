@@ -111,7 +111,13 @@ export function ConfirmationStep() {
         if (currentUser) {
             fetchCrmClients(true, false, targetSpecialistUuid).catch(() => {});
             bonusesApi.getMyBonuses().then(bonuses => {
-                setActiveBonuses(bonuses.filter(b => b.status === 'active' && b.type === 'freeHour'));
+                // ВАЖНО: бэкенд хранит тип подарочного часа как 'free_hour' (см.
+                // auth._create_welcome_bonus). Раньше фильтр искал только 'freeHour'
+                // (camelCase) → совпадений НИКОГДА не было → опция «оплатить бонусом»
+                // не показывалась, и новичок платил балансом, а час сгорал (кейс Оксаны).
+                // Принимаем оба написания на случай легаси-записей.
+                setActiveBonuses(bonuses.filter(b =>
+                    b.status === 'active' && (b.type === 'free_hour' || b.type === 'freeHour')));
             }).catch(() => {});
         }
     }, [currentUser, fetchCrmClients, targetSpecialistUuid]);
@@ -370,7 +376,7 @@ export function ConfirmationStep() {
                         crmClientId: selectedCrmClientId || undefined,
                         targetUserId: state.bookingForUser || undefined,
                     });
-                    const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'ежемесячно';
+                    const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
                     toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
                     // Mark success BEFORE the refetch — the series IS created.
                     setConfirmed(true);
@@ -1126,7 +1132,7 @@ export function ConfirmationStep() {
                             { id: '' as const, label: 'Разово' },
                             { id: 'weekly' as const, label: 'Кажд. неделю' },
                             { id: 'biweekly' as const, label: 'Раз в 2 нед.' },
-                            { id: 'monthly' as const, label: 'Ежемесячно' },
+                            { id: 'monthly' as const, label: 'Раз в 4 недели' },
                         ]).map(p => (
                             <button
                                 key={p.id}
@@ -1157,7 +1163,7 @@ export function ConfirmationStep() {
                             />
                             <span className="text-xs text-gray-500">
                                 повторений · {recurringPattern === 'monthly'
-                                    ? `≈ ${recurringOccurrences} мес.`
+                                    ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                     : recurringPattern === 'biweekly'
                                         ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
                                         : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}

@@ -77,6 +77,12 @@ export function LocationDetailsPage() {
     const heroPhotos = allPhotos.slice(0, 5);
 
     const handleBookResource = (resourceId: string) => {
+        // На телефоне — в новый мобильный мастер /m/find с предвыбранным кабинетом
+        // (см. CabinetPage): корректный выбор времени :30 и длительности.
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+            navigate(`/m/find?cab=${resourceId}`);
+            return;
+        }
         setHighlightedResourceId(resourceId);
         setStep(2);
         navigate('/checkout');
