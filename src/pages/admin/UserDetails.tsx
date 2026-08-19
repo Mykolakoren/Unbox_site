@@ -20,6 +20,7 @@ import { UserTags } from '../../components/admin/UserTags';
 import { UserTasks } from '../../components/admin/UserTasks';
 import { UserContacts } from '../../components/admin/UserContacts';
 import { UserTransactions } from '../../components/admin/UserTransactions';
+import { UserBalanceLedger } from '../../components/admin/UserBalanceLedger';
 import { ProfessionEditor } from '../../components/admin/ProfessionEditor';
 import { TargetAudienceEditor } from '../../components/admin/TargetAudienceEditor';
 import { UserBookingsTab } from '../../components/admin/UserBookingsTab';
@@ -1458,7 +1459,10 @@ export function AdminUserDetails() {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                                 <div className="space-y-6">
-                                    <UserTransactions email={user.email} />
+                                    <div className="space-y-6">
+                                        <UserBalanceLedger userId={user.id || user.email} />
+                                        <UserTransactions email={user.email} />
+                                    </div>
                                     <UserTasks email={user.email} tasks={user.adminTasks || []} />
                                 </div>
 
@@ -1599,7 +1603,10 @@ export function AdminUserDetails() {
                                     История транзакций
                                 </div>
                                 <div className="p-4">
-                                    <UserTransactions email={user.email} />
+                                    <div className="space-y-6">
+                                        <UserBalanceLedger userId={user.id || user.email} />
+                                        <UserTransactions email={user.email} />
+                                    </div>
                                 </div>
                             </Card>
                         </div>

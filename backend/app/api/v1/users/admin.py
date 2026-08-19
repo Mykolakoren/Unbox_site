@@ -371,6 +371,62 @@ def update_personal_discount(
 # ── Balance correction ──────────────────────────────────────────────────────
 # Owner + Egor 2026-05-27: admins need a fast way to set User.balance to an
 # exact value (e.g. matching the Excel reconciliation) without having to add
+# ── Balance ledger ────────────────────────────────────────────────────────────
+# Сверка 19.08.2026 (Лиза): в карточке клиента «История транзакций» показывала
+# ТОЛЬКО кассовые приходы. Списания за брони, возвраты, недельные скидки,
+# продления и корректировки живут в balance_ledger, а ручки к ней не было
+# вовсе — их не видел никто, кроме как напрямую в базе. Из-за этого админ
+# физически не мог свести баланс и сверял по своему Excel: у Кристины Ропель
+# карточка писала «Операций по счету не найдено» при десятках строк в ленте.
+#
+# Лента — источник истины по балансу. Инвариант: sum(delta) == user.balance;
+# отдаём его посчитанным, чтобы интерфейс сразу показывал, сходится ли.
+@router.get("/{user_id}/balance-ledger")
+def get_user_balance_ledger(
+    *,
+    user_id: str,
+    limit: int = Query(500, ge=1, le=2000),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    from app.models.balance_ledger import BalanceLedger
+
+    user = _resolve_user(session, user_id)
+    rows = session.exec(
+        select(BalanceLedger)
+        .where(BalanceLedger.user_id == str(user.id))
+        .order_by(BalanceLedger.created_at.desc())  # type: ignore
+        .limit(limit)
+    ).all()
+
+    ledger_sum = round(sum(float(r.delta or 0) for r in rows), 2)
+    balance = round(float(user.balance or 0), 2)
+    # Расхождение имеет смысл только когда лента отдана целиком: при обрезании
+    # по limit сумма заведомо неполная, и «не сходится» было бы ложной тревогой.
+    truncated = len(rows) >= limit
+    return {
+        "userId": str(user.id),
+        "balance": balance,
+        "ledgerSum": ledger_sum,
+        "reconciles": None if truncated else abs(ledger_sum - balance) < 0.01,
+        "truncated": truncated,
+        "entries": [
+            {
+                "id": str(r.id),
+                "date": r.created_at.isoformat() if r.created_at else None,
+                "delta": round(float(r.delta or 0), 2),
+                "balanceAfter": round(float(r.balance_after or 0), 2),
+                "reason": r.reason,
+                "description": r.description or "",
+                "refType": r.ref_type,
+                "refId": r.ref_id,
+                "actorName": r.actor_name,
+            }
+            for r in rows
+        ],
+    }
+
+
 # a one-off cashbox transaction and remember to flip credit_user_balance.
 # This endpoint takes the new absolute balance + a reason, and writes BOTH:
 #   1. The User.balance field directly.

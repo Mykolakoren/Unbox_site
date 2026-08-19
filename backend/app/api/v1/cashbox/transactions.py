@@ -108,10 +108,18 @@ def client_total_paid(
     if target is None:
         return {"total_paid": 0.0}
 
+    # Сверка 19.08.2026: число считалось ТОЛЬКО по credited_user_id (приходы с
+    # пометкой «пополнить баланс»), а список операций под ним в карточке клиента
+    # показывает ещё и приходы, привязанные через client_id. Из-за этого у Ольги
+    # Корень строка «+50 ₾» была видна, а «Общая сумма оплат» показывала 0.00 —
+    # админ не мог понять, чему верить. Считаем по тому же набору, что и список.
     total = session.exec(
         select(func.coalesce(func.sum(CashboxTransaction.amount), 0))
         .where(CashboxTransaction.type == "income")
-        .where(CashboxTransaction.credited_user_id == str(target.id))
+        .where(
+            (CashboxTransaction.credited_user_id == str(target.id))
+            | (CashboxTransaction.client_id == str(target.id))
+        )
     ).one()
     return {"total_paid": round(float(total), 2)}
 

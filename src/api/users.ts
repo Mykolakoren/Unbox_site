@@ -1,6 +1,28 @@
 import { api } from './client';
 import type { User } from '../store/types';
 
+export interface BalanceLedgerEntry {
+    id: string;
+    date: string | null;
+    delta: number;
+    balanceAfter: number;
+    reason: string;
+    description: string;
+    refType: string | null;
+    refId: string | null;
+    actorName: string | null;
+}
+
+export interface BalanceLedgerResponse {
+    userId: string;
+    balance: number;
+    ledgerSum: number;
+    /** null — лента обрезана по limit, сверка невозможна. */
+    reconciles: boolean | null;
+    truncated: boolean;
+    entries: BalanceLedgerEntry[];
+}
+
 export const usersApi = {
     /**
      * Default limit raised from 100 → 1000 so every active user fits in
@@ -61,6 +83,18 @@ export const usersApi = {
      *  Pass null to clear. Stored under user.crm_data.vacation_until. */
     setVacation: async (untilDate: string | null) => {
         const response = await api.post<User>('/users/me/vacation', { until: untilDate });
+        return response.data;
+    },
+
+    /** Admin: полная лента движений баланса клиента.
+     *  Единственный источник истины по балансу — в отличие от кассовых
+     *  операций, сюда попадают ещё и списания за брони, возвраты, недельные
+     *  скидки, продления и корректировки. `reconciles` показывает, сходится
+     *  ли сумма ленты с текущим балансом (null — лента обрезана по limit). */
+    getBalanceLedger: async (id: string): Promise<BalanceLedgerResponse> => {
+        const response = await api.get<BalanceLedgerResponse>(
+            `/users/${encodeURIComponent(id)}/balance-ledger`,
+        );
         return response.data;
     },
 
