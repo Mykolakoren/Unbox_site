@@ -282,7 +282,14 @@ def _refund_booking_to_owner(
         "refund_percent": refund_percent,
     }
 
-    if booking.payment_method == "subscription":
+    # §5#12 (зеркало waive_charge): возвращаем то, что РЕАЛЬНО списали. Если у
+    # абонементной брони часы фактически списаны (hours_deducted>0) → возврат
+    # часов. А если абонемент был исчерпан и бронь ушла в баланс-долг (settle
+    # пометил hours_deducted=0, payment_method остался 'subscription') → это
+    # ДЕНЬГИ, и возвращать надо деньги (ветка else ниже по charge_amount), иначе
+    # клиенту не вернётся ничего (баг: full_hours=0 → 0 часов, а денежная ветка
+    # при method=='subscription' недостижима).
+    if booking.payment_method == "subscription" and (booking.hours_deducted or 0) > 0:
         if owner.subscription:
             new_sub = owner.subscription.copy()
             full_hours = (
@@ -309,7 +316,14 @@ def _refund_booking_to_owner(
             refund_meta["refunded_hours"] = 0
             refund_meta["warning"] = "Owner has no subscription to refund to"
     else:
-        full_amount = booking.final_price if booking.final_price is not None else 0.0
+        # Возвращаем ФАКТИЧЕСКИ списанное (charge_amount), а не final_price:
+        # у абонемент→баланс брони final_price ≈0 (стоимость была в часах), а
+        # реальные деньги сидят в charge_amount. Для обычной balance-брони
+        # charge_amount == final_price, так что поведение не меняется.
+        full_amount = (
+            booking.charge_amount if booking.charge_amount is not None
+            else (booking.final_price or 0.0)
+        )
         refund_amount = round(full_amount * refund_percent, 2)
         retained_amount = round(full_amount - refund_amount, 2)
         if abs(refund_amount) >= 0.01:
@@ -1662,6 +1676,11 @@ class RecurringBookingRequest(PydanticBaseModel):
     weeks: int = 12          # kept for backward compat; use occurrences instead
     occurrences: Optional[int] = None   # number of repetitions (overrides weeks if set)
     pattern: str = "weekly"  # "weekly" | "biweekly" | "monthly"
+    # Пропустить занятые даты и создать остальные. По умолчанию False — серия
+    # атомарна (как раньше). Клиент сначала получает 409 со списком конфликтов,
+    # показывает их человеку и повторяет запрос с skip_conflicts=True по кнопке
+    # «Создать остальные» — чтобы пропуск был осознанным, а не молчаливым.
+    skip_conflicts: bool = False
     target_user_id: Optional[str] = None
     crm_client_id: Optional[str] = None
 
@@ -1707,11 +1726,10 @@ def create_recurring_booking(
     if pattern == "biweekly":
         dates = [first + timedelta(weeks=i * 2) for i in range(n)]
     elif pattern == "monthly":
-        try:
-            from dateutil.relativedelta import relativedelta as rdelta
-            dates = [first + rdelta(months=i) for i in range(n)]
-        except ImportError:
-            dates = [first + timedelta(weeks=i * 4) for i in range(n)]
+        # «Раз в 4 недели» (ровно 28 дней) — день недели фиксируется.
+        # Календарный месяц (relativedelta) сдвигал бы день недели, а владельцу
+        # нужно, чтобы серия всегда попадала на тот же день недели/час.
+        dates = [first + timedelta(weeks=i * 4) for i in range(n)]
     else:  # weekly (default)
         dates = [first + timedelta(weeks=i) for i in range(n)]
 
@@ -1768,14 +1786,28 @@ def create_recurring_booking(
                 "reason": reason,
             })
 
+    skipped_dates: list[dict] = []
     if conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": f"Конфликт в {len(conflicts)} из {len(dates)} дат",
-                "conflicts": conflicts,
-            },
-        )
+        if not data.skip_conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"Конфликт в {len(conflicts)} из {len(dates)} дат",
+                    "conflicts": conflicts,
+                },
+            )
+        # Пропускаем занятые даты и создаём остальные (клиент подтвердил кнопкой).
+        _busy = {c["date"] for c in conflicts}
+        create_dates = [d for d in create_dates if d.strftime("%Y-%m-%d") not in _busy]
+        skipped_dates = conflicts
+        if not create_dates and not anchor_booking:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Все даты серии заняты — создавать нечего",
+                    "conflicts": conflicts,
+                },
+            )
 
     # All slots available — create bookings
     recurring_group_id = str(gen_uuid4())
@@ -2022,6 +2054,30 @@ def create_recurring_booking(
 
     session.commit()
 
+    # Скидка за смежные часы для СЕРИИ. Одиночная бронь и мульти-слот уже
+    # пересчитывают цепочку (recompute_user_chains_for_day), а серия — нет:
+    # новая бронь получала скидку от calculate_price, а её сосед по времени
+    # (созданный раньше) оставался по полной цене. Реальный случай: Наталья
+    # Ященко 12.08 — 11:00 за 18₾ (−10%), смежная 12:00 за 20₾ → админ внесла
+    # 36₾ за «два часа со скидкой», а списалось 38₾ и возник минус.
+    # Пересчитываем цепочки по каждому затронутому дню.
+    if data.payment_method == "balance":
+        try:
+            from app.services.consecutive_pricing import recompute_user_chains_for_day
+            for _d in create_dates:
+                recompute_user_chains_for_day(
+                    session,
+                    booking_owner,
+                    data.resource_id,
+                    _d,
+                    actor_id=str(current_user.id),
+                    actor_role=current_user.role,
+                    reason="create_recurring",
+                )
+            session.commit()
+        except Exception:
+            logger.exception("[consecutive] recompute on recurring create failed")
+
     # §5#2: кабинет-GCal создаём в фоне ПОСЛЕ коммита — только для реально
     # сохранённых броней. Идемпотентно (_gcal_create_in_background пропускает
     # брони с уже проставленным gcal_event_id), не блокирует ответ, не плодит
@@ -2046,7 +2102,7 @@ def create_recurring_booking(
                 "С / По":    f"{first_label} → {last_label}",
                 "Время":     f"{data.start_time} · {data.duration} мин",
                 "Кабинет":   f"{res_name} · {loc_name}",
-                "Встреч":    f"{len(created_bookings)} ({data.pattern})",
+                "Встреч":    f"{len(created_bookings)} ({ {'weekly': 'еженедельно', 'biweekly': 'раз в 2 нед.', 'monthly': 'раз в 4 нед.'}.get(pattern, pattern) })",
                 "Сумма":     f"{round(total_cost, 2):g} ₾",
             },
         )
@@ -2061,6 +2117,9 @@ def create_recurring_booking(
         "total_cost": round(total_cost, 2),
         "booking_ids": created_bookings,
         "dates": [d.strftime("%Y-%m-%d") for d in dates],
+        # Даты, которые пропустили как занятые (только при skip_conflicts=True) —
+        # клиент показывает их человеку, чтобы он знал, чего в серии нет.
+        "skipped": skipped_dates,
     }
 
 
@@ -2232,10 +2291,10 @@ def extend_recurring_series(
     elif pattern_override == "biweekly":
         step_days = 14
     elif pattern_override == "monthly":
-        step_days = 30
+        step_days = 28  # «раз в 4 недели» — день недели фиксирован (см. create_recurring_booking)
     else:
         delta_days = (dates_sorted[-1] - dates_sorted[-2]).days if len(dates_sorted) >= 2 else 7
-        step_days = 7 if delta_days <= 8 else (14 if delta_days <= 16 else 30)
+        step_days = 7 if delta_days <= 8 else (14 if delta_days <= 16 else 28)
 
     # Build new dates после последней существующей — по дате «до» или по числу.
     last_date = dates_sorted[-1]
@@ -3023,6 +3082,16 @@ def reschedule_booking(
                     wallet.credit(session, booking_owner, abs(price_diff), reason="reschedule_diff",
                                   description="Возврат при переносе (цена упала)",
                                   ref_type="booking", ref_id=str(booking.id), actor=current_user)
+
+                # charge_amount — реально списанное — двигаем на дельту (как в
+                # /extend, /trim, /format). Раньше здесь не обновлялось → он
+                # расходился с final_price навсегда и портил будущие возвраты
+                # (waive, перевод на абонемент) и дашборд. Для pending не трогаем:
+                # там charge_amount ещё None, крон проставит полную новую цену.
+                booking.charge_amount = round(
+                    float(booking.charge_amount if booking.charge_amount is not None else old_price)
+                    + price_diff, 2
+                )
 
             # Update booking price fields
             booking.final_price = new_quote.final_price
@@ -5031,6 +5100,16 @@ def reject_booking(
         raise HTTPException(status_code=400, detail="Booking is not pending approval")
 
     admin_reason = (payload.reason if payload and payload.reason else "").strip()
+
+    # Вернуть бонусный час, если бронь оплачивалась бонусом. Hot-gate при создании
+    # откатывает деньги/часы абонемента, но бонусный пул НЕ трогает, а reject
+    # раньше вообще ничего не возвращал → бонусный час клиента терялся навсегда.
+    # _refund_booking_to_owner при payment_status='pending' вернёт ТОЛЬКО бонус
+    # (деньги уже откачены гейтом); для balance/subscription — no-op.
+    _reject_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
+    if _reject_owner:
+        _refund_booking_to_owner(session, booking, _reject_owner, 1.0)
+
     booking.status = "cancelled"
     booking.cancellation_reason = (
         f"Отклонено админом ({current_user.name}): {admin_reason}"
