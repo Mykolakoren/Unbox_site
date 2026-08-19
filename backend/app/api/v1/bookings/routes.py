@@ -4366,18 +4366,78 @@ def extend_booking(
                 detail=f"Конфликт с бронью {other.start_time} ({other.duration} мин). Слот занят."
             )
 
-    # Calculate additional price
+    # ── Доплата за добавленное время ────────────────────────────────────────
+    # Считаем прайс-движком: цена(новая длительность) − цена(старая), а НЕ
+    # пропорцией «цена за минуту × добавленные минуты».
+    #
+    # Баг (Лиза, 2026-08-18): пропорция не проходит через тарифную сетку, и
+    # продление сбивало скидку за длительность. Бронь 1 ч (20 ₾) + 1 ч давала
+    # 40 ₾ вместо 36 ₾ — тир «2 часа подряд = −10%» пропадал ровно в момент
+    # продления (Екатерина Жук, Кабинет 7, 14:00). Тот же промах в другую
+    # сторону на пиковых часах: 19:00 + 1 ч заезжает в пик 20:00 — должно быть
+    # 41 ₾, пропорция давала 40 ₾ (Unbox недополучал надбавку).
+    #
+    # Берём именно РАЗНИЦУ котировок, а не новую цену целиком: в final_price
+    # уже могут сидеть допы (кофе и т.п. из /add-extras) и покрытие бонусными
+    # часами — движок про них не знает и затёр бы их.
     from app.services.pricing import PricingService
     pricing = PricingService(session)
-    # Simple proportional pricing: (extra_minutes / original_duration) * original_price
-    if booking.final_price and booking.duration > 0:
-        price_per_min = booking.final_price / booking.duration
-        extra_price = round(price_per_min * extra, 2)
+    target_user = _resolve_booking_owner(session, booking)
+
+    try:
+        _h, _m = map(int, (booking.start_time or "0:0").split(":"))
+        _start_dt = booking.date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+    except Exception:
+        _start_dt = booking.date
+
+    # Абонементные брони через движок НЕ гоняем: если в плане осталось меньше
+    # часов, чем новая длительность, котировка соскочит с абонемента на деньги
+    # и продление на полчаса внезапно спишет с депозита полную стоимость всей
+    # брони. Для них остаётся прежнее поведение (обычно доплата 0).
+    # ⚠️ Известный отдельный пробел: продление абонементной брони не списывает
+    # добавленные часы с плана. Чинить отдельно, с владельцем.
+    _is_subscription = (booking.payment_method or "").lower() == "subscription"
+
+    new_quote = None
+    if target_user is not None and not _is_subscription:
+        _quote_args = dict(
+            user=target_user,
+            resource_id=booking.resource_id,
+            start_time=_start_dt,
+            format_type=booking.format or "individual",
+            # Бронь уже лежит в БД со СТАРОЙ длительностью. Без exclude движок
+            # посчитал бы её соседом самой себе и задвоил часы в цепочке.
+            exclude_booking_id=str(booking.id),
+        )
+        old_quote = pricing.calculate_price(duration_minutes=booking.duration, **_quote_args)
+        new_quote = pricing.calculate_price(duration_minutes=new_duration, **_quote_args)
+        extra_price = round(
+            float(new_quote.final_price or 0) - float(old_quote.final_price or 0), 2
+        )
+        # Отрицательной разницы при текущих тирах быть не может (база растёт
+        # быстрее, чем процент скидки). Если появится — не возвращаем деньги
+        # молча из ветки продления, а просто не доплачиваем.
+        if extra_price < 0:
+            logger.warning(
+                "[extend] отрицательная доплата %.2f для брони %s — цену не трогаем",
+                extra_price, booking.id,
+            )
+            extra_price = 0.0
+    elif booking.final_price and booking.duration > 0:
+        # Абонемент / бронь без найденного владельца — прежняя пропорция.
+        extra_price = round(booking.final_price / booking.duration * extra, 2)
     else:
         extra_price = 0
 
     booking.duration = new_duration
     booking.final_price = round((booking.final_price or 0) + extra_price, 2)
+    # Тариф брони после продления берём из новой котировки — иначе карточка,
+    # аудит и недельный перерасчёт видят старый процент скидки.
+    if new_quote is not None:
+        booking.base_price = float(new_quote.base_price)
+        booking.applied_rule = new_quote.applied_rule
+        booking.discount_amount = float(new_quote.discount_amount)
+        booking.discount_percent = int(new_quote.discount_percent)
     booking.updated_at = datetime.now()
 
     # Charge the extra time to the booking's OWNER — always, whoever clicked.
@@ -4399,7 +4459,6 @@ def extend_booking(
     #  4. On a `paid` booking, charge_amount stayed at the pre-extension figure,
     #     so a later waive/refund gave back less than was actually taken.
     if extra_price > 0:
-        target_user = _resolve_booking_owner(session, booking)
         if target_user and booking.payment_status == "pending":
             # Nothing has been charged yet — the cron will take the new total.
             pass

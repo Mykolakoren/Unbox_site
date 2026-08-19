@@ -381,6 +381,33 @@ def test_admin_user_update_routes_balance_through_wallet():
         "update_user не проводит баланс через wallet.set_balance")
 
 
+def test_extend_prices_via_engine_not_proportion():
+    """Продление брони обязано считать доплату ПРАЙС-ДВИЖКОМ (разница котировок
+    старая длительность → новая), а не пропорцией «цена за минуту × минуты».
+
+    Пропорция не проходит через тарифную сетку, и продление сбивало скидку за
+    длительность: бронь 1 ч (20 ₾) + 1 ч давала 40 ₾ вместо 36 ₾ — тир «2 часа
+    подряд = −10%» исчезал (Екатерина Жук, Кабинет 7, 18.08; нашла Лиза).
+    Та же формула промахивалась и в минус для Unbox: 19:00 + 1 ч заезжает в пик
+    (должно 41 ₾, пропорция давала 40 ₾), а допы из /add-extras задваивались
+    (кофе 3 ₾ → 6 ₾)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def extend_booking")
+    assert i != -1, "extend_booking не найден"
+    j = src.find("\n@router.", i + 10)
+    body = src[i:j if j != -1 else len(src)]
+    assert "price_per_min" not in body, (
+        "в /extend вернулась пропорциональная доплата — скидка за длительность "
+        "снова потеряется при продлении")
+    assert body.count("pricing.calculate_price(") >= 2, (
+        "/extend не котирует цену движком дважды (старая и новая длительность) — "
+        "доплата считается мимо тарифной сетки")
+    assert "exclude_booking_id" in body, (
+        "/extend котирует без exclude_booking_id — движок посчитает бронь "
+        "соседом самой себе и задвоит часы в цепочке")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
