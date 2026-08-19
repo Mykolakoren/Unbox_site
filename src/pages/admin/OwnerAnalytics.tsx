@@ -83,6 +83,49 @@ export function OwnerAnalytics() {
                         <Tile label="Средний чек" value={`${fmt(data.summary.avgCheck)} ₾`} />
                     </div>
 
+                    {/* Деньги, которых не видно в «выручке» — контроль владельца */}
+                    <Section title="Куда уходят деньги">
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
+                            <div style={card}>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>Бесплатные часы</div>
+                                <div style={{ fontSize: 22, fontWeight: 800 }}>{fmt(data.summary.freeHours)} ч</div>
+                                <div style={{ fontSize: 12, color: '#b45309', fontWeight: 700 }}>
+                                    ≈ {fmt(data.summary.freeHoursValue)} ₾ по прайсу
+                                </div>
+                                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 4 }}>
+                                    из {fmt(data.summary.hours)} ч всего
+                                </div>
+                            </div>
+                            <div style={card}>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>Скидки при брони</div>
+                                <div style={{ fontSize: 22, fontWeight: 800, color: '#b45309' }}>{fmt(data.summary.discountsGiven)} ₾</div>
+                                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 4 }}>за длительность и объём</div>
+                            </div>
+                            <div style={card}>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>Недельные возвраты</div>
+                                <div style={{ fontSize: 22, fontWeight: 800, color: '#b45309' }}>{fmt(data.summary.weeklyRebates)} ₾</div>
+                                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 4 }}>кэшбек на баланс</div>
+                            </div>
+                            <div style={card}>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>Долги клиентов</div>
+                                <div style={{ fontSize: 22, fontWeight: 800, color: '#b91c1c' }}>{fmt(data.summary.clientDebt)} ₾</div>
+                                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 4 }}>минусовые балансы сейчас</div>
+                            </div>
+                            <div style={card}>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>Предоплаты клиентов</div>
+                                <div style={{ fontSize: 22, fontWeight: 800 }}>{fmt(data.summary.clientCredit)} ₾</div>
+                                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 4 }}>лежит на балансах</div>
+                            </div>
+                            <div style={card}>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>Ручные правки баланса</div>
+                                <div style={{ fontSize: 22, fontWeight: 800, color: data.summary.correctionsCount > 0 ? '#b45309' : GH.ink }}>
+                                    {data.summary.correctionsCount} шт
+                                </div>
+                                <div style={{ fontSize: 12, color: GH.ink60 }}>на {fmt(data.summary.correctionsSum)} ₾</div>
+                            </div>
+                        </div>
+                    </Section>
+
                     {/* По центрам */}
                     <Section title="По центрам / филиалам">
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 12 }}>
@@ -93,6 +136,8 @@ export function OwnerAnalytics() {
                                     <Row k="Выручка" v={`${fmt(c.revenue)} ₾`} />
                                     <Row k="Броней" v={fmt(c.bookings)} />
                                     <Row k="Часов" v={fmt(c.hours)} />
+                                    <Row k="— платных" v={fmt(c.paidHours)} />
+                                    <Row k="— бесплатных" v={fmt(c.freeHours)} />
                                     <Row k="Средний чек" v={`${fmt(c.avgCheck)} ₾`} />
                                     <div style={{ marginTop: 10 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: GH.ink60, marginBottom: 4 }}>
@@ -148,6 +193,65 @@ export function OwnerAnalytics() {
                             </div>
                         )}
                     </Section>
+
+                    {/* Арендаторы — кто сколько занимает и платит */}
+                    <Section title="Арендаторы: часы и оплата">
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                                <thead>
+                                    <tr style={{ textAlign: 'left', color: GH.ink60, fontFamily: GH_MONO, fontSize: 10 }}>
+                                        <th style={{ padding: '8px 10px' }}>КЛИЕНТ</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>ЧАСОВ</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>БЕСПЛ.</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>ОПЛАТИЛ</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>₾/ЧАС</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>БАЛАНС</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.bySpecialist.map(x => (
+                                        <tr key={x.userId} style={{ borderTop: `1px solid ${GH.ink10}` }}>
+                                            <td style={{ padding: '8px 10px', fontWeight: 600 }}>{x.name}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(x.hours)}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: x.freeHours > 0 ? '#b45309' : GH.ink30 }}>
+                                                {x.freeHours > 0 ? fmt(x.freeHours) : '—'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(x.paid)} ₾</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{x.ratePerHour}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: x.balance < 0 ? '#b91c1c' : GH.ink60 }}>
+                                                {fmt(x.balance)} ₾
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style={{ fontSize: 11, color: GH.ink60, marginTop: 8 }}>
+                            «₾/час» ниже 20 — из-за скидок, абонемента или бесплатных часов.
+                        </div>
+                    </Section>
+
+                    {/* Ручные правки баланса — контроль */}
+                    {data.correctionsByAdmin.length > 0 && (
+                        <Section title="Ручные правки баланса (контроль)">
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {data.correctionsByAdmin.map(c => (
+                                    <div key={c.admin} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ fontWeight: 700 }}>{c.admin}</div>
+                                        <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+                                            <span style={{ fontSize: 12, color: GH.ink60 }}>{c.count} правок</span>
+                                            <span style={{ fontWeight: 800, color: c.sum < 0 ? '#b91c1c' : '#166534' }}>
+                                                {c.sum > 0 ? '+' : ''}{fmt(c.sum)} ₾
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ fontSize: 11, color: GH.ink60, marginTop: 8 }}>
+                                Это изменения баланса «руками», мимо обычной кассы. Стоит понимать причину каждой.
+                            </div>
+                        </Section>
+                    )}
 
                     {/* История по месяцам */}
                     <Section

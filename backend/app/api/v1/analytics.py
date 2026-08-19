@@ -16,6 +16,7 @@ from app.models.booking import Booking
 from app.models.resource import Resource
 from app.models.cashbox_transaction import CashboxTransaction
 from app.models.monthly_metrics import MonthlyMetrics
+from app.models.balance_ledger import BalanceLedger
 from app.core.permissions import ADMIN_ROLES
 
 router = APIRouter()
@@ -70,10 +71,17 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
     for b in bookings:
         loc = b.location_id or room_center.get(b.resource_id) or "—"
         hrs = (b.duration or 0) / 60.0
-        c = centers.setdefault(loc, {"revenue": 0.0, "bookings": 0, "hours": 0.0})
+        _paid = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
+        _is_free = _paid <= 0 and (b.payment_method or "") != "subscription"
+        c = centers.setdefault(loc, {"revenue": 0.0, "bookings": 0, "hours": 0.0,
+                                     "free_hours": 0.0, "paid_hours": 0.0})
         c["revenue"] += float(b.final_price or 0); c["bookings"] += 1; c["hours"] += hrs
-        rr = per_room.setdefault(b.resource_id, {"hours": 0.0, "bookings": 0, "revenue": 0.0})
+        c["free_hours"] += hrs if _is_free else 0.0
+        c["paid_hours"] += 0.0 if _is_free else hrs
+        rr = per_room.setdefault(b.resource_id, {"hours": 0.0, "bookings": 0, "revenue": 0.0,
+                                                 "free_hours": 0.0})
         rr["hours"] += hrs; rr["bookings"] += 1; rr["revenue"] += float(b.final_price or 0)
+        rr["free_hours"] += hrs if _is_free else 0.0
 
     by_center = []
     for loc, c in centers.items():
@@ -85,6 +93,8 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
             "avg_check": round(c["revenue"] / c["bookings"], 2) if c["bookings"] else 0,
             "rooms": rooms, "available_hours": avail,
             "occupancy_pct": round(c["hours"] / avail * 100, 1) if avail else 0,
+            "free_hours": round(c.get("free_hours", 0.0), 1),
+            "paid_hours": round(c.get("paid_hours", 0.0), 1),
         })
     by_center.sort(key=lambda x: x["revenue"], reverse=True)
 
@@ -95,6 +105,7 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
             "resource_id": rid, "name": room_names.get(rid, rid), "location_id": room_center.get(rid, "—"),
             "hours": round(rr["hours"], 1), "bookings": rr["bookings"], "revenue": round(rr["revenue"], 2),
             "occupancy_pct": round(rr["hours"] / avail * 100, 1) if avail else 0,
+            "free_hours": round(rr.get("free_hours", 0.0), 1),
         })
     by_room.sort(key=lambda x: x["occupancy_pct"], reverse=True)
 
@@ -135,6 +146,77 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
         })
     by_admin.sort(key=lambda x: (x["cash_income"] + x["bookings_revenue"]), reverse=True)
 
+    # ── Деньги, которых не видно в «выручке» ──────────────────────────────
+    # Владелец 2026-08: нужен контроль над тем, что уходит мимо кассы —
+    # бесплатные часы, скидки, долги клиентов и ручные правки баланса.
+    PRICE_PER_HOUR = 20.0  # ориентир прайса для оценки недополученного
+
+    free_hours_total = round(sum(c.get("free_hours", 0.0) for c in centers.values()), 1)
+    paid_hours_total = round(sum(c.get("paid_hours", 0.0) for c in centers.values()), 1)
+
+    # Скидки: разница между прайсом платных часов и тем, что реально списали.
+    _paid_price_sum = 0.0
+    for b in bookings:
+        _amt = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
+        if _amt > 0:
+            _paid_price_sum += _amt
+    discounts_given = round(max(0.0, paid_hours_total * PRICE_PER_HOUR - _paid_price_sum), 2)
+
+    # Движения баланса за период: недельные скидки и ручные корректировки.
+    ledger = session.exec(
+        select(BalanceLedger).where(BalanceLedger.created_at >= start, BalanceLedger.created_at < end)
+    ).all()
+    weekly_rebates_sum = round(sum(float(l.delta) for l in ledger if l.reason == "weekly_rebate"), 2)
+    corrections_sum = round(sum(float(l.delta) for l in ledger if l.reason == "correction"), 2)
+    corrections_cnt = sum(1 for l in ledger if l.reason == "correction")
+
+    # Долги и предоплаты клиентов (снимок на сейчас, не за период).
+    all_users = list(users.values())
+    client_debt = round(-sum(float(u.balance or 0) for u in all_users if (u.balance or 0) < 0), 2)
+    client_credit = round(sum(float(u.balance or 0) for u in all_users if (u.balance or 0) > 0), 2)
+
+    # Ручные правки баланса — по админам (кто и на сколько правил).
+    corr_by_admin: dict[str, dict] = {}
+    for l in ledger:
+        if l.reason != "correction":
+            continue
+        key = l.actor_id or (l.actor_name or "—")
+        a = corr_by_admin.setdefault(key, {"name": l.actor_name or "—", "count": 0, "sum": 0.0})
+        a["count"] += 1
+        a["sum"] += float(l.delta)
+
+    # ── Разрез по специалистам (арендаторам) ──────────────────────────────
+    spec_stats: dict[str, dict] = {}
+    for b in bookings:
+        uid = str(b.user_uuid) if b.user_uuid else None
+        if not uid:
+            continue
+        u = users.get(uid)
+        if not u:
+            continue
+        hrs = (b.duration or 0) / 60.0
+        amt = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
+        s = spec_stats.setdefault(uid, {
+            "name": u.name or u.email or uid, "role": u.role or "user",
+            "hours": 0.0, "free_hours": 0.0, "paid": 0.0, "bookings": 0,
+        })
+        s["hours"] += hrs
+        s["bookings"] += 1
+        s["paid"] += amt
+        if amt <= 0 and (b.payment_method or "") != "subscription":
+            s["free_hours"] += hrs
+    by_specialist = []
+    for uid, s in spec_stats.items():
+        u = users.get(uid)
+        by_specialist.append({
+            "user_id": uid, "name": s["name"], "role": s["role"],
+            "hours": round(s["hours"], 1), "free_hours": round(s["free_hours"], 1),
+            "paid": round(s["paid"], 2), "bookings": s["bookings"],
+            "rate_per_hour": round(s["paid"] / s["hours"], 1) if s["hours"] else 0,
+            "balance": round(float(u.balance or 0), 2) if u else 0,
+        })
+    by_specialist.sort(key=lambda x: x["hours"], reverse=True)
+
     total_revenue = round(sum(c["revenue"] for c in centers.values()), 2)
     total_hours = round(sum(c["hours"] for c in centers.values()), 1)
     total_bookings = sum(c["bookings"] for c in centers.values())
@@ -146,8 +228,22 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
             "revenue": total_revenue, "bookings": total_bookings, "hours": total_hours,
             "occupancy_pct": round(total_hours / total_avail * 100, 1) if total_avail else 0,
             "avg_check": round(total_revenue / total_bookings, 2) if total_bookings else 0,
+            "paid_hours": paid_hours_total,
+            "free_hours": free_hours_total,
+            "free_hours_value": round(free_hours_total * PRICE_PER_HOUR, 2),
+            "discounts_given": discounts_given,
+            "weekly_rebates": weekly_rebates_sum,
+            "corrections_sum": corrections_sum,
+            "corrections_count": corrections_cnt,
+            "client_debt": client_debt,
+            "client_credit": client_credit,
         },
         "by_center": by_center, "by_room": by_room, "by_admin": by_admin,
+        "by_specialist": by_specialist[:30],
+        "corrections_by_admin": [
+            {"admin": v["name"], "count": v["count"], "sum": round(v["sum"], 2)}
+            for v in sorted(corr_by_admin.values(), key=lambda x: abs(x["sum"]), reverse=True)
+        ],
         "admin_bookings_tracked": tracked,
     }
 
