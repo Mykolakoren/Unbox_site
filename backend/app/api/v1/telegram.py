@@ -813,11 +813,18 @@ def _merge_into(session: Session, *, absorb: User, keep: User) -> None:
     for attr in ("name", "phone", "avatar_url", "google_id"):
         if not getattr(keep, attr, None) and getattr(absorb, attr, None):
             setattr(keep, attr, getattr(absorb, attr))
-    if abs(float(absorb.balance or 0)) >= 0.01:
+    _merge_amt = float(absorb.balance or 0)
+    if abs(_merge_amt) >= 0.01:
         from app.services import wallet as _wallet
-        _wallet.apply(session, keep, float(absorb.balance or 0), reason="merge",
+        _wallet.apply(session, keep, _merge_amt, reason="merge",
                       description=f"Слияние баланса из {absorb.email}",
                       ref_type="user", ref_id=str(absorb.id))
+        # Обнуляем источник: иначе баланс И уходит на keep, И остаётся на absorb
+        # (задвоение денег + зависший баланс на мёртвом профиле — как 31 легаси-
+        # случай). Через wallet — чтобы лента сходилась (sum(delta)==balance).
+        _wallet.apply(session, absorb, -_merge_amt, reason="merge",
+                      description=f"Баланс перенесён на {keep.email}",
+                      ref_type="user", ref_id=str(keep.id))
     keep.credit_limit = max(float(keep.credit_limit or 0), float(absorb.credit_limit or 0))
     if not keep.subscription and absorb.subscription:
         keep.subscription = absorb.subscription
@@ -1918,6 +1925,15 @@ def _handle_hot_booking_callback(
                               ref_type="booking", ref_id=str(booking.id))
 
         booking.status = "confirmed"
+        # Деньги/часы только что сняты выше — помечаем бронь оплаченной.
+        # БЕЗ этого крон T-24ч видел бронь как confirmed+pending и списывал
+        # ВТОРОЙ раз (горячая бронь по определению внутри окна 24ч).
+        # Реальный случай: Алёна Ловиц 13.08 — бот снял 20₾ в 06:50,
+        # крон снял ещё 20₾ в 07:00. В веб-approve (bookings/routes.py)
+        # эта пометка есть — здесь её забыли.
+        booking.payment_status = "paid"
+        booking.charged_at = datetime.utcnow()
+        booking.charge_amount = float(booking.final_price or 0)
         booking.updated_at = datetime.utcnow()
         session.add(booking)
         session.commit()
