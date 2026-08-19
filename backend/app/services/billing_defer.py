@@ -126,6 +126,23 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
 
     Caller commits.
     """
+    # ── Атомарный claim против двойного списания ──
+    # Раньше проверка ниже читала payment_status БЕЗ блокировки строки: два
+    # прогона крона внахлёст (или ручной запуск поверх крона) читали 'pending'
+    # оба и списывали ОДНУ бронь дважды, без возврата (12 случаев 21.07–07.08).
+    # Перечитываем строку брони с FOR UPDATE (populate_existing — чтобы лок
+    # реально ушёл в БД, а не вернулся кэш из identity-map): второй прогон
+    # упрётся в блокировку, дождётся коммита первого и увидит 'paid' → пропустит.
+    # Лок снимается commit'ом (успех) или rollback'ом вызывающего (пропуск/ошибка).
+    # На SQLite (dev/tests) FOR UPDATE — no-op, там конкуренции нет.
+    b = session.exec(
+        select(Booking)
+        .where(Booking.id == b.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+    if b is None:
+        return False, "gone"
     if b.payment_status != "pending":
         return False, f"not_pending(status={b.payment_status!r})"
 
@@ -155,6 +172,15 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
                 used_hours=used + hrs,
             )
             snapshot = hrs
+            # Пиковая надбавка абонемента (pricing: final_price = subscription_peak_debt)
+            # — это РЕАЛЬНЫЕ деньги, часами не покрывается. Немедленный путь списывает
+            # её отдельно (routes ~975), а отложенный (крон) раньше не списывал —
+            # Unbox недополучал ~5₾/ч на пиковых абонементных бронях, забронированных
+            # заранее (>24ч). Списываем с баланса тут, как немедленный путь.
+            if amount > 0:
+                wallet.debit(session, user, amount, reason="booking_charge",
+                             description="пиковая надбавка абонемента (T-24ч)",
+                             ref_type="booking", ref_id=str(b.id))
         else:
             # Subscription can't cover (expired / depleted) — fall back to
             # cash balance debt so the slot stays bookable. §5#1 fix
