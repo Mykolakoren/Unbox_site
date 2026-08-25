@@ -171,7 +171,11 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
     corrections_cnt = sum(1 for l in ledger if l.reason == "correction")
 
     # Долги и предоплаты клиентов (снимок на сейчас, не за период).
-    all_users = list(users.values())
+    # Архивные профили ИСКЛЮЧАЕМ (владелец 2026-08-22): это закрытые и склеенные
+    # аккаунты, их остатки — легаси от переезда с Excel, а не живые долги и
+    # предоплаты. Пока они попадали в сводку, «долг клиентов» и «предоплаты»
+    # были завышены примерно на 1 300 ₾ по 37 мёртвым профилям.
+    all_users = [u for u in users.values() if u.archived_at is None]
     client_debt = round(-sum(float(u.balance or 0) for u in all_users if (u.balance or 0) < 0), 2)
     client_credit = round(sum(float(u.balance or 0) for u in all_users if (u.balance or 0) > 0), 2)
 
