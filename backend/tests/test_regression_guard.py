@@ -408,6 +408,32 @@ def test_extend_prices_via_engine_not_proportion():
         "соседом самой себе и задвоит часы в цепочке")
 
 
+def test_personal_hourly_rate_disables_all_discounts():
+    """Личная ставка за час (crm_data.personal_hourly_rate) — эксклюзивна:
+    ни тир за длительность, ни недельная скидка к ней не применяются.
+
+    Владелец 2026-08-25: Ольга Корень и Кристина Ропель снимают ГРУППОВОЙ кабинет
+    по 20 GEL/ч, Алла Коноплицкая по 15 GEL/ч. Пока договорённость жила только в
+    Excel, система считала их обычными клиентами и накидывала скидку за объём —
+    Ольге так натекло 58 GEL недельных скидок, которых быть не должно.
+
+    Ветка обязана стоять ПОСЛЕ абонемента (купленные часы должны сгорать, а не
+    списываться деньгами) и выходить ДО тарифной сетки, оставляя
+    discountable_base=0 — иначе weekly_rebate снова начнёт их добирать."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/services/pricing.py"), encoding="utf-8").read()
+    assert "personal_hourly_rate" in src, "личная ставка за час пропала из движка"
+    i = src.find('breakdown.applied_rule = "PERSONAL_RATE"')
+    assert i != -1, "нет ветки PERSONAL_RATE"
+    sub = src.find("_apply_subscription(user, breakdown, resource, format_type)")
+    assert sub != -1 and sub < i, (
+        "ветка личной ставки оказалась ПЕРЕД абонементом — купленные часы "
+        "перестанут сгорать и спишутся деньгами")
+    tier = src.find('for tier in self.PRICING_CONFIG["duration"]')
+    assert tier != -1 and i < tier, (
+        "личная ставка не выходит до тиров за длительность — скидка вернётся")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

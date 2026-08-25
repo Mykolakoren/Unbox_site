@@ -241,6 +241,30 @@ class PricingService:
             # Fallback: resource.hourly_rate if format_code missing (defensive)
             base_rate = rate_table.get(format_code, resource.hourly_rate)
 
+        # 2a. Личная ставка за час (владелец 2026-08-25). Клиент арендует по своей
+        # цене НЕЗАВИСИМО от кабинета и формата, и никакие скидки к ней не
+        # применяются — ни за длительность, ни недельная.
+        #
+        # Зачем: Ольга Корень, Кристина Ропель и Алла Коноплицкая снимают ГРУППОВОЙ
+        # кабинет 7 (35 ₾/ч по сетке) по договорённости за 20 и 15 ₾/ч. Раньше эта
+        # договорённость жила только в Excel: админам приходилось заводить брони как
+        # «индивидуальные», чтобы получить 20 ₾, а система сверху накидывала скидку
+        # за объём — Ольге так натекло 58 ₾ недельных скидок, которых быть не должно.
+        #
+        # Хранится в user.crm_data['personal_hourly_rate'] — без миграции таблицы.
+        # Пиковая надбавка (+5 ₾/ч) СОХРАНЯЕТСЯ: Лиза 2026-08-25 «утренняя
+        # отличалась только нашей классической надбавкой +5 лари в час».
+        personal_rate = None
+        if user is not None:
+            try:
+                _pr = (user.crm_data or {}).get("personal_hourly_rate")
+                if _pr is not None and float(_pr) > 0:
+                    personal_rate = float(_pr)
+            except (TypeError, ValueError, AttributeError):
+                personal_rate = None
+        if personal_rate is not None:
+            base_rate = personal_rate
+
         # 2b. Walk 30-min slots, separating peak vs non-peak portions.
         # New model (2026-05-07):
         #   non_peak_base = non_peak_hours × base_rate  (gets discounted)
@@ -308,6 +332,15 @@ class PricingService:
 
         # A. Subscription (Priority 1)
         if not ignore_subscription and self._apply_subscription(user, breakdown, resource, format_type):
+            return breakdown
+
+        # A2. Личная ставка за час — эксклюзивна: цена уже посчитана по ней,
+        # тиры за длительность и недельный перерасчёт не применяются.
+        # discountable_base остаётся 0, поэтому weekly_rebate её пропустит.
+        # Стоит ПОСЛЕ абонемента: если клиент купил часы, они должны сгорать,
+        # а не списываться деньгами по личной ставке.
+        if personal_rate is not None:
+            breakdown.applied_rule = "PERSONAL_RATE"
             return breakdown
 
         # B. Personal pricing takes EXCLUSIVE priority over tier discounts.
