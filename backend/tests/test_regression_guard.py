@@ -434,6 +434,40 @@ def test_personal_hourly_rate_disables_all_discounts():
         "личная ставка не выходит до тиров за длительность — скидка вернётся")
 
 
+def test_approve_recomputes_consecutive_chain():
+    """Подтверждение срочной брони обязано пересобирать цепочку смежных часов.
+
+    Срочная бронь создаётся как `pending_approval`, а `_compute_block_hours`
+    считает только `confirmed` — соседние часы друг друга не видят, и каждый
+    получает свой тир. Александр Беляев (26.08.2026): 5 часов подряд в капсуле
+    двумя бронями дали 15% и 10% вместо общих 20%."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def approve_booking")
+    assert i != -1, "approve_booking не найден"
+    j = src.find("class RejectBookingPayload", i)
+    body = src[i:j if j != -1 else len(src)]
+    assert "recompute_user_chains_for_day" in body, (
+        "approve_booking не пересчитывает цепочку — смежные часы останутся "
+        "с раздельными скидками вместо общей")
+
+
+def test_series_extension_stamps_payment_status():
+    """«Продлить серию» обязана ставить payment_status='pending'.
+
+    Крон списания (find_due_pending) ищет строго 'pending'. Бронь с NULL он не
+    увидит НИКОГДА — Валентина Ястребова: серия по понедельникам, 5 прошедших
+    занятий на 98 ₾ прошли бесплатно, и вся будущая серия ушла бы так же."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def extend_recurring_series")
+    assert i != -1, "extend_recurring_series не найден"
+    j = src.find("\n@router.", i + 10)
+    body = src[i:j if j != -1 else len(src)]
+    assert 'payment_status="pending"' in body, (
+        "продление серии не ставит payment_status — брони не спишутся никогда")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

@@ -2393,6 +2393,13 @@ def extend_recurring_series(
             discount_percent=template.discount_percent,
             hours_deducted=template.hours_deducted if template.payment_method == "subscription" else None,
             payment_method=template.payment_method,
+            # Без payment_status бронь остаётся NULL, а крон списания ищет
+            # строго 'pending' — такие брони не списываются НИКОГДА (Валентина
+            # Ястребова: серия по понедельникам, 5 прошедших занятий на 98 ₾
+            # прошли бесплатно, и вся будущая серия ушла бы так же).
+            payment_status="pending",
+            charged_at=None,
+            charge_amount=None,
             format=template.format,
             extras=template.extras or [],
             user_id=template.user_id,
@@ -5124,6 +5131,28 @@ def approve_booking(
                 session.rollback()
     except Exception:
         logger.warning("[hot-booking approve] client notify failed", exc_info=True)
+
+    # Пересчёт цепочки смежных часов ПОСЛЕ подтверждения (Лиза, 2026-08-26).
+    # Срочная бронь создаётся как `pending_approval`, а `_compute_block_hours`
+    # считает только `confirmed` — поэтому соседние часы друг друга не видят и
+    # каждый получает свой тир. Александр Беляев: 5 часов подряд в капсуле двумя
+    # бронями дали 15% и 10% вместо общих 20%. Подтверждение переводит бронь в
+    # `confirmed`, и вот тут цепочку надо собрать заново.
+    if booking.payment_method == "balance" and booking.status == "confirmed":
+        try:
+            from app.services.consecutive_pricing import recompute_user_chains_for_day
+            _owner = _resolve_booking_owner(session, booking)
+            if _owner:
+                recompute_user_chains_for_day(
+                    session, _owner, booking.resource_id, booking.date,
+                    actor_id=str(current_user.id), actor_role=current_user.role,
+                    reason="approve_booking",
+                )
+                session.commit()
+                session.refresh(booking)
+        except Exception:
+            session.rollback()
+            logger.exception("[consecutive] recompute on approve failed")
 
     return enrich_booking_status(booking)
 
