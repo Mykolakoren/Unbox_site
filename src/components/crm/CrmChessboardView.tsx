@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { useCrmStore } from '../../store/crmStore';
+import { SplitBookingModal } from '../admin/BookingTodayEditModals';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
 import {
     format, addMinutes, setHours, setMinutes, startOfToday,
@@ -351,6 +352,7 @@ function LinkBookingModal({
     onSaveMulti,
     onDeleteBooking,
     onTrim,
+    onSplit,
 }: {
     booking: BookingHistoryItem;
     crmClients: CrmClient[];
@@ -366,6 +368,7 @@ function LinkBookingModal({
     onSaveMulti: (assignments: SlotAssignment[], opts?: { recurringPattern?: 'weekly' | 'biweekly' | 'monthly' | ''; occurrences?: number }) => Promise<boolean | void>;
     onDeleteBooking: (booking: BookingHistoryItem) => Promise<void>;
     onTrim: (booking: BookingHistoryItem) => void;
+    onSplit: (booking: any) => void;
 }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const duration = booking.duration || 60;
@@ -706,6 +709,24 @@ function LinkBookingModal({
                     </div>
                 )}
 
+                {/* Разделить бронь на отдельные — когда части надо вести раздельно
+                    (отменить или перенести только один час, разные плательщики).
+                    Отличается от вкладок выше: там одна бронь и несколько сессий,
+                    здесь — несколько самостоятельных броней. Цена не меняется. */}
+                {duration >= 120
+                    && (booking.status === 'confirmed' || (booking.status as any) === undefined)
+                    && !booking.isReRentListed && (
+                    <div className="px-5 pb-3 pt-0">
+                        <button
+                            onClick={() => onSplit(booking)}
+                            disabled={deleting || saving}
+                            className="w-full py-2 rounded-xl border border-amber-200 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                        >
+                            Разделить на отдельные брони
+                        </button>
+                    </div>
+                )}
+
                 {/* Footer */}
                 <div className="flex gap-3 p-5 pt-0">
                     <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
@@ -746,6 +767,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
     const [seriesCancelTarget, setSeriesCancelTarget] = useState<BookingHistoryItem | null>(null);
     // Partial-cancel ("trim") target — opens TrimBookingModal for this booking.
     const [trimTarget, setTrimTarget] = useState<BookingHistoryItem | null>(null);
+    const [splitTarget, setSplitTarget] = useState<BookingHistoryItem | null>(null);
     // Waitlist subscribe modal — fired when specialist taps a foreign booking
     // (someone else's slot). Backend then notifies them when ANY cabinet in
     // the same branch frees up at the same time.
@@ -1715,6 +1737,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                         onSaveMulti={(assignments, recOpts) => handleMultiSlotSave(linkBooking, assignments, recOpts)}
                         onDeleteBooking={handleDeleteBooking}
                         onTrim={(b) => { setLinkBooking(null); setTrimTarget(b); }}
+                        onSplit={(b) => { setLinkBooking(null); setSplitTarget(b); }}
                     />
                 )}
                 {/* Slot-watch (waitlist) modal — раньше был только в desktop-ветке,
@@ -2055,8 +2078,17 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     onSaveMulti={(assignments, recOpts) => handleMultiSlotSave(linkBooking, assignments, recOpts)}
                     onDeleteBooking={handleDeleteBooking}
                     onTrim={(b) => { setLinkBooking(null); setTrimTarget(b); }}
+                    onSplit={(b) => { setLinkBooking(null); setSplitTarget(b); }}
                 />
             )}
+
+            <SplitBookingModal
+                bookingId={splitTarget?.id ?? null}
+                minutes={splitTarget?.duration ?? 0}
+                startTime={splitTarget?.startTime ?? undefined}
+                onClose={() => setSplitTarget(null)}
+                onDone={() => { fetchBookings(); fetchSessions(); }}
+            />
 
             {trimTarget && (
                 <TrimBookingModal
