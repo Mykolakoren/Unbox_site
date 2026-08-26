@@ -17,7 +17,7 @@ import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
-import { ExtendBookingModal, AddExtrasModal, MoveBookingModal } from './BookingTodayEditModals';
+import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
@@ -55,6 +55,8 @@ export function AdminChessboardView() {
     // времени и дозаказ допов — общие модалки со списком броней.
     const [extendModalId, setExtendModalId] = useState<string | null>(null);
     const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
+    // Бронь, которую делим на несколько сессий (нужны длительность и время начала).
+    const [splitModalBooking, setSplitModalBooking] = useState<any>(null);
     const [moveModalBooking, setMoveModalBooking] = useState<BookingHistoryItem | null>(null);
     // Перетаскиваемая бронь (drag-and-drop переноса по сетке, десктоп).
     const [draggedBooking, setDraggedBooking] = useState<BookingHistoryItem | null>(null);
@@ -1185,6 +1187,9 @@ export function AdminChessboardView() {
                                             <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
                                         )}
                                         <button onClick={() => setExtendModalId(selectedBooking.id)} className={clsx("py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700", bCompleted && "col-span-2")}>Продлить</button>
+                                        {splitOptions(selectedBooking.duration || 0).length > 0 && (
+                                            <button onClick={() => setSplitModalBooking(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700 col-span-2">Разделить на сессии</button>
+                                        )}
                                         {bookingIsToday(selectedBooking) && (
                                             <button onClick={() => setExtrasModalId(selectedBooking.id)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-teal-50 text-teal-700">+ Доп (кофе и т.п.)</button>
                                         )}
@@ -1280,6 +1285,13 @@ export function AdminChessboardView() {
                 <ExtendBookingModal
                     bookingId={extendModalId}
                     onClose={() => setExtendModalId(null)}
+                    onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+                />
+                <SplitBookingModal
+                    bookingId={splitModalBooking?.id ?? null}
+                    minutes={splitModalBooking?.duration ?? 0}
+                    startTime={splitModalBooking?.startTime ?? splitModalBooking?.start_time}
+                    onClose={() => setSplitModalBooking(null)}
                     onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
                 />
                 <AddExtrasModal
@@ -1758,6 +1770,14 @@ export function AdminChessboardView() {
                                         Продлить
                                     </button>
                                 </div>
+                                {splitOptions(selectedBooking.duration || 0).length > 0 && (
+                                    <button
+                                        onClick={() => setSplitModalBooking(selectedBooking)}
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
+                                    >
+                                        Разделить на сессии
+                                    </button>
+                                )}
                                 {bookingIsToday(selectedBooking) && (
                                     <button
                                         onClick={() => setExtrasModalId(selectedBooking.id)}
@@ -1809,6 +1829,13 @@ export function AdminChessboardView() {
             <ExtendBookingModal
                 bookingId={extendModalId}
                 onClose={() => setExtendModalId(null)}
+                onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
+            />
+            <SplitBookingModal
+                bookingId={splitModalBooking?.id ?? null}
+                minutes={splitModalBooking?.duration ?? 0}
+                startTime={splitModalBooking?.startTime ?? splitModalBooking?.start_time}
+                onClose={() => setSplitModalBooking(null)}
                 onDone={() => { fetchAllBookings(); setSelectedBooking(null); }}
             />
             <AddExtrasModal

@@ -78,6 +78,118 @@ export function ExtendBookingModal({
     );
 }
 
+// ─── Деление брони ───────────────────────────────────────────────────────────
+
+/** Варианты деления для брони длительностью `minutes`.
+ *  Каждая часть — не меньше 30 минут и кратна 30 (правило бэкенда). */
+export function splitOptions(minutes: number): { label: string; parts: number[] }[] {
+    const out: { label: string; parts: number[] }[] = [];
+    const seen = new Set<string>();
+    const push = (label: string, parts: number[]) => {
+        if (parts.some((p) => p < 30 || p % 30 !== 0)) return;
+        if (parts.reduce((a, b) => a + b, 0) !== minutes) return;
+        const key = parts.join('-');
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ label, parts });
+    };
+    if (minutes % 60 === 0 && minutes / 60 >= 2) {
+        const n = minutes / 60;
+        push(`По часу — ${n} ${n === 2 ? 'сессии' : 'сессий'}`, Array(n).fill(60));
+    }
+    if (minutes % 2 === 0 && (minutes / 2) % 30 === 0 && minutes / 2 >= 30) {
+        push('Пополам', [minutes / 2, minutes / 2]);
+    }
+    if (minutes - 60 >= 30) push('Первый час отдельно', [60, minutes - 60]);
+    if (minutes - 60 >= 30) push('Последний час отдельно', [minutes - 60, 60]);
+    return out;
+}
+
+export function SplitBookingModal({
+    bookingId, minutes, startTime, onClose, onDone,
+}: {
+    bookingId: string | null;
+    minutes: number;
+    startTime?: string;
+    onClose: () => void;
+    onDone: () => void;
+}) {
+    const [busy, setBusy] = useState(false);
+    if (!bookingId) return null;
+
+    const options = splitOptions(minutes);
+
+    const fmt = (mins: number) => (mins % 60 === 0 ? `${mins / 60} ч` : `${mins} мин`);
+    const times = (parts: number[]) => {
+        if (!startTime) return parts.map(fmt).join(' + ');
+        const [h, m] = startTime.split(':').map(Number);
+        let cur = h * 60 + m;
+        return parts
+            .map((p) => {
+                const s = `${String(Math.floor(cur / 60)).padStart(2, '0')}:${String(cur % 60).padStart(2, '0')}`;
+                cur += p;
+                const e = `${String(Math.floor(cur / 60)).padStart(2, '0')}:${String(cur % 60).padStart(2, '0')}`;
+                return `${s}–${e}`;
+            })
+            .join(' · ');
+    };
+
+    const split = async (parts: number[]) => {
+        setBusy(true);
+        try {
+            const res = await bookingsApi.splitBooking(bookingId, parts);
+            toast.success(`Бронь разделена на ${res.length}`);
+            onDone();
+            onClose();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось разделить бронь');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div style={overlay} onClick={onClose}>
+            <div style={card} onClick={(e) => e.stopPropagation()}>
+                <div style={title}>Разделить бронь</div>
+                <p style={{ fontSize: 14, color: GH.ink, marginBottom: 8 }}>
+                    Слот {fmt(minutes)} станет несколькими подряд идущими бронями — к каждой
+                    можно привязать своего клиента.
+                </p>
+                <p style={{ fontSize: 13, color: GH.ink60, marginBottom: 20 }}>
+                    Цена не изменится: сумма частей останется прежней.
+                </p>
+
+                {options.length === 0 ? (
+                    <p style={{ fontSize: 14, color: GH.ink60, marginBottom: 20 }}>
+                        Эту бронь разделить нельзя — нужен слот от часа, кратный 30 минутам.
+                    </p>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                        {options.map((o) => (
+                            <button
+                                key={o.parts.join('-')}
+                                disabled={busy}
+                                onClick={() => split(o.parts)}
+                                style={{
+                                    ...btnPrimary, textAlign: 'left', opacity: busy ? 0.5 : 1,
+                                    display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start',
+                                }}
+                            >
+                                <span>{o.label}</span>
+                                <span style={{ fontSize: 10, opacity: 0.75, letterSpacing: '0.04em' }}>
+                                    {times(o.parts)}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+                <button style={btnGhost} onClick={onClose} disabled={busy}>Отмена</button>
+            </div>
+        </div>
+    );
+}
+
 // ─── Допы ─────────────────────────────────────────────────────────────────────
 
 type PayMethod = 'cash' | 'card_tbc' | 'card_bog' | 'balance';

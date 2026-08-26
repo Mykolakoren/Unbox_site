@@ -4902,6 +4902,208 @@ def shorten_booking(
     return enrich_booking_status(booking)
 
 
+# ─── Split booking ───────────────────────────────────────────────────────────
+# Владелец 2026-08-26: «двухчасовой слот — это две сессии по часу, нужно уметь
+# разбить бронь и привязать к каждой части своего клиента».
+#
+# Почему делим саму бронь, а не вешаем две CRM-сессии на одну: вся система
+# устроена как «одна бронь = один слот = одна сессия». Автопривязка ищет сессию
+# ПО ВРЕМЕНИ НАЧАЛА брони, автосинк при переносе двигает одну сессию, в шахматке
+# на блок помещается одно имя. Делить бронь — одна аккуратная операция с
+# деньгами; вешать две сессии — правки в календаре, шахматке и синхронизации.
+#
+# Деньги при делении НЕ двигаются: сумма частей всегда равна исходной цене.
+# Это безопасно потому, что смежные часы движок и так считает одной цепочкой —
+# бронь 2 ч за 36 ₾ и две смежные по часу за 18 ₾ стоят одинаково.
+class SplitRequest(PydanticBaseModel):
+    """Длительности частей в минутах, по порядку. Сумма обязана совпадать с
+    длительностью брони: 120 → [60, 60]; 180 → [60, 60, 60] или [60, 120]."""
+    parts: List[int]
+
+
+@router.patch("/{booking_id}/split", response_model=List[BookingRead])
+def split_booking(
+    booking_id: str,
+    payload: SplitRequest,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Разделить бронь на несколько подряд идущих частей.
+
+    Первой частью остаётся ИСХОДНАЯ бронь (тот же id) — чтобы не отвалились
+    привязанная CRM-сессия, событие календаря и ссылки на неё. Остальные части
+    создаются новыми бронями сразу за ней.
+    """
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    is_owner = _check_ownership(booking, current_user)
+    if not is_owner and current_user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if booking.status != "confirmed":
+        raise HTTPException(status_code=400, detail="Делить можно только подтверждённую бронь")
+    if booking.payment_status == "waived":
+        raise HTTPException(
+            status_code=409,
+            detail="У брони снят штраф — сначала восстановите оплату",
+        )
+
+    parts = [int(p) for p in (payload.parts or [])]
+    if len(parts) < 2:
+        raise HTTPException(status_code=400, detail="Нужно минимум две части")
+    if any(p < 30 or p % 30 != 0 for p in parts):
+        raise HTTPException(status_code=400, detail="Каждая часть — не меньше 30 минут и кратна 30")
+    if sum(parts) != int(booking.duration or 0):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Сумма частей {sum(parts)} мин не совпадает с длительностью брони "
+                   f"{booking.duration} мин",
+        )
+
+    # Котируем каждую часть с подсказкой «это одна цепочка» — тогда тир за
+    # длительность у всех частей общий, как было у целой брони.
+    from app.services.pricing import PricingService
+    pricing = PricingService(session)
+    owner = _resolve_booking_owner(session, booking)
+    try:
+        _h, _m = map(int, (booking.start_time or "0:0").split(":"))
+        start_min0 = _h * 60 + _m
+    except Exception:
+        raise HTTPException(status_code=400, detail="Не удалось разобрать время начала брони")
+
+    total_hours = float(booking.duration or 0) / 60.0
+    quotes, offset = [], 0
+    for p in parts:
+        st_min = start_min0 + offset
+        st_dt = booking.date.replace(hour=st_min // 60, minute=st_min % 60,
+                                     second=0, microsecond=0)
+        q = None
+        if owner is not None:
+            try:
+                q = pricing.calculate_price(
+                    user=owner, resource_id=booking.resource_id, start_time=st_dt,
+                    duration_minutes=p, format_type=booking.format or "individual",
+                    consecutive_total_hours=total_hours,
+                    exclude_booking_id=str(booking.id),
+                )
+            except Exception:
+                logger.exception("[split] не удалось оценить часть %s мин", p)
+        quotes.append(q)
+        offset += p
+
+    # Деньги делим ДОЛЯМИ от уже списанной суммы — так итог совпадает с исходным
+    # до копейки при любом округлении. Пересчитывать «как новые» нельзя: цена
+    # могла содержать допы, бонусные часы или ручную правку.
+    extras_price = round(float(PricingService.calculate_extras_price(list(booking.extras or []))), 2)
+    room_total = round(float(booking.final_price or 0) - extras_price, 2)
+
+    weights = [float(q.final_price) if q is not None else float(p)
+               for q, p in zip(quotes, parts)]
+    if sum(weights) <= 0:
+        weights = [float(p) for p in parts]
+    wsum = sum(weights)
+
+    def _split_amount(total: float) -> list:
+        """Разложить сумму по долям так, чтобы части дали ровно total."""
+        out = [round(total * w / wsum, 2) for w in weights]
+        out[0] = round(total - sum(out[1:]), 2)      # остаток округления — в первую
+        return out
+
+    room_prices = _split_amount(room_total)
+    charged_total = float(booking.charge_amount) if booking.charge_amount is not None else None
+    charges = _split_amount(charged_total) if charged_total is not None else None
+    hours_total = float(booking.hours_deducted or 0)
+    hours = _split_amount(hours_total) if hours_total > 0 else None
+
+    old_event_id = booking.gcal_event_id
+    created: list = []
+    offset = 0
+    for idx, p in enumerate(parts):
+        st_min = start_min0 + offset
+        st_str = f"{st_min // 60:02d}:{st_min % 60:02d}"
+        price = room_prices[idx] + (extras_price if idx == 0 else 0.0)
+        q = quotes[idx]
+
+        if idx == 0:
+            booking.duration = p
+            booking.final_price = round(price, 2)
+            if charges is not None:
+                booking.charge_amount = charges[0]
+            if hours is not None:
+                booking.hours_deducted = hours[0]
+            if q is not None:
+                booking.base_price = float(q.base_price)
+                booking.applied_rule = q.applied_rule
+                booking.discount_amount = float(q.discount_amount)
+                booking.discount_percent = int(q.discount_percent)
+            booking.gcal_event_id = None
+            booking.updated_at = datetime.now()
+            session.add(booking)
+            created.append(booking)
+        else:
+            nb = Booking(
+                resource_id=booking.resource_id,
+                location_id=booking.location_id,
+                date=booking.date,
+                start_time=st_str,
+                duration=p,
+                status="confirmed",
+                format=booking.format,
+                payment_method=booking.payment_method,
+                payment_status=booking.payment_status,
+                charged_at=booking.charged_at,
+                charge_amount=(charges[idx] if charges is not None else None),
+                hours_deducted=(hours[idx] if hours is not None else None),
+                final_price=round(price, 2),
+                base_price=float(q.base_price) if q is not None else None,
+                applied_rule=q.applied_rule if q is not None else booking.applied_rule,
+                discount_amount=float(q.discount_amount) if q is not None else 0.0,
+                discount_percent=int(q.discount_percent) if q is not None else 0,
+                extras=[],
+                user_id=booking.user_id,
+                user_uuid=booking.user_uuid,
+                # Клиента CRM намеренно НЕ копируем: смысл деления в том, что у
+                # каждой части свой клиент — админ назначает его кликом.
+                crm_client_id=None,
+                created_by_id=str(current_user.id),
+                created_by_name=current_user.name or "",
+            )
+            session.add(nb)
+            created.append(nb)
+        offset += p
+
+    session.commit()
+    for b in created:
+        session.refresh(b)
+
+    # Google Calendar: старое событие описывало весь слот — убираем и заводим
+    # по событию на часть. Ошибки не валят операцию: БД — источник истины.
+    if old_event_id:
+        try:
+            gcal_service.delete_event(old_event_id, booking.resource_id)
+        except Exception as e:
+            logger.warning("[GCal Split] delete_event failed for %s: %s", old_event_id, e)
+    for b in created:
+        try:
+            ev = gcal_service.create_event(b, user_name=(owner.name if owner else b.user_id))
+            if ev:
+                b.gcal_event_id = ev
+                session.add(b)
+        except Exception as e:
+            logger.warning("[GCal Split] create_event failed for %s: %s", b.id, e)
+    session.commit()
+
+    logger.info("[split] бронь %s разделена на %s: %s",
+                booking_id, parts, [float(b.final_price or 0) for b in created])
+    return [enrich_booking_status(b) for b in created]
+
+
 # ─── Credit-limit forecast (раннее предупреждение о должниках) ────────────────
 
 @router.get("/limit-forecast")

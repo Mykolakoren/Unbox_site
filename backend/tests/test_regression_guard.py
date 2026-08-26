@@ -468,6 +468,32 @@ def test_series_extension_stamps_payment_status():
         "продление серии не ставит payment_status — брони не спишутся никогда")
 
 
+def test_split_preserves_total_and_keeps_first_booking():
+    """Деление брони не должно создавать и терять деньги.
+
+    Сумма частей обязана равняться исходной цене: части раскладываются ДОЛЯМИ от
+    уже списанного (остаток округления уходит в первую часть), а не считаются
+    «как новые» — иначе потерялись бы допы, бонусные часы и ручные правки.
+
+    Первой частью остаётся ИСХОДНАЯ бронь (тот же id), иначе отвалятся
+    привязанная CRM-сессия, событие Google Calendar и ссылки на неё."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def split_booking")
+    assert i != -1, "split_booking не найден"
+    j = src.find("\n@router.", i + 10)
+    body = src[i:j if j != -1 else len(src)]
+    assert "_split_amount" in body, "деление сумм долями пропало"
+    assert "out[0] = round(total - sum(out[1:]), 2)" in body, (
+        "остаток округления не сводится в первую часть — сумма частей "
+        "разойдётся с исходной ценой")
+    assert "sum(parts) != int(booking.duration or 0)" in body, (
+        "не проверяется, что сумма частей равна длительности брони")
+    assert "crm_client_id=None" in body, (
+        "новым частям копируется клиент CRM — смысл деления в том, что у "
+        "каждой части свой клиент")
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
