@@ -207,8 +207,12 @@ def test_session_payments_dated_by_operation_day_not_session_date():
     прошлого месяца и ломает кэш-флоу. Владелец: касса = когда деньги пришли."""
     base = os.path.join(os.path.dirname(__file__), "..")
     src = open(os.path.join(base, "app/api/v1/crm/sessions.py"), encoding="utf-8").read()
-    # В создании платежа не должно быть date=ts.date (обе ветки — операционный день).
-    assert "date=ts.date" not in src, (
+    # В создании ПЛАТЕЖА не должно быть date=ts.date (обе ветки — операционный
+    # день). Ищем только внутри конструктора TherapistPayment(...): подстрока
+    # session_date=ts.date в календарном пуше — легитимна (Этап 2, 27.08).
+    import re as _re
+    _pay_blocks = _re.findall(r"TherapistPayment\((?:[^()]|\([^()]*\))*\)", src)
+    assert not any("date=ts.date" in b for b in _pay_blocks), (
         "платёж за сессию датируется ts.date — верни datetime.now() (день оплаты)")
     # Обе платёжные ветки (quick_pay + mark_all) создают платёж с датой now().
     assert src.count("date=datetime.now()") >= 2, (
@@ -492,6 +496,174 @@ def test_split_preserves_total_and_keeps_first_booking():
     assert "crm_client_id=None" in body, (
         "новым частям копируется клиент CRM — смысл деления в том, что у "
         "каждой части свой клиент")
+
+
+def test_webhook_masks_start_token_in_logs():
+    """Вебхук Telegram не должен логировать payload /start целиком: там
+    одноразовый link-token, по которому биндится telegram_id (= вход на сайт).
+    Токен в journalctl = захват чужого аккаунта тем, кто читает логи
+    (аудит безопасности 2026-08-27)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/telegram.py"), encoding="utf-8").read()
+    i = src.find("[tg:webhook] in:")
+    assert i != -1, "строка логирования вебхука не найдена"
+    assert "<masked>" in src[max(0, i - 1200):i], (
+        "payload /start логируется без маскировки — link-token утечёт в journalctl")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 2026-08-27 — консилиум (money+regression+security+frontend): пакет фиксов.
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_price_recompute_ignores_fresh_subscription():
+    """Пересчёт цены СУЩЕСТВУЮЩЕЙ денежной брони (reschedule/trim/format/
+    extend/split) не должен тихо применять свежекупленный абонемент — иначе
+    рождаются «нулёвки» balance+final_price=0+rule=SUBSCRIPTION (серия Галины,
+    501 бронь). Все 5 точек обязаны передавать ignore_subscription."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    assert src.count("ignore_subscription") >= 5, (
+        f"точек с ignore_subscription {src.count('ignore_subscription')} < 5 — "
+        "какой-то пересчёт снова тихо применяет абонемент")
+
+
+def test_series_extension_requotes_each_date():
+    """extend_recurring_series обязан пере-котировать каждую новую дату живым
+    движком (+resolve_payment_method), а не копировать template байт-в-байт —
+    копирование размножало испорченную запись каждым продлением."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    i = src.find("def extend_recurring_series")
+    j = src.find("\ndef ", i + 10)
+    body = src[i:j if j != -1 else len(src)]
+    assert "calculate_price" in body and "resolve_payment_method" in body, (
+        "extend_recurring_series снова копирует шаблон без пересчёта")
+
+
+def test_series_has_hard_length_cap():
+    """Серия капится SERIES_MAX_OCCURRENCES и в create, и в extend (суммарно) —
+    без этого повторные продления по 52 растили серии до 500+ броней."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    assert src.count("SERIES_MAX_OCCURRENCES") >= 3, (
+        "потолок длины серии исчез из create или extend")
+
+
+def test_charge_fallback_fails_loud():
+    """Если пересчёт цены в cash-fallback крона падает — бронь остаётся pending
+    и уходит в failures (TG-алерт), а НЕ помечается paid со списанием 0₾."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/services/billing_defer.py"), encoding="utf-8").read()
+    assert "price_recompute_failed" in src, (
+        "fallback снова глотает исключение и дарит комнату за 0₾")
+
+
+def test_peak_surcharge_is_refunded_everywhere():
+    """Пиковая надбавка абонемента — деньги. Списывается при создании и кроном,
+    значит обязана возвращаться во всех трёх точках: отмена (_refund_booking_
+    to_owner), hot-gate revert, waive. Иначе клиент теряет 5₾/ч навсегда."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    routes = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    bd = open(os.path.join(base, "app/services/billing_defer.py"), encoding="utf-8").read()
+    assert "Возврат пиковой надбавки абонемента" in routes, "нет возврата пика при отмене"
+    assert "Откат пиковой надбавки" in routes, "нет отката пика в hot-gate"
+    assert "возврат пиковой надбавки" in bd, "нет возврата пика в waive"
+
+
+def test_analytics_keeps_hours_and_money_apart():
+    """Аналитика владельца не должна суммировать charge_amount абонементных
+    броней как деньги (там по конвенции ЧАСЫ у крон-списанных) — это раздувало
+    «скидки» и портило ₾/час арендаторов."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/analytics.py"), encoding="utf-8").read()
+    assert "_cash_paid_sum" in src, "скидки снова считаются по всем броням разом"
+    assert src.count('== "subscription"') >= 2, (
+        "исключение абонементных из денежных сумм пропало")
+
+
+def test_userdetails_hook_before_early_return():
+    """convertingId (useState) обязан стоять ДО раннего return «Загрузка…» в
+    UserDetails — иначе холодное открытие карточки (F5/прямая ссылка) роняет
+    весь /admin: Rendered more hooks than during the previous render."""
+    base = os.path.join(os.path.dirname(__file__), "..", "..")
+    p = os.path.join(base, "src/pages/admin/UserDetails.tsx")
+    if not os.path.exists(p):
+        return
+    src = open(p, encoding="utf-8").read()
+    hook = src.find("convertingId, setConvertingId")
+    early = src.find("\n    if (!user) {")
+    assert hook != -1 and early != -1, "не нашёл хук или ранний return"
+    assert hook < early, "useState(convertingId) снова после раннего return — /admin будет падать"
+
+
+def test_balance_correction_requires_permission():
+    """Решение владельца 27.08 («вариант а»): менять баланс клиента можно только
+    с правом finance.balance_correction — и в /balance-correction, и в generic
+    PATCH /users. Без гейта любой admin правил чужие балансы в обход матрицы."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/users/admin.py"), encoding="utf-8").read()
+    assert src.count('"finance.balance_correction"') >= 2, (
+        "гейт права на баланс пропал из correct_user_balance или update_user")
+
+
+def test_psycrm_roster_fully_isolated():
+    """Решение владельца 27.08: список клиентов Psy-CRM видит ТОЛЬКО сам
+    специалист — admin-proxy через ?specialist_id= закрыт для всех ролей."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/crm/clients.py"), encoding="utf-8").read()
+    assert "только самому специалисту" in src, "403-гейт изоляции ростера пропал"
+    assert "is_admin and specialist_id" not in src, (
+        "admin-proxy по specialist_id вернулся в list_clients")
+
+
+def test_calendar_push_dedupes_before_creating():
+    """Этап 1 календарного плана (владелец 27.08): пуш события в личный
+    календарь обязан СНАЧАЛА искать существующее событие клиента на это время
+    (привязка/сигнал), а не создавать вслепую — слепой пуш плодил дубли
+    («Алёна грум» ×8, «Николай Горячев»)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    cal = open(os.path.join(base, "app/services/crm_calendar.py"), encoding="utf-8").read()
+    assert "def find_matching_event" in cal and "def create_or_link_event" in cal, (
+        "дедуп-ядро пуша исчезло из crm_calendar.py")
+    assert "extendedProperties" in cal, (
+        "события больше не несут метки происхождения (origin=unbox)")
+    ses = open(os.path.join(base, "app/api/v1/crm/sessions.py"), encoding="utf-8").read()
+    assert "create_or_link_event" in ses, "ручная сессия снова пушит вслепую"
+    rts = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    assert "create_or_link_event" in rts, "зеркало серии снова пушит вслепую"
+    snc = open(os.path.join(base, "app/api/v1/crm/sync.py"), encoding="utf-8").read()
+    assert "calendar_duplicates" in snc, "отчёт синка потерял список дублей календаря"
+
+
+def test_calendar_two_way_and_recurring():
+    """Этап 2 календарного плана: (1) перенос сессии из CRM двигает ТО ЖЕ
+    событие Google (update_calendar_event по google_event_id); (2) серия
+    создаётся одним recurring-событием (RRULE) с детерминированными
+    instance-id; (3) patch события не затирает описание при переносе."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    cal = open(os.path.join(base, "app/services/crm_calendar.py"), encoding="utf-8").read()
+    assert "def create_recurring_event" in cal and "RRULE:FREQ=WEEKLY" in cal, (
+        "recurring-создатель серии пропал")
+    assert 'if notes is not None:' in cal, (
+        "patch события снова затирает описание пустой строкой")
+    ses = open(os.path.join(base, "app/api/v1/crm/sessions.py"), encoding="utf-8").read()
+    assert "update_calendar_event" in ses, (
+        "перенос сессии из CRM больше не двигает событие Google")
+    rts = open(os.path.join(base, "app/api/v1/bookings/routes.py"), encoding="utf-8").read()
+    assert "_series_instance_ids" in rts and "create_recurring_event" in rts, (
+        "серия снова пушится N одиночными событиями")
+
+
+def test_calendar_autosync_endpoint_secret_gated():
+    """Этап 3: автосинк календарей по крону — эндпоинт /crm/sync/auto обязан
+    существовать и быть закрыт TELEGRAM_REMINDER_SECRET (паттерн billing)."""
+    base = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(base, "app/api/v1/crm/sync.py"), encoding="utf-8").read()
+    assert '"/sync/auto"' in src, "cron-эндпоинт автосинка пропал"
+    i = src.find("def auto_sync_all_calendars")
+    body = src[i:i+2000]
+    assert "TELEGRAM_REMINDER_SECRET" in body and "Invalid secret" in body, (
+        "автосинк без секрет-гейта — любой сможет дергать синк")
 
 
 if __name__ == "__main__":

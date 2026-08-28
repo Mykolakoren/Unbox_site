@@ -1,5 +1,8 @@
 """CRM Calendar Sync — Google Calendar import with auto-client creation."""
 import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
 import re
 import random
 import string
@@ -454,7 +457,9 @@ def sync_from_calendar(
             "matched": len(result["matched"]),
             "unmatched": len(result["unmatched"]),
             "would_create_clients": len(unique_names),
-            "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],
+            "calendar_duplicates": calendar_duplicates[:15],
+        "calendar_duplicates_count": len(calendar_duplicates),
+        "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],
         }
 
     # ── Save sessions ─────────────────────────────────────────────────────
@@ -681,6 +686,23 @@ def sync_from_calendar(
                 )
                 backfill_errors += 1
 
+    # Этап 1 (27.08): дубли В КАЛЕНДАРЕ — два+ события одного клиента на одно
+    # время. Это источник дублей сессий; показываем специалисту явно, чтобы он
+    # удалил лишнее событие в Google (мы чужие ручные события не трогаем).
+    _dup_groups: dict = {}
+    for _e in result["matched"]:
+        _k = (str(_e.get("client_id")), _e.get("date"))
+        _dup_groups.setdefault(_k, []).append(_e)
+    calendar_duplicates = [
+        {
+            "summary": _evs[0]["summary"],
+            "date": _k[1].isoformat() if _k[1] else None,
+            "count": len(_evs),
+        }
+        for _k, _evs in _dup_groups.items() if len(_evs) > 1
+    ]
+    calendar_duplicates.sort(key=lambda x: x["date"] or "")
+
     return {
         "total_events": result["total"],
         "matched": len(result["matched"]),
@@ -872,3 +894,58 @@ def sync_client_history(
 
     session.commit()
     return {"total_found": len(sessions_data), "created": created}
+
+
+@router.post("/sync/auto")
+def auto_sync_all_calendars(
+    secret: Optional[str] = Query(None),
+    session: Session = Depends(deps.get_session),
+):
+    """Этап 3 календарного плана (28.08): автосинк по крону — без кнопки.
+
+    Гейт тем же секретом, что и денежный крон (TELEGRAM_REMINDER_SECRET,
+    паттерн billing/charge-due). Пробегает всех специалистов с подключённым
+    личным календарём (сейчас 1, задел на раскатку) и прогоняет для каждого
+    ШТАТНЫЙ sync_from_calendar — роут-функция вызывается напрямую, Depends
+    в сигнатуре — просто дефолты. Ошибки одного специалиста не роняют
+    остальных.
+    """
+    from app.core.config import settings as _settings
+
+    expected = getattr(_settings, "TELEGRAM_REMINDER_SECRET", None)
+    if not expected:
+        raise HTTPException(status_code=503, detail="Cron secret not configured")
+    if secret != expected:
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    # Не только role=specialist: владелец (owner) тоже ведёт Psy-CRM со своим
+    # календарём — фильтр по роли пропускал его (смок 28.08: synced=0).
+    # Критерий один: подключён личный календарь и профиль не в архиве.
+    specialists = session.exec(
+        select(User).where(User.archived_at.is_(None))  # type: ignore
+    ).all()
+    results, errors = [], []
+    for u in specialists:
+        if not get_crm_calendar_id(u):
+            continue
+        try:
+            r = sync_from_calendar(
+                session=session,
+                current_user=u,
+                dry_run=False,
+                auto_create_clients=True,
+                months_back=0,
+                months_forward=3,
+                past_days=45,
+            )
+            results.append({
+                "specialist": u.email,
+                "created": r.get("created"),
+                "updated": r.get("updated"),
+                "deleted": r.get("deleted"),
+                "duplicates": len(r.get("calendar_duplicates") or []),
+            })
+        except Exception as e:  # noqa: BLE001 — один упал, остальные синкаются
+            logger.warning("[auto-sync] %s failed: %r", u.email, e)
+            errors.append({"specialist": u.email, "error": str(e)})
+    return {"ok": True, "synced": len(results), "results": results, "errors": errors}

@@ -1313,14 +1313,19 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                         </DndContext>
                     )}
 
-                    {editing && (
-                        <EditModal
-                            specialist={editing}
-                            onClose={() => setEditing(null)}
-                            onSaved={load}
-                        />
-                    )}
                 </>
+            )}
+
+            {/* Модалка редактирования — НА ОБЩЕМ уровне, вне тернара вкладок.
+                Когда она жила внутри ветки «Специалисты», кнопка «Открыть» на
+                вкладке «Заявки» ставила editing, но модалке негде было
+                отрисоваться — казалось, что кнопка не работает (28.08). */}
+            {editing && (
+                <EditModal
+                    specialist={editing}
+                    onClose={() => setEditing(null)}
+                    onSaved={load}
+                />
             )}
 
             {/* ── Footer ── */}

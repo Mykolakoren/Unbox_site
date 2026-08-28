@@ -29,3 +29,8 @@
 # Сторож денежного крона (dead-man's-switch, §5#6). Алерт в TG, если charge-due
 # перестал списывать. Каждые 15 минут.
 */15 * * * * /usr/local/bin/unbox-cron-watchdog.sh >> /var/log/unbox-cron-watchdog.log 2>&1
+
+# Автосинк личных календарей Psy-CRM (Этап 3 календарного плана, 2026-08-28).
+# Каждые 20 мин дергает /crm/sync/auto для всех профилей с подключённым
+# календарём. Секрет тот же, что у денежного крона.
+*/20 * * * * curl -fsS -X POST 'http://127.0.0.1:8000/api/v1/crm/sync/auto?secret=<REMINDER_SECRET>' >> /var/log/unbox-crm-sync.log 2>&1
