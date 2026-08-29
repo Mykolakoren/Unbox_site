@@ -681,3 +681,17 @@ if __name__ == "__main__":
                 print(f"  ✗ {name}: {exc!r}")
     print("СТОРОЖ: OK" if not failures else f"СТОРОЖ УПАЛ ({failures}) — деплой НЕ выкатывать")
     sys.exit(1 if failures else 0)
+
+
+def test_session_notes_never_pushed_to_google_calendar():
+    """Ревизия приватности 29.08: заметки терапевта шифруются в базе и не
+    должны уходить открытым текстом в описание события Google. Пуш сессии
+    в календарь (create_or_link_event в sessions.py) обязан передавать
+    notes=None. Если кто-то вернёт notes=data.notes — этот сторож упадёт."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/crm/sessions.py").read_text()
+    i = src.find("res = create_or_link_event(")
+    assert i != -1, "пуш сессии в календарь исчез — проверь sessions.py"
+    call = src[i:i + 700]
+    assert "notes=None" in call, "пуш сессии должен слать notes=None"
+    assert "notes=data.notes" not in call, "заметка сессии утекает в Google!"

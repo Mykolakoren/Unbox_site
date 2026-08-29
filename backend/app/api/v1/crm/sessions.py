@@ -165,20 +165,52 @@ def create_session(
         logger.info(f"[create_session] calendar_id={calendar_id!r} alias_code={client.alias_code!r}")
         if calendar_id:
             try:
-                from app.services.crm_calendar import create_calendar_event
+                from app.services.crm_calendar import create_or_link_event
                 # Use the already-normalised UTC-naive date (matches the
                 # row we'll store) — _dt_to_rfc3339 will append "Z" and
                 # GCal will render in the calendar's TZ correctly.
-                gcal_id = create_calendar_event(
+                # Этап 1 (27.08): пуш С ПОИСКОМ — если событие клиента на это
+                # время уже стоит в календаре (поставлено руками), привязываемся
+                # к нему; «почти совпало» → сигнал, второе не создаём.
+                res = create_or_link_event(
                     calendar_id=calendar_id,
                     client_name=client.name,
                     alias_code=client.alias_code,
                     session_date=therapy_session.date,
                     duration_minutes=data.duration_minutes,
-                    notes=data.notes,
+                    # Ревизия приватности 29.08: заметка сессии НЕ уходит в
+                    # описание события Google. Ни один UI-путь не передаёт
+                    # notes вместе с push_to_calendar, а держать лазейку на
+                    # уровне API опасно: заметки терапевта шифруются в базе
+                    # и не должны оказаться открытым текстом у Google.
+                    notes=None,
+                    session_id=str(therapy_session.id),
                 )
-                therapy_session.google_event_id = gcal_id
-                logger.info(f"[create_session] GCal event created: {gcal_id}")
+                if res["action"] == "conflict":
+                    from app.models.notification import Notification as _Notif
+                    session.add(_Notif(
+                        type="calendar_conflict",
+                        title="Календарь: возможный дубль",
+                        description=(
+                            f"Рядом уже стоит событие «{res.get('summary')}» "
+                            f"({res.get('conflict_start') or '—'}). Второе НЕ создано — "
+                            f"проверьте время в Google Calendar и в CRM."
+                        ),
+                        recipient_id=str(current_user.id),
+                        icon="AlertTriangle",
+                        link="/crm/sessions",
+                    ))
+                    logger.warning(f"[create_session] GCal dedupe conflict: {res}")
+                else:
+                    gid = res["event_id"]
+                    # google_event_id уникален — не привязываем событие, у
+                    # которого уже есть сессия (это был бы дубль сессий).
+                    clash = session.exec(
+                        select(TherapySession).where(TherapySession.google_event_id == gid)
+                    ).first() if gid else None
+                    if clash is None and gid:
+                        therapy_session.google_event_id = gid
+                    logger.info(f"[create_session] GCal {res['action']}: {gid}")
             except Exception as e:
                 logger.warning(f"GCal push failed: {e}", exc_info=True)
         else:
@@ -277,6 +309,29 @@ def update_session(
     for key, value in update_data.items():
         setattr(ts, key, value)
     ts.updated_at = datetime.now()
+
+    # Этап 2 календарного плана (27.08): перенос/смена длительности сессии из
+    # CRM двигает ТО ЖЕ событие в личном календаре (по ключу google_event_id).
+    # Раньше двигалась только бронь кабинета, а событие в Google оставалось на
+    # старом времени — расхождение, которое следующий синк «побеждал» обратно.
+    if ts.google_event_id and ("date" in update_data or "duration_minutes" in update_data):
+        _cal_id = get_crm_calendar_id(current_user)
+        if _cal_id:
+            try:
+                from app.services.crm_calendar import update_calendar_event
+                _cl = session.get(TherapistClient, ts.client_id)
+                update_calendar_event(
+                    calendar_id=_cal_id,
+                    event_id=ts.google_event_id,
+                    client_name=_cl.name if _cl else "Сессия",
+                    alias_code=_cl.alias_code if _cl else None,
+                    session_date=ts.date,
+                    duration_minutes=ts.duration_minutes or 60,
+                    # notes не передаём — описание события в Google не трогаем
+                )
+                logger.info(f"[update_session] GCal event moved: {ts.google_event_id}")
+            except Exception as e:
+                logger.warning(f"[update_session] GCal move failed: {e}")
 
     session.add(ts)
     session.commit()
