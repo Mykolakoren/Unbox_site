@@ -695,3 +695,31 @@ def test_session_notes_never_pushed_to_google_calendar():
     call = src[i:i + 700]
     assert "notes=None" in call, "пуш сессии должен слать notes=None"
     assert "notes=data.notes" not in call, "заметка сессии утекает в Google!"
+
+
+def test_quick_pay_reconciles_existing_payment_instead_of_500():
+    """29.08: у сессии есть запись оплаты, а is_paid=False (легаси-рассинхрон).
+    quick-pay обязан НЕ вставлять второй платёж (unique-констрейнт дал бы 500),
+    а идемпотентно чинить флаг. Проверяем: до создания TherapistPayment стоит
+    поиск существующего платежа с веткой reconciled."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/crm/sessions.py").read_text()
+    i = src.find('def quick_pay_session')
+    assert i != -1
+    body = src[i:src.find("def unmark_paid_session")]
+    assert '"reconciled": True' in body, "нет идемпотентной ветки при существующем платеже"
+    assert body.find("existing_payment") < body.find("TherapistPayment("), \
+        "проверка существующего платежа должна стоять ДО создания нового"
+
+
+def test_update_session_unpaid_deletes_orphan_payments():
+    """29.08: снятие «Оплачено» через форму (PATCH is_paid=False) должно
+    удалять платежи сессии, как это делает unmark-paid. Иначе платёж-сирота
+    остаётся жить: доход завышен, повторная оплата падает."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/crm/sessions.py").read_text()
+    i = src.find("def update_session")
+    body = src[i:src.find("def delete_session")]
+    assert 'update_data.get("is_paid") is False' in body, \
+        "PATCH is_paid=False больше не чистит платежи-сироты"
+    assert "session.delete(_p)" in body

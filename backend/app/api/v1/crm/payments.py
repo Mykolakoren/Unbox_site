@@ -46,7 +46,15 @@ def create_payment(
 
     ts = None
     if data.session_id:
-        ts = session.get(TherapySession, data.session_id)
+        # FOR UPDATE — тот же паттерн, что в quick-pay: одновременные
+        # «Оплатить» и произвольный платёж по той же сессии не должны
+        # обгонять друг друга (иначе один из них падал 500 на
+        # uq_therapist_payment_session).
+        ts = session.exec(
+            select(TherapySession)
+            .where(TherapySession.id == data.session_id)
+            .with_for_update()
+        ).first()
         if ts and ts.specialist_id != str(current_user.id):
             ts = None
 

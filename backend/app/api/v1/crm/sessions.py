@@ -306,6 +306,26 @@ def update_session(
                 bk.updated_at = datetime.now()
                 session.add(bk)
 
+    # 29.08 (ревизия денег): снятие «Оплачено» через форму редактирования шло
+    # мимо unmark-paid — флаг падал, а запись оплаты оставалась жить сиротой.
+    # Сирота ломала повторную оплату (500 на unique-констрейнте) и завышала
+    # доход. Теперь PATCH с is_paid=False ведёт себя как unmark-paid: платежи
+    # сессии удаляются вместе со снятием флага.
+    if update_data.get("is_paid") is False and ts.is_paid:
+        _orphans = session.exec(
+            select(TherapistPayment).where(
+                TherapistPayment.session_id == session_id,
+                TherapistPayment.specialist_id == str(current_user.id),
+            )
+        ).all()
+        for _p in _orphans:
+            session.delete(_p)
+        if _orphans:
+            logger.info(
+                "[update_session] is_paid→False: удалено платежей по сессии %s: %d",
+                session_id, len(_orphans),
+            )
+
     for key, value in update_data.items():
         setattr(ts, key, value)
     ts.updated_at = datetime.now()
@@ -627,6 +647,49 @@ def quick_pay_session(
         raise HTTPException(404, "Session not found")
     if ts.is_paid:
         raise HTTPException(400, "Session already paid")
+
+    # 29.08: у сессии может быть живая запись оплаты при is_paid=False —
+    # легаси-рассинхрон (например, старый unmark-paid удалял только первый
+    # платёж). Раньше повторный «Оплатить» падал 500 на unique-констрейнте
+    # uq_therapist_payment_session. Теперь идемпотентно: оплата уже есть →
+    # чиним только флаг и цену, второй платёж НЕ создаём.
+    existing_payment = session.exec(
+        select(TherapistPayment).where(
+            TherapistPayment.session_id == session_id,
+            TherapistPayment.specialist_id == str(current_user.id),
+        )
+    ).first()
+    if existing_payment:
+        # Частичная оплата (возможна только через POST /crm/payments, который
+        # копит сумму в той же записи) этой кнопкой не закрывается — иначе
+        # недоплата молча выпала бы из долга клиента.
+        if ts.price is not None and float(existing_payment.amount or 0) + 0.01 < float(ts.price):
+            raise HTTPException(
+                409,
+                f"По сессии уже внесено {existing_payment.amount} "
+                f"{existing_payment.currency} из {ts.price} — доплату проведите через «Финансы»",
+            )
+        logger.warning(
+            "[quick-pay] reconcile: у сессии %s был живой платёж при is_paid=False "
+            "(рассинхрон) — чиню флаг, второй платёж не создаю", session_id,
+        )
+        ts.is_paid = True
+        if ts.price is None:
+            ts.price = existing_payment.amount
+        if not ts.currency:
+            ts.currency = existing_payment.currency
+        if not ts.account:
+            ts.account = existing_payment.account
+        ts.updated_at = datetime.now()
+        session.add(ts)
+        session.commit()
+        return {
+            "ok": True,
+            "amount": existing_payment.amount,
+            "currency": existing_payment.currency,
+            "account": existing_payment.account,
+            "reconciled": True,
+        }
 
     client = session.get(TherapistClient, ts.client_id)
     if not client:
