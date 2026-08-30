@@ -222,7 +222,7 @@ export function AdminLayout() {
                 <>
                     <div className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
                     <div
-                        className="fixed top-14 left-0 right-0 z-40 md:hidden animate-in slide-in-from-top-2 duration-200"
+                        className="fixed top-14 left-0 right-0 z-40 md:hidden animate-in slide-in-from-top-2 duration-200 max-h-[calc(100vh-56px)] overflow-y-auto"
                         style={{
                             background: 'rgba(22,34,31,0.97)',
                             backdropFilter: 'blur(20px)',

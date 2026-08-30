@@ -31,6 +31,15 @@ const STATUS_LABELS: Record<string, string> = {
     CANCELLED_THERAPIST: 'Отмена (терапевт)',
 };
 
+// Тот же хук, что в DashboardOverview/LoginPage: карточка клиента была
+// единственным экраном CRM совсем без мобильной ветки — двухколоночная
+// сетка сжимала блок «Финансы» в полосу ~100px (аудит 30.08).
+function useGHNarrow(bp = 768) {
+    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return n;
+}
+
 export function CrmClientDetail() {
     const { clientId } = useParams<{ clientId: string }>();
     const navigate = useNavigate();
@@ -496,6 +505,7 @@ const GH_STATUS_COLORS: Record<string, { bg: string; color: string }> = {
 };
 
 function GridHouseCrmClientDetail(props: GHClientDetailProps) {
+    const narrow = useGHNarrow();
     const {
         client, sessions: _sessions, notes, payments, stats, futureSessions, pastSessions, notesBySession,
         editingProfile, editForm, setEditForm, openEditProfile, handleSaveProfile, setEditingProfile,
@@ -521,7 +531,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, minHeight: '100vh' }}>
 
             {/* ── Back link ── */}
-            <div style={{ padding: '24px 32px 0' }}>
+            <div style={{ padding: narrow ? '16px 16px 0' : '24px 32px 0' }}>
                 <button
                     onClick={() => navigate('/crm/clients')}
                     style={{
@@ -534,7 +544,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
             </div>
 
             {/* ── Head ── */}
-            <div style={{ padding: '20px 32px 0' }}>
+            <div style={{ padding: narrow ? '16px 16px 0' : '20px 32px 0' }}>
                 <div style={ghMono}>CRM · Клиент</div>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -633,7 +643,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
             {/* ── Anchor KPI + secondary ── */}
             <div style={{
                 display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-                padding: '32px 32px 24px', flexWrap: 'wrap', gap: 24,
+                padding: narrow ? '20px 16px 16px' : '32px 32px 24px', flexWrap: 'wrap', gap: narrow ? 16 : 24,
             }}>
                 <div>
                     {Object.keys(stats.paidByCurrency).length > 1 ? (
@@ -682,11 +692,11 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
             </div>
 
             {/* ── Thick header border ── */}
-            <div style={{ margin: '0 32px', borderBottom: `2px solid ${GH.ink}` }} />
+            <div style={{ margin: narrow ? '0 16px' : '0 32px', borderBottom: `2px solid ${GH.ink}` }} />
 
             {/* ── Edit Profile Form ── */}
             {editingProfile && (
-                <div style={{ margin: '24px 32px', padding: 24, border: `1px solid ${GH.accent}`, background: '#fff' }}>
+                <div style={{ margin: narrow ? '16px' : '24px 32px', padding: narrow ? 16 : 24, border: `1px solid ${GH.accent}`, background: '#fff' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                         <div style={{ ...ghMono, color: GH.accent }}>Редактировать профиль</div>
                         <button onClick={() => setEditingProfile(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
@@ -775,13 +785,13 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
             )}
 
             {/* ── Two-column layout ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 0, padding: '0 32px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '2fr 1fr', gap: 0, padding: narrow ? '0 16px' : '0 32px' }}>
 
                 {/* ── Left column ── */}
-                <div style={{ borderRight: ghHairline }}>
+                <div style={{ borderRight: narrow ? 'none' : ghHairline, order: narrow ? 2 : undefined }}>
 
                     {/* Notes section */}
-                    <div style={{ padding: '24px 24px 24px 0' }}>
+                    <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div style={ghMono}>Заметки</div>
                             <button
@@ -841,7 +851,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
                     {/* Upcoming sessions */}
                     {futureSessions.length > 0 && (
-                        <div style={{ padding: '24px 24px 24px 0' }}>
+                        <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                                 <div style={ghMono}>Ближайшие сессии</div>
                                 <span style={{ ...ghMono, fontSize: 9, color: GH.accent }}>{futureSessions.length} запланировано</span>
@@ -885,7 +895,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                     )}
 
                     {/* Session history */}
-                    <div style={{ padding: '24px 24px 24px 0' }}>
+                    <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div style={ghMono}>История сессий</div>
                             <div style={{ position: 'relative' }}>
@@ -1192,7 +1202,8 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                 </div>
 
                 {/* ── Right column (Finance) ── */}
-                <div style={{ padding: '24px 0 24px 24px' }}>
+                {/* На телефоне финансы первыми: долг — главный вопрос с телефона */}
+                <div style={{ padding: narrow ? '24px 0 8px' : '24px 0 24px 24px', order: narrow ? 1 : undefined, borderBottom: narrow ? ghHairline : 'none' }}>
                     <div style={ghMono}>Финансы</div>
 
                     <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1285,7 +1296,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
             {/* ── Footer ── */}
             <div style={{
-                borderTop: `2px solid ${GH.ink}`, margin: '48px 32px 0',
+                borderTop: `2px solid ${GH.ink}`, margin: narrow ? '32px 16px 0' : '48px 32px 0',
                 padding: '12px 0 32px', display: 'flex', justifyContent: 'space-between',
             }}>
                 <div style={{ ...ghMono, fontSize: 9 }}>UNBOX · 2026</div>

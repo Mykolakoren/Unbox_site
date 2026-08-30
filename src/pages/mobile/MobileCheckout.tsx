@@ -960,7 +960,10 @@ export function MobileCheckout() {
                         )}
                         <PaymentRow
                             label="Баланс"
-                            sub={currentUser ? `${(currentUser.balance ?? 0).toFixed(0)} ₾` : ''}
+                            // Показываем баланс того, ЗА КОГО бронь (админ-прокси
+                            // бронирует за клиента — списание идёт с клиента, не
+                            // с админа; аудит 30.08).
+                            sub={effectiveUser ? `${(effectiveUser.balance ?? 0).toFixed(0)} ₾` : ''}
                             active={state.paymentMethod !== 'subscription' && state.paymentMethod !== 'bonus'}
                             onClick={() => useBookingStore.setState({ paymentMethod: 'balance' })}
                         />
@@ -996,6 +999,26 @@ export function MobileCheckout() {
                         {state.paymentMethod === 'bonus' && bonusEligible && (
                             <div style={{ fontSize: 12, color: '#666' }}>
                                 Спишется {totalDurationHours.toFixed(1)} ч из бонуса — с баланса 0 ₾
+                            </div>
+                        )}
+                        {/* Оплата балансом: говорим явно, сколько спишется, и
+                            честно предупреждаем про уход в долг — раньше клиент
+                            узнавал о минусе постфактум из истории баланса. */}
+                        {state.paymentMethod !== 'subscription' && state.paymentMethod !== 'bonus' && effectiveUser && (() => {
+                            const bal = effectiveUser.balance ?? 0;
+                            const after = bal - priced.total;
+                            const debt = after < 0 ? Math.min(priced.total, -after) : 0;
+                            return (
+                                <div style={{ fontSize: 12, color: debt > 0 ? '#b3453a' : '#666' }}>
+                                    {debt > 0
+                                        ? `Спишется ${priced.total.toFixed(0)} ₾, из них ${debt.toFixed(0)} ₾ — в долг (лимит ${(effectiveUser.creditLimit ?? 0).toFixed(0)} ₾)`
+                                        : `Спишется ${priced.total.toFixed(0)} ₾ с баланса, останется ${after.toFixed(0)} ₾`}
+                                </div>
+                            );
+                        })()}
+                        {recurPattern !== 'once' && effectiveOccurrences > 1 && (
+                            <div style={{ fontSize: 11, color: '#999' }}>
+                                Сумма серии ориентировочная — точный расчёт по каждой дате покажем после создания
                             </div>
                         )}
                     </div>

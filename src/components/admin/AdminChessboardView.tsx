@@ -1070,7 +1070,7 @@ export function AdminChessboardView() {
                 {/* Booking detail popup */}
                 {selectedBooking && (
                     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm p-3" onClick={() => setSelectedBooking(null)}>
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
                             <div className="flex items-start justify-between mb-3">
                                 <div>
                                     <div className="font-bold text-unbox-dark">{getUserName(selectedBooking.userId)}</div>

@@ -432,7 +432,7 @@ function CrmAccessRequests() {
     }
 
     return (
-        <div className="bg-white rounded-xl border border-unbox-light overflow-hidden shadow-sm">
+        <div className="bg-white rounded-xl border border-unbox-light overflow-x-auto shadow-sm">
             <table className="w-full text-left">
                 <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
                     <tr>

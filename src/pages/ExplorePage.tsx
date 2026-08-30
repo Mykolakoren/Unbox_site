@@ -107,7 +107,9 @@ export function ExplorePage() {
 // Mobile users almost always come here to book a room quickly. The current
 // landing has a long path: WelcomeGate → ClientLanding → scroll/find CTA.
 // FAB short-circuits that — visible on every variant, fixed bottom-right,
-// one tap → /checkout. Hidden on the welcome gate (no mode picked yet) and
+// one tap → /m/find (мобильный мастер «Свободно сейчас»; старый /checkout
+// на телефоне нечитаем — таблица-шахматка — и без логин-гейта, см. аудит
+// 30.08). Hidden on the welcome gate (no mode picked yet) and
 // on desktop (≥768px) where the regular CTAs are easy to find.
 function MobileBookFab({ visitorMode }: { visitorMode: 'client' | 'specialist' | null }) {
     const navigate = useNavigate();
@@ -121,7 +123,7 @@ function MobileBookFab({ visitorMode }: { visitorMode: 'client' | 'specialist' |
     if (visitorMode === null) return null; // gate first — don't crowd the choice
     return (
         <button
-            onClick={() => navigate('/checkout')}
+            onClick={() => navigate('/m/find')}
             aria-label="Забронировать кабинет"
             style={{
                 position: 'fixed',

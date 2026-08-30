@@ -144,7 +144,17 @@ interface GHDashProps {
     calendarIdSaved: string | null;
 }
 
+// Аудит 30.08: специалисты работают с телефона между сессиями — на узком
+// экране дашборд открывается блоком «Сегодня»: ближайшие сессии дня одним
+// вертикальным списком, тап ведёт в «Сессии» (там кнопка «Оплачено»).
+function useGHDashNarrow(bp = 768) {
+    const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
+    useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
+    return n;
+}
+
 function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMonth, navigate, calendarIdSaved }: GHDashProps) {
+    const ghNarrow = useGHDashNarrow();
     // Excel #33 — show specialist's own coworking bookings (the cabinets
     // they've reserved as a renter) on the CRM dashboard alongside their
     // therapy sessions. Two separate worlds, but admins want one screen
@@ -313,8 +323,66 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
         CANCELLED_THERAPIST: { label: 'ОТМЕНА · ТЕР.', color: GH.danger },
     };
 
+    // Сессии сегодняшнего дня из уже загруженных «ближайших»
+    const todayKey = new Date().toDateString();
+    const todaySessions = (dashboard?.upcomingSessions || []).filter(
+        (x) => parseUTC(x.date).toDateString() === todayKey
+    );
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '72px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: ghNarrow ? '40px' : '72px' }}>
+
+            {ghNarrow && (
+                <section style={{ border: `1px solid ${GH.ink}`, background: GH.paper }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                        padding: '12px 14px', borderBottom: `1px solid ${GH.ink10}`,
+                    }}>
+                        <span style={monoLabel}>Сегодня · {new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span>
+                        {(dashboard?.unpaidSessions ?? 0) > 0 && (
+                            <button
+                                onClick={() => navigate('/crm/sessions')}
+                                style={{ ...monoLabel, color: GH.danger, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                            >
+                                Не оплачено: {dashboard?.unpaidSessions}
+                            </button>
+                        )}
+                    </div>
+                    {todaySessions.length === 0 ? (
+                        <div style={{ padding: '18px 14px', fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>
+                            Сегодня сессий нет.
+                        </div>
+                    ) : todaySessions.map((x) => {
+                        const dt = parseUTC(x.date);
+                        const st = STATUS_GH[x.status] || { label: x.status, color: GH.ink60 };
+                        return (
+                            <div
+                                key={x.id}
+                                onClick={() => navigate('/crm/sessions')}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 12,
+                                    padding: '14px', borderTop: `1px solid ${GH.ink10}`,
+                                    cursor: 'pointer', minHeight: 48,
+                                }}
+                            >
+                                <span style={{ fontFamily: GH_MONO, fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                                    {dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                                <span style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {x.clientName}
+                                </span>
+                                <span style={{ ...monoLabel, color: st.color, fontSize: 9 }}>{st.label}</span>
+                            </div>
+                        );
+                    })}
+                    <div
+                        onClick={() => navigate('/crm/sessions')}
+                        style={{ padding: '10px 14px', borderTop: `1px solid ${GH.ink10}`, ...monoLabel, cursor: 'pointer' }}
+                    >
+                        Все сессии →
+                    </div>
+                </section>
+            )}
 
             {/* Merge-suggestions banner — appears only when there's at
                 least one unlinked (session, booking) pair at the same

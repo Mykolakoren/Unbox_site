@@ -1101,8 +1101,8 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                         style={{
                             display: 'grid',
                             gridTemplateColumns: mergeMode
-                                ? '40px 32px 1.4fr 1.2fr 90px 110px 110px 110px 80px'
-                                : '32px 1.4fr 1.2fr 90px 110px 110px 110px 80px',
+                                ? '40px 32px 1.4fr 110px 1.2fr 90px 110px 110px 80px'
+                                : '32px 1.4fr 110px 1.2fr 90px 110px 110px 80px',
                             gap: 0,
                             borderBottom: GHC_HAIRLINE,
                             padding: '12px 20px',
@@ -1113,10 +1113,12 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                         {mergeMode && <div />}
                         <div style={GHC_MONO_LABEL}>#</div>
                         <GHSortHeader field="name" current={sortField} dir={sortDir} onSort={toggleSort}>Имя</GHSortHeader>
+                        {/* Долг — сразу после имени: с телефона главный вопрос
+                            «кто должен» не должен требовать скролла вбок (аудит 30.08) */}
+                        <GHSortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</GHSortHeader>
                         <div style={GHC_MONO_LABEL}>Контакты</div>
                         <GHSortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</GHSortHeader>
                         <GHSortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort}>LTV</GHSortHeader>
-                        <GHSortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</GHSortHeader>
                         <GHSortHeader field="lastSessionDate" current={sortField} dir={sortDir} onSort={toggleSort}>Посл. сессия</GHSortHeader>
                         <div style={{ ...GHC_MONO_LABEL, textAlign: 'right' }}>Действия</div>
                     </div>
@@ -1143,8 +1145,8 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                 style={{
                                     display: 'grid',
                                     gridTemplateColumns: mergeMode
-                                        ? '40px 32px 1.4fr 1.2fr 90px 110px 110px 110px 80px'
-                                        : '32px 1.4fr 1.2fr 90px 110px 110px 110px 80px',
+                                        ? '40px 32px 1.4fr 110px 1.2fr 90px 110px 110px 80px'
+                                        : '32px 1.4fr 110px 1.2fr 90px 110px 110px 80px',
                                     gap: 0,
                                     padding: '16px 20px',
                                     alignItems: 'center',
@@ -1226,6 +1228,28 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     )}
                                 </div>
 
+                                {/* Debt */}
+                                <div style={{ fontSize: 11 }}>
+                                    {(c.unpaidSum || 0) > 0 ? (
+                                        <span
+                                            style={{
+                                                fontFamily: GH_MONO,
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.08em',
+                                                color: GH.danger,
+                                                fontWeight: 600,
+                                                fontVariantNumeric: 'tabular-nums',
+                                            }}
+                                        >
+                                            {(c.unpaidSum || 0).toLocaleString()} {client.currency}
+                                        </span>
+                                    ) : (c.sessionCount || 0) > 0 ? (
+                                        <span style={{ ...GHC_MONO_LABEL, color: GH.accent }}>Оплачено</span>
+                                    ) : (
+                                        <span style={{ color: GH.ink30 }}>—</span>
+                                    )}
+                                </div>
+
                                 {/* Contacts */}
                                 <div
                                     style={{
@@ -1268,28 +1292,6 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     title="LTV — сумма всех реально полученных платежей"
                                 >
                                     {((c as any).totalPaid || 0).toLocaleString()}
-                                </div>
-
-                                {/* Debt */}
-                                <div style={{ fontSize: 11 }}>
-                                    {(c.unpaidSum || 0) > 0 ? (
-                                        <span
-                                            style={{
-                                                fontFamily: GH_MONO,
-                                                textTransform: 'uppercase',
-                                                letterSpacing: '0.08em',
-                                                color: GH.danger,
-                                                fontWeight: 600,
-                                                fontVariantNumeric: 'tabular-nums',
-                                            }}
-                                        >
-                                            {(c.unpaidSum || 0).toLocaleString()} {client.currency}
-                                        </span>
-                                    ) : (c.sessionCount || 0) > 0 ? (
-                                        <span style={{ ...GHC_MONO_LABEL, color: GH.accent }}>Оплачено</span>
-                                    ) : (
-                                        <span style={{ color: GH.ink30 }}>—</span>
-                                    )}
                                 </div>
 
                                 {/* Last session */}

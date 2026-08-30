@@ -401,8 +401,17 @@ function App() {
         {/* Self-assessment tests */}
         <Route path="/tests/:testId" element={<TestPage />} />
 
-        {/* Legacy Checkout Wizard Route (for backward compat / direct checkout) */}
-        <Route path="/checkout" element={<ModuleErrorBoundary moduleName="Бронирование"><BookingWizard /></ModuleErrorBoundary>} />
+        {/* Legacy Checkout Wizard Route (for backward compat / direct checkout).
+            Гейт по ширине НА САМОМ РОУТЕ (аудит 30.08): раньше каждый CTA был
+            обязан сам помнить про редирект на /m/find, и один забытый FAB
+            уводил мобильного клиента в нечитаемую десктопную шахматку.
+            Теперь любой путь в /checkout с телефона попадает в мобильный
+            мастер — класс ошибок закрыт целиком. */}
+        <Route path="/checkout" element={
+            typeof window !== 'undefined' && window.innerWidth < 768
+                ? <Navigate to="/m/find" replace />
+                : <ModuleErrorBoundary moduleName="Бронирование"><BookingWizard /></ModuleErrorBoundary>
+        } />
 
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />

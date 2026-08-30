@@ -1530,7 +1530,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             {/* Legacy sync modal */}
             {p.showSyncModal && (
                 <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => p.setShowSyncModal(false)}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <div className="p-6 space-y-5">
                             <div className="flex items-center justify-between">
                                 <h3 className="text-lg font-bold text-unbox-dark flex items-center gap-2">
@@ -1568,6 +1568,21 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                     <div className="flex justify-between"><span className="text-gray-500">Всего</span><span className="font-medium">{p.syncResult.totalEvents ?? 0}</span></div>
                                     <div className="flex justify-between"><span className="text-gray-500">Создано</span><span className="font-medium text-green-600">{p.syncResult.created ?? 0}</span></div>
                                     <div className="flex justify-between"><span className="text-gray-500">Обновлено</span><span className="font-medium">{p.syncResult.updated ?? 0}</span></div>
+                                    {(p.syncResult.calendarDuplicatesCount ?? 0) > 0 && (
+                                        <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                                            <div className="font-semibold text-amber-800">
+                                                ⚠ Дубли в календаре: {p.syncResult.calendarDuplicatesCount}
+                                            </div>
+                                            <div className="text-xs text-amber-700 mt-1">
+                                                На одну встречу стоит несколько событий — удалите лишнее в Google Calendar:
+                                            </div>
+                                            {(p.syncResult.calendarDuplicates ?? []).slice(0, 6).map((d: any, i: number) => (
+                                                <div key={i} className="text-xs text-amber-800 mt-0.5">
+                                                    • {d.summary} — {d.date ? new Date(d.date).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'} (×{d.count})
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             <div className="flex gap-3">
