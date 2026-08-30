@@ -189,6 +189,10 @@ export interface CrmDashboard {
         clientId: string;
         status: string;
         isBooked: boolean;
+        // 30.08: для кнопки «Оплачено» в блоке «Сегодня» мобильного дашборда
+        isPaid?: boolean;
+        price?: number | null;
+        currency?: string | null;
     }[];
     // Extended
     monthlyStats?: MonthlyStats[];

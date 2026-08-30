@@ -160,6 +160,9 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     // therapy sessions. Two separate worlds, but admins want one screen
     // to plan their week.
     const { bookings, fetchBookings, currentUser } = useUserStore();
+    // «Оплачено» прямо из блока «Сегодня» (аудит 30.08, «Мой день» v2)
+    const { quickPaySession: ghQuickPay, fetchDashboard: ghRefetchDash } = useCrmStore();
+    const [payingId, setPayingId] = useState<string | null>(null);
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
 
     // Merge-suggestion banner — when a CRM session and a cabinet booking
@@ -371,7 +374,36 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 <span style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {x.clientName}
                                 </span>
-                                <span style={{ ...monoLabel, color: st.color, fontSize: 9 }}>{st.label}</span>
+                                {!x.isPaid && !x.status.startsWith('CANCELLED') ? (
+                                    <button
+                                        disabled={payingId === x.id}
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            setPayingId(x.id);
+                                            try {
+                                                const r = await ghQuickPay(x.id);
+                                                toast.success(`Оплачено: ${r.amount} ${r.currency}`);
+                                                ghRefetchDash(format(currentMonth, 'yyyy-MM'));
+                                            } catch (err: any) {
+                                                toast.error(err?.response?.data?.detail || 'Не удалось отметить оплату');
+                                            } finally {
+                                                setPayingId(null);
+                                            }
+                                        }}
+                                        style={{
+                                            ...monoLabel, fontSize: 9, color: GH.paper,
+                                            background: GH.accent, border: 'none', cursor: 'pointer',
+                                            padding: '8px 10px', minHeight: 32,
+                                            opacity: payingId === x.id ? 0.6 : 1,
+                                        }}
+                                    >
+                                        {payingId === x.id ? '…' : (x.price ? `${x.price} ${x.currency && x.currency !== 'GEL' ? x.currency : '₾'} · Оплачено` : 'Оплачено')}
+                                    </button>
+                                ) : (
+                                    <span style={{ ...monoLabel, color: x.isPaid ? GH.accent : st.color, fontSize: 9 }}>
+                                        {x.isPaid ? 'Оплачено' : st.label}
+                                    </span>
+                                )}
                             </div>
                         );
                     })}

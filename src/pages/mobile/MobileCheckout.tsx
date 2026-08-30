@@ -301,6 +301,31 @@ export function MobileCheckout() {
         return out;
     }, [recurPattern, effectiveOccurrences, firstSlot, state.date]);
 
+    // «Примерка» серии на бэке (аудит 30.08): точная сумма той же математикой,
+    // что и создание. Пока не пришла — кнопка показывает оценку «цена × N».
+    const [seriesQuote, setSeriesQuote] = useState<{ totalMoney: number; totalHours: number; occurrences: number; subscriptionShortDates: string[] } | null>(null);
+    useEffect(() => {
+        setSeriesQuote(null);
+        if (recurPattern === 'once' || !firstSlot || effectiveOccurrences < 1) return;
+        let cancelled = false;
+        const t = setTimeout(() => {
+            bookingsApi.quoteRecurringBooking({
+                resourceId: firstSlot.resourceId,
+                locationId: state.locationId || resource?.locationId || 'unbox_one',
+                startTime: firstSlot.startTime,
+                duration: firstSlot.duration,
+                format: state.format,
+                paymentMethod: resolveFinalMethod(),
+                firstDate: fmtDate(state.date, 'yyyy-MM-dd'),
+                occurrences: effectiveOccurrences,
+                pattern: recurPattern,
+                targetUserId: state.bookingForUser || undefined,
+            }).then((q) => { if (!cancelled) setSeriesQuote(q); }).catch(() => {});
+        }, 350);
+        return () => { cancelled = true; clearTimeout(t); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [recurPattern, effectiveOccurrences, firstSlot?.resourceId, firstSlot?.startTime, firstSlot?.duration, state.format, state.paymentMethod, state.date, state.bookingForUser]);
+
     const resolveFinalMethod = (): 'balance' | 'subscription' | 'bonus' =>
         (bonusEligible && state.paymentMethod === 'bonus')
             ? 'bonus'
@@ -1017,9 +1042,24 @@ export function MobileCheckout() {
                             );
                         })()}
                         {recurPattern !== 'once' && effectiveOccurrences > 1 && (
-                            <div style={{ fontSize: 11, color: '#999' }}>
-                                Сумма серии ориентировочная — точный расчёт по каждой дате покажем после создания
-                            </div>
+                            seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? (
+                                <>
+                                    <div style={{ fontSize: 12, color: '#666' }}>
+                                        Серия из {seriesQuote.occurrences}: точно {seriesQuote.totalMoney.toFixed(0)} ₾
+                                        {seriesQuote.totalHours > 0 ? ` + ${seriesQuote.totalHours.toFixed(1)} ч с абонемента` : ''}
+                                    </div>
+                                    {(seriesQuote.subscriptionShortDates?.length ?? 0) > 0 && (
+                                        <div style={{ fontSize: 12, color: '#b3453a' }}>
+                                            Абонемента хватит не на все даты ({seriesQuote.subscriptionShortDates.length} из {seriesQuote.occurrences} — мимо).
+                                            Выбери оплату балансом или уменьши число повторов, иначе серия не создастся.
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div style={{ fontSize: 11, color: '#999' }}>
+                                    Сумма серии ориентировочная — уточняем расчёт по каждой дате…
+                                </div>
+                            )
                         )}
                     </div>
                 </div>
@@ -1075,7 +1115,7 @@ export function MobileCheckout() {
                             ? (recurPattern !== 'once' ? 'Создаём серию…' : 'Бронируем…')
                             : recurPattern !== 'once'
                                 ? (effectiveOccurrences > 0
-                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['сессию', 'сессии', 'сессий'])} · ${(priced.total * effectiveOccurrences).toFixed(0)} ₾`
+                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['сессию', 'сессии', 'сессий'])} · ${(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences).toFixed(0)} ₾`
                                     : 'Выбери число повторов или дату')
                                 : isHotBooking
                                     ? `Отправить на одобрение · ${priced.total.toFixed(0)} ₾`

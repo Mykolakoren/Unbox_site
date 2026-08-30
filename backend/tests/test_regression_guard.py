@@ -723,3 +723,19 @@ def test_update_session_unpaid_deletes_orphan_payments():
     assert 'update_data.get("is_paid") is False' in body, \
         "PATCH is_paid=False больше не чистит платежи-сироты"
     assert "session.delete(_p)" in body
+
+
+def test_series_quote_is_read_only():
+    """30.08: «примерка» серии (/recurring/quote) обязана быть чистым чтением —
+    ни броней, ни списаний, ни коммитов. Если в неё просочится запись,
+    двойное списание вернётся через самый безобидный на вид эндпоинт."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/bookings/routes.py").read_text()
+    i = src.find("def quote_recurring_booking")
+    j = src.find("def create_recurring_booking")
+    assert 0 < i < j, "эндпоинт примерки исчез или переехал за создание"
+    body = src[i:j]
+    for forbidden in ("session.add(", "session.commit(", "wallet.debit", "wallet.credit", "subscription_pool.update"):
+        assert forbidden not in body, f"примерка серии пишет в базу: {forbidden}"
+    assert "resolve_payment_method" in body and "calculate_price" in body, \
+        "примерка должна считать той же математикой, что создание"

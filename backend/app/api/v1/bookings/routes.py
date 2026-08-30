@@ -315,6 +315,16 @@ def _refund_booking_to_owner(
         else:
             refund_meta["refunded_hours"] = 0
             refund_meta["warning"] = "Owner has no subscription to refund to"
+        # Аудит 2026-08-27: пиковая надбавка абонемента — реальные ДЕНЬГИ
+        # (у абонементной брони final_price == subscription_peak_debt), списанные
+        # при создании или кроном T-24ч. Возврат часов её не покрывал — клиент
+        # терял 5₾/ч при любой отмене пиковой абонементной брони.
+        _peak = round(float(booking.final_price or 0) * refund_percent, 2)
+        if _peak >= 0.01:
+            wallet.credit(session, owner, _peak, reason="booking_refund",
+                          description="Возврат пиковой надбавки абонемента",
+                          ref_type="booking", ref_id=str(booking.id))
+            refund_meta["refunded_peak_gel"] = _peak
     else:
         # Возвращаем ФАКТИЧЕСКИ списанное (charge_amount), а не final_price:
         # у абонемент→баланс брони final_price ≈0 (стоимость была в часах), а
@@ -1032,6 +1042,14 @@ def create_booking(
                         remaining_hours=rem + quote.hours_deducted,
                         used_hours=max(0.0, used - quote.hours_deducted),
                     )
+                # Аудит 2026-08-27: пиковая надбавка — реальные ДЕНЬГИ, списанные
+                # выше (wallet.debit(peak_debt) на не-отложенном пути; hot всегда
+                # не-отложенный). Часы откатили — откатываем и деньги, иначе
+                # «Отклонить» съедал 5₾/ч безвозвратно.
+                if peak_debt > 0:
+                    wallet.credit(session, booking_owner, peak_debt, reason="booking_charge_revert",
+                                  description="Откат пиковой надбавки — бронь ушла на подтверждение (hot)",
+                                  ref_type="booking")
 
             # The money was just handed back, so the row must stop claiming it
             # was paid. It used to keep payment_status="paid" + charge_amount
@@ -1665,6 +1683,13 @@ def create_multi_slot_booking(
 # matches "/recurring" and "/recurring-groups" exactly instead of treating
 # them as a booking_id path parameter.
 
+# Жёсткий потолок длины серии (аудит 2026-08-27): create не имел границы вовсе,
+# а extend капал 52 ЗА ВЫЗОВ, но суммарно — бесконечно. Так у одного клиента
+# выросла серия из 501 брони до мая 2027 (и размножила испорченный шаблон).
+# 104 = два года еженедельных встреч — за глаза для любого реального сценария.
+SERIES_MAX_OCCURRENCES = 104
+
+
 class RecurringBookingRequest(PydanticBaseModel):
     resource_id: str
     location_id: str = "unbox_one"
@@ -1683,6 +1708,99 @@ class RecurringBookingRequest(PydanticBaseModel):
     skip_conflicts: bool = False
     target_user_id: Optional[str] = None
     crm_client_id: Optional[str] = None
+
+
+@router.post("/recurring/quote")
+def quote_recurring_booking(
+    *,
+    session: Session = Depends(deps.get_session),
+    data: RecurringBookingRequest,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """«Примерка» серии (аудит 30.08): ТА ЖЕ математика, что у создания —
+    PricingService по каждой дате + resolve_payment_method — но без единой
+    записи: ни броней, ни списаний, ни блокировок. Мобильный мастер
+    показывает точную сумму ДО кнопки «Забронировать» вместо «цена × N»
+    (недельная скидка и пиковая надбавка зависят от конкретной даты).
+    Доступность дат тут не проверяется — конфликты как и раньше решает 409
+    самого создания."""
+    deps.require_can_book(current_user)
+    from app.services.pricing import PricingService, resolve_payment_method
+
+    booking_owner = current_user
+    if current_user.role in ADMIN_ROLES and data.target_user_id:
+        target = None
+        try:
+            target = session.get(User, UUID(data.target_user_id))
+        except ValueError:
+            pass
+        if not target:
+            target = session.exec(select(User).where(User.email == data.target_user_id)).first()
+        if target:
+            booking_owner = target
+
+    try:
+        first = datetime.strptime(data.first_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+    n = data.occurrences if data.occurrences is not None else data.weeks
+    if n < 1 or n > SERIES_MAX_OCCURRENCES:
+        raise HTTPException(
+            400,
+            f"Число повторений должно быть от 1 до {SERIES_MAX_OCCURRENCES} (запрошено {n}).",
+        )
+    step = {"weekly": 1, "biweekly": 2, "monthly": 4}.get(data.pattern.lower(), 1)
+    dates = [first + timedelta(weeks=i * step) for i in range(n)]
+
+    pricing_service = PricingService(session)
+    items = []
+    total_money = 0.0
+    total_hours = 0.0
+    warnings = []
+    for d in dates:
+        try:
+            h, m = map(int, data.start_time.split(":"))
+            start_dt = d.replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:
+            start_dt = d
+        quote = pricing_service.calculate_price(
+            user=booking_owner,
+            resource_id=data.resource_id,
+            start_time=start_dt,
+            duration_minutes=data.duration,
+            format_type=data.format,
+        )
+        occ_method = resolve_payment_method(data.payment_method, quote)
+        if occ_method == "subscription" and quote.applied_rule != "SUBSCRIPTION":
+            # Создание на такой дате упало бы 400 — честно помечаем и считаем
+            # деньгами (так поведёт себя клиент, переключив способ оплаты).
+            warnings.append(d.strftime("%Y-%m-%d"))
+            occ_method = "balance"
+        if occ_method == "subscription":
+            # Часы — с абонемента; final_price у SUBSCRIPTION-котировки — это
+            # ДЕНЬГИ пиковой надбавки (может быть 0), их тоже показываем.
+            hours = float(quote.hours_deducted or 0)
+            amount = float(quote.final_price or 0)
+        else:
+            hours = 0.0
+            amount = float(quote.final_price or 0)
+        total_hours += hours
+        total_money += amount
+        items.append({
+            "date": d.strftime("%Y-%m-%d"),
+            "method": occ_method,
+            "amount": round(amount, 2),
+            "hours": hours,
+        })
+
+    return {
+        "ok": True,
+        "occurrences": n,
+        "items": items,
+        "total_money": round(total_money, 2),
+        "total_hours": round(total_hours, 2),
+        "subscription_short_dates": warnings,
+    }
 
 
 @router.post("/recurring")
@@ -1721,6 +1839,12 @@ def create_recurring_booking(
         raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
 
     n = data.occurrences if data.occurrences is not None else data.weeks
+    if n < 1 or n > SERIES_MAX_OCCURRENCES:
+        raise HTTPException(
+            400,
+            f"Число повторений должно быть от 1 до {SERIES_MAX_OCCURRENCES} "
+            f"(запрошено {n}). Для более длинной регулярности продлевайте серию позже.",
+        )
 
     pattern = data.pattern.lower()
     if pattern == "biweekly":
@@ -1821,6 +1945,9 @@ def create_recurring_booking(
     # All sessions in the series share one recurring_group_id (separate
     # from the booking series id) so the new "delete future" UX works.
     crm_session_group_id = str(gen_uuid4()) if data.crm_client_id else None
+    # Даты, где пуш в личный календарь нашёл «почти совпадающее» событие и
+    # НЕ стал создавать второе (Этап 1: сигнал вместо тихого дубля).
+    _gcal_mirror_conflicts: list[str] = []
     crm_calendar_id = None
     if data.crm_client_id:
         # Resolve the specialist's personal CRM calendar once — used to push
@@ -1842,6 +1969,50 @@ def create_recurring_booking(
                 status_code=403,
                 detail="Этот клиент принадлежит другому специалисту",
             )
+
+    # ── Этап 2 календарного плана (27.08): серия = ОДНО повторяющееся событие ──
+    # Вместо N одиночных событий создаём один Google-recurring (RRULE) и заранее
+    # знаем instance-id каждой даты. Только для «чистой» серии: равный шаг
+    # (weekly/biweekly/monthly), без пропущенных конфликтов и якоря, и первая
+    # дата не пересекается с ручным событием специалиста (probe). Иначе —
+    # прежний по-датный пуш с дедупом (Этап 1).
+    _series_instance_ids: dict = {}
+    if crm_calendar_id and crm_client_obj and not skipped_dates and not anchor_booking and len(dates) >= 2:
+        _iw = {"weekly": 1, "biweekly": 2, "monthly": 4}.get(pattern)
+        if _iw:
+            try:
+                from app.services.crm_calendar import (
+                    find_matching_event as _fme,
+                    create_recurring_event as _cre,
+                    tbilisi_naive_to_utc_naive as _tb2utc,
+                )
+                _h0, _m0 = map(int, data.start_time.split(":"))
+                _first_utc = _tb2utc(dates[0].replace(hour=_h0, minute=_m0, second=0, microsecond=0))
+                _ev0, _st0 = _fme(
+                    crm_calendar_id, crm_client_obj.name, crm_client_obj.alias_code,
+                    _first_utc, data.duration,
+                )
+                if _st0 is None:
+                    _master_id, _inst_ids = _cre(
+                        calendar_id=crm_calendar_id,
+                        client_name=crm_client_obj.name,
+                        alias_code=crm_client_obj.alias_code,
+                        first_date=_first_utc,
+                        duration_minutes=data.duration,
+                        count=len(dates),
+                        interval_weeks=_iw,
+                        booking_group_id=recurring_group_id,
+                    )
+                    _series_instance_ids = {
+                        dts.strftime("%Y-%m-%d"): iid for dts, iid in zip(dates, _inst_ids)
+                    }
+                    logger.info(
+                        "[recurring gcal] серия одним recurring-событием %s (%d дат)",
+                        _master_id, len(dates),
+                    )
+                # exact/near на первой дате → по-датный путь Этапа 1 разберётся
+            except Exception:
+                logger.warning("[recurring gcal] recurring master не создан — по-датный путь", exc_info=True)
 
     # Adopt the anchor into the new series (idempotent UPDATE — no extra
     # booking, no duplicate balance debit, no GCal duplicate).
@@ -2035,16 +2206,41 @@ def create_recurring_booking(
                 # Mirror the cabinet GCal event into the specialist's personal
                 # CRM calendar too, so a session shows up under the client's
                 # name (not just "Кабинет 8 — Микола") in their day view.
-                if crm_calendar_id:
+                if crm_calendar_id and _series_instance_ids:
+                    # Этап 2: серия уже создана одним recurring-событием —
+                    # сессия получает заранее известный instance-id.
+                    _iid = _series_instance_ids.get(d.strftime("%Y-%m-%d"))
+                    if _iid:
+                        _clash = session.exec(
+                            select(_TS).where(_TS.google_event_id == _iid)
+                        ).first()
+                        if _clash is None:
+                            ts.google_event_id = _iid
+                elif crm_calendar_id:
                     try:
-                        from app.services.crm_calendar import create_calendar_event as _crm_create_ev
-                        ts.google_event_id = _crm_create_ev(
+                        # Этап 1 (27.08): пуш С ПОИСКОМ. Если специалист уже
+                        # держит в Google свою (в т.ч. повторяющуюся) встречу
+                        # на этот слот — привязываемся к ней, а не ставим
+                        # рядом вторую (так рождались дубли «Алёна грум»).
+                        from app.services.crm_calendar import create_or_link_event as _crm_push
+                        _res = _crm_push(
                             calendar_id=crm_calendar_id,
                             client_name=crm_client_obj.name,
                             alias_code=crm_client_obj.alias_code,
                             session_date=session_date,
                             duration_minutes=data.duration,
+                            session_id=str(ts.id) if ts.id else None,
+                            booking_id=str(booking.id),
                         )
+                        if _res["action"] == "conflict":
+                            _gcal_mirror_conflicts.append(d.strftime("%d.%m"))
+                        else:
+                            _gid = _res["event_id"]
+                            _clash = session.exec(
+                                select(_TS).where(_TS.google_event_id == _gid)
+                            ).first() if _gid else None
+                            if _clash is None and _gid:
+                                ts.google_event_id = _gid
                     except Exception as e:
                         logger.warning(f"CRM GCal push failed for recurring {d}: {e}")
                 session.add(ts)
@@ -2053,6 +2249,28 @@ def create_recurring_booking(
         created_bookings.append(str(booking.id))
 
     session.commit()
+
+    # Сигнал специалисту о датах, где пуш в календарь встретил «почти дубль»
+    # и не стал создавать второе событие (Этап 1 календарного плана).
+    if _gcal_mirror_conflicts and booking_owner is not None:
+        try:
+            from app.models.notification import Notification as _NotifGC
+            session.add(_NotifGC(
+                type="calendar_conflict",
+                title="Календарь: возможные дубли в серии",
+                description=(
+                    f"Даты: {', '.join(_gcal_mirror_conflicts[:8])}"
+                    f"{'…' if len(_gcal_mirror_conflicts) > 8 else ''}. "
+                    "Рядом уже стояли события в Google — вторые НЕ созданы. "
+                    "Проверьте время в календаре и в CRM."
+                ),
+                recipient_id=str(booking_owner.id),
+                icon="AlertTriangle",
+                link="/crm/sessions",
+            ))
+            session.commit()
+        except Exception:
+            logger.warning("[recurring] conflict notification failed", exc_info=True)
 
     # Скидка за смежные часы для СЕРИИ. Одиночная бронь и мульти-слот уже
     # пересчитывают цепочку (recompute_user_chains_for_day), а серия — нет:
@@ -2319,6 +2537,16 @@ def extend_recurring_series(
     if not new_dates:
         raise HTTPException(400, "Нечего добавить — проверьте дату «до» или периодичность")
 
+    # Суммарный потолок серии (аудит 2026-08-27): повторные продления по 52
+    # складывались без ограничения — так выросла серия из 501 брони.
+    if len(existing) + len(new_dates) > SERIES_MAX_OCCURRENCES:
+        raise HTTPException(
+            400,
+            f"Серия не может превышать {SERIES_MAX_OCCURRENCES} встреч: сейчас "
+            f"{len(existing)}, добавить можно ещё максимум "
+            f"{max(0, SERIES_MAX_OCCURRENCES - len(existing))}.",
+        )
+
     # Reuse the most recent confirmed booking as the template (price,
     # extras, format, payment method etc).
     template = next((b for b in reversed(existing) if b.status == "confirmed"), existing[-1])
@@ -2376,9 +2604,42 @@ def extend_recurring_series(
             ext_crm_client = None  # other specialist's client — don't touch
 
     # Create
+    # Аудит 2026-08-27: цена/метод каждой новой даты считаются ЖИВЫМ движком,
+    # как в create_recurring_booking. Раньше поля копировались из template
+    # байт-в-байт — одна испорченная запись (balance + final_price=0 +
+    # rule=SUBSCRIPTION из старых пересчётов) размножалась каждым продлением:
+    # так выросла серия из 501 нулевой брони до 2027 года. Шаблон остаётся
+    # fallback'ом только если движок недоступен (owner не найден/ресурс удалён).
+    from app.services.pricing import PricingService as _PS, resolve_payment_method as _rpm
+    _ext_ps = _PS(session)
     created = 0
     total_cost = 0.0
     for d in new_dates:
+        _q = None
+        if booking_owner is not None:
+            try:
+                _h, _m = map(int, (template.start_time or "0:0").split(":"))
+                _q = _ext_ps.calculate_price(
+                    user=booking_owner,
+                    resource_id=template.resource_id,
+                    start_time=d.replace(hour=_h, minute=_m, second=0, microsecond=0),
+                    duration_minutes=template.duration,
+                    format_type=template.format or "individual",
+                )
+            except Exception:
+                logger.exception("[extend-series] пересчёт %s не удался — берём шаблон", d)
+        if _q is not None:
+            _method = _rpm(template.payment_method or "balance", _q)
+            _final, _base = _q.final_price, _q.base_price
+            _rule = _q.applied_rule
+            _damt, _dpct = _q.discount_amount, _q.discount_percent
+            _hrs = _q.hours_deducted if _method == "subscription" else None
+        else:
+            _method = template.payment_method
+            _final, _base = template.final_price, template.base_price
+            _rule = template.applied_rule
+            _damt, _dpct = template.discount_amount, template.discount_percent
+            _hrs = template.hours_deducted if template.payment_method == "subscription" else None
         new_booking = Booking(
             resource_id=template.resource_id,
             location_id=template.location_id,
@@ -2386,13 +2647,13 @@ def extend_recurring_series(
             start_time=template.start_time,
             duration=template.duration,
             status="confirmed",
-            final_price=template.final_price,
-            base_price=template.base_price,
-            applied_rule=template.applied_rule,
-            discount_amount=template.discount_amount,
-            discount_percent=template.discount_percent,
-            hours_deducted=template.hours_deducted if template.payment_method == "subscription" else None,
-            payment_method=template.payment_method,
+            final_price=_final,
+            base_price=_base,
+            applied_rule=_rule,
+            discount_amount=_damt,
+            discount_percent=_dpct,
+            hours_deducted=_hrs,
+            payment_method=_method,
             # Без payment_status бронь остаётся NULL, а крон списания ищет
             # строго 'pending' — такие брони не списываются НИКОГДА (Валентина
             # Ястребова: серия по понедельникам, 5 прошедших занятий на 98 ₾
@@ -3060,6 +3321,11 @@ def reschedule_booking(
                 start_time=new_start_dt,
                 duration_minutes=new_duration,
                 format_type=booking.format,
+                # Аудит 2026-08-27: бронь ДЕНЕЖНАЯ (subscription отсечён выше).
+                # Без ignore движок при свежекупленном абонементе вернул бы
+                # SUBSCRIPTION/0₾ — и родилась бы «нулёвка» balance+0 (сигнатура
+                # утечки 1630₾). Перевод на абонемент — только явной кнопкой.
+                ignore_subscription=True,
             )
 
             new_price = new_quote.final_price
@@ -3410,6 +3676,11 @@ def trim_booking(
             duration_minutes=dur,
             format_type=booking.format,
             exclude_booking_id=str(booking.id),
+            # Аудит 2026-08-27: для ДЕНЕЖНОЙ брони остаток должен котироваться
+            # деньгами, даже если у клиента к этому моменту появился абонемент —
+            # иначе остаток получает final_price=0 при payment_method=balance
+            # («нулёвка», крон спишет 0). Абонементная бронь котируется как есть.
+            ignore_subscription=(booking.payment_method or "").lower() != "subscription",
         )
 
     leftQuote = _quote_for(bStart, left) if left > 0 else None
@@ -4036,6 +4307,9 @@ def change_booking_format(
         start_time=start_dt,
         duration_minutes=booking.duration,
         format_type=new_format,
+        # Аудит 2026-08-27: денежная бронь при смене формата остаётся денежной —
+        # свежекупленный абонемент не должен тихо занулять цену (balance+0₾).
+        ignore_subscription=(booking.payment_method or "").lower() != "subscription",
     )
 
     old_price = float(booking.final_price or 0)
@@ -4415,6 +4689,9 @@ def extend_booking(
             # Бронь уже лежит в БД со СТАРОЙ длительностью. Без exclude движок
             # посчитал бы её соседом самой себе и задвоил часы в цепочке.
             exclude_booking_id=str(booking.id),
+            # Аудит 2026-08-27: ветка только для денежных броней (гейт
+            # not _is_subscription выше) — абонемент не должен занулять доплату.
+            ignore_subscription=True,
         )
         old_quote = pricing.calculate_price(duration_minutes=booking.duration, **_quote_args)
         new_quote = pricing.calculate_price(duration_minutes=new_duration, **_quote_args)
@@ -4991,6 +5268,10 @@ def split_booking(
                     duration_minutes=p, format_type=booking.format or "individual",
                     consecutive_total_hours=total_hours,
                     exclude_booking_id=str(booking.id),
+                    # Аудит 2026-08-27: части денежной брони котируются деньгами —
+                    # иначе часть получает final_price=0 при methode=balance
+                    # (точная сигнатура «нулёвок» серии Галины).
+                    ignore_subscription=(booking.payment_method or "").lower() != "subscription",
                 )
             except Exception:
                 logger.exception("[split] не удалось оценить часть %s мин", p)

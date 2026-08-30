@@ -357,6 +357,33 @@ export const bookingsApi = {
     },
 
     // Recurring bookings
+    /** «Примерка» серии: точные суммы по каждой дате той же математикой,
+     *  что и создание, но без записей. Аудит 30.08 — сумма в кнопке была
+     *  «цена × количество» и могла разойтись с реальным списанием. */
+    quoteRecurringBooking: async (data: {
+        resourceId: string;
+        locationId: string;
+        startTime: string;
+        duration: number;
+        format: string;
+        paymentMethod: string;
+        firstDate: string;
+        occurrences: number;
+        pattern: 'weekly' | 'biweekly' | 'monthly';
+        targetUserId?: string;
+    }): Promise<{
+        ok: boolean; occurrences: number;
+        items: { date: string; method: string; amount: number; hours: number }[];
+        totalMoney: number; totalHours: number;
+        subscriptionShortDates: string[];
+    }> => {
+        const response = await api.post('/bookings/recurring/quote', {
+            ...data,
+            weeks: data.occurrences,
+        });
+        return response.data;
+    },
+
     createRecurringBooking: async (data: {
         resourceId: string;
         locationId: string;

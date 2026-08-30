@@ -114,6 +114,11 @@ def crm_dashboard(
             "client_id": s.client_id,
             "status": s.status,
             "is_booked": s.is_booked,
+            # 30.08: блоку «Сегодня» на мобильном дашборде нужна кнопка
+            # «Оплачено» — для неё флаг оплаты и цена (fallback на ставку).
+            "is_paid": s.is_paid,
+            "price": s.price if s.price is not None else (client.base_price if client else None),
+            "currency": client.currency if client else None,
         })
 
     # --- Extended stats ---
