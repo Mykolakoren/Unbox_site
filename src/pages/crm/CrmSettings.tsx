@@ -497,28 +497,53 @@ function GridHouseCrmSettings({
                     )}
                 </div>
 
-                {/* Тумблер «источник правды» скрыт 28.08: бэкенд поле не
-                    сохраняет и синк его не читает — переключатель ничего не
-                    менял, а тост «Режим отключён» вводил в заблуждение.
-                    Синк ВСЕГДА ведёт себя как «календарь главный», поэтому
-                    вместо фиктивного выбора — честное описание поведения.
-                    Вернуть тумблер только вместе с реальной поддержкой флага
-                    в PATCH /crm/settings и в sync_from_calendar. */}
+                {/* 31.08: тумблер вернулся НАСТОЯЩИМ — бэкенд теперь хранит
+                    флаг (crm_data.gcal_source_of_truth), а синк его читает.
+                    Выключен (по умолчанию) = защитный режим: удаления из
+                    Google не трогают сессии и брони, приходит уведомление. */}
                 <div style={{ borderTop: GHS_HAIRLINE, paddingTop: 20 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 20, alignItems: 'start' }}>
-                        <ShieldCheck size={20} color={GH.ink60} style={{ marginTop: 2, justifySelf: 'center' }} />
-                        <div>
-                            <div
+                        <button
+                            onClick={onToggleSourceOfTruth}
+                            disabled={sotSaving}
+                            style={{
+                                width: 48,
+                                height: 24,
+                                border: `2px solid ${GH.ink}`,
+                                background: sourceOfTruth ? GH.ink : GH.paper,
+                                position: 'relative',
+                                cursor: sotSaving ? 'default' : 'pointer',
+                                padding: 0,
+                                marginTop: 2,
+                            }}
+                            aria-label="Переключить: Google Calendar — источник правды"
+                        >
+                            <span
                                 style={{
-                                    fontFamily: GH_SANS,
-                                    fontSize: 16,
-                                    fontWeight: 700,
-                                    letterSpacing: '-0.01em',
-                                    color: GH.ink,
-                                    marginBottom: 6,
+                                    position: 'absolute',
+                                    top: 2,
+                                    left: sourceOfTruth ? 26 : 2,
+                                    width: 16,
+                                    height: 16,
+                                    background: sourceOfTruth ? GH.paper : GH.ink,
+                                    transition: 'left 150ms ease',
                                 }}
-                            >
-                                Календарь — главный
+                            />
+                        </button>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                <ShieldCheck size={14} color={sourceOfTruth ? GH.ink : GH.ink60} />
+                                <div
+                                    style={{
+                                        fontFamily: GH_SANS,
+                                        fontSize: 16,
+                                        fontWeight: 700,
+                                        letterSpacing: '-0.01em',
+                                        color: GH.ink,
+                                    }}
+                                >
+                                    Google Calendar — источник правды
+                                </div>
                             </div>
                             <div
                                 style={{
@@ -529,9 +554,9 @@ function GridHouseCrmSettings({
                                     maxWidth: 520,
                                 }}
                             >
-                                Перенесли событие в Google — сессия в CRM передвинется.
-                                Удалили событие — сессия отменится, а привязанная бронь
-                                кабинета будет снята. Удаляйте события в календаре осознанно.
+                                {sourceOfTruth
+                                    ? 'Включено: календарь главный. Удалили событие в Google — сессия отменится, привязанная бронь кабинета будет снята автоматически. Удаляйте события осознанно.'
+                                    : 'Выключено (защитный режим): удаление события в Google НЕ трогает сессию и бронь — придёт уведомление, решение за вами. Переносы событий применяются в обоих режимах.'}
                             </div>
                         </div>
                     </div>

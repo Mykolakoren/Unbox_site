@@ -489,6 +489,15 @@ def sync_from_calendar(
     _recent_guard = _now - _td_cancel_guard(days=7)
     _cancel_window_start = _now - _td_cancel_guard(days=max(7, past_days))
     deleted_on_cancel = 0
+    # ── Защитный режим (31.08, решение владельца) ──────────────────────────
+    # По умолчанию календарь НЕ управляет удалением: пока специалист сам не
+    # включил «Google Calendar — источник правды» в настройках CRM, удаление
+    # события в Google НЕ удаляет сессию и НЕ снимает бронь (автосинк каждые
+    # 20 минут делал это без участия человека — слишком опасно). Вместо этого
+    # копим список и шлём одно уведомление. Переносы применяются в обоих
+    # режимах — они обратимы.
+    gcal_master = bool((current_user.crm_data or {}).get("gcal_source_of_truth", False))
+    deletions_held: list[str] = []
     for entry in result["matched"]:
         if entry.get("is_cancelled"):
             existing = session.exec(
@@ -512,6 +521,10 @@ def sync_from_calendar(
                     continue
                 # 3) За пределами окна синка вообще не трогаем.
                 if existing.date < _cancel_window_start:
+                    continue
+                # Защитный режим: удаление в Google НЕ трогает CRM.
+                if not gcal_master:
+                    deletions_held.append(existing.date.strftime("%d.%m %H:%M"))
                     continue
                 # 2026-05-14: spec says cancellation in GCal = removal from
                 # CRM (no CANCELLED_* status). Detach any linked cabinet
@@ -635,12 +648,47 @@ def sync_from_calendar(
     for ts in orphans_in_window:
         if ts.google_event_id in seen_gcal_ids:
             continue
+        # Защитный режим: исчезнувшее из календаря событие НЕ удаляет сессию.
+        if not gcal_master:
+            deletions_held.append(ts.date.strftime("%d.%m %H:%M"))
+            continue
         # Same "GCal-cancel = delete" rule applies to orphan rows whose
         # GCal event vanished from the sync window. Refunds the client and
         # clears the cabinet's own GCal event — see _cancel_booking_behind_session.
         _cancel_booking_behind_session(session, ts, "Сессия удалена из Google Calendar")
         _delete_session_safely(session, ts)
         orphans_cancelled += 1
+
+    # Одно уведомление о задержанных удалениях. Автосинк ходит каждые 20 минут
+    # и будет находить те же удалённые события снова — дедуп по типу за сутки,
+    # чтобы не заспамить колокольчик.
+    if deletions_held and not dry_run:
+        from app.models.notification import Notification as _HeldNotif
+        _day_ago = datetime.now() - _td(hours=24)
+        _already = session.exec(
+            select(_HeldNotif).where(
+                _HeldNotif.recipient_id == uid,
+                _HeldNotif.type == "calendar_deletions_held",
+                _HeldNotif.created_at >= _day_ago,
+            )
+        ).first()
+        if not _already:
+            _sample = ", ".join(sorted(set(deletions_held))[:8])
+            _more = len(set(deletions_held)) - 8
+            session.add(_HeldNotif(
+                recipient_id=uid,
+                type="calendar_deletions_held",
+                title=f"Календарь: удалено событий — {len(set(deletions_held))}, сессии сохранены",
+                description=(
+                    f"В Google удалены события: {_sample}"
+                    + (f" и ещё {_more}" if _more > 0 else "")
+                    + ". Сессии и брони в CRM не тронуты (защитный режим). "
+                    "Отмените их вручную, если они действительно не состоятся, "
+                    "или включите «Google Calendar — источник правды» в Настройках."
+                ),
+                icon="calendar-x",
+                link="/crm/sessions",
+            ))
 
     if orphans_cancelled > 0 or deleted_on_cancel > 0:
         logging.getLogger(__name__).info(
@@ -715,6 +763,8 @@ def sync_from_calendar(
         # so admins notice when a ghost session is purged.
         "updated": updated + orphans_cancelled,
         "orphans_cancelled": orphans_cancelled,
+        # Защитный режим: сколько удалений из Google задержано (сессии целы).
+        "deletions_held": len(set(deletions_held)),
         "auto_created_clients": auto_created_clients,
         "codes_backfilled": codes_backfilled,
         "backfill_errors": backfill_errors,

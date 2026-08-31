@@ -311,6 +311,11 @@ def get_crm_settings(
     return {
         "calendar_id": crm_data.get("calendar_id"),
         "calendar_sync_enabled": bool(crm_data.get("calendar_id")),
+        # 31.08: реальный флаг «Google Calendar — источник правды». По
+        # умолчанию False = защитный режим (удаления из Google не трогают
+        # сессии и брони). Раньше тумблер был декорацией — поле молча
+        # терялось, а синк всегда вёл себя как «календарь главный».
+        "google_calendar_source_of_truth": bool(crm_data.get("gcal_source_of_truth", False)),
     }
 
 
@@ -319,6 +324,7 @@ def update_crm_settings(
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
     calendar_id: Optional[str] = Body(None, embed=True),
+    google_calendar_source_of_truth: Optional[bool] = Body(None, embed=True),
 ):
     """Update specialist's CRM settings."""
     crm_data = dict(current_user.crm_data or {})
@@ -327,11 +333,17 @@ def update_crm_settings(
             crm_data.pop("calendar_id", None)
         else:
             crm_data["calendar_id"] = calendar_id
+    if google_calendar_source_of_truth is not None:
+        crm_data["gcal_source_of_truth"] = bool(google_calendar_source_of_truth)
     current_user.crm_data = crm_data
     current_user.updated_at = datetime.now()
     session.add(current_user)
     session.commit()
-    return {"ok": True, "calendar_id": crm_data.get("calendar_id")}
+    return {
+        "ok": True,
+        "calendar_id": crm_data.get("calendar_id"),
+        "google_calendar_source_of_truth": bool(crm_data.get("gcal_source_of_truth", False)),
+    }
 
 
 # ── Payment Accounts ─────────────────────────────────────────────

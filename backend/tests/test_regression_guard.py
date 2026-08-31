@@ -739,3 +739,24 @@ def test_series_quote_is_read_only():
         assert forbidden not in body, f"примерка серии пишет в базу: {forbidden}"
     assert "resolve_payment_method" in body and "calculate_price" in body, \
         "примерка должна считать той же математикой, что создание"
+
+
+def test_calendar_safe_mode_gates_deletions():
+    """31.08 (решение владельца): пока специалист не включил «источник правды»
+    (crm_data.gcal_source_of_truth), удаление события в Google НЕ должно
+    удалять сессию и снимать бронь. Оба разрушающих блока синка обязаны
+    проверять флаг, а настройки — реально его сохранять."""
+    import pathlib
+    base = pathlib.Path(__file__).parent.parent
+    sync_src = (base / "app/api/v1/crm/sync.py").read_text()
+    assert 'gcal_source_of_truth' in sync_src, "синк не читает флаг режима"
+    assert sync_src.count("if not gcal_master:") >= 2, \
+        "гейт должен стоять и в cancel-matched, и в orphan-блоке"
+    for destroyer in ("_cancel_booking_behind_session", "_delete_session_safely"):
+        i = sync_src.find("deleted_on_cancel = 0")
+        j = sync_src.find(destroyer, i)
+        g = sync_src.find("if not gcal_master:", i)
+        assert 0 < g < j, f"{destroyer} вызывается раньше проверки режима"
+    dash_src = (base / "app/api/v1/crm/dashboard.py").read_text()
+    assert 'google_calendar_source_of_truth' in dash_src and 'gcal_source_of_truth' in dash_src, \
+        "настройки снова потеряли флаг (тумблер станет декорацией)"
