@@ -109,6 +109,10 @@ export function MobileLayout() {
                     background: '#fff',
                     display: 'flex',
                     flexDirection: 'column',
+                    // Safe-area сверху: в standalone-режиме iOS контент
+                    // начинался под чёлкой (фикс 31.08, как в CRM/админ
+                    // оболочках). В обычном браузере env() = 0.
+                    paddingTop: 'env(safe-area-inset-top, 0px)',
                     paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
                     fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
                     color: '#0E0E0E',

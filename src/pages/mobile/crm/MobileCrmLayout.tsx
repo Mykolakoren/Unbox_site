@@ -81,11 +81,18 @@ export function MobileCrmLayout() {
                 color: '#0E0E0E',
                 boxShadow: '0 0 0 1px rgba(0,0,0,0.04)',
             }}>
-                {/* Workspace header — tap to go back to cabinet */}
+                {/* Workspace header — tap to go back to cabinet.
+                    В standalone-режиме iOS (сайт добавлен на экран «Домой»,
+                    status-bar black-translucent) контент начинается ПОД
+                    чёлкой — без safe-area-отступа шапка целиком пряталась
+                    под неё (скрин владельца 31.08). Тёмный фон заливает
+                    зону чёлки, текст начинается ниже — как в нативных
+                    приложениях. В обычном Safari env() = 0, ничего не
+                    меняется. */}
                 <div style={{
                     background: '#0E0E0E',
                     color: '#fff',
-                    padding: '8px 14px',
+                    padding: 'calc(8px + env(safe-area-inset-top, 0px)) 14px 8px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,

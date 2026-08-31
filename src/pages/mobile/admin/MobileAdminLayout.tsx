@@ -73,10 +73,12 @@ export function MobileAdminLayout() {
                 color: '#0E0E0E',
                 boxShadow: '0 0 0 1px rgba(0,0,0,0.04)',
             }}>
+                {/* Safe-area сверху: в standalone-режиме iOS шапка пряталась
+                    под чёлкой (см. MobileCrmLayout, тот же фикс 31.08). */}
                 <div style={{
                     background: '#0E0E0E',
                     color: '#fff',
-                    padding: '8px 14px',
+                    padding: 'calc(8px + env(safe-area-inset-top, 0px)) 14px 8px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
