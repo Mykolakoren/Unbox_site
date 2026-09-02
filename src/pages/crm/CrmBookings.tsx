@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
 import { type CrmClient } from '../../api/crm';
@@ -676,6 +677,24 @@ export function CrmBookings() {
         setModalExistingSessionId(existingSessionId);
         setModalExistingClientId(existingClientId);
     };
+
+    // Мост из личного кабинета (02.09): попап брони на «Моих бронированиях»
+    // шлёт сюда ?link=<bookingId> — сразу открываем окно привязки/разбивки,
+    // чтобы длинную бронь можно было разбить на сессии по клиентам, не ища
+    // её заново в списке. Параметр гасим, чтобы окно не всплывало повторно.
+    const [linkParams, setLinkParams] = useSearchParams();
+    useEffect(() => {
+        const linkId = linkParams.get('link');
+        if (!linkId || myBookings.length === 0) return;
+        const target = myBookings.find(b => b.id === linkId);
+        setLinkParams({}, { replace: true });
+        if (target) {
+            handleOpenModal(target);
+        } else {
+            toast.error('Бронь не найдена в списке CRM — проверьте фильтр периода');
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [linkParams, myBookings.length]);
 
     // Track cumulative offset for split slots
     const slotOffsetRef = useRef(0);

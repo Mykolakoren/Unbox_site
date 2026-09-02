@@ -1903,25 +1903,41 @@ function BookingsChessboard({
                         <div className="border-t border-unbox-light/50 pt-3">
                             <div className="text-[10px] text-unbox-grey uppercase tracking-wider mb-1.5 font-semibold">Клиент из CRM</div>
                             {crmClients.length > 0 ? (
-                                <div className="flex items-center gap-2">
-                                    <UserIcon size={12} className="text-unbox-grey flex-shrink-0" />
-                                    <select
-                                        value={activeBooking.crmClientId || ''}
-                                        onChange={(e) => {
-                                            const val = e.target.value || null;
-                                            onLinkClient(activeBooking.id, val);
-                                            setActiveBooking(prev => prev ? { ...prev, crmClientId: val || undefined } : null);
-                                        }}
-                                        className="flex-1 text-xs border border-unbox-light rounded-lg px-2 py-1.5 bg-white/80 text-unbox-dark focus:border-unbox-green focus:outline-none"
-                                    >
-                                        <option value="">— Без клиента —</option>
-                                        {crmClients.map(c => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
+                                <>
+                                    <div className="flex items-center gap-2">
+                                        <UserIcon size={12} className="text-unbox-grey flex-shrink-0" />
+                                        <select
+                                            value={activeBooking.crmClientId || ''}
+                                            onChange={(e) => {
+                                                const val = e.target.value || null;
+                                                onLinkClient(activeBooking.id, val);
+                                                setActiveBooking(prev => prev ? { ...prev, crmClientId: val || undefined } : null);
+                                            }}
+                                            className="flex-1 text-xs border border-unbox-light rounded-lg px-2 py-1.5 bg-white/80 text-unbox-dark focus:border-unbox-green focus:outline-none"
+                                        >
+                                            <option value="">— Без клиента —</option>
+                                            {crmClients.map(c => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    {/* Мост в CRM (02.09): длинную бронь можно разбить на
+                                        сессии по часу с РАЗНЫМИ клиентами — это умеет окно
+                                        привязки в CRM → Бронирования. Селектор выше вешает
+                                        ОДНОГО клиента на всю бронь; для 2ч+ даём прямой
+                                        переход в разбивку, чтобы не искать бронь заново. */}
+                                    {activeBooking.duration > 60 && (
+                                        <Link
+                                            to={`/crm/bookings?link=${activeBooking.id}`}
+                                            onClick={() => setActiveBooking(null)}
+                                            className="mt-2 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
+                                        >
+                                            <Plus size={12} /> Разбить по клиентам ({activeBooking.duration / 60}ч → сессии)
+                                        </Link>
+                                    )}
+                                </>
                             ) : (
                                 <Link to="/crm/clients" className="flex items-center gap-1.5 text-xs text-unbox-grey hover:text-unbox-green transition-colors" onClick={() => setActiveBooking(null)}>
                                     <UserIcon size={12} />
