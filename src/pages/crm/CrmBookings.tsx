@@ -81,9 +81,12 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
         { clientId: existingSessionClientId || '', duration: totalDuration, price: '', notes: '' }
     ]);
     const [activeSlot, setActiveSlot] = useState(0);
+    // 02.09 (владелец): режим разбивки больше не включается переключателем —
+    // он «включён», как только слотов стало больше одного (пресетом или «+ Слот»).
+    const splitMode = slots.length > 1;
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
-    const [splitMode, setSplitMode] = useState(false);
+
 
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const { dateStr: bookingDate, dateObj: bookingDateObj } = getSafeBookingDate(booking);
@@ -111,6 +114,17 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
 
     const updateSlot = (idx: number, patch: Partial<SlotEntry>) => {
         setSlots(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
+    };
+
+    /** Пересобрать слоты по пресету: первый кусок наследует уже выбранного
+     *  клиента/цену/заметку, остальные — пустые. */
+    const applyPreset = (parts: number[]) => {
+        const first = slots[0];
+        setSlots(parts.map((d, i) => i === 0
+            ? { ...first, duration: d }
+            : { clientId: '', duration: d, price: '', notes: '' }));
+        setActiveSlot(0);
+        setSearch('');
     };
 
     const addSlot = () => {
@@ -188,31 +202,44 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                 </div>
 
                 <div className="p-5 space-y-4">
-                    {/* Split mode toggle */}
-                    {!existingSessionClientId && (
-                        <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-gray-700">Разделить на слоты</span>
-                            <button
-                                onClick={() => {
-                                    if (!splitMode) {
-                                        setSplitMode(true);
-                                    } else {
-                                        setSplitMode(false);
-                                        setSlots([slots[0]]);
-                                        setActiveSlot(0);
-                                        updateSlot(0, { duration: totalDuration });
-                                    }
-                                }}
-                                className={clsx(
-                                    'relative w-10 h-5 rounded-full transition-colors',
-                                    splitMode ? 'bg-unbox-green' : 'bg-gray-300'
+                    {/* Пресеты разбивки (02.09, владелец): без переключателя —
+                        одна кнопка сразу отделяет кусок нужной длины, «По часу»
+                        режет всю бронь на равные часовые слоты. */}
+                    {!existingSessionClientId && totalDuration > 60 && (
+                        <div>
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+                                Разбить бронь ({totalDuration / 60} ч)
+                            </div>
+                            <div className="flex gap-1.5 flex-wrap">
+                                {[60, 90, 120].filter(d => d < totalDuration).map(d => (
+                                    <button
+                                        key={d}
+                                        onClick={() => applyPreset([d, totalDuration - d])}
+                                        className="px-3 py-2 rounded-lg text-xs font-semibold border border-unbox-green/40 text-unbox-dark hover:bg-unbox-green/10 transition-colors"
+                                    >
+                                        Отделить {d === 90 ? '1,5 ч' : `${d / 60} ч`}
+                                    </button>
+                                ))}
+                                {totalDuration >= 120 && totalDuration % 60 === 0 && (
+                                    <button
+                                        onClick={() => applyPreset(Array(totalDuration / 60).fill(60))}
+                                        className="px-3 py-2 rounded-lg text-xs font-semibold border border-unbox-green bg-unbox-green/10 text-unbox-dark hover:bg-unbox-green/20 transition-colors"
+                                    >
+                                        По часу × {totalDuration / 60}
+                                    </button>
                                 )}
-                            >
-                                <span className={clsx(
-                                    'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
-                                    splitMode ? 'translate-x-5' : 'translate-x-0.5'
-                                )} />
-                            </button>
+                                {slots.length > 1 && (
+                                    <button
+                                        onClick={() => {
+                                            setSlots([{ ...slots[0], duration: totalDuration }]);
+                                            setActiveSlot(0);
+                                        }}
+                                        className="px-3 py-2 rounded-lg text-xs font-medium border border-gray-200 text-gray-500 hover:border-gray-300 transition-colors"
+                                    >
+                                        Не разбивать
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     )}
 
