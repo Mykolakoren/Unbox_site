@@ -760,3 +760,18 @@ def test_calendar_safe_mode_gates_deletions():
     dash_src = (base / "app/api/v1/crm/dashboard.py").read_text()
     assert 'google_calendar_source_of_truth' in dash_src and 'gcal_source_of_truth' in dash_src, \
         "настройки снова потеряли флаг (тумблер станет декорацией)"
+
+
+def test_update_session_validates_client_ownership():
+    """02.09: переподвязка клиента (PATCH client_id) обязана проверять, что
+    новый клиент принадлежит ЭТОМУ специалисту — иначе изоляция Psy-CRM
+    дырявится через смену клиента."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/crm/sessions.py").read_text()
+    i = src.find("def update_session")
+    body = src[i:src.find("def delete_session")]
+    assert 'update_data.get("client_id")' in body, "нет проверки нового client_id"
+    assert "specialist_id != str(current_user.id)" in body
+    j = body.find('update_data.get("client_id")')
+    k = body.find("for key, value in update_data.items()")
+    assert 0 < j < k, "проверка клиента должна стоять ДО setattr"

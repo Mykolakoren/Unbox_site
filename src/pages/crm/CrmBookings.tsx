@@ -73,9 +73,11 @@ interface LinkSessionModalProps {
     existingSessionClientId?: string;
     onClose: () => void;
     onConfirm: (clientId: string, price: number, notes: string, duration?: number) => Promise<void>;
+    /** Отвязать клиента: удалить привязанную сессию, бронь остаётся. */
+    onUnlink?: () => Promise<void>;
 }
 
-function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, onConfirm }: LinkSessionModalProps) {
+function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, onConfirm, onUnlink }: LinkSessionModalProps) {
     const totalDuration = booking.duration || 60;
     const [slots, setSlots] = useState<SlotEntry[]>([
         { clientId: existingSessionClientId || '', duration: totalDuration, price: '', notes: '' }
@@ -409,6 +411,22 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                     )}
                 </div>
 
+                {/* Отвязка клиента (02.09, владелец): сессия удаляется,
+                    бронь остаётся свободной для привязки другого клиента. */}
+                {existingSessionClientId && onUnlink && (
+                    <div className="px-5 pb-1">
+                        <button
+                            onClick={async () => {
+                                if (!confirm('Отвязать клиента от этой брони? Сессия будет удалена, бронь останется.')) return;
+                                await onUnlink();
+                            }}
+                            className="w-full py-2 rounded-xl border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 transition-colors"
+                        >
+                            Отвязать клиента от брони
+                        </button>
+                    </div>
+                )}
+
                 {/* Footer */}
                 <div className="flex gap-3 p-5 pt-0 sticky bottom-0 bg-white rounded-b-2xl">
                     <button
@@ -726,6 +744,21 @@ export function CrmBookings() {
     // Track cumulative offset for split slots
     const slotOffsetRef = useRef(0);
 
+    // Отвязка клиента (02.09): удаляем привязанную сессию, бронь остаётся.
+    const handleUnlinkSession = async () => {
+        if (!modalExistingSessionId) return;
+        try {
+            await useCrmStore.getState().deleteSession(modalExistingSessionId);
+            toast.success('Клиент отвязан — бронь снова без клиента');
+            setModalBooking(null);
+            setModalExistingSessionId(undefined);
+            setModalExistingClientId(undefined);
+            await fetchSessions();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Не удалось отвязать');
+        }
+    };
+
     const handleLinkSession = async (clientId: string, price: number, notes: string, slotDuration?: number) => {
         if (!modalBooking) return;
 
@@ -744,7 +777,10 @@ export function CrmBookings() {
         const dur = slotDuration || modalBooking.duration || 60;
 
         if (modalExistingSessionId) {
+            // 02.09: раньше выбранный клиент здесь ИГНОРИРОВАЛСЯ — окно
+            // называлось «Изменить клиента сессии», а клиента не меняло.
             await useCrmStore.getState().updateSession(modalExistingSessionId, {
+                clientId,
                 date: sessionDate,
                 durationMinutes: dur,
                 price: price || undefined,
@@ -796,6 +832,8 @@ export function CrmBookings() {
             setModalExistingSessionId={setModalExistingSessionId}
             setModalExistingClientId={setModalExistingClientId}
             handleLinkSession={handleLinkSession}
+            modalExistingSessionId={modalExistingSessionId}
+            handleUnlinkSession={handleUnlinkSession}
         />
     );
 }
@@ -828,6 +866,8 @@ interface GHCrmBookingsProps {
     setModalExistingSessionId: (id: string | undefined) => void;
     setModalExistingClientId: (id: string | undefined) => void;
     handleLinkSession: (clientId: string, price: number, notes: string, slotDuration?: number) => Promise<void>;
+    modalExistingSessionId?: string;
+    handleUnlinkSession: () => Promise<void>;
 }
 
 const ghMono = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const, color: GH.ink60 };
@@ -841,6 +881,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
         handleOpenModal, sessionsByBookingId, clientById, clients,
         modalBooking, setModalBooking, modalExistingClientId,
         setModalExistingSessionId, setModalExistingClientId, handleLinkSession,
+        modalExistingSessionId, handleUnlinkSession,
     } = props;
 
     const VIEW_MODES: { key: typeof viewMode; label: string }[] = [
@@ -1076,6 +1117,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                         setModalExistingClientId(undefined);
                     }}
                     onConfirm={handleLinkSession}
+                    onUnlink={modalExistingSessionId ? handleUnlinkSession : undefined}
                 />
             )}
         </div>

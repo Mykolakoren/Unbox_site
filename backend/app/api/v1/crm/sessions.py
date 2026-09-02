@@ -239,6 +239,14 @@ def update_session(
         from app.services.crm_calendar import tbilisi_naive_to_utc_naive
         update_data["date"] = tbilisi_naive_to_utc_naive(update_data["date"])
 
+    # 02.09: переподвязка клиента — client_id менять можно, но только на
+    # СВОЕГО клиента (изоляция Psy-CRM). Без этой проверки setattr ниже
+    # принял бы id чужого клиента.
+    if update_data.get("client_id"):
+        _new_cl = session.get(TherapistClient, update_data["client_id"])
+        if not _new_cl or _new_cl.specialist_id != str(current_user.id):
+            raise HTTPException(404, "Клиент не найден")
+
     # ── Auto-sync linked cabinet booking ─────────────────────────────────
     # Owner asked 2026-05-27: when a session is moved in CRM, the
     # attached cabinet booking must follow so they stay in lock-step.
@@ -334,7 +342,12 @@ def update_session(
     # CRM двигает ТО ЖЕ событие в личном календаре (по ключу google_event_id).
     # Раньше двигалась только бронь кабинета, а событие в Google оставалось на
     # старом времени — расхождение, которое следующий синк «побеждал» обратно.
-    if ts.google_event_id and ("date" in update_data or "duration_minutes" in update_data):
+    if ts.google_event_id and (
+        "date" in update_data or "duration_minutes" in update_data
+        # 02.09: смена клиента должна переименовать событие в Google —
+        # иначе в календаре остаётся имя прежнего клиента.
+        or "client_id" in update_data
+    ):
         _cal_id = get_crm_calendar_id(current_user)
         if _cal_id:
             try:
