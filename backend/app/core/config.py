@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     # шифрование молча выключалось бы, а заметки писались открытым текстом.
     NOTES_ENCRYPTION_KEY: Optional[str] = None
 
+    # Мост в семейную книгу расходов (Finance Tracker на этом же дроплете):
+    # адрес, общий секрет и чьи платежи туда шлём (id специалистов через
+    # запятую) — семейный бюджет пополняет практика Николая, а не весь центр.
+    FINANCE_URL: str = ""
+    FINANCE_SECRET: str = ""
+    FINANCE_SPECIALIST_IDS: str = ""
+
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), case_sensitive=True, extra='ignore')
 
 settings = Settings()

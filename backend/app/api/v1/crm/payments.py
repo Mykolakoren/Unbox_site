@@ -7,6 +7,7 @@ from app.api import deps
 from app.models.user import User
 from app.models.therapist_client import TherapistClient
 from app.models.therapy_session import TherapySession
+from app.services.finance_bridge import push_payment, retract_payment
 from app.models.therapist_payment import (
     TherapistPayment, TherapistPaymentCreate, TherapistPaymentRead,
 )
@@ -97,6 +98,9 @@ def create_payment(
 
     session.commit()
     session.refresh(payment)
+    # После commit: платёж уже записан, и даже если мост упадёт, оплата в
+    # CRM останется. Доплата уходит той же записью с новой суммой.
+    push_payment(payment, client.name)
     return payment
 
 
@@ -136,4 +140,5 @@ def delete_payment(
                 session.add(ts)
 
     session.commit()
+    retract_payment(payment_id, str(current_user.id))
     return {"ok": True}

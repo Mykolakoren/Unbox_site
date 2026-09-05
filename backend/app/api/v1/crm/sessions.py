@@ -13,6 +13,7 @@ from app.models.therapy_session import (
     TherapySession, TherapySessionCreate, TherapySessionRead, TherapySessionUpdate,
 )
 from app.models.therapist_payment import TherapistPayment
+from app.services.finance_bridge import push_payment, retract_payment
 from app.api.v1.crm import get_crm_calendar_id
 
 router = APIRouter()
@@ -738,6 +739,9 @@ def quick_pay_session(
     session.add(ts)
 
     session.commit()
+    if price and price > 0:
+        session.refresh(payment)
+        push_payment(payment, client.name)
     return {"ok": True, "amount": price, "currency": client.currency, "account": account}
 
 
@@ -762,15 +766,21 @@ def unmark_paid_session(
     # стоял .first(): если по сессии почему-то оказалось два платежа (старая
     # гонка при двойном нажатии «Оплачено» или частичные оплаты), лишние
     # оставались навсегда и завышали доход.
+    removed_ids = []
     for payment in session.exec(
         select(TherapistPayment).where(
             TherapistPayment.session_id == session_id,
             TherapistPayment.specialist_id == str(current_user.id),
         )
     ).all():
+        removed_ids.append(payment.id)
         session.delete(payment)
 
     session.commit()
+    # Снятая оплата уходит и из семейной книги — иначе доход там остаётся
+    # от платежа, которого больше нет.
+    for payment_id in removed_ids:
+        retract_payment(payment_id, str(current_user.id))
     return {"ok": True}
 
 
@@ -800,6 +810,7 @@ def mark_all_sessions_paid(
     ).all()
 
     count = 0
+    created_payments = []
     for ts in unpaid:
         price = ts.price if ts.price is not None else client.base_price or 0
         # Fill session price from client base_price if NULL
@@ -825,6 +836,7 @@ def mark_all_sessions_paid(
                 session_id=ts.id,
             )
             session.add(payment)
+            created_payments.append(payment)
         ts.is_paid = True
         ts.updated_at = datetime.now()
         session.add(ts)
@@ -832,4 +844,7 @@ def mark_all_sessions_paid(
 
     if count > 0:
         session.commit()
+        # После commit: у платежей уже есть id, и падение моста не тронет CRM.
+        for payment in created_payments:
+            push_payment(payment, client.name)
     return {"ok": True, "marked": count}
