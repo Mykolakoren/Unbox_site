@@ -775,3 +775,20 @@ def test_update_session_validates_client_ownership():
     j = body.find('update_data.get("client_id")')
     k = body.find("for key, value in update_data.items()")
     assert 0 < j < k, "проверка клиента должна стоять ДО setattr"
+
+
+def test_rerent_listing_gated_by_start_and_feed_has_weekdays():
+    """04.09 (лента админов): (а) выставить бронь на переаренду нельзя после
+    её НАЧАЛА (лазейка была из-за _is_past по концу брони); снятие — всегда;
+    (б) даты в ленте админ-бота аннотируются днём недели."""
+    import pathlib
+    base = pathlib.Path(__file__).parent.parent
+    routes = (base / "app/api/v1/bookings/routes.py").read_text()
+    i = routes.find("def toggle_re_rent")
+    body = routes[i:i + 3500]
+    assert "Слот уже начался" in body, "гейт по старту для переаренды пропал"
+    assert "if not booking.is_re_rent_listed:" in body, \
+        "гейт должен действовать только при выставлении (не при снятии)"
+    tg = (base / "app/services/telegram.py").read_text()
+    assert "_annotate_weekdays" in tg and "_annotate_weekdays(str(val))" in tg, \
+        "лента потеряла дни недели у дат"

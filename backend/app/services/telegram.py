@@ -492,6 +492,24 @@ class TelegramService:
         "booking_with_extras":       ("🧰", "Бронь с допуслугами — нужно подготовить"),
     }
 
+    # 04.09 (просьба админов из ленты): день недели рядом с каждой датой.
+    _RU_WD = ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
+
+    @classmethod
+    def _annotate_weekdays(cls, text: str) -> str:
+        """«11.09.2026» → «11.09.2026 (чт)» во всех полях ленты. Дата, за
+        которой уже идёт скобка, не трогается (защита от двойной пометки)."""
+        import re as _re
+
+        def _repl(m):
+            try:
+                dt = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                return m.group(0)
+            return f"{m.group(0)} ({cls._RU_WD[dt.weekday()]})"
+
+        return _re.sub(r"\b(\d{2})\.(\d{2})\.(\d{4})(?!\s*\()", _repl, text)
+
     @staticmethod
     def hot_booking_markup(booking_id) -> dict:
         """Кнопки ✅/❌ для срочной брони. ЕДИНОЕ место сборки — раньше этот
@@ -526,7 +544,7 @@ class TelegramService:
         for key, val in fields.items():
             if val is None or val == "":
                 continue
-            lines.append(f"<b>{escape(str(key))}:</b> {val}")
+            lines.append(f"<b>{escape(str(key))}:</b> {self._annotate_weekdays(str(val))}")
         # Footer: when the event happened, in Tbilisi local — admins always
         # operate in this tz and don't care about UTC.
         from datetime import timezone as _tz, timedelta as _td

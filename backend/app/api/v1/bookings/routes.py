@@ -4188,6 +4188,20 @@ def toggle_re_rent(
             status_code=400, detail="Cannot re-rent a past booking"
         )
 
+    # 04.09 (лента админов): бронь на 14:00 выставляли на переаренду в 14:47 —
+    # слот уже ИДЁТ, переарендовать его некому. _is_past смотрит на конец
+    # брони, поэтому пропускал такое. Выставление гейтим по СТАРТУ; снятие
+    # с переаренды (обратный переключатель) разрешено всегда.
+    if not booking.is_re_rent_listed:
+        from datetime import timezone as _tz_rr, timedelta as _td_rr
+        _start_dt = _booking_end_dt(booking) - _td_rr(minutes=booking.duration or 60)
+        _now_rr = datetime.now(_tz_rr.utc) if _start_dt.tzinfo else datetime.now()
+        if _start_dt < _now_rr:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Слот уже начался ({booking.start_time}) — выставить на переаренду можно только до начала брони",
+            )
+
     was_listed_before = booking.is_re_rent_listed
     booking.is_re_rent_listed = not booking.is_re_rent_listed
     booking.updated_at = datetime.now()
