@@ -444,6 +444,23 @@ def sync_from_calendar(
                 still_unmatched.append(ev)
         result["unmatched"] = still_unmatched
 
+    # Этап 1 (27.08): дубли В КАЛЕНДАРЕ — два+ события одного клиента на одно
+    # время. Это источник дублей сессий; показываем специалисту явно, чтобы он
+    # удалил лишнее событие в Google (мы чужие ручные события не трогаем).
+    _dup_groups: dict = {}
+    for _e in result["matched"]:
+        _k = (str(_e.get("client_id")), _e.get("date"))
+        _dup_groups.setdefault(_k, []).append(_e)
+    calendar_duplicates = [
+        {
+            "summary": _evs[0]["summary"],
+            "date": _k[1].isoformat() if _k[1] else None,
+            "count": len(_evs),
+        }
+        for _k, _evs in _dup_groups.items() if len(_evs) > 1
+    ]
+    calendar_duplicates.sort(key=lambda x: x["date"] or "")
+
     # ── Dry Run preview ───────────────────────────────────────────────────
     if dry_run:
         unique_names = set()
@@ -458,8 +475,8 @@ def sync_from_calendar(
             "unmatched": len(result["unmatched"]),
             "would_create_clients": len(unique_names),
             "calendar_duplicates": calendar_duplicates[:15],
-        "calendar_duplicates_count": len(calendar_duplicates),
-        "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],
+            "calendar_duplicates_count": len(calendar_duplicates),
+            "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],
         }
 
     # ── Save sessions ─────────────────────────────────────────────────────
@@ -588,6 +605,33 @@ def sync_from_calendar(
             )
         ).first()
         if existing_by_date:
+            # 05.09 (кейс Максима): отменённая в CRM сессия «застолбила» это
+            # время и блокировала восстановление из календаря — специалист
+            # заводил НОВОЕ событие в Google, а синк молча пропускал его.
+            # Правило: событие с ДРУГИМ id на времени отменённой сессии =
+            # явное намерение вернуть сессию → воскрешаем. Если id тот же,
+            # что был у отменённой, — отмену уважаем (специалист отменил
+            # сессию, а событие просто забыл удалить).
+            if (
+                existing_by_date.status in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST")
+                and entry["google_event_id"] != existing_by_date.google_event_id
+            ):
+                _gid_clash = session.exec(
+                    select(TherapySession).where(
+                        TherapySession.google_event_id == entry["google_event_id"]
+                    )
+                ).first()
+                if _gid_clash is None:
+                    existing_by_date.google_event_id = entry["google_event_id"]
+                    existing_by_date.status = entry["status"]
+                    existing_by_date.duration_minutes = entry["duration_minutes"]
+                    existing_by_date.updated_at = datetime.now()
+                    session.add(existing_by_date)
+                    updated += 1
+                    logging.getLogger(__name__).info(
+                        "[crm-sync] воскресил отменённую сессию %s по новому "
+                        "событию %s", existing_by_date.id, entry["google_event_id"],
+                    )
             continue
 
         ts = TherapySession(
@@ -734,22 +778,9 @@ def sync_from_calendar(
                 )
                 backfill_errors += 1
 
-    # Этап 1 (27.08): дубли В КАЛЕНДАРЕ — два+ события одного клиента на одно
-    # время. Это источник дублей сессий; показываем специалисту явно, чтобы он
-    # удалил лишнее событие в Google (мы чужие ручные события не трогаем).
-    _dup_groups: dict = {}
-    for _e in result["matched"]:
-        _k = (str(_e.get("client_id")), _e.get("date"))
-        _dup_groups.setdefault(_k, []).append(_e)
-    calendar_duplicates = [
-        {
-            "summary": _evs[0]["summary"],
-            "date": _k[1].isoformat() if _k[1] else None,
-            "count": len(_evs),
-        }
-        for _k, _evs in _dup_groups.items() if len(_evs) > 1
-    ]
-    calendar_duplicates.sort(key=lambda x: x["date"] or "")
+    # calendar_duplicates посчитан ВЫШЕ, до dry-run ветки — 05.09 предпросмотр
+    # синка падал UnboundLocalError, потому что поля дублей добавили в
+    # dry-run ответ (Этап 1), а сама переменная считалась только здесь.
 
     return {
         "total_events": result["total"],

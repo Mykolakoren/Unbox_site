@@ -792,3 +792,21 @@ def test_rerent_listing_gated_by_start_and_feed_has_weekdays():
     tg = (base / "app/services/telegram.py").read_text()
     assert "_annotate_weekdays" in tg and "_annotate_weekdays(str(val))" in tg, \
         "лента потеряла дни недели у дат"
+
+
+def test_sync_dry_run_and_cancelled_revive():
+    """05.09 (кейс Максима): (а) dry-run синка падал UnboundLocalError —
+    calendar_duplicates обязан считаться ДО dry-run ветки; (б) отменённая
+    сессия не должна навечно блокировать время: новое событие в Google
+    (другой google_event_id) воскрешает её, событие с тем же id — нет."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/crm/sync.py").read_text()
+    i_dup = src.find("calendar_duplicates = [")
+    i_dry = src.find("if dry_run:")
+    assert 0 < i_dup < i_dry, "calendar_duplicates снова считается после dry-run ветки"
+    assert "воскресил отменённую сессию" in src
+    i_rev = src.find('existing_by_date.status in ("CANCELLED_CLIENT", "CANCELLED_THERAPIST")')
+    assert i_rev != -1
+    body = src[i_rev:i_rev + 400]
+    assert 'entry["google_event_id"] != existing_by_date.google_event_id' in src[i_rev - 200:i_rev + 200], \
+        "воскрешение должно требовать НОВОЕ событие (другой id) — иначе синк отменяет отмены"
