@@ -3,6 +3,7 @@
  */
 import { useState } from 'react';
 import { useCrmStore, type PaymentAccount } from '../../store/crmStore';
+import { CURRENCIES } from '../../utils/currency';
 import { Plus, Pencil, Trash2, Check, X, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -12,6 +13,7 @@ export function PaymentAccountsManager() {
     const [editLabel, setEditLabel] = useState('');
     const [adding, setAdding] = useState(false);
     const [newLabel, setNewLabel] = useState('');
+    const [newCurrency, setNewCurrency] = useState('');
 
     const handleAdd = async () => {
         if (!newLabel.trim()) return;
@@ -20,10 +22,11 @@ export function PaymentAccountsManager() {
             toast.error('Такой счёт уже существует');
             return;
         }
-        const updated = [...paymentAccounts, { id, label: newLabel.trim() }];
+        const updated = [...paymentAccounts, { id, label: newLabel.trim(), currency: newCurrency || undefined }];
         try {
             await updatePaymentAccounts(updated);
             setNewLabel('');
+            setNewCurrency('');
             setAdding(false);
             toast.success('Счёт добавлен');
         } catch {
@@ -100,7 +103,27 @@ export function PaymentAccountsManager() {
                         ) : (
                             <>
                                 <span className="flex-1 text-sm text-unbox-dark font-medium">{acc.label}</span>
-                                <span className="text-[10px] text-unbox-grey font-mono">{acc.id}</span>
+                                <select
+                                    value={acc.currency || ''}
+                                    onChange={async (e) => {
+                                        const updated = paymentAccounts.map(a =>
+                                            a.id === acc.id ? { ...a, currency: e.target.value || undefined } : a
+                                        );
+                                        try {
+                                            await updatePaymentAccounts(updated);
+                                            toast.success(e.target.value
+                                                ? `Счёт «${acc.label}» теперь в ${e.target.value}`
+                                                : `Валюта у счёта «${acc.label}» снята`);
+                                        } catch { toast.error('Ошибка при сохранении'); }
+                                    }}
+                                    title="Валюта счёта — подставится в платёж при выборе этого счёта"
+                                    className="text-[11px] text-unbox-grey border border-unbox-light rounded-lg px-1.5 py-1 bg-white/80 focus:outline-none"
+                                >
+                                    <option value="">валюта —</option>
+                                    {CURRENCIES.map(cur => (
+                                        <option key={cur.code} value={cur.code}>{cur.symbol} {cur.code}</option>
+                                    ))}
+                                </select>
                                 <button
                                     onClick={() => { setEditing(acc.id); setEditLabel(acc.label); }}
                                     className="p-1 text-unbox-grey hover:text-unbox-dark hover:bg-gray-100 rounded-lg transition-colors"
@@ -126,10 +149,20 @@ export function PaymentAccountsManager() {
                         value={newLabel}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-                        placeholder="Название счёта..."
+                        placeholder="Название счёта (напр. Mono)..."
                         className="flex-1 px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20"
                         autoFocus
                     />
+                    <select
+                        value={newCurrency}
+                        onChange={(e) => setNewCurrency(e.target.value)}
+                        className="px-2 py-2 rounded-xl border border-unbox-light text-sm bg-white focus:outline-none"
+                    >
+                        <option value="">валюта —</option>
+                        {CURRENCIES.map(cur => (
+                            <option key={cur.code} value={cur.code}>{cur.symbol} {cur.code}</option>
+                        ))}
+                    </select>
                     <button
                         onClick={handleAdd}
                         disabled={!newLabel.trim()}

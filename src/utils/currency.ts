@@ -23,6 +23,22 @@ export let EXCHANGE_RATES: Record<string, number> = {
     USDT: 2.69,
 };
 
+/** Известные символы для валют, добавляемых через настройки (07.09). */
+const KNOWN_SYMBOLS: Record<string, string> = {
+    UAH: '\u20B4', GBP: '\u00A3', TRY: '\u20BA', KZT: '\u20B8',
+    BYN: 'Br', AMD: '\u058F', PLN: 'z\u0142', ILS: '\u20AA', AED: 'DH',
+};
+
+/** Валюты из настроек, которых нет в зашитом списке, добавляются на лету —
+ *  все селекторы валют по приложению читают этот же массив. */
+export function registerCurrenciesFromRates(rates: Record<string, number>): void {
+    for (const code of Object.keys(rates)) {
+        if (!CURRENCIES.some(c => c.code === code)) {
+            CURRENCIES.push({ code, symbol: KNOWN_SYMBOLS[code] || code, label: code });
+        }
+    }
+}
+
 /** Fetch exchange rates from backend and update in-memory cache */
 let _ratesFetched = false;
 export async function fetchExchangeRates(): Promise<Record<string, number>> {
@@ -31,6 +47,7 @@ export async function fetchExchangeRates(): Promise<Record<string, number>> {
         const res = await api.get('/settings/exchange_rates');
         if (res.data && typeof res.data === 'object') {
             EXCHANGE_RATES = { ...EXCHANGE_RATES, ...res.data };
+            registerCurrenciesFromRates(EXCHANGE_RATES);
             _ratesFetched = true;
         }
     } catch {

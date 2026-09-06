@@ -8,7 +8,7 @@ import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
-import { CURRENCIES, EXCHANGE_RATES, fetchExchangeRates } from '../../utils/currency';
+import { CURRENCIES, EXCHANGE_RATES, fetchExchangeRates, registerCurrenciesFromRates } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const glassCard: React.CSSProperties = {
@@ -219,6 +219,22 @@ function GridHouseCrmSettings({
         gap: 10,
     });
 
+    // 07.09 (владелец): добавление своей валюты (например UAH для счёта Mono).
+    const [newCurCode, setNewCurCode] = useState('');
+    const [newCurRate, setNewCurRate] = useState('');
+    const addCurrency = () => {
+        const code = newCurCode.trim().toUpperCase();
+        const rate = parseFloat(newCurRate);
+        if (!/^[A-Z]{2,6}$/.test(code)) { toast.error('Код валюты — 2-6 латинских букв (напр. UAH)'); return; }
+        if (CURRENCIES.some(cu => cu.code === code)) { toast.error('Такая валюта уже есть'); return; }
+        if (!rate || rate <= 0) { toast.error('Укажите курс к GEL (сколько лари стоит 1 единица)'); return; }
+        registerCurrenciesFromRates({ [code]: rate });
+        setRates(r => ({ ...r, [code]: rate }));
+        setNewCurCode('');
+        setNewCurRate('');
+        toast.info(`${code} добавлена — нажмите «Сохранить курсы», чтобы применить для всех`);
+    };
+
     const inputStyle: React.CSSProperties = {
         width: '100%',
         padding: '10px 0',
@@ -340,6 +356,36 @@ function GridHouseCrmSettings({
                             )}
                         </div>
                     ))}
+                </div>
+
+                {/* Добавление валюты (07.09) */}
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 20, flexWrap: 'wrap' }}>
+                    <input
+                        type="text"
+                        value={newCurCode}
+                        onChange={(e) => setNewCurCode(e.target.value)}
+                        placeholder="Код (UAH)"
+                        maxLength={6}
+                        style={{ ...inputStyle, width: 110, textTransform: 'uppercase' }}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink30 }}>1 ед. =</span>
+                        <input
+                            type="number"
+                            step="0.001"
+                            value={newCurRate}
+                            onChange={(e) => setNewCurRate(e.target.value)}
+                            placeholder="0.065"
+                            style={{ ...inputStyle, width: 90, textAlign: 'right' }}
+                        />
+                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink30 }}>GEL</span>
+                    </div>
+                    <button onClick={addCurrency} style={{ ...inkBtn(), padding: '10px 14px' }}>
+                        ＋ Добавить валюту
+                    </button>
+                </div>
+                <div style={{ ...GHS_MONO_LABEL, color: GH.ink30, marginTop: 8 }}>
+                    Валюту счёта можно привязать в «Платёжных счетах» — платёж этим счётом сразу пойдёт в ней
                 </div>
 
                 {hasRateChanges && (

@@ -205,7 +205,10 @@ function PaymentForm({ clients, onSave, onCancel }: {
         if (!clientId || !amount) return;
         setSaving(true);
         try {
-            await onSave({ clientId, amount: Number(amount), currency: selectedClient?.currency, account: account || undefined });
+            // 07.09: у счёта может быть своя валюта (напр. Mono → UAH) —
+            // она важнее валюты клиента.
+            const accCurrency = useCrmStore.getState().paymentAccounts.find(a => a.id === account)?.currency;
+            await onSave({ clientId, amount: Number(amount), currency: accCurrency || selectedClient?.currency, account: account || undefined });
         } catch (err: any) {
             toast.error(err.message || 'Ошибка');
         } finally {
@@ -551,7 +554,10 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
         if (!clientId || !amount) return;
         setSaving(true);
         try {
-            await onSave({ clientId, amount: Number(amount), currency: selectedClient?.currency, account: account || undefined });
+            // 07.09: у счёта может быть своя валюта (напр. Mono → UAH) —
+            // она важнее валюты клиента.
+            const accCurrency = useCrmStore.getState().paymentAccounts.find(a => a.id === account)?.currency;
+            await onSave({ clientId, amount: Number(amount), currency: accCurrency || selectedClient?.currency, account: account || undefined });
         } catch (err: any) {
             toast.error(err.message || 'Ошибка');
         } finally {

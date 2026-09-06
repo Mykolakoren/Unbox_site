@@ -69,12 +69,18 @@ def update_exchange_rates(
     clean: Dict[str, float] = {}
     for k, v in payload.items():
         code = str(k).upper().strip()
-        if code not in ("GEL", "USD", "EUR", "RUB", "USDT"):
+        # 07.09 (владелец): валюты настраиваемые — любой код из 2-6 латинских
+        # букв (гривна UAH и т.д.), а не зашитая пятёрка. Курс > 0.
+        import re as _re
+        if not _re.fullmatch(r"[A-Z]{2,6}", code):
             continue
         try:
-            clean[code] = float(v)
+            rate = float(v)
         except (TypeError, ValueError):
             continue
+        if rate <= 0:
+            continue
+        clean[code] = rate
     clean["GEL"] = 1.0  # always
 
     row = session.get(AppSetting, "exchange_rates")

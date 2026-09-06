@@ -810,3 +810,17 @@ def test_sync_dry_run_and_cancelled_revive():
     body = src[i_rev:i_rev + 400]
     assert 'entry["google_event_id"] != existing_by_date.google_event_id' in src[i_rev - 200:i_rev + 200], \
         "воскрешение должно требовать НОВОЕ событие (другой id) — иначе синк отменяет отмены"
+
+
+def test_currencies_are_configurable():
+    """07.09 (владелец): валюты добавляются через настройки (гривна для Mono).
+    Бэк не должен вернуть себе зашитый белый список, а форма платежа обязана
+    подставлять валюту счёта поверх валюты клиента."""
+    import pathlib
+    base = pathlib.Path(__file__).parent.parent
+    st = (base / "app/api/v1/settings.py").read_text()
+    assert '("GEL", "USD", "EUR", "RUB", "USDT")' not in st.split("def update_exchange_rates")[1].split("def ")[0], \
+        "белый список валют вернулся — UAH снова молча выбрасывается"
+    assert '[A-Z]{2,6}' in st
+    fin = (base.parent / "src/pages/crm/CrmFinances.tsx").read_text()
+    assert fin.count("accCurrency") >= 2, "формы платежа потеряли валюту счёта"

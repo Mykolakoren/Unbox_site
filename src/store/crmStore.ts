@@ -18,6 +18,8 @@ import type {
 export interface PaymentAccount {
     id: string;
     label: string;
+    /** Валюта счёта (07.09): выбрал счёт «Mono» — платёж по умолчанию в UAH. */
+    currency?: string;
 }
 
 interface CrmStore {
