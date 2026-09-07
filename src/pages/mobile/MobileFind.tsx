@@ -877,12 +877,17 @@ function buildFreeWindows(
     );
 
     const matchesSpace = (r: typeof RESOURCES[number]) => {
+        // 07.09 (просьба админов): «Индивид» — это про РАЗМЕР (до 4 чел.),
+        // а не про форматы. После мини-групп кабинеты 2 (One) и 6 (Uni)
+        // получили формат group и выпадали из «Индивид», хотя это обычные
+        // кабинеты на 4 человека. Теперь они видны и в «Индивид», и в
+        // «Большом зале»; настоящие залы (7/8/9, 10-20 чел.) — только в зале.
         const isCapsule = r.type === 'capsule';
-        const isGroup = !isCapsule && (r.formats?.includes('group') ?? false);
-        const isIndividual = !isCapsule && !isGroup;
-        if (isCapsule && spaces.has('capsule')) return true;
-        if (isGroup && spaces.has('group')) return true;
-        if (isIndividual && spaces.has('individual')) return true;
+        if (isCapsule) return spaces.has('capsule');
+        const cap = r.capacity ?? 4;
+        const canGroup = r.formats?.includes('group') ?? false;
+        if (spaces.has('individual') && cap <= 4) return true;
+        if (spaces.has('group') && (cap > 4 || canGroup)) return true;
         return false;
     };
 
