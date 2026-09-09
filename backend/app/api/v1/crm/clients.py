@@ -144,11 +144,19 @@ def list_clients(
     sensitive and admins must explicitly choose whose CRM they're acting on.
     """
     uid = str(current_user.id)
-    is_admin = current_user.role in ("owner", "senior_admin", "admin")
 
-    # Admin-proxy: view a specific specialist's CRM.
-    # Plain specialist: always pinned to their own data.
-    target_uid = specialist_id if (is_admin and specialist_id) else uid
+    # 2026-08-27, решение владельца: Psy-CRM изолирован ПОЛНОСТЬЮ — список
+    # клиентов специалиста не видит никто, кроме него самого (ни admin, ни
+    # senior_admin, ни owner). Прежний admin-proxy (`?specialist_id=`)
+    # закрыт: явный 403, чтобы фронт-флоу не деградировал молча.
+    # Следствие: админ, бронируя ОТ ИМЕНИ специалиста, больше не может
+    # привязать бронь к его CRM-клиенту — привязку делает сам специалист.
+    if specialist_id and specialist_id != uid:
+        raise HTTPException(
+            status_code=403,
+            detail="Список клиентов Psy-CRM доступен только самому специалисту",
+        )
+    target_uid = uid
 
     stmt = select(TherapistClient).where(TherapistClient.specialist_id == target_uid)
     if active_only:
@@ -343,6 +351,38 @@ def update_client(
     new_price = update_data.get("base_price")
     new_currency = update_data.get("currency")
     new_account = update_data.get("default_account")
+
+    # ── Заморозка истории (09.09, кейс «Роман и Анжелика») ────────────────
+    # Смена ставки/валюты/счёта у клиента действует ТОЛЬКО ВПЕРЁД. Прошлые
+    # сессии без проставленных значений отображались бы в НОВОЙ валюте
+    # (показ идёт как «session.currency ?? client.currency») — 75 USDT
+    # задним числом превращались в «75 UAH». Поэтому до применения правки
+    # штампуем в прошлые сессии СТАРЫЕ значения клиента.
+    _old_price, _old_currency, _old_account = client.base_price, client.currency, client.default_account
+    _freeze_fields = {
+        k for k, old, new in (
+            ("price", _old_price, new_price),
+            ("currency", _old_currency, new_currency),
+            ("account", _old_account, new_account),
+        ) if new is not None and new != old and old
+    }
+    if _freeze_fields:
+        _uid = str(current_user.id)
+        _past = session.exec(
+            select(TherapySession).where(
+                TherapySession.specialist_id == _uid,
+                TherapySession.client_id == client_id,
+                TherapySession.date < datetime.utcnow(),
+            )
+        ).all()
+        for _ts in _past:
+            if "price" in _freeze_fields and _ts.price is None:
+                _ts.price = _old_price
+            if "currency" in _freeze_fields and not _ts.currency:
+                _ts.currency = _old_currency
+            if "account" in _freeze_fields and not _ts.account:
+                _ts.account = _old_account
+            session.add(_ts)
 
     for key, value in update_data.items():
         setattr(client, key, value)

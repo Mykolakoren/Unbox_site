@@ -717,9 +717,12 @@ def quick_pay_session(
         ts.price = client.base_price
         price = client.base_price
 
-    # Freeze currency & account on the session at payment time
-    ts.currency = client.currency
-    ts.account = account
+    # Freeze currency & account on the session at payment time.
+    # 09.09: если валюта/счёт УЖЕ проставлены на сессии (заморозка истории
+    # или ручная правка) — они главнее текущих значений клиента: сессия в
+    # USDT не должна оплатиться в гривнах после смены валюты клиента.
+    ts.currency = ts.currency or client.currency
+    ts.account = ts.account or account
 
     # Create payment record only if amount > 0
     if price and price > 0:
@@ -727,8 +730,8 @@ def quick_pay_session(
             client_id=client.id,
             specialist_id=str(current_user.id),
             amount=price,
-            currency=client.currency,
-            account=account,
+            currency=ts.currency or client.currency,
+            account=ts.account or account,
             date=datetime.now(),  # payment date = today, not session date
             session_id=ts.id,
         )
@@ -817,17 +820,18 @@ def mark_all_sessions_paid(
         if ts.price is None and client.base_price:
             ts.price = client.base_price
             price = client.base_price
-        # Freeze currency & account on the session at payment time
-        ts.currency = client.currency
-        ts.account = client.default_account
+        # Freeze currency & account on the session at payment time.
+        # 09.09: проставленные на сессии значения главнее клиентских (см. quick-pay).
+        ts.currency = ts.currency or client.currency
+        ts.account = ts.account or client.default_account
         # Create payment only if amount > 0
         if price and price > 0:
             payment = TherapistPayment(
                 client_id=client.id,
                 specialist_id=uid,
                 amount=price,
-                currency=client.currency,
-                account=client.default_account,
+                currency=ts.currency or client.currency,
+                account=ts.account or client.default_account,
                 # Дата платежа = ДЕНЬ ОПЛАТЫ (как в quick_pay_session), а НЕ дата
                 # сессии. Иначе оплата старого долга задним числом меняла кассу
                 # прошлого месяца, а «касса за месяц» переставала быть кэш-флоу.

@@ -824,3 +824,23 @@ def test_currencies_are_configurable():
     assert '[A-Z]{2,6}' in st
     fin = (base.parent / "src/pages/crm/CrmFinances.tsx").read_text()
     assert fin.count("accCurrency") >= 2, "формы платежа потеряли валюту счёта"
+
+
+def test_client_change_is_forward_only():
+    """09.09 (кейс «Роман и Анжелика», 75 USDT → показались как 75 UAH):
+    смена ставки/валюты/счёта клиента действует только вперёд — прошлые
+    сессии замораживаются со СТАРЫМИ значениями, а оплата уважает
+    проставленную на сессии валюту, а не текущую валюту клиента."""
+    import pathlib
+    base = pathlib.Path(__file__).parent.parent
+    cl = (base / "app/api/v1/crm/clients.py").read_text()
+    i = cl.find("def update_client")
+    body = cl[i:cl.find("def delete_client")]
+    assert "_freeze_fields" in body and "TherapySession.date < datetime.utcnow()" in body, \
+        "заморозка истории при правке клиента пропала"
+    j = body.find("_freeze_fields")
+    k = body.find("for key, value in update_data.items()")
+    assert 0 < j < k, "заморозка должна идти ДО применения новых значений"
+    se = (base / "app/api/v1/crm/sessions.py").read_text()
+    assert se.count("ts.currency = ts.currency or client.currency") >= 2, \
+        "оплата снова перетирает валюту сессии валютой клиента (quick-pay/mark-all-paid)"
