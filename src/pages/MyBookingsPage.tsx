@@ -1277,6 +1277,30 @@ function BookingsChessboard({
                                             Отменить часть
                                         </button>
                                     )}
+                                    {/* Селектор «Клиент из CRM» — как в десктопном попапе
+                                        (просьба владельца 16.09): привязать одного клиента
+                                        ко всей брони прямо с телефона. */}
+                                    {crmClients.length > 0 && activeBooking.status !== 'completed' && (
+                                        <div className="flex items-center gap-2 pt-1">
+                                            <span className="text-[10px] text-unbox-grey uppercase tracking-wider font-semibold flex-shrink-0">Клиент CRM</span>
+                                            <select
+                                                value={activeBooking.crmClientId || ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value || null;
+                                                    onLinkClient(activeBooking.id, val);
+                                                    setActiveBooking(prev => prev ? { ...prev, crmClientId: val || undefined } : null);
+                                                }}
+                                                className="flex-1 min-w-0 text-xs border border-unbox-light rounded-lg px-2 py-2 bg-white text-unbox-dark focus:border-unbox-green focus:outline-none"
+                                            >
+                                                <option value="">— Без клиента —</option>
+                                                {crmClients.map(c => (
+                                                    <option key={c.id} value={c.id}>
+                                                        {c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
                                     {/* 15.09 (вопрос владельца): мобильная шторка не имела
                                         моста в разбивку по клиентам — он был только в
                                         десктопном попапе. Тот же переход: CRM → Бронирования
