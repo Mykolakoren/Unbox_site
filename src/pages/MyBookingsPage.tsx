@@ -1277,6 +1277,19 @@ function BookingsChessboard({
                                             Отменить часть
                                         </button>
                                     )}
+                                    {/* 15.09 (вопрос владельца): мобильная шторка не имела
+                                        моста в разбивку по клиентам — он был только в
+                                        десктопном попапе. Тот же переход: CRM → Бронирования
+                                        с автооткрытием окна разбивки этой брони. */}
+                                    {crmClients.length > 0 && activeBooking.duration > 60 && (
+                                        <Link
+                                            to={`/crm/bookings?link=${activeBooking.id}`}
+                                            onClick={() => setActiveBooking(null)}
+                                            className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl border border-dashed border-unbox-green text-unbox-green"
+                                        >
+                                            <Plus size={12} /> Разбить по клиентам ({activeBooking.duration / 60}ч → сессии)
+                                        </Link>
+                                    )}
                                 </div>
                             ) : activeBooking.status === 'confirmed' && !(() => {
                                 const [bh, bm] = (activeBooking.startTime || '00:00').split(':').map(Number);
