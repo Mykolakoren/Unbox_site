@@ -198,7 +198,11 @@ export function AddExtrasModal({
     bookingId, onClose, onDone,
 }: { bookingId: string | null; onClose: () => void; onDone: () => void }) {
     const [selected, setSelected] = useState<Record<string, number>>({});
-    const [method, setMethod] = useState<PayMethod>('cash');
+    // 16.09 (кейс Валентины): дефолт был «наличными» — админ дважды добавил
+    // допы, ожидая «в счёт брони», а в кассу легли фантомные наличные приходы.
+    // «С баланса» — безопасный дефолт: добавляется к цене брони и списывается
+    // вместе с ней; наличные/карта админ выбирает осознанно.
+    const [method, setMethod] = useState<PayMethod>('balance');
     const [busy, setBusy] = useState(false);
     if (!bookingId) return null;
 
@@ -235,11 +239,14 @@ export function AddExtrasModal({
     };
 
     const methods: { value: PayMethod; label: string }[] = [
+        { value: 'balance', label: 'С баланса (в счёт брони)' },
         { value: 'cash', label: 'Наличными' },
         { value: 'card_tbc', label: 'Карта TBC' },
         { value: 'card_bog', label: 'Карта BOG' },
-        { value: 'balance', label: 'С баланса' },
     ];
+    const methodHint = method === 'balance'
+        ? 'Добавится к цене брони и спишется вместе с ней.'
+        : 'Гость платит на месте — уйдёт в кассу отдельным приходом, цена брони НЕ изменится.';
 
     return (
         <div style={overlay} onClick={onClose}>
@@ -284,6 +291,9 @@ export function AddExtrasModal({
                             {m.label}
                         </button>
                     ))}
+                </div>
+                <div style={{ fontSize: 12, color: GH.ink60, margin: '-12px 0 18px', lineHeight: 1.4 }}>
+                    {methodHint}
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
