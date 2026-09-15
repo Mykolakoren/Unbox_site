@@ -60,6 +60,21 @@ export function AdminChessboardView() {
     const [moveModalBooking, setMoveModalBooking] = useState<BookingHistoryItem | null>(null);
     // Перетаскиваемая бронь (drag-and-drop переноса по сетке, десктоп).
     const [draggedBooking, setDraggedBooking] = useState<BookingHistoryItem | null>(null);
+    // 15.09 (Лиза): «+Доп» был виден только на СЕГОДНЯШНИХ бронях — а допы
+    // нужны и на будущих (кейс Анны Калекиной: песочница на бронь завтра).
+    // Бэкенд это давно умеет: у pending-брони крон спишет итог уже с допами.
+    // Прошлые не трогаем — дозаказывать допы задним числом бессмысленно.
+    const bookingTodayOrFuture = (b: BookingHistoryItem | null): boolean => {
+        if (!b?.date) return false;
+        const raw: any = b.date;
+        const day = typeof raw === 'string'
+            ? raw.split('T')[0].split(' ')[0]
+            : new Date(raw).toISOString().split('T')[0];
+        const n = new Date();
+        const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+        return day >= today;
+    };
+
     const bookingIsToday = (b: BookingHistoryItem | null): boolean => {
         if (!b?.date) return false;
         const raw: any = b.date;
@@ -1204,7 +1219,7 @@ export function AdminChessboardView() {
                                         {splitOptions(selectedBooking.duration || 0).length > 0 && (
                                             <button onClick={() => setSplitModalBooking(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700 col-span-2">Разделить на сессии</button>
                                         )}
-                                        {bookingIsToday(selectedBooking) && (
+                                        {bookingTodayOrFuture(selectedBooking) && (
                                             <button onClick={() => setExtrasModalId(selectedBooking.id)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-teal-50 text-teal-700">+ Доп (кофе и т.п.)</button>
                                         )}
                                         {canToSubscription(selectedBooking) && (
@@ -1795,7 +1810,7 @@ export function AdminChessboardView() {
                                         Разделить на сессии
                                     </button>
                                 )}
-                                {bookingIsToday(selectedBooking) && (
+                                {bookingTodayOrFuture(selectedBooking) && (
                                     <button
                                         onClick={() => setExtrasModalId(selectedBooking.id)}
                                         className="w-full py-1.5 text-xs font-medium rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 transition-colors"
