@@ -4587,6 +4587,104 @@ class ExtendRequest(PydanticBaseModel):
     extra_minutes: int = 30  # default 30 min extension
 
 
+@router.patch("/{booking_id}/bonus-hour", response_model=BookingRead)
+def apply_bonus_hour(
+    booking_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """«Час в подарок» одной кнопкой (15.09, просьба Валентины).
+
+    Раньше админ считал вручную: 36 − 18 (час со скидкой) и менял цену через
+    «Цена», а бонус клиента оставался непогашенным — подарок мог задвоиться.
+    Теперь: проверяем активный бесплатный час клиента, гасим его (FIFO,
+    consume_free_hours) и снижаем цену брони на стоимость ОДНОГО часа в
+    текущей цене (со всеми скидками) через тот же механизм, что «Цена»
+    (set_booking_price): pending — крон спишет меньше, paid — разница
+    вернётся на баланс. Всё в одной транзакции: сорвался пересчёт цены —
+    бонус не погашен.
+    """
+    try:
+        b_uuid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+    booking = session.get(Booking, b_uuid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status != "confirmed":
+        raise HTTPException(400, "Бонус-час применяется только к подтверждённой брони")
+    # Ревизия денег 15.09: повторное нажатие на ту же бронь компаундило бы
+    # скидку (18 → 9 → 4.5…) и сжигало бонусы клиента почти без эффекта.
+    if (booking.applied_rule or "") == "BONUS_HOUR":
+        raise HTTPException(409, "«Час в подарок» уже применён к этой брони")
+    method = (booking.payment_method or "balance").lower()
+    # Только balance: у cash/service деньги в кассе, возврат на баланс
+    # раздвоил бы учёт; абонемент/бонус — свои механики.
+    if method != "balance":
+        raise HTTPException(
+            409, "«Час в подарок» применяется только к броням с оплатой балансом",
+        )
+    if not booking.user_uuid:
+        raise HTTPException(
+            409, "У этой старой брони не указан владелец — примените скидку через «Цена»",
+        )
+    duration = int(booking.duration or 0)
+    if duration < 60:
+        raise HTTPException(400, "Бронь короче часа — дарить нечего")
+    old_price = float(booking.final_price or 0)
+    if old_price <= 0:
+        raise HTTPException(400, "Цена брони уже 0 — скидывать нечего")
+
+    booking_owner = _resolve_booking_owner(session, booking)
+    if not booking_owner:
+        raise HTTPException(404, "Владелец брони не найден")
+
+    # Целый бесплатный час должен быть у клиента ДО списания.
+    from app.models.bonus import Bonus as _Bonus
+    _now = datetime.now()
+    _active = session.exec(
+        select(_Bonus).where(
+            _Bonus.user_id == str(booking_owner.id),
+            _Bonus.type == "free_hour",
+            _Bonus.status == "active",
+        )
+    ).all()
+    _avail = sum(float(b.quantity or 0) for b in _active
+                 if not (b.expires_at and b.expires_at < _now))
+    if _avail < 0.999:
+        raise HTTPException(
+            409, f"У клиента нет целого бесплатного часа (доступно: {_avail:g} ч)",
+        )
+
+    # Стоимость одного часа в ТЕКУЩЕЙ цене (со скидками): 36₾/2ч → 18₾.
+    hour_cost = round(old_price * 60.0 / duration, 2)
+    new_price = round(old_price - hour_cost, 2)
+
+    from app.services.bonus_service import consume_free_hours
+    covered = consume_free_hours(session, booking_owner.id, 1.0)
+    if covered < 0.999:
+        raise HTTPException(409, "Не удалось погасить бонус — попробуйте ещё раз")
+
+    # Тот же путь, что кнопка «Цена»: набивает audit, шлёт TG, двигает деньги
+    # при paid и коммитит всю транзакцию (вместе с погашенным бонусом).
+    set_booking_price(
+        booking_id=booking_id,
+        payload=SetPriceRequest(
+            new_price=new_price,
+            reason=f"🎁 Час в подарок: −{hour_cost:g}₾ (бонус клиента погашен)",
+        ),
+        session=session,
+        current_user=current_user,
+    )
+    # Метка идемпотентности — ПОСЛЕ успешного расчёта (set_booking_price
+    # перетирает applied_rule в MANUAL_OVERRIDE, поэтому штампуем поверх).
+    booking.applied_rule = "BONUS_HOUR"
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+    return booking
+
+
 @router.patch("/{booking_id}/extend", response_model=BookingRead)
 def extend_booking(
     booking_id: str,

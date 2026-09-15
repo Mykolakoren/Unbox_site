@@ -146,6 +146,13 @@ export const bookingsApi = {
      * Server now persists the new price + adjusts the owner's balance
      * (or subscription hours) by the delta when the row is already paid.
      */
+    /** «Час в подарок» (15.09): гасит бесплатный час клиента и снижает цену
+     *  брони на стоимость одного часа с учётом скидок — одной операцией. */
+    applyBonusHour: async (id: string): Promise<any> => {
+        const response = await api.patch(`/bookings/${id}/bonus-hour`, {});
+        return mapToFrontend(response.data);
+    },
+
     setPrice: async (id: string, newPrice: number, reason?: string): Promise<any> => {
         const response = await api.patch(`/bookings/${id}/price`, {
             new_price: newPrice,

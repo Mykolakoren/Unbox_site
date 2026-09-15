@@ -844,3 +844,21 @@ def test_client_change_is_forward_only():
     se = (base / "app/api/v1/crm/sessions.py").read_text()
     assert se.count("ts.currency = ts.currency or client.currency") >= 2, \
         "оплата снова перетирает валюту сессии валютой клиента (quick-pay/mark-all-paid)"
+
+
+def test_bonus_hour_button_is_atomic_and_gated():
+    """15.09 («Час в подарок» для Валентины): бонус гасится ДО пересчёта цены
+    в одной транзакции (упал пересчёт — бонус не потерян), абонементные и
+    бонусные брони исключены, целый час проверяется до списания."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/bookings/routes.py").read_text()
+    i = src.find("def apply_bonus_hour")
+    assert i != -1, "эндпоинт бонус-часа исчез"
+    body = src[i:src.find("def extend_booking", i)]
+    assert 'method != "balance"' in body, "бонус-час должен быть только для balance-броней"
+    assert '"BONUS_HOUR"' in body and "уже применён" in body, \
+        "нет защиты от повторного применения (компаундная скидка + сжигание бонусов)"
+    j = body.find("consume_free_hours")
+    k = body.find("set_booking_price(")
+    assert 0 < j < k, "бонус должен гаситься до пересчёта цены (одна транзакция)"
+    assert "session.commit()" not in body[:k], "ранний commit ломает атомарность бонус+цена"

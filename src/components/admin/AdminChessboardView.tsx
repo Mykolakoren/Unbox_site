@@ -662,6 +662,20 @@ export function AdminChessboardView() {
             setSelectedBooking(null);
         }
     };
+    // «Час в подарок» (15.09, просьба Валентины): раньше админ считал скидку
+    // вручную через «Цена», а бонус клиента оставался непогашенным.
+    const handleBonusHour = async (b: BookingHistoryItem) => {
+        if (!window.confirm('Применить «час в подарок»? Спишется 1 бесплатный час клиента, цена брони уменьшится на стоимость часа (со скидками).')) return;
+        try {
+            const updated = await bookingsApi.applyBonusHour(b.id);
+            toast.success(`Час в подарок применён: ${b.finalPrice}₾ → ${updated.finalPrice}₾`);
+            setSelectedBooking(null);
+            await fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось применить бонус-час');
+        }
+    };
+
     const handleEditPrice = async (b: BookingHistoryItem) => {
         // Replaces the legacy local-only setManualPrice — that one mutated
         // the Zustand store and never hit the server, so the value reverted
@@ -1202,6 +1216,9 @@ export function AdminChessboardView() {
                                     </div>
                                     <div className={clsx("grid gap-1.5", bCompleted ? "grid-cols-1" : "grid-cols-3")}>
                                         <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
+                                        {!bCompleted && selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60 && (
+                                            <button onClick={() => handleBonusHour(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">🎁 Час в подарок</button>
+                                        )}
                                         {!bCompleted && (
                                             <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
                                                 {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
@@ -1801,6 +1818,14 @@ export function AdminChessboardView() {
                                     >
                                         Цена
                                     </button>
+                                    {selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60 && (
+                                        <button
+                                            onClick={() => handleBonusHour(selectedBooking)}
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                                        >
+                                            🎁 Час в подарок
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => handleToggleReRent(selectedBooking)}
                                         className="py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
