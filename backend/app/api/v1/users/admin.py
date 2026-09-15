@@ -171,6 +171,13 @@ def update_user(
     # handleAssignSubscription), деньги списывались молча, а в истории пусто —
     # у Валерии Костенецкой так «исчезли» 650₾ за Профи+.
     _new_balance = user_data.pop("balance", None)
+    # То же право и для balance через generic PATCH (второй обходной путь,
+    # найденный аудитом 27.08): без него любой admin менял чужой баланс.
+    if _new_balance is not None and not deps.has_permission(current_user, "finance.balance_correction"):
+        raise HTTPException(
+            status_code=403,
+            detail="Нет права «Корректировка баланса» — попросите старшего администратора",
+        )
     for key, value in user_data.items():
         setattr(user, key, value)
     if _new_balance is not None:
@@ -222,7 +229,7 @@ def toggle_subscription_freeze(
     user = _resolve_user(session, user_id)
 
     if not user.subscription:
-        raise HTTPException(status_code=400, detail="User has no subscription")
+        raise HTTPException(status_code=400, detail="У клиента нет активного абонемента")
 
     from datetime import timedelta
 
@@ -235,7 +242,9 @@ def toggle_subscription_freeze(
     if not is_frozen:
         if freeze_count >= 1:
             raise HTTPException(
-                status_code=400, detail="Subscription has already been frozen once"
+                status_code=400,
+                detail="Абонемент уже замораживался — по правилам пауза одна на абонемент. "
+                       "Повторную может разрешить владелец.",
             )
         # frozen_at — момент старта паузы: на разморозке по нему продлеваем срок
         # ровно на проведённое в паузе время, чтобы пауза не съедала срок.
@@ -440,6 +449,15 @@ def correct_user_balance(
     session: Session = Depends(get_session),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
+    # Аудит 2026-08-27 (решение владельца, вариант «а»): корректировка баланса —
+    # только с правом finance.balance_correction (по матрице: senior_admin/owner
+    # по умолчанию; обычному админу — персональной выдачей). Раньше этот
+    # эндпоинт дублировал cashbox-корректировку БЕЗ проверки права.
+    if not deps.has_permission(current_user, "finance.balance_correction"):
+        raise HTTPException(
+            status_code=403,
+            detail="Нет права «Корректировка баланса» — попросите старшего администратора",
+        )
     user = _resolve_user(session, user_id)
 
     new_balance = payload.get("new_balance")

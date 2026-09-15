@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet } from 'lucide-react';
 import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrectionModal';
+import { hasPermission } from '../../utils/permissions';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
@@ -162,6 +163,12 @@ export function AdminUserDetails() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id, user?.email]);
 
+    // ВАЖНО: этот хук обязан стоять ДО раннего return ниже. Когда он жил после,
+    // холодная загрузка карточки (F5/прямая ссылка: users ещё пуст → return
+    // «Загрузка…» → users подгрузились → ре-рендер с +1 хуком) роняла ВЕСЬ
+    // /admin через ErrorBoundary: «Rendered more hooks…» (консилиум 27.08).
+    const [convertingId, setConvertingId] = useState<string | null>(null);
+
     if (!user) {
         // While the initial fetch is in flight, show a spinner instead of
         // the false-negative "Клиент не найден". Distinguishes "still
@@ -259,10 +266,17 @@ export function AdminUserDetails() {
 
 
 
-    const toggleFreeze = () => {
+    const toggleFreeze = async () => {
         if (!user.subscription) return;
-        useUserStore.getState().toggleSubscriptionFreeze(user.email);
-        toast.success(user.subscription.isFrozen ? 'Абонемент разморожен' : 'Абонемент заморожен');
+        // Тост — только ПОСЛЕ ответа сервера. Раньше «Абонемент заморожен»
+        // показывался мгновенно, даже когда сервер отвечал отказом
+        // (повторная заморозка), — админ не понимал, почему ничего не меняется.
+        try {
+            await useUserStore.getState().toggleSubscriptionFreeze(user.email);
+            toast.success(user.subscription.isFrozen ? 'Абонемент разморожен' : 'Абонемент заморожен');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку');
+        }
     };
 
     const handleAssignSubscription = (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => {
@@ -323,7 +337,6 @@ export function AdminUserDetails() {
     // «На абонемент» прямо из карточки клиента: клиент мог забронировать в момент,
     // когда часы кончились (бронь ушла за деньги), а абонемент пополнили следом.
     // Перевод вернёт деньги на баланс и спишет час. Кейс Валерии 13.08.
-    const [convertingId, setConvertingId] = useState<string | null>(null);
     const handleToSubscription = async (bookingId: string) => {
         if (!confirm('Перевести бронь на абонемент? Деньги вернутся на баланс, спишется час с абонемента.')) return;
         setConvertingId(bookingId);
@@ -1186,7 +1199,15 @@ export function AdminUserDetails() {
                                         </div>
                                         <div
                                             className="text-xs text-unbox-grey mt-1 flex items-center gap-1.5 cursor-pointer group/balance"
-                                            onClick={() => setIsBalanceCorrectionOpen(true)}
+                                            // Право finance.balance_correction (решение владельца 27.08):
+                                            // без него бэк вернёт 403 — не дразним кликабельностью.
+                                            onClick={() => {
+                                                if (!hasPermission(currentUser, 'finance.balance_correction')) {
+                                                    toast.error('Корректировка баланса — только для старших администраторов');
+                                                    return;
+                                                }
+                                                setIsBalanceCorrectionOpen(true);
+                                            }}
                                             title="Скорректировать баланс (вручную, с указанием причины)"
                                         >
                                             <Wallet size={11} className="text-unbox-grey/70 group-hover/balance:text-unbox-green transition-colors" />

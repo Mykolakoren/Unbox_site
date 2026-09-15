@@ -1,4 +1,5 @@
 import type { FC } from 'react';
+import { toast } from 'sonner';
 import { useUserStore, type User } from '../store/userStore';
 import { Calendar, RefreshCcw, Snowflake, CheckCircle2 } from 'lucide-react';
 import { Button } from './ui/Button';
@@ -103,7 +104,8 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                         variant="outline"
                         disabled={!canFreeze && !sub.isFrozen}
                         className={`w-full h-10 border-white/10 hover:bg-white/10 text-white hover:text-white rounded-xl ${sub.isFrozen ? 'bg-blue-600/30 border-blue-500/50 text-blue-100' : ''}`}
-                        onClick={() => toggleSubscriptionFreeze(user.email)}
+                        onClick={() => toggleSubscriptionFreeze(user.email).catch((err: any) =>
+                            toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку'))}
                     >
                         <Snowflake size={16} className="mr-2" />
                         {sub.isFrozen ? 'Разморозить' : 'Заморозить на 7 дней'}

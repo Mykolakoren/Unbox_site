@@ -49,6 +49,11 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
             }));
         } catch (error) {
             console.error("Failed to toggle freeze", error);
+            // 17.09 (кейс Марины Бусиной): ошибка глоталась, а карточка выше
+            // уже показала «Абонемент заморожен» — админ думал, что всё
+            // сработало. Пробрасываем, чтобы вызывающий показал настоящий
+            // ответ сервера.
+            throw error;
         }
     },
 
