@@ -862,3 +862,26 @@ def test_bonus_hour_button_is_atomic_and_gated():
     k = body.find("set_booking_price(")
     assert 0 < j < k, "бонус должен гаситься до пересчёта цены (одна транзакция)"
     assert "session.commit()" not in body[:k], "ранний commit ломает атомарность бонус+цена"
+
+
+def test_reschedule_recomputes_price_on_time_change():
+    """17.09 (кейс Алёны Ловиц): перенос 18:00 → 19:00 оставлял старую цену —
+    пересчёт шёл только при смене кабинета/длительности, хотя цена зависит и
+    от времени (пик 20:00-22:00) и от даты. Служебные брони без владельца
+    должны переноситься без 400."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/bookings/routes.py").read_text()
+    i = src.find("def reschedule_booking")
+    body = src[i:src.find("def reschedule_booking_series", i)]
+    assert "time_changed" in body and "date_changed" in body, \
+        "перенос снова не пересчитывает цену при смене времени/даты"
+    assert "room_changed or duration_changed or time_changed or date_changed" in body
+    assert "без владельца (служебная)" in body, \
+        "перенос служебной брони (уборка) снова падает 400"
+    assert "if booking_owner and booking.payment_method" in body
+    # Ревизия денег 17.09: три обязательных условия нового пересчёта.
+    assert 'booking.payment_status == "waived"' in body, \
+        "перенос waived-брони снова двигает деньги от стухшей цены"
+    assert "exclude_booking_id=str(booking.id)" in body, \
+        "бронь снова считает себя своим соседом — фантомная скидка за часы подряд"
+    assert "price_recalculated" in body, "аудит переноса снова слеп к цене"

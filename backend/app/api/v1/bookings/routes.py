@@ -3274,15 +3274,32 @@ def reschedule_booking(
     old_time = booking.start_time
     old_resource = booking.resource_id
 
-    # ── Price recalculation when room OR duration changes ──
+    # ── Price recalculation when room, duration, TIME or DATE changes ──
+    # 17.09 (кейс Алёны Ловиц): перенос 18:00 → 19:00 при той же длительности
+    # оставлял старую цену 30₾, хотя полчаса уехали в пик 20:00-22:00 (+2.5₾).
+    # Пересчёт запускался только при смене кабинета/длительности, а цена
+    # зависит ещё и от времени (пиковые окна) и от даты (недельные скидки).
     room_changed = new_resource != booking.resource_id
     duration_changed = new_duration != booking.duration
+    time_changed = (data.new_start_time or booking.start_time) != booking.start_time
+    date_changed = new_date.date() != booking.date.date()
     old_price = booking.final_price or 0.0
     new_price = old_price
     price_diff = 0.0
     booking_owner = None
+    price_recalculated = False
 
-    if room_changed or duration_changed:
+    if room_changed or duration_changed or time_changed or date_changed:
+        # Бронь со снятым штрафом: деньги по ней уже улажены (возвращены или
+        # не списывались), а final_price остался снимком «до waive». Пересчёт
+        # двигал бы деньги от стухшей цены — тот же гейт, что в «Цена»,
+        # «Сменить формат», «Сократить», «Разделить» (ревизия денег 17.09).
+        if booking.payment_status == "waived":
+            raise HTTPException(
+                status_code=409,
+                detail="У этой брони снят штраф — перенос поменял бы цену. "
+                       "Снимите waiver или создайте новую бронь.",
+            )
         # Абонемент: смену ДЛИТЕЛЬНОСТИ блокируем — нужен пересчёт часов пула.
         # А перенос в другой КАБИНЕТ/время при той же длительности разрешаем:
         # абонемент уже покрыл этот слот, часы списаны при создании, релокация
@@ -3298,14 +3315,23 @@ def reschedule_booking(
 
         booking_owner = _resolve_booking_owner(session, booking)
         if not booking_owner:
-            raise HTTPException(
-                status_code=400,
-                detail="Не удалось определить владельца бронирования для перерасчёта",
+            # Служебные брони (уборка, техработы) владельца не имеют. Раньше в
+            # этот блок заходили только смены кабинета/длительности и падали
+            # 400; теперь сюда попадает и обычный перенос времени, поэтому для
+            # него просто пропускаем пересчёт вместо ошибки.
+            if room_changed or duration_changed:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Не удалось определить владельца бронирования для перерасчёта",
+                )
+            logger.info(
+                "[reschedule] booking %s без владельца (служебная) — перенос без пересчёта цены",
+                booking.id,
             )
 
         # Пересчёт цены — только для balance/bonus. Абонемент релоцируется как
         # есть: final_price / hours_deducted / applied_rule не трогаем.
-        if booking.payment_method != "subscription":
+        if booking_owner and booking.payment_method != "subscription":
             from app.services.pricing import PricingService
 
             try:
@@ -3321,6 +3347,11 @@ def reschedule_booking(
                 start_time=new_start_dt,
                 duration_minutes=new_duration,
                 format_type=booking.format,
+                # Ревизия 17.09: без exclude сама переносимая бронь попадала в
+                # «соседей» по СТАРОМУ времени — перенос 18:00→19:00 в том же
+                # кабинете стыковался встык со своим старым слотом и дарил
+                # скидку за 2 часа подряд. Как в trim/extend/split.
+                exclude_booking_id=str(booking.id),
                 # Аудит 2026-08-27: бронь ДЕНЕЖНАЯ (subscription отсечён выше).
                 # Без ignore движок при свежекупленном абонементе вернул бы
                 # SUBSCRIPTION/0₾ — и родилась бы «нулёвка» balance+0 (сигнатура
@@ -3330,6 +3361,7 @@ def reschedule_booking(
 
             new_price = new_quote.final_price
             price_diff = new_price - old_price
+            price_recalculated = True
 
             # `pending` bookings haven't been charged yet — the T-24h cron will
             # capture the (new) final_price in full. Touching the balance here
@@ -3502,9 +3534,11 @@ def reschedule_booking(
             "new_time": data.new_start_time,
             "new_resource": new_resource,
             "room_changed": room_changed,
-            "old_price": old_price if room_changed else None,
-            "new_price": new_price if room_changed else None,
-            "price_diff": price_diff if room_changed else None,
+            # Ревизия 17.09: цену писали только при смене кабинета — при
+            # переносе времени (самый частый случай) аудит был слепым.
+            "old_price": old_price if price_recalculated else None,
+            "new_price": new_price if price_recalculated else None,
+            "price_diff": price_diff if price_recalculated else None,
         },
     )
 
