@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { EXTRAS, RESOURCES, LOCATIONS } from '../../utils/data';
@@ -312,10 +312,27 @@ export function AddExtrasModal({
 // Бэкенд reschedule умеет менять кабинет (new_resource_id) — не хватало выбора
 // в интерфейсе. Раньше «Перенести» спрашивало только дату/время (тот же кабинет).
 
+/** Локальный день брони (YYYY-MM-DD). Не через toISOString — она даёт UTC,
+ *  и бронь на 24.09 00:00 Тбилиси превращалась бы в «23.09». */
 function _bookingDay(raw: any): string {
     if (!raw) return '';
     if (typeof raw === 'string') return raw.split('T')[0].split(' ')[0];
-    try { return new Date(raw).toISOString().split('T')[0]; } catch { return ''; }
+    try {
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return '';
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    } catch { return ''; }
+}
+
+/** Принимаем и «30.09.2026» / «30/09/2026» — Safari без нативного пикера
+ *  или ручной набор. Возвращает YYYY-MM-DD либо ''. */
+function _normalizeDay(v: string): string {
+    const s = (v || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    return '';
 }
 
 export function MoveBookingModal({
@@ -329,15 +346,33 @@ export function MoveBookingModal({
     const [time, setTime] = useState(() => booking?.startTime || '10:00');
     const [resourceId, setResourceId] = useState(() => booking?.resourceId || '');
     const [busy, setBusy] = useState(false);
+    const dateRef = useRef<HTMLInputElement>(null);
+    const timeRef = useRef<HTMLInputElement>(null);
+
+    // Модалка смонтирована постоянно (booking=null → null), поэтому
+    // useState-инициализаторы срабатывают один раз при старте шахматки.
+    // Пересобираем поля при каждом открытии — иначе дата и кабинет пустые
+    // (кейс Валентины 23.09: «Дата: ГГГГ-ММ-ДД» на переносе брони Марины).
+    useEffect(() => {
+        if (!booking) return;
+        setDate(_bookingDay(booking.date));
+        setTime(booking.startTime || '10:00');
+        setResourceId(booking.resourceId || '');
+    }, [booking?.id]);
+
     if (!booking) return null;
 
     const submit = async () => {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast.error('Дата: ГГГГ-ММ-ДД'); return; }
-        if (!/^\d{2}:\d{2}$/.test(time)) { toast.error('Время: ЧЧ:ММ'); return; }
+        // Safari с controlled date/time-полем не всегда дёргает onChange —
+        // читаем значение прямо из инпута, стейт лишь запасной вариант.
+        const day = _normalizeDay(dateRef.current?.value || date);
+        const hhmm = (timeRef.current?.value || time).slice(0, 5);
+        if (!day) { toast.error('Укажите дату переноса (например 30.09.2026)'); return; }
+        if (!/^\d{2}:\d{2}$/.test(hhmm)) { toast.error('Укажите время начала (например 10:00)'); return; }
         if (!resourceId) { toast.error('Выберите кабинет'); return; }
         setBusy(true);
         try {
-            await onSubmit(date, time, resourceId);
+            await onSubmit(day, hhmm, resourceId);
             onClose();
         } finally {
             setBusy(false);
@@ -350,11 +385,11 @@ export function MoveBookingModal({
                 <div style={title}>Перенести бронь</div>
 
                 <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Дата</label>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                <input ref={dateRef} type="date" value={date} onChange={(e) => setDate(e.target.value)}
                     style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 14, fontFamily: GH_SANS, fontSize: 14 }} />
 
                 <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Время начала</label>
-                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} step={1800}
+                <input ref={timeRef} type="time" value={time} onChange={(e) => setTime(e.target.value)} step={1800}
                     style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 14, fontFamily: GH_SANS, fontSize: 14 }} />
 
                 <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Кабинет</label>
