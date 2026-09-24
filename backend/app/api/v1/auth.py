@@ -84,7 +84,16 @@ def login_access_token(
     user = session.exec(statement).first()
 
     if not user or not security.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect email or password")
+        # Аккаунт, созданный через Google/Telegram, пароля не имеет (пусто или
+        # заглушка, не argon/bcrypt-хеш). Раньше такой клиент видел «неверный
+        # пароль» и перебирал пароли, не понимая, что входить надо кнопкой.
+        if user and not (user.hashed_password or "").startswith("$"):
+            raise HTTPException(
+                status_code=400,
+                detail="У этого аккаунта нет пароля — он создан через Google или Telegram. "
+                       "Войдите кнопкой Google или Telegram ниже.",
+            )
+        raise HTTPException(status_code=400, detail="Неверный email или пароль")
 
     # Excel #11 — archived users can't log in.
     if user.archived_at is not None:
@@ -129,7 +138,7 @@ def register_new_user(
     if user:
         raise HTTPException(
             status_code=400,
-            detail="The user with this username already exists in the system",
+            detail="Такой email уже зарегистрирован. Войдите или используйте другой адрес.",
         )
         
     user = User.model_validate(user_in, update={"hashed_password": security.get_password_hash(user_in.password)})

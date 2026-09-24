@@ -37,13 +37,13 @@ def merge_clients(
     # Validate target
     target = session.get(TherapistClient, data.target_id)
     if not target or target.specialist_id != uid:
-        raise HTTPException(404, "Target client not found")
+        raise HTTPException(404, "Карточка, в которую склеиваете, не найдена")
 
     if not data.source_ids:
-        raise HTTPException(400, "No source clients to merge")
+        raise HTTPException(400, "Выберите карточки для склейки")
 
     if data.target_id in data.source_ids:
-        raise HTTPException(400, "Target cannot be in source list")
+        raise HTTPException(400, "Нельзя склеить карточку саму с собой")
 
     # Validate all source clients
     sources = []
@@ -241,7 +241,7 @@ def get_client(
 ):
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
     return client
 
 
@@ -254,7 +254,7 @@ def get_client_balance(
     """Calculate client's financial balance: debt, prepayment, totals — grouped by currency."""
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     uid = str(current_user.id)
     base = client.base_price or 0
@@ -345,7 +345,7 @@ def update_client(
 ):
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     update_data = data.model_dump(exclude_unset=True)
     new_price = update_data.get("base_price")
@@ -424,11 +424,11 @@ def delete_client(
 ):
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     if permanent:
         if current_user.role not in ("owner", "senior_admin"):
-            raise HTTPException(403, "Only owner or senior admin can permanently delete clients")
+            raise HTTPException(403, "Удалить карточку навсегда может только владелец или старший администратор")
 
         for model in (TherapySession, TherapistPayment, TherapistNote):
             rows = session.exec(select(model).where(model.client_id == client_id)).all()

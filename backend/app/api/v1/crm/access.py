@@ -174,9 +174,9 @@ def get_user_crm_access(
     try:
         target_user = session.get(User, _UUID(user_id))
     except (ValueError, TypeError):
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Пользователь не найден")
     if not target_user:
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Пользователь не найден")
 
     if target_user.role in ("specialist", "owner", "senior_admin"):
         app_data = (target_user.crm_data or {}).get("access_application", {})
@@ -270,9 +270,9 @@ def approve_crm_access(
     try:
         target_user = session.get(User, _UUID(user_id))
     except (ValueError, TypeError):
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Пользователь не найден")
     if not target_user:
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Пользователь не найден")
 
     now = datetime.now()
     expires_at = now + timedelta(days=days)
@@ -327,9 +327,9 @@ def reject_crm_access(
     try:
         target_user = session.get(User, _UUID(user_id))
     except (ValueError, TypeError):
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Пользователь не найден")
     if not target_user:
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Пользователь не найден")
 
     crm_data = dict(target_user.crm_data or {})
     crm_data["access_status"] = "rejected"

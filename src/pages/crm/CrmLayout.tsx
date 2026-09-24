@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmApplyPage } from './CrmApplyPage';
+import { NotificationsBell } from '../mobile/NotificationsBell';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
 import { useCrmStore } from '../../store/crmStore';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -309,6 +310,10 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         CRM · ОПЕРАТОР
                     </div>
                 </Link>
+                {/* Уведомления (конфликты календаря, удержанные удаления, связи
+                    с бронями). Раньше колокольчик был только в мобильной CRM —
+                    с компьютера специалист их не видел вовсе (аудит 24.09). */}
+                <NotificationsBell color={GH.ink} />
             </div>
 
             {/* Current user strip */}

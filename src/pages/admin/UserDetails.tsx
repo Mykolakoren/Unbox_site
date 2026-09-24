@@ -11,6 +11,7 @@ import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
 import { subscriptionBadge, subscriptionLifecycle } from '../../utils/subscription';
 import { bookingsApi } from '../../api/bookings';
+import { usersApi } from '../../api/users';
 import type { BookingHistoryItem } from '../../store/types';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
@@ -259,9 +260,16 @@ export function AdminUserDetails() {
         }
     };
 
-    const handleUpdateCreditLimit = (limit: number) => {
-        updateUserById(user.email, { creditLimit: limit });
-        toast.success(`Кредитный лимит установлен: ${limit} ₾`);
+    const handleUpdateCreditLimit = async (limit: number) => {
+        // Тост — только после ответа сервера (раньше «установлен» показывался
+        // сразу, даже если у админа нет права менять лимит).
+        try {
+            await usersApi.updateUser(user.email, { creditLimit: limit } as any);
+            await useUserStore.getState().fetchUsers();
+            toast.success(`Кредитный лимит установлен: ${limit} ₾`);
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось изменить кредитный лимит');
+        }
     }
 
 
@@ -448,7 +456,7 @@ export function AdminUserDetails() {
             {
                 <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 28 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                        <button onClick={() => navigate('/admin/users')}
+                        <button onClick={() => navigate(window.location.pathname.startsWith('/m/admin') ? '/m/admin/users' : '/admin/users')}
                             style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30, marginTop: 4 }}>
                             <ArrowLeft size={18} />
                         </button>
@@ -1337,12 +1345,36 @@ export function AdminUserDetails() {
                                                             </button>
                                                         )}
                                                     </div>
-                                                    <button
-                                                        onClick={toggleFreeze}
-                                                        className="mt-2 text-xs underline text-purple-800 hover:text-purple-900"
-                                                    >
-                                                        {user.subscription.isFrozen ? 'Разморозить' : 'Заморозить'}
-                                                    </button>
+                                                    {(() => {
+                                                        // Состояние паузы видно сразу: на паузе ли, до какого числа,
+                                                        // использована ли. Раньше кнопка была всегда активна, и админы
+                                                        // жали «Заморозить» по 17 раз, получая отказ.
+                                                        const sub = user.subscription!;
+                                                        const until = sub.isFrozen && sub.frozenUntil ? new Date(sub.frozenUntil) : null;
+                                                        const over = !!until && until.getTime() < Date.now();
+                                                        const used = !sub.isFrozen && (sub.freezeCount || 0) >= 1;
+                                                        return (
+                                                            <div className="mt-2 space-y-1">
+                                                                {sub.isFrozen && (
+                                                                    <div className={clsx('text-xs font-medium', over ? 'text-amber-700' : 'text-blue-700')}>
+                                                                        {over
+                                                                            ? `⚠ Пауза закончилась ${safeFormat(sub.frozenUntil, 'd.MM')}, но не снята — брони идут с баланса, а не часами`
+                                                                            : `На паузе до ${safeFormat(sub.frozenUntil, 'd.MM')} — брони идут с баланса`}
+                                                                    </div>
+                                                                )}
+                                                                {used ? (
+                                                                    <div className="text-xs text-unbox-grey">Пауза по этому абонементу уже использована</div>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={toggleFreeze}
+                                                                        className={clsx('text-xs underline hover:text-purple-900', over ? 'text-amber-800 font-semibold' : 'text-purple-800')}
+                                                                    >
+                                                                        {sub.isFrozen ? 'Снять паузу' : 'Поставить на паузу (7 дней, один раз)'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
                                             )}
                                         </div>

@@ -43,7 +43,7 @@ def create_payment(
 ):
     client = session.get(TherapistClient, data.client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     ts = None
     if data.session_id:
@@ -119,7 +119,7 @@ def delete_payment(
     """
     payment = session.get(TherapistPayment, payment_id)
     if not payment or payment.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Payment not found")
+        raise HTTPException(404, "Платёж не найден")
 
     session_id = payment.session_id
     session.delete(payment)

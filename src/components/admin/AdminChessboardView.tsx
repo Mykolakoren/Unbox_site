@@ -17,7 +17,7 @@ import { isPeakTime } from '../../utils/pricing';
 import type { BookingHistoryItem } from '../../store/types';
 import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
-import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
+import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
@@ -58,6 +58,7 @@ export function AdminChessboardView() {
     // Бронь, которую делим на несколько сессий (нужны длительность и время начала).
     const [splitModalBooking, setSplitModalBooking] = useState<any>(null);
     const [moveModalBooking, setMoveModalBooking] = useState<BookingHistoryItem | null>(null);
+    const [shortenModalBooking, setShortenModalBooking] = useState<BookingHistoryItem | null>(null);
     // Перетаскиваемая бронь (drag-and-drop переноса по сетке, десктоп).
     const [draggedBooking, setDraggedBooking] = useState<BookingHistoryItem | null>(null);
     // 15.09 (Лиза): «+Доп» был виден только на СЕГОДНЯШНИХ бронях — а допы
@@ -773,28 +774,16 @@ export function AdminChessboardView() {
         }
     };
 
-    /** Сократить бронь — для броней >60 мин. Спрашивает сколько и с какой
-     *  стороны (начало/конец). Минимальный итог — 60 мин. */
-    const handleShorten = async (b: BookingHistoryItem) => {
-        const dur = b.duration || 60;
-        if (dur <= 60) {
+    /** Сократить бронь — для броней >60 мин: окно с выбором «сколько» и
+     *  «с какой стороны» (раньше — два системных prompt'а). Минимум — 60 мин. */
+    const handleShorten = (b: BookingHistoryItem) => {
+        if ((b.duration || 60) <= 60) {
             toast.error('Бронь уже минимальная (60 мин), сократить нельзя');
             return;
         }
-        const removeRaw = window.prompt(
-            `На сколько минут сократить? (кратно 30, максимум ${dur - 60})`,
-            '60',
-        );
-        if (removeRaw === null) return;
-        const remove = parseInt(removeRaw, 10);
-        if (!Number.isFinite(remove) || remove < 30 || remove % 30 !== 0) {
-            toast.error('Введите число кратное 30');
-            return;
-        }
-        const sideRaw = window.prompt('С какой стороны убрать? "конец" (по умолчанию) или "начало":', 'конец');
-        if (sideRaw === null) return;
-        const side: 'start' | 'end' = sideRaw.trim().toLowerCase().startsWith('нач') ? 'start' : 'end';
-        if (!confirm(`Сократить на ${remove} мин с ${side === 'start' ? 'начала' : 'конца'}? Деньги/часы вернутся пропорционально.`)) return;
+        setShortenModalBooking(b);
+    };
+    const doShorten = async (b: BookingHistoryItem, remove: number, side: 'start' | 'end') => {
         try {
             await bookingsApi.shortenBooking(b.id, { removeMinutes: remove, side });
             toast.success(`Бронь сокращена на ${remove} мин, средства возвращены`);
@@ -802,6 +791,7 @@ export function AdminChessboardView() {
             setSelectedBooking(null);
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось сократить');
+            throw e;
         }
     };
 
@@ -1335,6 +1325,11 @@ export function AdminChessboardView() {
                     booking={moveModalBooking}
                     onClose={() => setMoveModalBooking(null)}
                     onSubmit={(d, t, r) => moveModalBooking ? doMove(moveModalBooking, d, t, r) : undefined}
+                />
+                <ShortenBookingModal
+                    booking={shortenModalBooking}
+                    onClose={() => setShortenModalBooking(null)}
+                    onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
                 />
             </div>
         );
@@ -1888,6 +1883,11 @@ export function AdminChessboardView() {
                 onClose={() => setMoveModalBooking(null)}
                 onSubmit={(d, t, r) => moveModalBooking ? doMove(moveModalBooking, d, t, r) : undefined}
             />
+            <ShortenBookingModal
+                booking={shortenModalBooking}
+                onClose={() => setShortenModalBooking(null)}
+                onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
+            />
             {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
                 <CancelBookingChoiceModal
                     bookingId={seriesCancelTarget.id}
@@ -2166,6 +2166,7 @@ function AdminQuickBookingModal({
             const hasStructuredConflicts = typeof detail === 'object' && Array.isArray(detail?.conflicts);
             const isConflict = hasStructuredConflicts
                 || message.includes('Time slot is already booked')
+                || message.includes('уже занято')
                 || message.includes('Conflict');
 
             if (isConflict) {

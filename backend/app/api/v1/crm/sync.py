@@ -337,11 +337,45 @@ def test_calendar_connection(
             "message": _gcal_error_to_message(e, calendar_id),
         }
 
+    # Проверка ЗАПИСИ (аудит 24.09). Список событий работает и при доступе
+    # «только просмотр», а CRM нужно создавать события — раньше специалист
+    # видел «работает», а сессии молча не появлялись в календаре. Ставим
+    # служебное событие в далёкое прошлое и сразу удаляем его.
+    try:
+        probe = service.events().insert(
+            calendarId=calendar_id,
+            body={
+                "summary": "Unbox CRM — проверка подключения",
+                "start": {"date": "2000-01-01"},
+                "end": {"date": "2000-01-02"},
+                "transparency": "transparent",
+                "visibility": "private",
+            },
+            sendUpdates="none",
+        ).execute()
+    except Exception as e:
+        logger.info(f"[test-connection] write probe failed for {calendar_id}: {e}")
+        return {
+            "ok": False,
+            "calendar_id": calendar_id,
+            "service_account": GCAL_SERVICE_ACCOUNT,
+            "message": (
+                "Календарь виден, но CRM не может добавлять в него события — "
+                "доступ открыт только на просмотр. В Google Календаре: настройки "
+                "календаря → «Доступ для отдельных пользователей» → для "
+                f"{GCAL_SERVICE_ACCOUNT} выберите «Внесение изменений в мероприятия»."
+            ),
+        }
+    try:
+        service.events().delete(calendarId=calendar_id, eventId=probe["id"], sendUpdates="none").execute()
+    except Exception as e:  # событие в 2000 году никому не мешает — только лог
+        logger.warning(f"[test-connection] probe event cleanup failed for {calendar_id}: {e}")
+
     return {
         "ok": True,
         "calendar_id": calendar_id,
         "service_account": GCAL_SERVICE_ACCOUNT,
-        "message": f"Подключение к {calendar_id} работает.",
+        "message": f"Подключение к {calendar_id} работает: CRM видит календарь и может добавлять события.",
     }
 
 
@@ -363,7 +397,7 @@ def sync_from_calendar(
 
     calendar_id = get_crm_calendar_id(current_user)
     if not calendar_id:
-        raise HTTPException(400, "Google Calendar not configured. Set calendar_id in /crm/settings.")
+        raise HTTPException(400, "Google Календарь не подключён — укажите его в Настройках CRM")
 
     uid = str(current_user.id)
     clients = session.exec(
@@ -829,7 +863,7 @@ def backfill_alias_codes(
 
     calendar_id = get_crm_calendar_id(current_user)
     if not calendar_id:
-        raise HTTPException(400, "Google Calendar not configured. Set calendar_id in /crm/settings.")
+        raise HTTPException(400, "Google Календарь не подключён — укажите его в Настройках CRM")
 
     uid = str(current_user.id)
     clients = session.exec(
@@ -921,13 +955,13 @@ def sync_client_history(
 
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
     if not client.alias_code:
-        raise HTTPException(400, "Client has no alias code — required for calendar matching.")
+        raise HTTPException(400, "У клиента нет метки #код — без неё календарь не найдёт его события")
 
     calendar_id = get_crm_calendar_id(current_user)
     if not calendar_id:
-        raise HTTPException(400, "Google Calendar not configured.")
+        raise HTTPException(400, "Google Календарь не подключён — укажите его в Настройках CRM")
 
     # Convert months_back to years_back if provided
     effective_years_back = years_back

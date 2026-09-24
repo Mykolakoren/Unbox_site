@@ -885,3 +885,43 @@ def test_reschedule_recomputes_price_on_time_change():
     assert "exclude_booking_id=str(booking.id)" in body, \
         "бронь снова считает себя своим соседом — фантомная скидка за часы подряд"
     assert "price_recalculated" in body, "аудит переноса снова слеп к цене"
+
+
+def test_ux_audit_2026_09_24_fixes_hold():
+    """24.09 аудит (5 ревизоров + логи прода). Сторож на исправленные баги:
+    перенос с телефона молча создавал вторую бронь; окно переноса открывалось
+    с пустой датой; клиенту показывалась админская кнопка заморозки (403);
+    «Проверить подключение» календаря проверяло только чтение; провал записи
+    сессии в календарь был тихим; Google/TG-аккаунт видел «неверный пароль»."""
+    import pathlib
+    root = pathlib.Path(__file__).parent.parent.parent
+    find = (root / "src/pages/mobile/MobileFind.tsx").read_text()
+    i = find.find("// Normal create path → /m/checkout.")
+    assert i > 0 and "if (rescheduleId) {" in find[i - 600:i], \
+        "в режиме переноса мобильный поиск снова может СОЗДАТЬ новую бронь"
+    assert "rescheduleSnapshot" in find, "перенос снова теряет исходную бронь после fetchBookings()"
+
+    modals = (root / "src/components/admin/BookingTodayEditModals.tsx").read_text()
+    j = modals.find("export function MoveBookingModal")
+    assert "}, [booking?.id]);" in modals[j:j + 2500], \
+        "окно переноса снова не подставляет дату/кабинет брони при открытии"
+
+    card = (root / "src/components/SubscriptionCard.tsx").read_text()
+    assert "viewerIsAdmin ?" in card, "клиенту снова показывается админская кнопка заморозки"
+
+    sync = (root / "backend/app/api/v1/crm/sync.py").read_text()
+    k = sync.find("def test_calendar_connection")
+    assert "events().insert(" in sync[k:k + 4000], \
+        "проверка подключения календаря снова не проверяет право ЗАПИСИ"
+
+    sess = (root / "backend/app/api/v1/crm/sessions.py").read_text()
+    assert 'type="calendar_push_failed"' in sess, "провал записи сессии в календарь снова тихий"
+
+    auth = (root / "backend/app/api/v1/auth.py").read_text()
+    assert "У этого аккаунта нет пароля" in auth, \
+        "аккаунт Google/Telegram снова получает «неверный пароль» без подсказки"
+
+    routes = (root / "backend/app/api/v1/bookings/routes.py").read_text()
+    assert "Cannot reschedule less than 24h" not in routes, "отказ в переносе снова на английском"
+    for f in ("src/components/admin/AdminChessboardView.tsx", "src/components/Wizard/ConfirmationStep.tsx"):
+        assert "уже занято" in (root / f).read_text(), f"{f}: конфликт слота не распознаётся по русскому тексту"

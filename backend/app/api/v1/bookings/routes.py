@@ -765,7 +765,7 @@ def create_booking(
             from app.models.therapist_client import TherapistClient as _TC
             _client = session.get(_TC, booking_in.crm_client_id)
             if not _client:
-                raise HTTPException(status_code=404, detail="CRM client not found")
+                raise HTTPException(status_code=404, detail="Клиент CRM не найден")
             if _client.specialist_id != str(booking_owner.id):
                 raise HTTPException(
                     status_code=403,
@@ -785,7 +785,7 @@ def create_booking(
             if not re_rent_conflicts:
                 # Genuine conflict with non-re-rent booking
                 raise HTTPException(
-                    status_code=400, detail=f"Time slot is already booked: {reason}"
+                    status_code=400, detail=f"Это время уже занято: {reason}"
                 )
 
             # Auto-cancel all conflicting re-rent bookings with 50% refund.
@@ -950,7 +950,7 @@ def create_booking(
             if quote.applied_rule != "SUBSCRIPTION":
                 raise HTTPException(
                     status_code=400,
-                    detail="Insufficient subscription hours or invalid format for plan",
+                    detail="Абонемент не покрывает эту бронь: не хватает часов или этот формат кабинета не входит в тариф",
                 )
             if not defer_charge_single and booking_owner.subscription:
                 rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
@@ -1396,7 +1396,7 @@ def create_multi_slot_booking(
         from app.models.therapist_client import TherapistClient as _TC
         _client = session.get(_TC, data.crm_client_id)
         if not _client:
-            raise HTTPException(status_code=404, detail="CRM client not found")
+            raise HTTPException(status_code=404, detail="Клиент CRM не найден")
         if _client.specialist_id != str(booking_owner.id):
             raise HTTPException(
                 status_code=403,
@@ -2955,7 +2955,7 @@ def cancel_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     # SELECT … FOR UPDATE, same as `trim` and `approve`. A plain read let a
     # double-click (or a client retry after a timeout) run two cancellations at
@@ -2967,12 +2967,12 @@ def cancel_booking(
         select(Booking).where(Booking.id == b_uuid).with_for_update()
     ).first()
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     is_admin = current_user.role in ADMIN_ROLES
     if not is_owner and not is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if booking.status == "cancelled":
         return booking
@@ -2990,7 +2990,7 @@ def cancel_booking(
         if current_user.role not in ("senior_admin", "owner"):
             raise HTTPException(
                 status_code=403,
-                detail="Past bookings cannot be modified. Only senior admin or owner can delete them.",
+                detail="Прошедшую бронь менять нельзя — удалить её может только старший администратор или владелец",
             )
 
     # ── Time-based cancellation policy (>24h check) ──
@@ -3206,24 +3206,24 @@ def reschedule_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and not current_user.role in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if booking.status != "confirmed":
         raise HTTPException(
-            status_code=400, detail="Only confirmed bookings can be rescheduled"
+            status_code=400, detail="Перенести можно только подтверждённую бронь"
         )
 
     if _is_past(booking):
         raise HTTPException(
-            status_code=400, detail="Cannot reschedule a past booking"
+            status_code=400, detail="Нельзя перенести бронь, которая уже прошла"
         )
 
     # 24h policy — Tbilisi-aware (see _booking_hours_until_start docstring).
@@ -3231,14 +3231,15 @@ def reschedule_booking(
     if hours_until < 24 and not current_user.role in ADMIN_ROLES:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot reschedule less than 24h before start ({hours_until:.1f}h remaining)",
+            detail=(f"Перенос невозможен менее чем за 24 часа до начала (осталось {hours_until:.1f} ч). "
+                    f"Можно выставить бронь на переаренду или написать администратору."),
         )
 
     try:
         new_date = datetime.strptime(data.new_date, "%Y-%m-%d")
     except ValueError:
         raise HTTPException(
-            status_code=400, detail="Invalid date format. Use YYYY-MM-DD"
+            status_code=400, detail="Некорректная дата — нужен формат ГГГГ-ММ-ДД"
         )
 
     new_resource = data.new_resource_id or booking.resource_id
@@ -3249,7 +3250,7 @@ def reschedule_booking(
         if data.new_duration < 30 or data.new_duration % 30 != 0:
             raise HTTPException(
                 status_code=400,
-                detail="new_duration must be a positive multiple of 30",
+                detail="Длительность должна быть кратна 30 минутам",
             )
         new_duration = int(data.new_duration)
     else:
@@ -3267,7 +3268,7 @@ def reschedule_booking(
     )
     if not available:
         raise HTTPException(
-            status_code=400, detail=f"New slot is not available: {conflict}"
+            status_code=400, detail=f"Новое время недоступно: {conflict}"
         )
 
     old_date = booking.date
@@ -3613,7 +3614,7 @@ def trim_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     # Lock the row (SELECT FOR UPDATE) so two concurrent trims/cancels on the
     # same booking serialize — otherwise both read the original duration and
@@ -3622,15 +3623,15 @@ def trim_booking(
         select(Booking).where(Booking.id == b_uuid).with_for_update()
     ).first()
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     is_admin = current_user.role in ADMIN_ROLES
     if not is_owner and not is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if booking.status == "cancelled":
-        raise HTTPException(status_code=400, detail="Booking is already cancelled")
+        raise HTTPException(status_code=400, detail="Бронь уже отменена")
 
     if booking.status == "pending_approval":
         raise HTTPException(
@@ -3642,7 +3643,7 @@ def trim_booking(
     if _is_past(booking) and current_user.role not in ("senior_admin", "owner"):
         raise HTTPException(
             status_code=403,
-            detail="Past bookings cannot be modified. Only senior admin or owner can delete them.",
+            detail="Прошедшую бронь менять нельзя — удалить её может только старший администратор или владелец",
         )
 
     # ── 24h late gate (same message as cancel_booking) ──
@@ -3980,20 +3981,20 @@ def reschedule_booking_series(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if not booking.recurring_group_id:
         raise HTTPException(
             status_code=400,
-            detail="Booking is not part of a recurring series — use /reschedule instead",
+            detail="Эта бронь не входит в серию — переносите её как одиночную",
         )
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     # Snapshot the anchor's pre-move date so we can find "later" siblings
     # AFTER the anchor is updated (its own date may have moved).
@@ -4158,25 +4159,25 @@ def link_crm_client(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and not current_user.role in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if data.crm_client_id:
         from app.models.therapist_client import TherapistClient
 
         client = session.get(TherapistClient, data.crm_client_id)
         if not client:
-            raise HTTPException(status_code=404, detail="CRM client not found")
+            raise HTTPException(status_code=404, detail="Клиент CRM не найден")
         if client.specialist_id != str(current_user.id):
             raise HTTPException(
-                status_code=403, detail="CRM client does not belong to you"
+                status_code=403, detail="Этот клиент CRM принадлежит другому специалисту"
             )
 
     booking.crm_client_id = data.crm_client_id
@@ -4201,25 +4202,25 @@ def toggle_re_rent(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and not current_user.role in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if booking.status != "confirmed":
         raise HTTPException(
             status_code=400,
-            detail="Only confirmed bookings can be listed for re-rent",
+            detail="На переаренду можно выставить только подтверждённую бронь",
         )
 
     if _is_past(booking):
         raise HTTPException(
-            status_code=400, detail="Cannot re-rent a past booking"
+            status_code=400, detail="Нельзя выставить на переаренду бронь, которая уже прошла"
         )
 
     # 04.09 (лента админов): бронь на 14:00 выставляли на переаренду в 14:47 —
@@ -4311,21 +4312,21 @@ def change_booking_format(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     new_format = (payload.new_format or "").strip().lower()
     if new_format not in ("individual", "group"):
         raise HTTPException(status_code=400, detail="new_format must be 'individual' or 'group'")
 
     if new_format == (booking.format or "").lower():
-        raise HTTPException(status_code=400, detail="Booking is already in that format")
+        raise HTTPException(status_code=400, detail="Бронь уже в этом формате")
 
     if booking.status != "confirmed":
-        raise HTTPException(status_code=400, detail="Only confirmed bookings can be re-formatted")
+        raise HTTPException(status_code=400, detail="Сменить формат можно только у подтверждённой брони")
 
     if booking.payment_status == "waived":
         raise HTTPException(
@@ -4335,11 +4336,11 @@ def change_booking_format(
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     booking_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
     if not booking_owner:
-        raise HTTPException(status_code=404, detail="Booking owner missing")
+        raise HTTPException(status_code=404, detail="Не найден владелец брони")
 
     # Re-quote with the new format
     from app.services.pricing import PricingService
@@ -4499,11 +4500,11 @@ def set_booking_price(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     new_price = float(payload.new_price)
     if new_price < 0:
@@ -4641,10 +4642,10 @@ def apply_bonus_hour(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status != "confirmed":
         raise HTTPException(400, "Бонус-час применяется только к подтверждённой брони")
     # Ревизия денег 15.09: повторное нажатие на ту же бронь компаундило бы
@@ -4730,18 +4731,18 @@ def extend_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and not current_user.role in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if booking.status != "confirmed":
-        raise HTTPException(status_code=400, detail="Only confirmed bookings can be extended")
+        raise HTTPException(status_code=400, detail="Продлить можно только подтверждённую бронь")
 
     if _is_past(booking):
         # 2026-06-30 owner: клиент часто занимается дольше заказанного. Админ
@@ -4753,11 +4754,11 @@ def extend_booking(
         booking_day = booking.date.date() if hasattr(booking.date, "date") else booking.date
         is_admin = current_user.role in ADMIN_ROLES
         if not (is_admin and booking_day == tbilisi_today):
-            raise HTTPException(status_code=400, detail="Cannot extend a past booking")
+            raise HTTPException(status_code=400, detail="Нельзя продлить бронь, которая уже прошла")
 
     extra = payload.extra_minutes
     if extra < 30 or extra % 30 != 0:
-        raise HTTPException(status_code=400, detail="Extension must be in 30-minute increments")
+        raise HTTPException(status_code=400, detail="Продлевать можно только шагом 30 минут")
 
     new_duration = booking.duration + extra
 
@@ -4970,10 +4971,10 @@ def add_booking_extras(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status != "confirmed":
         raise HTTPException(status_code=400, detail="Допы можно добавить только к подтверждённой броне")
 
@@ -5147,10 +5148,10 @@ def convert_booking_to_subscription(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status not in ("confirmed",):
         raise HTTPException(status_code=400, detail="Перевести можно только подтверждённую бронь")
 
@@ -5197,21 +5198,21 @@ def shorten_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
 
     if booking.status != "confirmed":
-        raise HTTPException(status_code=400, detail="Only confirmed bookings can be shortened")
+        raise HTTPException(status_code=400, detail="Сократить можно только подтверждённую бронь")
 
     if _is_past(booking):
-        raise HTTPException(status_code=400, detail="Cannot shorten a past booking")
+        raise HTTPException(status_code=400, detail="Нельзя сократить бронь, которая уже прошла")
 
     if booking.payment_status == "waived":
         raise HTTPException(
@@ -5360,15 +5361,15 @@ def split_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
 
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
     if booking.status != "confirmed":
         raise HTTPException(status_code=400, detail="Делить можно только подтверждённую бронь")
     if booking.payment_status == "waived":
@@ -5639,7 +5640,7 @@ def approve_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     # Row-level lock to serialize concurrent approvals: without it two
     # admins double-clicking «Подтвердить» (or one in /admin/bookings while
@@ -5651,9 +5652,9 @@ def approve_booking(
         select(Booking).where(Booking.id == b_uuid).with_for_update()
     ).first()
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status != "pending_approval":
-        raise HTTPException(status_code=400, detail="Booking is not pending approval")
+        raise HTTPException(status_code=400, detail="Эта бронь не ждёт подтверждения")
 
     # Check availability again
     is_available, reason = check_availability(
@@ -5666,7 +5667,7 @@ def approve_booking(
         requester_user_uuid=booking.user_uuid,
     )
     if not is_available:
-        raise HTTPException(status_code=400, detail=f"Slot no longer available: {reason}")
+        raise HTTPException(status_code=400, detail=f"Слот уже занят: {reason}")
 
     # Deduct payment now
     b_owner = session.get(User, booking.user_uuid) if booking.user_uuid else None
@@ -5808,13 +5809,13 @@ def reject_booking(
     try:
         b_uuid = UUID(booking_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid Booking ID")
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
 
     booking = session.get(Booking, b_uuid)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
     if booking.status != "pending_approval":
-        raise HTTPException(status_code=400, detail="Booking is not pending approval")
+        raise HTTPException(status_code=400, detail="Эта бронь не ждёт подтверждения")
 
     admin_reason = (payload.reason if payload and payload.reason else "").strip()
 

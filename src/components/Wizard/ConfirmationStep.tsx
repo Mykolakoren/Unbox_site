@@ -662,6 +662,7 @@ export function ConfirmationStep() {
             // + alternative-cabinet suggestions. Fall back to the single-slot
             // path when the backend didn't ship a structured conflicts list.
             const isConflict = message.includes("Time slot is already booked")
+                || message.includes("уже занято")
                 || message.includes("Conflict")
                 || (typeof detail === 'object' && Array.isArray(detail?.conflicts));
             if (isConflict) {

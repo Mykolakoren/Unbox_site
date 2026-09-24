@@ -126,15 +126,16 @@ export function MobileAdminUsers() {
                     ] as { id: Filter; label: string; count: number }[]).map(f => (
                         <button
                             key={f.id}
+                            className="tap-target"
                             onClick={() => setFilter(f.id)}
                             style={{
                                 flexShrink: 0,
-                                padding: '6px 11px',
+                                padding: '6px 12px',
                                 background: filter === f.id ? '#0E0E0E' : 'rgba(0,0,0,0.04)',
                                 color: filter === f.id ? '#fff' : '#0E0E0E',
                                 border: 'none',
                                 borderRadius: 999,
-                                fontSize: 11,
+                                fontSize: 12,
                                 fontWeight: 600,
                                 cursor: 'pointer',
                                 whiteSpace: 'nowrap',
@@ -157,7 +158,7 @@ export function MobileAdminUsers() {
                     return (
                         <Link
                             key={u.id}
-                            to={`/admin/users/${encodeURIComponent(u.email)}`}
+                            to={`/m/admin/users/${encodeURIComponent(u.email)}`}
                             style={{
                                 background: '#fff',
                                 border: '1px solid rgba(0,0,0,0.08)',

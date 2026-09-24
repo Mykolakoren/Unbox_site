@@ -116,10 +116,15 @@ body.scroll-locked [data-mobile-scroll] {
 }
 
 /* iOS Safari zooms the viewport on focus when an input's font-size is
- * < 16px. Force ≥16px for form fields on phone-width to suppress that. */
+ * < 16px. Force ≥16px for form fields on phone-width screens.
+ * !important: без него правило проигрывало инлайн fontSize: 14 и классам
+ * text-xs/text-sm — страница зумилась в поиске клиента, сумме кассы,
+ * времени сессии (аудит мобильной админки и Psy-CRM, 24.09). */
 @media (max-width: 768px) {
-  input, select, textarea {
-    font-size: 16px;
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }
 

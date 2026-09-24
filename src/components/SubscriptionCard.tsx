@@ -12,8 +12,11 @@ interface SubscriptionCardProps {
 }
 
 export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
-    const { toggleSubscriptionFreeze } = useUserStore();
+    const { toggleSubscriptionFreeze, currentUser } = useUserStore();
     const sub = user.subscription;
+    // Заморозку проводит только админ (эндпоинт require_admin). Клиенту
+    // раньше показывалась рабочая на вид кнопка → 403 «Not enough privileges».
+    const viewerIsAdmin = ['owner', 'senior_admin', 'admin'].includes(currentUser?.role || '') || !!currentUser?.isAdmin;
 
     if (!sub) return null;
 
@@ -22,6 +25,9 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
     const percentRemaining = (sub.remainingHours / totalWithBonus) * 100;
 
     const canFreeze = !sub.isFrozen && sub.freezeCount < 1;
+    const frozenUntil = sub.isFrozen && sub.frozenUntil ? parseISO(sub.frozenUntil) : null;
+    const pauseOver = !!frozenUntil && frozenUntil.getTime() < Date.now();
+    const frozenUntilLabel = frozenUntil ? format(frozenUntil, 'd MMMM', { locale: ru }) : '';
 
     return (
         <div className="bg-unbox-dark text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
@@ -34,7 +40,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                         <div className="text-white/60 text-sm font-medium mb-1">Абонемент</div>
                         <h3 className="text-2xl font-bold flex items-center gap-2">
                             {sub.name}
-                            {sub.bonusHours && (
+                            {(sub.bonusHours || 0) > 0 && (
                                 <span className="bg-unbox-green/20 text-unbox-green text-[10px] px-1.5 py-0.5 rounded border border-unbox-green/30">
                                     +{sub.bonusHours}ч бонус
                                 </span>
@@ -99,6 +105,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                 </div>
 
                 {/* Action */}
+                {viewerIsAdmin ? (
                 <div className="space-y-2">
                     <Button
                         variant="outline"
@@ -117,10 +124,38 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                         </p>
                     )}
                 </div>
+                ) : (
+                <div className="space-y-2 text-center">
+                    {sub.isFrozen ? (
+                        <p className="text-xs text-blue-100 leading-snug">
+                            {pauseOver
+                                ? `Пауза закончилась ${frozenUntilLabel}, но ещё не снята. Пока абонемент на паузе, брони оплачиваются с баланса.`
+                                : 'Пока абонемент на паузе, часы не списываются — брони оплачиваются с баланса.'}
+                        </p>
+                    ) : (
+                        <p className="text-xs text-white/60 leading-snug">
+                            {canFreeze
+                                ? 'Абонемент можно один раз поставить на паузу на 7 дней — через администратора.'
+                                : 'Пауза по этому абонементу уже использована.'}
+                        </p>
+                    )}
+                    {(canFreeze || sub.isFrozen) && (
+                        <a
+                            href="https://t.me/UnboxCenter"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-2 w-full h-11 rounded-xl border border-white/15 text-sm text-white hover:bg-white/10 transition-colors"
+                        >
+                            <Snowflake size={16} />
+                            {sub.isFrozen ? 'Снять паузу — написать администратору' : 'Попросить паузу у администратора'}
+                        </a>
+                    )}
+                </div>
+                )}
 
-                {sub.isFrozen && sub.frozenUntil && (
-                    <div className="text-center text-[11px] text-blue-300 font-medium mt-3 bg-blue-500/10 py-1.5 rounded-lg border border-blue-500/20">
-                        Заморожено до {format(parseISO(sub.frozenUntil), 'd MMMM', { locale: ru })}
+                {sub.isFrozen && frozenUntil && (
+                    <div className={`text-center text-[11px] font-medium mt-3 py-1.5 rounded-lg border ${pauseOver ? 'text-amber-200 bg-amber-500/10 border-amber-500/30' : 'text-blue-300 bg-blue-500/10 border-blue-500/20'}`}>
+                        {pauseOver ? `Пауза должна была закончиться ${frozenUntilLabel}` : `На паузе до ${frozenUntilLabel}`}
                     </div>
                 )}
             </div>

@@ -128,38 +128,15 @@ export function MobileAdminBookings() {
         };
     }, [bookings, dayKey]);
 
-    const doCancel = async (b: BookingHistoryItem) => {
-        // Refund-aware cancel — раньше mobile только звал «отменить» c
-        // дефолтным 100% возвратом (= политика «бесплатной отмены»).
-        // Десктоп даёт админу выбор. Симметрия.
-        const fullRefund = window.confirm(
-            `Отменить бронь ${b.startTime} · ${getUserName(b.userId)}?\n\n` +
-            'OK = вернуть 100% (бесплатная отмена)\n' +
-            'Отмена = выбрать другой процент возврата'
-        );
-        let refundPercent = 100;
-        let reason = '';
-        if (!fullRefund) {
-            const choice = window.prompt(
-                'Процент возврата клиенту: 100, 50 или 0\n' +
-                '(100 = полный возврат, 50 = частичный, 0 = без возврата — например прогул)',
-                '50',
-            );
-            if (choice === null) return;
-            const parsed = parseInt(choice.trim(), 10);
-            if (![100, 50, 0].includes(parsed)) {
-                toast.error('Нужно 100, 50 или 0');
-                return;
-            }
-            refundPercent = parsed;
-            const r = window.prompt('Причина (видна в истории брони):', '');
-            if (r === null) return; // юзер передумал
-            reason = r.trim();
-            if (refundPercent !== 100 && !reason) {
-                toast.error('Для частичного возврата нужна причина');
-                return;
-            }
-        }
+    // Отмена и смена цены — через нижние шторки. Раньше это были 2-3 системных
+    // окна браузера подряд (confirm → prompt «100/50/0» → prompt причины):
+    // легко промахнуться, а во встроенных браузерах prompt молча не работает.
+    const [cancelTarget, setCancelTarget] = useState<BookingHistoryItem | null>(null);
+    const [priceTarget, setPriceTarget] = useState<BookingHistoryItem | null>(null);
+
+    const doCancel = (b: BookingHistoryItem) => setCancelTarget(b);
+
+    const performCancel = async (b: BookingHistoryItem, refundPercent: number, reason: string) => {
         setBusy(b.id);
         try {
             // Бэк ждёт ДОЛЮ 0..1 (1.0 = полный возврат), а UI собирает
@@ -172,6 +149,7 @@ export function MobileAdminBookings() {
                 : refundPercent === 50 ? 'Отменена (возврат 50%)'
                 : 'Отменена (без возврата)'
             );
+            setCancelTarget(null);
             setSheet(null);
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось отменить');
@@ -180,26 +158,16 @@ export function MobileAdminBookings() {
         }
     };
 
-    const doEditPrice = async (b: BookingHistoryItem) => {
+    const doEditPrice = (b: BookingHistoryItem) => setPriceTarget(b);
+
+    const performEditPrice = async (b: BookingHistoryItem, num: number, reason: string) => {
         const current = b.finalPrice ?? 0;
-        const raw = window.prompt(
-            `Новая цена в ₾ (текущая: ${current.toFixed(0)}):`,
-            String(current),
-        );
-        if (raw === null) return;
-        const num = parseFloat(raw.trim());
-        if (!Number.isFinite(num) || num < 0) {
-            toast.error('Нужно положительное число');
-            return;
-        }
-        if (num === current) return; // ничего не меняется
-        const reason = window.prompt('Причина изменения цены:', '');
-        if (reason === null) return;
         setBusy(b.id);
         try {
-            await bookingsApi.setPrice(b.id, num, reason.trim() || undefined);
+            await bookingsApi.setPrice(b.id, num, reason || undefined);
             await fetchAllBookings();
             toast.success(`Цена обновлена: ${current.toFixed(0)} → ${num.toFixed(0)} ₾`);
+            setPriceTarget(null);
             setSheet(null);
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
@@ -515,6 +483,26 @@ export function MobileAdminBookings() {
                 />
             )}
 
+            {cancelTarget && (
+                <CancelBookingSheet
+                    booking={cancelTarget}
+                    userName={getUserName(cancelTarget.userId)}
+                    busy={busy === cancelTarget.id}
+                    onClose={() => setCancelTarget(null)}
+                    onConfirm={(pct, reason) => performCancel(cancelTarget, pct, reason)}
+                />
+            )}
+
+            {priceTarget && (
+                <EditPriceSheet
+                    booking={priceTarget}
+                    userName={getUserName(priceTarget.userId)}
+                    busy={busy === priceTarget.id}
+                    onClose={() => setPriceTarget(null)}
+                    onConfirm={(num, reason) => performEditPrice(priceTarget, num, reason)}
+                />
+            )}
+
             {/* 2026-06-06 owner: FAB «+ Новая бронь» для админа.
                 Ведёт на /m/find — общий клиентский flow поиска слота, но
                 MobileCheckout автоматически активирует admin user-picker
@@ -812,5 +800,173 @@ function ActionRow({
                 {sub && <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.75 }}>{sub}</span>}
             </span>
         </button>
+    );
+}
+
+
+// ─── Нижние шторки: отмена брони и смена цены ────────────────────────────────
+
+function BottomSheet({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+    return (
+        <div
+            onClick={onClose}
+            role="dialog"
+            aria-modal="true"
+            style={{
+                position: 'fixed', inset: 0,
+                background: 'rgba(14,14,14,0.55)', zIndex: 210,
+                display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            }}
+        >
+            <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                    width: '100%', maxWidth: 480, background: 'var(--color-paper)',
+                    borderRadius: '20px 20px 0 0',
+                    padding: 20,
+                    paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+                    display: 'flex', flexDirection: 'column', gap: 14,
+                    maxHeight: 'calc(100dvh - 16px)', overflowY: 'auto',
+                }}
+            >
+                {children}
+            </div>
+        </div>
+    );
+}
+
+const sheetInput: React.CSSProperties = {
+    width: '100%', padding: '12px 14px', fontSize: 16, fontFamily: 'inherit',
+    border: '1px solid var(--color-ink-20, rgba(0,0,0,0.2))', borderRadius: 12,
+    background: '#fff', color: 'var(--color-ink)', boxSizing: 'border-box',
+};
+
+function SheetButtons({ confirmLabel, danger, disabled, busy, onConfirm, onClose }: {
+    confirmLabel: string; danger?: boolean; disabled?: boolean; busy: boolean; onConfirm: () => void; onClose: () => void;
+}) {
+    return (
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button
+                onClick={onClose}
+                disabled={busy}
+                style={{ flex: 1, minHeight: 48, borderRadius: 12, border: '1px solid rgba(0,0,0,0.15)', background: 'transparent', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', color: 'var(--color-ink)' }}
+            >
+                Назад
+            </button>
+            <button
+                onClick={onConfirm}
+                disabled={busy || disabled}
+                style={{
+                    flex: 1.4, minHeight: 48, borderRadius: 12, border: 'none', fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
+                    background: danger ? '#C8253A' : '#0E0E0E', color: '#fff',
+                    opacity: busy || disabled ? 0.45 : 1,
+                }}
+            >
+                {busy ? 'Сохраняю…' : confirmLabel}
+            </button>
+        </div>
+    );
+}
+
+function CancelBookingSheet({ booking, userName, busy, onClose, onConfirm }: {
+    booking: BookingHistoryItem; userName: string; busy: boolean;
+    onClose: () => void; onConfirm: (refundPercent: number, reason: string) => void;
+}) {
+    const [pct, setPct] = useState(100);
+    const [reason, setReason] = useState('');
+    const needReason = pct !== 100;
+    const price = booking.finalPrice ?? 0;
+    const refund = Math.round(price * pct) / 100;
+    const notCharged = booking.paymentStatus === 'pending';
+    return (
+        <BottomSheet onClose={onClose}>
+            <div>
+                <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--color-ink)' }}>Отменить бронь</div>
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                    {fmtDate(new Date(booking.date as any), 'd MMMM', { locale: ru })} · {booking.startTime} · {userName}
+                </div>
+            </div>
+            <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--color-ink)' }}>Сколько вернуть клиенту</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    {[100, 50, 0].map(v => (
+                        <button
+                            key={v}
+                            onClick={() => setPct(v)}
+                            aria-pressed={pct === v}
+                            style={{
+                                flex: 1, minHeight: 48, borderRadius: 12, fontSize: 16, fontWeight: 700, fontFamily: 'inherit',
+                                border: pct === v ? '2px solid #0E0E0E' : '1px solid rgba(0,0,0,0.15)',
+                                background: pct === v ? '#0E0E0E' : 'transparent',
+                                color: pct === v ? '#fff' : 'var(--color-ink)',
+                            }}
+                        >
+                            {v}%
+                        </button>
+                    ))}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--color-ink-60)', marginTop: 8 }}>
+                    {notCharged && <div style={{ marginBottom: 4 }}>Оплата за эту бронь ещё не списывалась — при любом варианте с клиента ничего не спишется.</div>}
+                    {pct === 100 && 'Бесплатная отмена — клиенту вернётся всё списанное.'}
+                    {pct === 50 && `Вернётся половина${price > 0 ? ` (≈ ${refund} ₾ из ${price} ₾)` : ''}.`}
+                    {pct === 0 && 'Без возврата — например, клиент не пришёл.'}
+                </div>
+            </div>
+            {needReason && (
+                <label style={{ display: 'block' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: 'var(--color-ink)' }}>Причина — видна в истории брони</div>
+                    <input
+                        value={reason}
+                        onChange={e => setReason(e.target.value)}
+                        placeholder="Например: неявка без предупреждения"
+                        style={sheetInput}
+                    />
+                </label>
+            )}
+            <SheetButtons
+                confirmLabel="Отменить бронь"
+                danger
+                disabled={needReason && !reason.trim()}
+                busy={busy}
+                onClose={onClose}
+                onConfirm={() => onConfirm(pct, reason.trim())}
+            />
+        </BottomSheet>
+    );
+}
+
+function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
+    booking: BookingHistoryItem; userName: string; busy: boolean;
+    onClose: () => void; onConfirm: (price: number, reason: string) => void;
+}) {
+    const current = booking.finalPrice ?? 0;
+    const [raw, setRaw] = useState(String(current));
+    const [reason, setReason] = useState('');
+    const num = parseFloat(raw.replace(',', '.'));
+    const valid = Number.isFinite(num) && num >= 0 && num !== current;
+    return (
+        <BottomSheet onClose={onClose}>
+            <div>
+                <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--color-ink)' }}>Изменить цену</div>
+                <div style={{ fontSize: 14, color: 'var(--color-ink-60)', marginTop: 4 }}>
+                    {fmtDate(new Date(booking.date as any), 'd MMMM', { locale: ru })} · {booking.startTime} · {userName} · сейчас {current.toFixed(0)} ₾
+                </div>
+            </div>
+            <label style={{ display: 'block' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: 'var(--color-ink)' }}>Новая цена, ₾</div>
+                <input value={raw} onChange={e => setRaw(e.target.value)} inputMode="decimal" style={sheetInput} />
+            </label>
+            <label style={{ display: 'block' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: 'var(--color-ink)' }}>Причина</div>
+                <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Например: скидка по договорённости" style={sheetInput} />
+            </label>
+            <SheetButtons
+                confirmLabel={valid ? `Сохранить ${num.toFixed(0)} ₾` : 'Сохранить'}
+                disabled={!valid}
+                busy={busy}
+                onClose={onClose}
+                onConfirm={() => onConfirm(num, reason.trim())}
+            />
+        </BottomSheet>
     );
 }

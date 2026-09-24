@@ -37,7 +37,7 @@ def create_note(
 ):
     client = session.get(TherapistClient, data.client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     note = TherapistNote(
         **data.model_dump(),
@@ -57,7 +57,7 @@ def delete_note(
 ):
     note = session.get(TherapistNote, note_id)
     if not note or note.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Note not found")
+        raise HTTPException(404, "Заметка не найдена")
     session.delete(note)
     session.commit()
     return {"ok": True}

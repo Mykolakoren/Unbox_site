@@ -77,7 +77,7 @@ def create_session(
 ):
     client = session.get(TherapistClient, data.client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     # Frontend sends Tbilisi wall-clock as a naive ISO string (e.g.
     # "2026-05-22T11:00:00" = 11:00 Tbilisi). The DB convention is
@@ -214,6 +214,21 @@ def create_session(
                     logger.info(f"[create_session] GCal {res['action']}: {gid}")
             except Exception as e:
                 logger.warning(f"GCal push failed: {e}", exc_info=True)
+                # Раньше провал записи был тихим: сессия создавалась, события
+                # нет, специалист не узнавал (типично — доступ «только просмотр»).
+                from app.models.notification import Notification as _Notif
+                session.add(_Notif(
+                    type="calendar_push_failed",
+                    title="Сессия не попала в Google Календарь",
+                    description=(
+                        "Сессия сохранена в CRM, но событие в календаре не создано. "
+                        "Чаще всего у CRM доступ к календарю только на просмотр — "
+                        "проверьте в Настройках CRM кнопкой «Проверить подключение»."
+                    ),
+                    recipient_id=str(current_user.id),
+                    icon="AlertTriangle",
+                    link="/crm/settings",
+                ))
         else:
             logger.warning(f"[create_session] push_to_calendar=True but calendar_id missing for user {current_user.id}")
 
@@ -232,7 +247,7 @@ def update_session(
 ):
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
 
     update_data = data.model_dump(exclude_unset=True)
     # Same Tbilisi-naive → UTC-naive normalisation as create_session.
@@ -394,7 +409,7 @@ def delete_session(
     """
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
 
     # Build the list of session rows to delete.
     targets: list[TherapySession] = [ts]
@@ -550,7 +565,7 @@ def accept_merge_suggestion(
 
     ts = session.get(TherapySession, sid)
     if not ts or ts.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
 
     try:
         from uuid import UUID as _UUID
@@ -563,7 +578,7 @@ def accept_merge_suggestion(
         b.user_id != current_user.email
         and b.user_uuid != current_user.id
     ):
-        raise HTTPException(404, "Booking not found")
+        raise HTTPException(404, "Бронь не найдена")
 
     ts.booking_id = str(b.id)
     ts.is_booked = True
@@ -597,9 +612,9 @@ def detach_session_cabinet(
     """
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
     if not ts.booking_id:
-        raise HTTPException(400, "Session has no cabinet booking attached")
+        raise HTTPException(400, "К этой сессии не привязана бронь кабинета")
 
     detached_booking_id = ts.booking_id
     booking_cancelled = False
@@ -658,9 +673,9 @@ def quick_pay_session(
         select(TherapySession).where(TherapySession.id == session_id).with_for_update()
     ).first()
     if not ts or ts.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
     if ts.is_paid:
-        raise HTTPException(400, "Session already paid")
+        raise HTTPException(400, "Сессия уже отмечена оплаченной")
 
     # 29.08: у сессии может быть живая запись оплаты при is_paid=False —
     # легаси-рассинхрон (например, старый unmark-paid удалял только первый
@@ -707,7 +722,7 @@ def quick_pay_session(
 
     client = session.get(TherapistClient, ts.client_id)
     if not client:
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     price = ts.price if ts.price is not None else client.base_price or 0
     account = payload.get("account") or client.default_account
@@ -757,9 +772,9 @@ def unmark_paid_session(
     """Unmark a session as paid and optionally remove the related payment."""
     ts = session.get(TherapySession, session_id)
     if not ts or ts.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, "Сессия не найдена — возможно, её удалили")
     if not ts.is_paid:
-        raise HTTPException(400, "Session is not paid")
+        raise HTTPException(400, "Сессия ещё не оплачена")
 
     ts.is_paid = False
     ts.updated_at = datetime.now()
@@ -796,7 +811,7 @@ def mark_all_sessions_paid(
     """Mark all unpaid non-cancelled sessions as paid, creating payment records."""
     client = session.get(TherapistClient, client_id)
     if not client or client.specialist_id != str(current_user.id):
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(404, "Клиент не найден — возможно, его удалили или склеили с другим")
 
     uid = str(current_user.id)
     # TherapySession.date is UTC-naive; the "don't touch future sessions"

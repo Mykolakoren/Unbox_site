@@ -129,8 +129,13 @@ export function LoginPage() {
             navigate(postLoginPath());
         } catch (err: any) {
             console.error(err);
-            if (err.response?.status === 400 || err.response?.status === 401) {
-                setError('Неверный email или пароль');
+            // Бэкенд отдаёт понятные русские причины (нет пароля у Google/TG-
+            // аккаунта, email занят, аккаунт в архиве) — показываем их как есть.
+            const detail = err.response?.data?.detail;
+            if (typeof detail === 'string' && /[а-яё]/i.test(detail)) {
+                setError(detail);
+            } else if (err.response?.status === 400 || err.response?.status === 401) {
+                setError(isRegistering ? 'Не удалось создать аккаунт — проверьте данные' : 'Неверный email или пароль');
             } else if (err.response?.status === 422) {
                 setError('Проверьте правильность введенных данных');
             } else {
@@ -450,6 +455,17 @@ function GridHouseLoginPage({
                                 <span>{isLoading ? 'Отправка…' : isRegistering ? 'Создать аккаунт' : 'Войти'}</span>
                                 <LogIn size={14} />
                             </button>
+
+                            {!isRegistering && (
+                                <a
+                                    href="https://t.me/UnboxCenter"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ display: 'block', textAlign: 'right', marginTop: 14, padding: '6px 0', fontSize: 13, color: GH.ink60, textDecoration: 'underline', textUnderlineOffset: 3 }}
+                                >
+                                    Забыли пароль? Напишите администратору
+                                </a>
+                            )}
                         </form>
 
                         {/* Divider */}

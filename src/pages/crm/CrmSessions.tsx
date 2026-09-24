@@ -1307,12 +1307,12 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         {[
-                            { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false },
-                            { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false },
-                            { label: 'Заработано', value: p.stats.earnedLabel, color: GH.accent, sub: p.stats.earnedGel, multiline: true },
-                            { label: 'Касса · с долгами', value: p.stats.revenueLabel, color: GH.ink60, sub: p.stats.revenueGel, multiline: true },
+                            { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false, hint: 'Сессии этого месяца, которые ещё впереди' },
+                            { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false, hint: 'Прошедшие сессии без оплаты — долг клиентов за всё время' },
+                            { label: 'Заработано', value: p.stats.earnedLabel, color: GH.accent, sub: p.stats.earnedGel, multiline: true, hint: 'Проведённые и оплаченные сессии этого месяца — по дате сессии' },
+                            { label: 'Касса · с долгами', value: p.stats.revenueLabel, color: GH.ink60, sub: p.stats.revenueGel, multiline: true, hint: 'Все деньги, полученные в этом месяце, включая оплату старых долгов. Бывает больше или меньше «Заработано»' },
                         ].map(kpi => (
-                            <div key={kpi.label} style={{ textAlign: 'right' as const, minWidth: 0 }}>
+                            <div key={kpi.label} title={kpi.hint} style={{ textAlign: 'right' as const, minWidth: 0, cursor: 'help' }}>
                                 <div style={{
                                     fontSize: kpi.multiline && ghNarrow ? 13 : 16,
                                     fontWeight: 700,

@@ -416,3 +416,77 @@ export function MoveBookingModal({
         </div>
     );
 }
+
+
+/** Сократить бронь с начала или с конца (PATCH /bookings/{id}/shorten —
+ *  тот же путь и те же возвраты, что раньше). Заменяет два системных
+ *  prompt'а подряд («сколько минут?», «начало/конец?»). Итог — не меньше 60 мин. */
+export function ShortenBookingModal({
+    booking, onClose, onSubmit,
+}: {
+    booking: BookingHistoryItem | null;
+    onClose: () => void;
+    onSubmit: (removeMinutes: number, side: 'start' | 'end') => Promise<void> | void;
+}) {
+    const [remove, setRemove] = useState(30);
+    const [side, setSide] = useState<'start' | 'end'>('end');
+    const [busy, setBusy] = useState(false);
+    useEffect(() => { setRemove(30); setSide('end'); }, [booking?.id]);
+    if (!booking) return null;
+    const dur = booking.duration || 60;
+    const options: number[] = [];
+    for (let m = 30; m <= dur - 60; m += 30) options.push(m);
+    const [h, mm] = (booking.startTime || '00:00').split(':').map(Number);
+    const startMin = (h || 0) * 60 + (mm || 0);
+    const fmt = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const newStart = side === 'start' ? startMin + remove : startMin;
+    const newEnd = side === 'end' ? startMin + dur - remove : startMin + dur;
+    const chip = (active: boolean): React.CSSProperties => ({
+        padding: '10px 12px', minWidth: 64, border: `1px solid ${GH.ink}`, cursor: 'pointer',
+        background: active ? GH.ink : GH.paper, color: active ? GH.paper : GH.ink,
+        fontFamily: GH_SANS, fontSize: 14, fontWeight: 600,
+    });
+    const label = (m: number) => (m % 60 === 0 ? `${m / 60} ч` : m > 60 ? `${Math.floor(m / 60)} ч 30 мин` : `${m} мин`);
+    const submit = async () => {
+        setBusy(true);
+        try { await onSubmit(remove, side); onClose(); } catch { /* тост уже показан */ } finally { setBusy(false); }
+    };
+    return (
+        <div style={overlay} onClick={onClose}>
+            <div style={card} onClick={(e) => e.stopPropagation()}>
+                <div style={title}>Сократить бронь</div>
+                <div style={{ fontSize: 13, color: GH.ink60, marginBottom: 14 }}>
+                    Сейчас {fmt(startMin)}–{fmt(startMin + dur)}. Деньги или часы за убранное время вернутся клиенту.
+                </div>
+                {options.length === 0 ? (
+                    <div style={{ fontSize: 14, marginBottom: 16 }}>Бронь уже минимальная (60 мин) — сократить нельзя.</div>
+                ) : (
+                    <>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 6 }}>Убрать</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                            {options.map(m => (
+                                <button key={m} style={chip(remove === m)} onClick={() => setRemove(m)}>{label(m)}</button>
+                            ))}
+                        </div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginBottom: 6 }}>С какой стороны</div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                            <button style={{ ...chip(side === 'end'), flex: 1 }} onClick={() => setSide('end')}>С конца</button>
+                            <button style={{ ...chip(side === 'start'), flex: 1 }} onClick={() => setSide('start')}>С начала</button>
+                        </div>
+                        <div style={{ fontSize: 14, marginBottom: 18 }}>
+                            Останется: <b>{fmt(newStart)}–{fmt(newEnd)}</b>
+                        </div>
+                    </>
+                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                    {options.length > 0 && (
+                        <button style={{ ...btnPrimary, flex: 1, opacity: busy ? 0.5 : 1 }} disabled={busy} onClick={submit}>
+                            Сократить
+                        </button>
+                    )}
+                    <button style={btnGhost} onClick={onClose} disabled={busy}>Отмена</button>
+                </div>
+            </div>
+        </div>
+    );
+}

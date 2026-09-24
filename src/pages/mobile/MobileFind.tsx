@@ -32,10 +32,36 @@ export function MobileFind() {
     // free-slot search UI, but the slot-tap handler patches the booking via
     // bookingsApi.rescheduleBooking instead of going to /m/checkout.
     const rescheduleId = searchParams.get('reschedule');
-    const rescheduleBooking = useMemo<BookingHistoryItem | null>(() => {
+    // Снимок переносимой брони. Экран при монтировании зовёт fetchBookings(),
+    // который перезаписывает общий список «моими + публичными» (только
+    // confirmed и ≤60 дней вперёд). Админ, переносивший чужую бронь «Ожидает»
+    // или дальнюю, терял её из списка — и тап по слоту молча СОЗДАВАЛ новую
+    // бронь вместо переноса (аудит мобильной админки 24.09). Держим снимок.
+    const [rescheduleSnapshot, setRescheduleSnapshot] = useState<BookingHistoryItem | null>(
+        () => (rescheduleId ? useUserStore.getState().bookings.find(b => b.id === rescheduleId) ?? null : null));
+    const [rescheduleLookupFailed, setRescheduleLookupFailed] = useState(false);
+    const liveRescheduleMatch = useMemo<BookingHistoryItem | null>(() => {
         if (!rescheduleId) return null;
         return bookings.find(b => b.id === rescheduleId) ?? null;
     }, [rescheduleId, bookings]);
+    const rescheduleBooking = liveRescheduleMatch ?? rescheduleSnapshot;
+    useEffect(() => {
+        if (liveRescheduleMatch) setRescheduleSnapshot(liveRescheduleMatch);
+    }, [liveRescheduleMatch]);
+    useEffect(() => {
+        if (!rescheduleId || rescheduleSnapshot) return;
+        const role = useUserStore.getState().currentUser?.role;
+        if (role !== 'owner' && role !== 'senior_admin' && role !== 'admin') return;
+        let cancelled = false;
+        bookingsApi.getAllBookings()
+            .then(all => {
+                if (cancelled) return;
+                const found = all.find((b: BookingHistoryItem) => b.id === rescheduleId) ?? null;
+                if (found) setRescheduleSnapshot(found); else setRescheduleLookupFailed(true);
+            })
+            .catch(() => { if (!cancelled) setRescheduleLookupFailed(true); });
+        return () => { cancelled = true; };
+    }, [rescheduleId, rescheduleSnapshot]);
 
     // Link-session mode: when ?linkSession=<crm-session-id> is present, the
     // user came from the mobile CRM day-view's "Привязать кабинет" action.
@@ -258,6 +284,15 @@ export function MobileFind() {
             return;
         }
 
+        // В режиме переноса новую бронь не создаём никогда: если исходную
+        // бронь не удалось загрузить — честно говорим об этом.
+        if (rescheduleId) {
+            toast.error(rescheduleLookupFailed
+                ? 'Бронь для переноса не найдена — возможно, её уже отменили. Обновите список броней.'
+                : 'Загружаю бронь для переноса — попробуйте через секунду.');
+            return;
+        }
+
         // Normal create path → /m/checkout.
         const slotStrs: string[] = [];
         for (let m = startMin; m < startMin + duration; m += 30) {
@@ -284,12 +319,12 @@ export function MobileFind() {
             }}>
                 <div style={{ padding: '0 16px' }}>
                     <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
-                        {linkSessionMeta ? 'Привязать кабинет' : rescheduleBooking ? 'Перенести' : 'Свободно'}
+                        {linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно'}
                     </h1>
                     <p style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
                         {linkSessionMeta
                             ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
-                            : rescheduleBooking
+                            : rescheduleId
                                 ? 'Выбери новое время — старый слот освободится'
                                 : 'Когда · сколько · где — три тапа.'}
                     </p>
