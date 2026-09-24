@@ -154,13 +154,21 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
     free_hours_total = round(sum(c.get("free_hours", 0.0) for c in centers.values()), 1)
     paid_hours_total = round(sum(c.get("paid_hours", 0.0) for c in centers.values()), 1)
 
-    # Скидки: разница между прайсом платных часов и тем, что реально списали.
-    _paid_price_sum = 0.0
+    # Скидки: разница между прайсом и реально списанным — ТОЛЬКО по денежным
+    # броням. Конвенция проекта: у абонементных charge_amount хранит ЧАСЫ
+    # (снимок пула, см. routes.py «для subscription charge_amount = снимок
+    # часов»), складывать их с деньгами нельзя — это раздувало «скидки»
+    # (аудит консилиума 2026-08-27, риск №2).
+    _cash_hours = 0.0
+    _cash_paid_sum = 0.0
     for b in bookings:
+        if (b.payment_method or "") == "subscription":
+            continue
         _amt = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
         if _amt > 0:
-            _paid_price_sum += _amt
-    discounts_given = round(max(0.0, paid_hours_total * PRICE_PER_HOUR - _paid_price_sum), 2)
+            _cash_paid_sum += _amt
+            _cash_hours += (b.duration or 0) / 60.0
+    discounts_given = round(max(0.0, _cash_hours * PRICE_PER_HOUR - _cash_paid_sum), 2)
 
     # Движения баланса за период: недельные скидки и ручные корректировки.
     ledger = session.exec(
@@ -199,7 +207,10 @@ def compute_owner_analytics(session: Session, start: datetime, end: datetime, da
         if not u:
             continue
         hrs = (b.duration or 0) / 60.0
-        amt = float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
+        # У абонементных charge_amount = ЧАСЫ (конвенция), не деньги — в
+        # денежную колонку «оплатил» их не суммируем (риск №2 аудита 27.08).
+        amt = 0.0 if (b.payment_method or "") == "subscription" else \
+            float(b.charge_amount if b.charge_amount is not None else (b.final_price or 0))
         s = spec_stats.setdefault(uid, {
             "name": u.name or u.email or uid, "role": u.role or "user",
             "hours": 0.0, "free_hours": 0.0, "paid": 0.0, "bookings": 0,

@@ -137,15 +137,28 @@ def create_calendar_event(
     session_date: datetime,
     duration_minutes: int = 60,
     notes: Optional[str] = None,
+    session_id: Optional[str] = None,
+    booking_id: Optional[str] = None,
 ) -> str:
     """
     Create a Google Calendar event for a therapy session.
     Returns the Google event ID.
+
+    События получают скрытые метки происхождения (extendedProperties.private):
+    origin='unbox' + id сессии/брони. По ним синк и дедуп отличают «наше»
+    событие от поставленного специалистом руками — стопроцентно, а не
+    гаданием по имени (Этап 1 календарного плана, 2026-08-27).
     """
     service = _get_calendar_service()
     summary = f"{client_name} #{alias_code}" if alias_code else client_name
     start = session_date
     end = session_date + timedelta(minutes=duration_minutes)
+
+    private_props = {"origin": "unbox"}
+    if session_id:
+        private_props["unbox_session_id"] = str(session_id)
+    if booking_id:
+        private_props["unbox_booking_id"] = str(booking_id)
 
     event = service.events().insert(
         calendarId=calendar_id,
@@ -154,10 +167,161 @@ def create_calendar_event(
             "description": notes or "",
             "start": {"dateTime": _dt_to_rfc3339(start)},
             "end": {"dateTime": _dt_to_rfc3339(end)},
+            "extendedProperties": {"private": private_props},
         },
     ).execute()
 
     return event["id"]
+
+
+def _norm_client_name(s: str) -> str:
+    """Имя из summary без #кода, лишних пробелов и регистра — для точного
+    сравнения «тот же ли это клиент»."""
+    s = re.sub(r"#\d{4}", "", s or "")
+    return re.sub(r"\s+", " ", s).strip().casefold()
+
+
+def find_matching_event(
+    calendar_id: str,
+    client_name: str,
+    alias_code: Optional[str],
+    session_date: datetime,
+    duration_minutes: int = 60,
+):
+    """Ищет в календаре УЖЕ существующее событие этого клиента рядом с этим
+    временем (Этап 1: «пуш с поиском вместо пуша вслепую»).
+
+    Возвращает (event, status):
+      status='exact' — старт совпадает минута в минуту и клиент тот же
+                       (по #коду или точному имени) → к событию нужно
+                       ПРИВЯЗАТЬСЯ, а не создавать второе;
+      status='near'  — клиент тот же, старт в пределах ±3 часов, но не точь-в-точь
+                       → СИГНАЛ (возможный дубль/перенос), второе не создаём;
+      (None, None)   — совпадений нет, можно создавать.
+    """
+    try:
+        events = _get_events(
+            calendar_id,
+            session_date - timedelta(hours=12),
+            session_date + timedelta(hours=12),
+        )
+    except Exception:
+        logger.warning("[gcal dedupe] поиск событий не удался — пуш без дедупа", exc_info=True)
+        return None, None
+
+    want_name = _norm_client_name(client_name)
+    exact, near, near_gap = None, None, None
+    for ev in events:
+        if ev.get("status") == "cancelled":
+            continue
+        summary = ev.get("summary") or ""
+        ev_alias = _extract_alias_code(summary)
+        same_client = (
+            (alias_code and ev_alias and ev_alias == alias_code)
+            or (_norm_client_name(summary) == want_name and want_name)
+        )
+        if not same_client:
+            continue
+        start_dt = _parse_event_dt(ev.get("start") or {})
+        if start_dt is None:
+            continue
+        gap = abs((start_dt - session_date).total_seconds())
+        if gap < 60:
+            exact = ev
+            break
+        if gap <= 3 * 3600 and (near_gap is None or gap < near_gap):
+            near, near_gap = ev, gap
+
+    if exact is not None:
+        return exact, "exact"
+    if near is not None:
+        return near, "near"
+    return None, None
+
+
+def create_or_link_event(
+    calendar_id: str,
+    client_name: str,
+    alias_code: Optional[str],
+    session_date: datetime,
+    duration_minutes: int = 60,
+    notes: Optional[str] = None,
+    session_id: Optional[str] = None,
+    booking_id: Optional[str] = None,
+) -> dict:
+    """Пуш встречи в календарь БЕЗ дублей (Этап 1, решение владельца 27.08:
+    «сопоставление точное, иначе сигнал»).
+
+    - точное совпадение → возвращаем существующее событие (action='linked');
+    - почти совпадение → НИЧЕГО не создаём, отдаём сигнал (action='conflict');
+    - нет совпадений → создаём с метками происхождения (action='created').
+    """
+    ev, status = find_matching_event(
+        calendar_id, client_name, alias_code, session_date, duration_minutes
+    )
+    if status == "exact":
+        return {"event_id": ev["id"], "action": "linked", "summary": ev.get("summary")}
+    if status == "near":
+        start_dt = _parse_event_dt(ev.get("start") or {})
+        return {
+            "event_id": None,
+            "action": "conflict",
+            "summary": ev.get("summary"),
+            "conflict_start": start_dt.isoformat() if start_dt else None,
+        }
+    gid = create_calendar_event(
+        calendar_id, client_name, alias_code, session_date,
+        duration_minutes, notes, session_id=session_id, booking_id=booking_id,
+    )
+    return {"event_id": gid, "action": "created", "summary": None}
+
+
+def create_recurring_event(
+    calendar_id: str,
+    client_name: str,
+    alias_code: Optional[str],
+    first_date: datetime,
+    duration_minutes: int,
+    count: int,
+    interval_weeks: int,
+    booking_group_id: Optional[str] = None,
+) -> tuple:
+    """Этап 2 календарного плана (27.08): серия = ОДНО повторяющееся событие
+    Google (RRULE), а не N одиночных. Возвращает (master_id, [instance_id по
+    датам серии]).
+
+    Instance id детерминирован форматом Google: '<master>_<UTC-старт
+    YYYYMMDDTHHMMSSZ>' — ровно эти id придут из events.list(singleEvents=True),
+    поэтому сессии, привязанные к ним заранее, синк будет обновлять как родные.
+    Если формат когда-нибудь разойдётся — страховка в синке: дубль сессии не
+    создаётся (same-moment check), событие просто останется непривязанным.
+    """
+    service = _get_calendar_service()
+    summary = f"{client_name} #{alias_code}" if alias_code else client_name
+    start = first_date
+    end = first_date + timedelta(minutes=duration_minutes)
+
+    private_props = {"origin": "unbox"}
+    if booking_group_id:
+        private_props["unbox_booking_group"] = str(booking_group_id)
+
+    master = service.events().insert(
+        calendarId=calendar_id,
+        body={
+            "summary": summary,
+            "start": {"dateTime": _dt_to_rfc3339(start)},
+            "end": {"dateTime": _dt_to_rfc3339(end)},
+            "recurrence": [f"RRULE:FREQ=WEEKLY;INTERVAL={interval_weeks};COUNT={count}"],
+            "extendedProperties": {"private": private_props},
+        },
+    ).execute()
+
+    master_id = master["id"]
+    instance_ids = [
+        f"{master_id}_{(first_date + timedelta(weeks=interval_weeks * i)).strftime('%Y%m%dT%H%M%SZ')}"
+        for i in range(count)
+    ]
+    return master_id, instance_ids
 
 
 def update_calendar_event(
@@ -175,15 +339,20 @@ def update_calendar_event(
     start = session_date
     end = session_date + timedelta(minutes=duration_minutes)
 
+    body = {
+        "summary": summary,
+        "start": {"dateTime": _dt_to_rfc3339(start)},
+        "end": {"dateTime": _dt_to_rfc3339(end)},
+    }
+    # patch-семантика: не передали notes — описание события НЕ трогаем
+    # (перенос времени из CRM не должен стирать текст, вписанный в Google).
+    if notes is not None:
+        body["description"] = notes
+
     service.events().patch(
         calendarId=calendar_id,
         eventId=event_id,
-        body={
-            "summary": summary,
-            "description": notes or "",
-            "start": {"dateTime": _dt_to_rfc3339(start)},
-            "end": {"dateTime": _dt_to_rfc3339(end)},
-        },
+        body=body,
     ).execute()
 
 

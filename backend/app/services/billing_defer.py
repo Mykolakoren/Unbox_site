@@ -201,10 +201,17 @@ def settle_pending_charge(session: Session, b: Booking) -> Tuple[bool, str]:
                 )
                 cash_amount = round(float(breakdown.final_price or 0), 2)
             except Exception as e:
-                logger.warning(
-                    "[billing] booking %s sub-fallback price recompute failed: %r; using stored %.2f₾",
-                    b.id, e, amount,
+                # Аудит 2026-08-27: раньше здесь был фолбэк «спишем сохранённый
+                # final_price» — у броней абонементных серий он 0₾, и падение
+                # пересчёта (например, кабинет переименован/удалён за долгую
+                # жизнь серии) ТИХО дарило комнату: списывалось 0 и бронь
+                # помечалась paid. Теперь честный отказ: бронь остаётся pending,
+                # sweep кладёт её в failures → TG-алерт админам (§5#6).
+                logger.error(
+                    "[billing] booking %s sub-fallback price recompute failed: %r — оставляю pending",
+                    b.id, e,
                 )
+                return False, f"price_recompute_failed:{type(e).__name__}"
             wallet.debit(session, user, cash_amount, reason="booking_charge",
                          description="абонемент исчерпан → списание с баланса (T-24ч)",
                          ref_type="booking", ref_id=str(b.id))
@@ -313,6 +320,13 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
             remaining_hours=rem + hours_actually_used,
             used_hours=max(0.0, used - hours_actually_used),
         )
+        # Аудит 2026-08-27: пиковая надбавка (final_price у абонементной брони)
+        # — деньги, списанные отдельно от часов. Возврат часов её не покрывал.
+        _peak = float(b.final_price or 0)
+        if _peak >= 0.01:
+            wallet.credit(session, user, _peak, reason="booking_refund",
+                          description="снятие штрафа (waive) — возврат пиковой надбавки",
+                          ref_type="booking", ref_id=str(b.id), actor=by_user)
     else:
         wallet.credit(session, user, amount, reason="booking_refund",
                       description="снятие штрафа (waive) — возврат на баланс",

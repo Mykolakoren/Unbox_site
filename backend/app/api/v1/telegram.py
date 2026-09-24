@@ -617,7 +617,15 @@ def telegram_webhook(
 
     # 2026-06-05 owner: detailed logging для отладки binding-флоу
     # (Valentina не привязывается — нужно увидеть что именно шлёт TG).
-    text_preview = (text[:60] + "…") if len(text) > 60 else text
+    # БЕЗОПАСНОСТЬ (аудит 2026-08-27): `/start <token>` несёт одноразовый
+    # link-token — секрет, по которому биндится telegram_id (а telegram_id =
+    # вход через «Войти в Telegram»). Раньше токен целиком попадал в journalctl:
+    # любой, кто читает логи, мог перехватить его до клика жертвы и привязать
+    # СВОЙ Telegram к чужому аккаунту → JWT жертвы. Маскируем payload /start.
+    if text.lower().startswith("/start ") and len(text) > 13:
+        text_preview = text[:13] + "…<masked>"
+    else:
+        text_preview = (text[:60] + "…") if len(text) > 60 else text
     logger.info(
         "[tg:webhook] in: chat_id=%s username=%s text=%r",
         chat_id, username, text_preview,
