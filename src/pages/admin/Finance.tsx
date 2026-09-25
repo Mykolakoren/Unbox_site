@@ -18,6 +18,7 @@ import { MorningChecklistModal } from '../../components/admin/cashbox/MorningChe
 import { PreCloseShiftChecklist } from '../../components/admin/cashbox/PreCloseShiftChecklist';
 import { ShiftReportsTable } from '../../components/admin/cashbox/ShiftReportsTable';
 import { CashboxAnalytics } from '../../components/admin/cashbox/CashboxAnalytics';
+import { ReconciliationExport } from '../../components/admin/cashbox/ReconciliationExport';
 import type { CashboxTransaction } from '../../api/cashbox';
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
@@ -516,6 +517,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         >
                             Недельные кредиты
                         </button>
+
+                        <ReconciliationExport />
 
                         <button
                             onClick={() => p.setShowAddTx(true)}

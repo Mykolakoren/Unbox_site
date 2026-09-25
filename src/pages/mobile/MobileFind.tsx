@@ -328,6 +328,11 @@ export function MobileFind() {
                                 ? 'Выбери новое время — старый слот освободится'
                                 : 'Когда · сколько · где — три тапа.'}
                     </p>
+                    {!linkSessionMeta && !rescheduleId && (
+                        <p style={{ fontSize: 12, color: '#8a6d1f', marginTop: 4 }}>
+                            Пиковые часы 09–10 и 20–22: +5 ₾ за каждый час пика.
+                        </p>
+                    )}
                 </div>
 
                 {/* 2026-06-06 owner: админ может попасть на /m/find через

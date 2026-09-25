@@ -64,8 +64,9 @@ def build_category_tree(categories: List[ExpenseCategory]) -> List[dict]:
 
 
 # ── Sub-routers ──────────────────────────────────────────────────────────────
-from app.api.v1.cashbox import transactions, categories, shifts  # noqa: E402
+from app.api.v1.cashbox import transactions, categories, shifts, reconciliation  # noqa: E402
 
 router.include_router(transactions.router)
 router.include_router(categories.router)
 router.include_router(shifts.router)
+router.include_router(reconciliation.router)

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -1004,6 +1005,14 @@ export function MobileCheckout() {
                         display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
                         <Row label="База" value={`${priced.items.reduce((s, i) => s + i.price.basePrice, 0).toFixed(0)} ₾`} />
+                        {/* Пик (09–10, 20–22) уже внутри «Базы» — раньше клиент видел
+                            на карточке кабинета «20 ₾/ч», а здесь 25 ₾ без объяснения. */}
+                        {priced.items.some(i => (i.price.peakSurcharge ?? 0) > 0) && (
+                            <Row
+                                label="в т.ч. пиковые часы"
+                                value={`+${priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0).toFixed(0)} ₾`}
+                            />
+                        )}
                         {priced.items.some(i => i.price.extrasPrice > 0) && (
                             <Row label="Допуслуги" value={`${priced.items.reduce((s, i) => s + i.price.extrasPrice, 0).toFixed(0)} ₾`} />
                         )}
@@ -1033,11 +1042,25 @@ export function MobileCheckout() {
                             const bal = effectiveUser.balance ?? 0;
                             const after = bal - priced.total;
                             const debt = after < 0 ? Math.min(priced.total, -after) : 0;
+                            // Списание отложенное: бронь дальше 24 ч спишется за сутки
+                            // до начала (как на сервере). Раньше текст звучал так, будто
+                            // деньги уходят прямо сейчас, и остаток «после» был неверным.
+                            const firstStart = priced.items[0]?.start;
+                            const deferred = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
+                            if (deferred) {
+                                return (
+                                    <div style={{ fontSize: 12, color: debt > 0 ? '#b3453a' : '#666' }}>
+                                        Спишется с баланса {formatChargeAt(firstStart)} (за сутки до начала): {priced.total.toFixed(0)} ₾.
+                                        {' '}Сейчас на балансе {bal.toFixed(0)} ₾
+                                        {debt > 0 ? ` — не хватает ${debt.toFixed(0)} ₾, уйдёт в долг (лимит ${(effectiveUser.creditLimit ?? 0).toFixed(0)} ₾), если не пополнить.` : '.'}
+                                    </div>
+                                );
+                            }
                             return (
                                 <div style={{ fontSize: 12, color: debt > 0 ? '#b3453a' : '#666' }}>
                                     {debt > 0
-                                        ? `Спишется ${priced.total.toFixed(0)} ₾, из них ${debt.toFixed(0)} ₾ — в долг (лимит ${(effectiveUser.creditLimit ?? 0).toFixed(0)} ₾)`
-                                        : `Спишется ${priced.total.toFixed(0)} ₾ с баланса, останется ${after.toFixed(0)} ₾`}
+                                        ? `Спишется сразу ${priced.total.toFixed(0)} ₾, из них ${debt.toFixed(0)} ₾ — в долг (лимит ${(effectiveUser.creditLimit ?? 0).toFixed(0)} ₾)`
+                                        : `Спишется сразу ${priced.total.toFixed(0)} ₾ с баланса, останется ${after.toFixed(0)} ₾`}
                                 </div>
                             );
                         })()}

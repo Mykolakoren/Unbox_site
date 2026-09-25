@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { EXTRAS, RESOURCES, LOCATIONS } from '../../utils/data';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
+import { useUserStore } from '../../store/userStore';
 
 /**
  * Быстрые правки СЕГОДНЯШНЕЙ брони для админа:
@@ -360,7 +361,33 @@ export function MoveBookingModal({
         setResourceId(booking.resourceId || '');
     }, [booking?.id]);
 
+    // Занятость выбранного кабинета в выбранный день — прямо в окне. Раньше
+    // админ узнавал о конфликте только после «Перенести» и подбирал время
+    // наугад (в логах: 6 неудачных попыток на одну бронь).
+    const allBookings = useUserStore(s => s.bookings);
+    const users = useUserStore(s => s.users);
+    const occupied = useMemo(() => {
+        if (!booking || !resourceId || !date) return [];
+        const toMin = (t?: string | null) => { const [h, m] = (t || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+        return allBookings
+            .filter(b => b.id !== booking.id && b.resourceId === resourceId
+                && (b.status === 'confirmed' || b.status === 'pending_approval')
+                && _bookingDay(b.date) === date)
+            .map(b => {
+                const st = toMin(b.startTime);
+                const u = users.find(x => x.email === b.userId || x.id === b.userId);
+                const who = String(b.paymentMethod || '') === 'service' ? 'обслуживание' : (u?.name || '');
+                return { start: st, end: st + (b.duration || 60), who };
+            })
+            .sort((a, b) => a.start - b.start);
+    }, [allBookings, users, booking, resourceId, date]);
+
     if (!booking) return null;
+
+    const _fmtMin = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const _newStart = /^\d{2}:\d{2}/.test(time) ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : -1;
+    const _newEnd = _newStart + (booking.duration || 60);
+    const clash = _newStart >= 0 ? occupied.find(x => x.start < _newEnd && _newStart < x.end) : undefined;
 
     const submit = async () => {
         // Safari с controlled date/time-полем не всегда дёргает onChange —
@@ -394,7 +421,7 @@ export function MoveBookingModal({
 
                 <label style={{ fontSize: 12, color: GH.ink60, display: 'block', marginBottom: 4 }}>Кабинет</label>
                 <select value={resourceId} onChange={(e) => setResourceId(e.target.value)}
-                    style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 20, fontFamily: GH_SANS, fontSize: 14, background: GH.paper }}>
+                    style={{ width: '100%', padding: '10px', border: `1px solid ${GH.ink}`, marginBottom: 10, fontFamily: GH_SANS, fontSize: 14, background: GH.paper }}>
                     {LOCATIONS.map((loc) => (
                         <optgroup key={loc.id} label={loc.name}>
                             {RESOURCES.filter((r) => r.locationId === loc.id).map((r) => (
@@ -405,6 +432,21 @@ export function MoveBookingModal({
                         </optgroup>
                     ))}
                 </select>
+
+                <div style={{ fontSize: 12, marginBottom: 16, lineHeight: 1.45 }}>
+                    {occupied.length === 0 ? (
+                        <span style={{ color: GH.ink60 }}>В этот день кабинет свободен.</span>
+                    ) : (
+                        <span style={{ color: GH.ink60 }}>
+                            Занято: {occupied.map(x => `${_fmtMin(x.start)}–${_fmtMin(x.end)}${x.who ? ` (${x.who})` : ''}`).join(' · ')}
+                        </span>
+                    )}
+                    {clash && (
+                        <div style={{ color: '#b3261e', fontWeight: 600, marginTop: 4 }}>
+                            ⚠ {_fmtMin(_newStart)}–{_fmtMin(_newEnd)} пересекается с {_fmtMin(clash.start)}–{_fmtMin(clash.end)} — выберите другое время или кабинет.
+                        </div>
+                    )}
+                </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>
                     <button style={{ ...btnPrimary, flex: 1, opacity: busy ? 0.5 : 1 }} disabled={busy} onClick={submit}>

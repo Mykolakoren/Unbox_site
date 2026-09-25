@@ -291,6 +291,39 @@ def _normalize_name(name: str) -> str:
     return " ".join(name.lower().strip().split())
 
 
+# События, которые почти наверняка НЕ клиенты (аудит 24.09): раньше синк делал
+# карточку клиента из любого события календаря — «Стоматолог», «ДР Маши»,
+# «Созвон с партнёром». Сверяем ЦЕЛЫЕ слова / начала слов, чтобы не задеть
+# имена («Залина» не отсеивается словом «зал»).
+_NON_CLIENT_STEMS = (
+    "встреч", "созвон", "стрижк", "ремонт", "стоматолог", "маникюр", "педикюр",
+    "тренировк", "планёрк", "планерк", "совещан", "вебинар", "супервиз", "интервиз",
+    "напомин", "отпуск", "перелёт", "перелет", "завтрак", "стратсесс",
+    "информац", "актёрск", "актерск", "отвезти", "заполнить", "оплатить", "позвонить",
+    "купить", "забрать", "дедлайн", "праздник", "cancelled", "telemed", "http", "zoom",
+    "meeting", "birthday", "webinar",
+)
+_NON_CLIENT_WORDS = {"др", "зал", "рейс", "курс", "урок", "бип", "личное", "дела",
+                     "врач", "врача", "врачу", "обед", "обеда", "ужин", "ужина"}
+_NON_CLIENT_PHRASES = ("день рождения", "neo school", "online session", "нова подія")
+
+
+def _looks_non_client(summary: str) -> bool:
+    """True, если заголовок события похож на личное дело, а не на клиента."""
+    low = (summary or "").lower()
+    if any(ph in low for ph in _NON_CLIENT_PHRASES):
+        return True
+    words = re.findall(r"[a-zа-яёіїєґ]+", low)
+    if any(w in _NON_CLIENT_WORDS for w in words):
+        return True
+    return any(w.startswith(st) for w in words for st in _NON_CLIENT_STEMS)
+
+
+def _ignored_names(user: User) -> set:
+    """Имена, которые специалист отметил «не клиент» в предпросмотре синка."""
+    return {_normalize_name(n) for n in ((user.crm_data or {}).get("sync_ignore_names") or []) if n}
+
+
 @router.get("/sync/test-connection")
 def test_calendar_connection(
     session: Session = Depends(deps.get_session),
@@ -424,12 +457,16 @@ def sync_from_calendar(
             name_to_client[_normalize_name(c.name)] = c
 
         # Group unmatched events by clean name
+        ignored = _ignored_names(current_user)
         name_events: dict = {}
         for ev in result["unmatched"]:
             clean = _clean_client_name(ev["summary"])
             if not clean or len(clean) < 2:
                 continue
             norm = _normalize_name(clean)
+            # Личные дела и отмеченные «не клиент» карточками не становятся.
+            if norm in ignored or (norm not in name_to_client and _looks_non_client(clean)):
+                continue
             if norm not in name_events:
                 name_events[norm] = []
             name_events[norm].append(ev)
@@ -497,17 +534,31 @@ def sync_from_calendar(
 
     # ── Dry Run preview ───────────────────────────────────────────────────
     if dry_run:
-        unique_names = set()
+        # Кто станет новой карточкой — с пометкой «похоже не клиент», чтобы
+        # специалист видел имена ДО синхронизации и мог исключить лишнее.
+        ignored = _ignored_names(current_user)
+        existing_norm = {_normalize_name(c.name) for c in clients}
+        unique_names: dict = {}
         for ev in result["unmatched"]:
             clean = _clean_client_name(ev["summary"])
-            if clean and len(clean) >= 2:
-                unique_names.add(_normalize_name(clean))
+            if not clean or len(clean) < 2:
+                continue
+            norm = _normalize_name(clean)
+            if norm in existing_norm or norm in unique_names:
+                continue
+            unique_names[norm] = {
+                "name": clean,
+                "looks_non_client": _looks_non_client(clean),
+                "ignored": norm in ignored,
+            }
+        creatable = [v for v in unique_names.values() if not v["looks_non_client"] and not v["ignored"]]
         return {
             "dry_run": True,
             "total_events": result["total"],
             "matched": len(result["matched"]),
             "unmatched": len(result["unmatched"]),
-            "would_create_clients": len(unique_names),
+            "would_create_clients": len(creatable),
+            "would_create_names": sorted(unique_names.values(), key=lambda v: v["name"].lower())[:80],
             "calendar_duplicates": calendar_duplicates[:15],
             "calendar_duplicates_count": len(calendar_duplicates),
             "unmatched_summaries": [e["summary"] for e in result["unmatched"][:20]],

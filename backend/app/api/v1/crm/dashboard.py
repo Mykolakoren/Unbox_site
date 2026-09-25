@@ -316,6 +316,7 @@ def get_crm_settings(
         # сессии и брони). Раньше тумблер был декорацией — поле молча
         # терялось, а синк всегда вёл себя как «календарь главный».
         "google_calendar_source_of_truth": bool(crm_data.get("gcal_source_of_truth", False)),
+        "sync_ignore_names": list(crm_data.get("sync_ignore_names") or []),
     }
 
 
@@ -325,9 +326,19 @@ def update_crm_settings(
     current_user: User = Depends(deps.require_specialist),
     calendar_id: Optional[str] = Body(None, embed=True),
     google_calendar_source_of_truth: Optional[bool] = Body(None, embed=True),
+    sync_ignore_names: Optional[List[str]] = Body(None, embed=True),
 ):
     """Update specialist's CRM settings."""
     crm_data = dict(current_user.crm_data or {})
+    if sync_ignore_names is not None:
+        # «Не клиент» из предпросмотра синка — эти заголовки событий больше
+        # не превращаются в карточки (ни вручную, ни автосинком раз в 20 мин).
+        clean = []
+        for n in sync_ignore_names[:500]:
+            n = " ".join(str(n or "").split())[:120]
+            if n and n.lower() not in {c.lower() for c in clean}:
+                clean.append(n)
+        crm_data["sync_ignore_names"] = clean
     if calendar_id is not None:
         if calendar_id == "":
             crm_data.pop("calendar_id", None)
@@ -343,6 +354,7 @@ def update_crm_settings(
         "ok": True,
         "calendar_id": crm_data.get("calendar_id"),
         "google_calendar_source_of_truth": bool(crm_data.get("gcal_source_of_truth", False)),
+        "sync_ignore_names": list(crm_data.get("sync_ignore_names") or []),
     }
 
 

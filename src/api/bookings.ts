@@ -99,6 +99,17 @@ export const bookingsApi = {
         return mapToFrontend(response.data);
     },
 
+    /** Ориентир недельной скидки для попапа брони (только чтение, админ). */
+    getWeeklyEstimate: async (id: string) => {
+        // Ответ проходит через интерцептор snake→camel (api/client.ts).
+        const response = await api.get<{
+            weekStart: string; applies: boolean; totalHours: number; tierPercent: number;
+            nextTierPercent: number | null; hoursToNextTier: number | null;
+            bookingRebate: number; bookingNetEstimate: number; weekRebate: number;
+        }>(`/bookings/${id}/weekly-estimate`);
+        return response.data;
+    },
+
     getBooking: async (id: string) => {
         const response = await api.get<any>(`/bookings/${id}`);
         return mapToFrontend(response.data);

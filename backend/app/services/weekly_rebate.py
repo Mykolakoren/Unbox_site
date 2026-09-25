@@ -250,3 +250,93 @@ def run_weekly_rebates(
         "skipped_already_done": skipped_already,
         "details": results,
     }
+
+
+def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
+    """Ориентир для попапа брони (просьба Егора 21.09): сколько недельного
+    кредита придёт в понедельник за ЭТУ бронь и за всю неделю клиента.
+
+    ТОЛЬКО ЧТЕНИЕ — ничего не пишет. Формула добора — та же, что в
+    run_weekly_rebates (держать синхронно; сторож сверяет ключевые строки).
+    Отличие одно: pending-брони тоже считаются — к понедельнику их спишут
+    (списание за 24 ч до начала), а это прогноз, не начисление.
+    """
+    d = booking.date.date() if isinstance(booking.date, datetime) else booking.date
+    week_start = _monday(d)
+    start_dt = datetime(week_start.year, week_start.month, week_start.day)
+    end_dt = start_dt + timedelta(days=7)
+
+    user: Optional[User] = None
+    if booking.user_uuid:
+        try:
+            user = session.get(User, booking.user_uuid if isinstance(booking.user_uuid, UUID) else UUID(str(booking.user_uuid)))
+        except (ValueError, TypeError):
+            user = None
+    if user is None and booking.user_id:
+        user = session.exec(select(User).where(User.email == booking.user_id)).first()
+
+    tiers = PricingService.PRICING_CONFIG["weekly_progressive"]
+    empty = {
+        "week_start": week_start.isoformat(), "applies": False, "total_hours": 0.0,
+        "tier_percent": 0, "next_tier_percent": None, "hours_to_next_tier": None,
+        "booking_rebate": 0.0, "booking_net_estimate": float(booking.final_price or 0.0),
+        "week_rebate": 0.0,
+    }
+    if user is None:
+        return empty
+
+    conds = [Booking.status == "confirmed", Booking.date >= start_dt, Booking.date < end_dt]
+    week = session.exec(select(Booking).where(*conds, Booking.user_uuid == user.id)).all()
+    if not week:
+        week = session.exec(select(Booking).where(*conds, Booking.user_id == user.email)).all()
+    total_hours = sum(b.duration / 60.0 for b in week)
+    tier = PricingService.weekly_tier_percent(total_hours)
+    nxt = next((t for t in tiers if t["min"] > total_hours and int(t["percent"]) > tier), None)
+
+    pricing = PricingService(session)
+
+    def _rebate_for(b: Booking) -> float:
+        if b.payment_method != "balance" or b.payment_status == "waived" or tier == 0:
+            return 0.0
+        try:
+            try:
+                _h, _m = map(int, (b.start_time or "0:0").split(":"))
+                _start = b.date.replace(hour=_h, minute=_m, second=0, microsecond=0)
+            except Exception:
+                _start = b.date
+            breakdown = pricing.calculate_price(
+                user=user,
+                resource_id=b.resource_id,
+                start_time=_start,
+                duration_minutes=b.duration,
+                format_type=b.format or "individual",
+                exclude_booking_id=b.id,
+                ignore_subscription=True,
+            )
+        except Exception:
+            return 0.0
+        base = breakdown.discountable_base or 0.0
+        if base <= 0:
+            return 0.0
+        duration_pct = int(breakdown.discount_percent or 0)
+        weekly_extra = base * (max(0, tier - duration_pct) / 100.0)
+        recomputed = float(breakdown.final_price or 0.0)
+        correct_at_T = recomputed - weekly_extra
+        return max(0.0, float(b.final_price or 0.0) - correct_at_T)
+
+    this_rebate = round(_rebate_for(booking), 2)
+    week_rebate = round(sum(_rebate_for(b) for b in week), 2)
+    if week_rebate < MIN_REBATE_GEL:
+        week_rebate, this_rebate = 0.0, 0.0
+    applies = booking.payment_method == "balance" and booking.payment_status != "waived"
+    return {
+        "week_start": week_start.isoformat(),
+        "applies": applies,
+        "total_hours": round(total_hours, 1),
+        "tier_percent": tier,
+        "next_tier_percent": int(nxt["percent"]) if nxt else None,
+        "hours_to_next_tier": round(nxt["min"] - total_hours, 1) if nxt else None,
+        "booking_rebate": this_rebate,
+        "booking_net_estimate": round(float(booking.final_price or 0.0) - this_rebate, 2),
+        "week_rebate": week_rebate,
+    }

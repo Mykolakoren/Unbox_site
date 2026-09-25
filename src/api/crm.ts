@@ -106,6 +106,8 @@ export interface CrmSettings {
     calendarId: string | null;
     calendarSyncEnabled: boolean;
     googleCalendarSourceOfTruth: boolean;
+    /** Заголовки событий, отмеченные «не клиент» — синк не делает из них карточки. */
+    syncIgnoreNames?: string[];
 }
 
 export interface CrmSyncResult {
@@ -116,6 +118,9 @@ export interface CrmSyncResult {
     updated: number;
     autoCreatedClients: number;
     unmatchedSummaries: string[];
+    dryRun?: boolean;
+    /** Только в предпросмотре: кто станет новой карточкой клиента. */
+    wouldCreateNames?: { name: string; looksNonClient: boolean; ignored: boolean }[];
 }
 
 export interface CrmPayment {
@@ -456,10 +461,11 @@ export const crmApi = {
         return response.data;
     },
 
-    updateSettings: async (data: { calendarId?: string | null; googleCalendarSourceOfTruth?: boolean }): Promise<{ ok: boolean }> => {
+    updateSettings: async (data: { calendarId?: string | null; googleCalendarSourceOfTruth?: boolean; syncIgnoreNames?: string[] }): Promise<{ ok: boolean }> => {
         const body: Record<string, any> = {};
         if (data.calendarId !== undefined) body.calendar_id = data.calendarId;
         if (data.googleCalendarSourceOfTruth !== undefined) body.google_calendar_source_of_truth = data.googleCalendarSourceOfTruth;
+        if (data.syncIgnoreNames !== undefined) body.sync_ignore_names = data.syncIgnoreNames;
         const response = await api.patch('/crm/settings', body);
         return response.data;
     },

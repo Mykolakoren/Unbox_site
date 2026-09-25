@@ -9,6 +9,10 @@ interface AddFundsModalProps {
     onClose: () => void;
     onConfirm: (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => void;
     userName?: string;
+    /** Подставить сумму при открытии (например, долг клиента или цена брони). */
+    defaultAmount?: number;
+    /** Пояснение под заголовком — откуда взялась подставленная сумма. */
+    hint?: string;
 }
 
 const PAYMENT_METHODS = [
@@ -21,7 +25,7 @@ const PAYMENT_METHODS = [
 // локацией для броней, но денег там не считают: операций по нему ноль.
 const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
-export function AddFundsModal({ isOpen, onClose, onConfirm, userName }: AddFundsModalProps) {
+export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmount, hint }: AddFundsModalProps) {
     const [amount, setAmount] = useState('');
     const [method, setMethod] = useState<'cash' | 'tbc' | 'bog'>('cash');
     const [branch, setBranch] = useState('');
@@ -32,8 +36,8 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName }: AddFunds
     // филиал специально НЕ трогаем: за смену они одни и те же, их повторный
     // выбор — как раз лишняя работа.
     useEffect(() => {
-        if (isOpen) setAmount('');
-    }, [isOpen]);
+        if (isOpen) setAmount(defaultAmount && defaultAmount > 0 ? String(Math.round(defaultAmount * 100) / 100) : '');
+    }, [isOpen, defaultAmount]);
 
     if (!isOpen) return null;
 
@@ -68,6 +72,9 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName }: AddFunds
                         <CreditCard size={24} />
                     </div>
                     <h3 className="text-xl font-bold text-gray-900">Пополнить баланс</h3>
+                    {hint && (
+                        <p className="text-unbox-grey text-xs mt-1">{hint}</p>
+                    )}
                     {userName && (
                         <p className="text-unbox-green text-sm font-medium mt-1">{userName}</p>
                     )}

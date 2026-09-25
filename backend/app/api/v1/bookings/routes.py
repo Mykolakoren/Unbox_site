@@ -5534,6 +5534,30 @@ def split_booking(
 
 # ─── Credit-limit forecast (раннее предупреждение о должниках) ────────────────
 
+@router.get("/{booking_id}/weekly-estimate")
+def booking_weekly_estimate(
+    booking_id: str,
+    session: Session = Depends(deps.get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Ориентир недельной скидки для попапа брони в шахматке (только чтение).
+
+    Недельная скидка за объём приходит кредитом в понедельник за прошлую
+    неделю — в цене брони её нет. Админы (Егор 21.09) хотят видеть, сколько
+    примерно клиент заплатит с её учётом. Считает weekly_rebate
+    .estimate_booking_rebate — той же формулой, что понедельничное начисление.
+    """
+    from app.services.weekly_rebate import estimate_booking_rebate
+    try:
+        uid = UUID(booking_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Некорректный номер брони")
+    booking = session.get(Booking, uid)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Бронь не найдена — возможно, её уже удалили")
+    return estimate_booking_rebate(session, booking)
+
+
 @router.get("/limit-forecast")
 def credit_limit_forecast(
     session: Session = Depends(deps.get_session),

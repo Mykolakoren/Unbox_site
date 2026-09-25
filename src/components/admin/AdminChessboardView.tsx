@@ -18,6 +18,7 @@ import type { BookingHistoryItem } from '../../store/types';
 import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
+import { BookingMoneyHints } from './BookingMoneyHints';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
@@ -1130,6 +1131,7 @@ export function AdminChessboardView() {
                                     />
                                 )}
                                 <InfoRow label="Статус" value={statusLabel(selectedBooking)} />
+                                <BookingMoneyHints booking={selectedBooking} />
                                 {/* Deferred-billing payment status — only show if explicitly set
                                     (legacy rows = NULL = silent). Keeps the panel uncluttered for
                                     bookings created before the 24h-defer rollout. */}
@@ -1721,6 +1723,7 @@ export function AdminChessboardView() {
                             label="Статус"
                             value={statusLabel(selectedBooking)}
                         />
+                        <BookingMoneyHints booking={selectedBooking} />
                         {/* Recurring series banner — shows "Постоянная бронь · осталось N
                             сессий" plus a [Продлить] button when this booking is part
                             of a series. Future-count comes from /recurring-groups. */}

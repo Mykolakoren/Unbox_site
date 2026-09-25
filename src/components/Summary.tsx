@@ -262,7 +262,7 @@ export function Summary() {
                     <div className="flex justify-between text-sm">
                         <span className="text-gray-500 flex items-center gap-1">
                             <Sunrise size={12} className="text-amber-500" />
-                            Пиковые часы (+25%)
+                            Пиковые часы (+5 ₾/ч)
                         </span>
                         <span className="text-amber-600">вкл. {(total.peakSurcharge ?? 0).toFixed(1)} ₾</span>
                     </div>

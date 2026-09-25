@@ -133,6 +133,12 @@ export const cashboxApi = {
         return data;
     },
 
+    /** Excel для сверки с таблицей админов за месяц (YYYY-MM). */
+    downloadReconciliation: async (month: string): Promise<Blob> => {
+        const response = await api.get(`/cashbox/reconciliation.xlsx`, { params: { month }, responseType: 'blob' });
+        return response.data as Blob;
+    },
+
     createTransaction: async (payload: CashboxTransactionCreate): Promise<CashboxTransaction> => {
         const { data } = await api.post('/cashbox/transactions', payload);
         return data;

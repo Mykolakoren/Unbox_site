@@ -93,6 +93,10 @@ export function CrmSessions() {
     const [syncMonthsBack, setSyncMonthsBack] = useState(0); // 0 = current month only
     const [syncMonthsForward, setSyncMonthsForward] = useState(1);
     const [syncResult, setSyncResult] = useState<any>(null);
+    // Предпросмотр синка: какие новые карточки клиентов НЕ создавать
+    // (специалист снимает галочку). Сохраняется в настройках CRM, чтобы
+    // и автосинк раз в 20 минут их не создавал.
+    const [syncExcluded, setSyncExcluded] = useState<Set<string>>(new Set());
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
@@ -277,10 +281,25 @@ export function CrmSessions() {
 
     const handleSync = async (dryRun = false) => {
         setSyncing(true);
+        const previewNames: any[] = (syncResult?.dryRun && syncResult?.wouldCreateNames) || [];
         setSyncResult(null);
         try {
+            if (!dryRun && previewNames.length > 0) {
+                // Сохраняем выбор из предпросмотра: снятые галочки → «не клиент»,
+                // возвращённые галочки убираем из списка исключений.
+                const settings = await crmApi.getSettings();
+                const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, ' ');
+                const reIncluded = new Set(previewNames.filter(n => n.ignored && !syncExcluded.has(n.name)).map(n => norm(n.name)));
+                const next = (settings.syncIgnoreNames || []).filter(n => !reIncluded.has(norm(n)));
+                for (const n of syncExcluded) if (!next.some(x => norm(x) === norm(n))) next.push(n);
+                await crmApi.updateSettings({ syncIgnoreNames: next });
+            }
             const result = await crmApi.syncFromCalendar(dryRun, syncMonthsBack, syncMonthsForward);
             setSyncResult(result);
+            if (dryRun) {
+                const names: any[] = result?.wouldCreateNames || [];
+                setSyncExcluded(new Set(names.filter(n => n.ignored && !n.looksNonClient).map(n => n.name)));
+            }
             if (!dryRun) {
                 toast.success(`Синхронизировано: ${result.created || 0} новых, ${result.updated || 0} обновлённых`);
                 fetchSessions({ dateFrom, dateTo });
@@ -307,6 +326,7 @@ export function CrmSessions() {
             syncMonthsBack={syncMonthsBack} setSyncMonthsBack={setSyncMonthsBack}
             syncMonthsForward={syncMonthsForward} setSyncMonthsForward={setSyncMonthsForward}
             syncResult={syncResult} handleSync={handleSync}
+            syncExcluded={syncExcluded} setSyncExcluded={setSyncExcluded}
             stats={stats}
             upcomingGroups={upcomingGroups} pastGroups={pastGroups}
             sessions={sessions} clientMap={clientMap}
@@ -1223,6 +1243,7 @@ interface GHSessionsProps {
     syncMonthsBack: number; setSyncMonthsBack: (v: number) => void;
     syncMonthsForward: number; setSyncMonthsForward: (v: number) => void;
     syncResult: any; handleSync: (dryRun?: boolean) => Promise<void>;
+    syncExcluded: Set<string>; setSyncExcluded: (v: Set<string>) => void;
     stats: { planned: number; completed: number; unpaidCount: number; debtLabel: string; revenueLabel: string; revenueGel: string; earnedLabel: string; earnedGel: string };
     upcomingGroups: [string, CrmSession[]][];
     pastGroups: [string, CrmSession[]][];
@@ -1564,10 +1585,48 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                             </div>
                             {p.syncResult && (
                                 <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1">
-                                    <div className="font-medium mb-2">Результат:</div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Всего</span><span className="font-medium">{p.syncResult.totalEvents ?? 0}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Создано</span><span className="font-medium text-green-600">{p.syncResult.created ?? 0}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Обновлено</span><span className="font-medium">{p.syncResult.updated ?? 0}</span></div>
+                                    <div className="font-medium mb-2">{p.syncResult.dryRun ? 'Предпросмотр (ничего не изменено):' : 'Результат:'}</div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Событий в календаре</span><span className="font-medium">{p.syncResult.totalEvents ?? 0}</span></div>
+                                    {p.syncResult.dryRun ? (
+                                        <>
+                                            <div className="flex justify-between"><span className="text-gray-500">Узнали клиента</span><span className="font-medium">{p.syncResult.matched ?? 0}</span></div>
+                                            <div className="flex justify-between"><span className="text-gray-500">Новых карточек клиентов</span><span className="font-medium text-green-600">{(p.syncResult.wouldCreateNames || []).filter((n: any) => !n.looksNonClient && !p.syncExcluded.has(n.name)).length}</span></div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="flex justify-between"><span className="text-gray-500">Создано</span><span className="font-medium text-green-600">{p.syncResult.created ?? 0}</span></div>
+                                            <div className="flex justify-between"><span className="text-gray-500">Обновлено</span><span className="font-medium">{p.syncResult.updated ?? 0}</span></div>
+                                        </>
+                                    )}
+                                    {p.syncResult.dryRun && (p.syncResult.wouldCreateNames || []).length > 0 && (
+                                        <div className="mt-2 p-2.5 rounded-lg bg-white border border-gray-200">
+                                            <div className="font-semibold text-unbox-dark">Кто станет новой карточкой клиента</div>
+                                            <div className="text-xs text-gray-500 mt-0.5 mb-1.5">
+                                                Снимите галочку, если это не клиент — такие события не будут превращаться в карточки и при автосинке.
+                                            </div>
+                                            {(p.syncResult.wouldCreateNames || []).map((n: any) => (
+                                                n.looksNonClient ? (
+                                                    <div key={n.name} className="text-xs text-gray-400 py-1" title="Похоже на личное дело — карточку не создадим">
+                                                        — {n.name} <span className="italic">(похоже не клиент, пропустим)</span>
+                                                    </div>
+                                                ) : (
+                                                    <label key={n.name} className="flex items-center gap-2 py-1.5 text-sm cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={!p.syncExcluded.has(n.name)}
+                                                            onChange={e => {
+                                                                const next = new Set(p.syncExcluded);
+                                                                if (e.target.checked) next.delete(n.name); else next.add(n.name);
+                                                                p.setSyncExcluded(next);
+                                                            }}
+                                                            className="w-4 h-4 accent-emerald-600"
+                                                        />
+                                                        <span className={p.syncExcluded.has(n.name) ? 'text-gray-400 line-through' : ''}>{n.name}</span>
+                                                    </label>
+                                                )
+                                            ))}
+                                        </div>
+                                    )}
                                     {(p.syncResult.calendarDuplicatesCount ?? 0) > 0 && (
                                         <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
                                             <div className="font-semibold text-amber-800">

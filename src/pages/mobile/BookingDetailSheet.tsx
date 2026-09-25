@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { Clock, MapPin, X, Calendar, Plus, AlertTriangle, Smartphone, Repeat, User as UserIcon, BellOff, Users } from 'lucide-react';
 import { toast } from 'sonner';
@@ -746,18 +747,3 @@ function formatLabel(f: string | undefined): string {
 }
 
 /** "T-24h" — booking start minus 24 hours, formatted human-readably. */
-function formatChargeAt(start: Date): string {
-    const charge = new Date(start.getTime() - 24 * 3600 * 1000);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today.getTime() + 24 * 3600 * 1000);
-    const dayAfter = new Date(today.getTime() + 48 * 3600 * 1000);
-    const dCharge = new Date(charge);
-    dCharge.setHours(0, 0, 0, 0);
-
-    if (charge.getTime() <= Date.now()) return `совсем скоро`;
-    if (dCharge.getTime() === today.getTime()) return `сегодня в ${formatHHMM(charge)}`;
-    if (dCharge.getTime() === tomorrow.getTime()) return `завтра в ${formatHHMM(charge)}`;
-    if (dCharge.getTime() === dayAfter.getTime()) return `послезавтра в ${formatHHMM(charge)}`;
-    return charge.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) + ` в ${formatHHMM(charge)}`;
-}

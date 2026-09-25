@@ -925,3 +925,44 @@ def test_ux_audit_2026_09_24_fixes_hold():
     assert "Cannot reschedule less than 24h" not in routes, "отказ в переносе снова на английском"
     for f in ("src/components/admin/AdminChessboardView.tsx", "src/components/Wizard/ConfirmationStep.tsx"):
         assert "уже занято" in (root / f).read_text(), f"{f}: конфликт слота не распознаётся по русскому тексту"
+
+
+def test_admin_requests_2026_09_25_hold():
+    """25.09 («делай» владельца): подсказка недельной скидки, «Принять оплату»,
+    выгрузка для сверки, занятость в окне переноса, пик и момент списания в
+    мобильной записи, фильтр «не клиент» в синке Psy-CRM."""
+    import pathlib, re
+    root = pathlib.Path(__file__).parent.parent.parent
+    wr = (root / "backend/app/services/weekly_rebate.py").read_text()
+    i = wr.find("def estimate_booking_rebate")
+    run_body, est_body = wr[:i], wr[i:]
+    for line in ("weekly_extra = base * (max(0, tier - duration_pct) / 100.0)",
+                 "correct_at_T = recomputed - weekly_extra",
+                 "ignore_subscription=True"):
+        assert line in run_body and line in est_body, f"оценка недельной скидки разошлась с начислением: {line}"
+    assert "session.add" not in est_body and "commit" not in est_body and "wallet" not in est_body, \
+        "оценка недельной скидки должна быть только чтением"
+
+    rec = (root / "backend/app/api/v1/cashbox/reconciliation.py").read_text()
+    assert "session.add" not in rec and ".commit(" not in rec and "wallet" not in rec, \
+        "выгрузка для сверки должна быть только чтением"
+    assert "reconciliation" in (root / "backend/app/api/v1/cashbox/__init__.py").read_text()
+
+    sync = (root / "backend/app/api/v1/crm/sync.py").read_text()
+    ns = {"re": re}
+    exec(sync[sync.index("_NON_CLIENT_STEMS = ("):sync.index("def _ignored_names")], ns)
+    f = ns["_looks_non_client"]
+    assert f("ДР Маши") and f("Стоматолог") and f("Созвон с партнёром")
+    assert not f("Залина Петрова") and not f("Олег Врачев") and not f("Анна Калекина"), \
+        "фильтр «не клиент» режет настоящие имена"
+    assert "_looks_non_client(clean)" in sync and "_ignored_names(current_user)" in sync
+
+    modals = (root / "src/components/admin/BookingTodayEditModals.tsx").read_text()
+    assert "пересекается с" in modals, "окно переноса снова не показывает занятость"
+    co = (root / "src/pages/mobile/MobileCheckout.tsx").read_text()
+    assert "за сутки до начала" in co and "в т.ч. пиковые часы" in co
+    hints = (root / "src/components/admin/BookingMoneyHints.tsx").read_text()
+    assert "credit_user_balance: true" in hints, "«Принять оплату» должна идти через кассу с зачислением на баланс"
+    assert "est.tierPercent" in hints and "est.tier_percent" not in hints, \
+        "ответ API приходит в camelCase (интерцептор) — snake_case поля будут undefined"
+    assert "Depends(require_reports)" in rec, "выгрузка по всем клиентам — только с правом отчётов"
