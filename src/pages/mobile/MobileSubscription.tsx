@@ -6,6 +6,7 @@ import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { api } from '../../api/client';
+import { fmtHours, reservedSubscriptionHours } from '../../utils/paymentPriority';
 
 /**
  * Mobile cabinet: Абонемент — full subscription view with hours remaining,
@@ -15,7 +16,7 @@ import { api } from '../../api/client';
  */
 export function MobileSubscription() {
     const navigate = useNavigate();
-    const { currentUser, fetchCurrentUser } = useUserStore();
+    const { currentUser, fetchCurrentUser, bookings, fetchBookings } = useUserStore();
     const [busy, setBusy] = useState(false);
 
     const sub = currentUser?.subscription;
@@ -23,6 +24,14 @@ export function MobileSubscription() {
     useEffect(() => {
         if (!currentUser) fetchCurrentUser().catch(() => {});
     }, [currentUser, fetchCurrentUser]);
+
+    // Брони нужны, чтобы честно показать остаток: часы будущих броней ещё не
+    // списаны (спишутся за сутки до встречи), но уже обещаны (G4-client-mobile-M1).
+    useEffect(() => {
+        if (currentUser && bookings.length === 0) fetchBookings().catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentUser?.id]);
+    const reserved = reservedSubscriptionHours(sub, bookings, currentUser?.email);
 
     const handleFreeze = async () => {
         if (!sub) return;
@@ -106,6 +115,12 @@ export function MobileSubscription() {
                         {!!sub.bonusHours && (
                             <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
                                 Из них {sub.bonusHours} ч — бонусные
+                            </div>
+                        )}
+                        {reserved > 0.01 && (
+                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6, lineHeight: 1.4 }}>
+                                {fmtHours(reserved)} уже в будущих бронях — спишутся за сутки до встреч.
+                                {' '}Свободно для новых: {fmtHours(Math.max(0, sub.remainingHours - reserved))}
                             </div>
                         )}
                     </div>

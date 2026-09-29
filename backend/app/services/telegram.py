@@ -91,7 +91,7 @@ class TelegramService:
         price_label = (
             f"{int(final_price)}" if final_price == int(final_price) else f"{final_price:.2f}"
         )
-        payment_label = "Абонемент" if payment_method == "subscription" else "Баланс"
+        payment_label = {"subscription": "Абонемент", "bonus": "Бонусные часы"}.get(payment_method, "Баланс")
         address_line = f"\n   <i>{escape(location_address)}</i>" if location_address else ""
 
         # ── Extras line (only shown when present) ──

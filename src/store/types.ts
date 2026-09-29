@@ -31,6 +31,13 @@ export interface Subscription {
     frozenUntil?: string; // ISO string
     freezeCount: number;
     includedFormats?: Format[];
+    /** Особые условия: без срока (subscription_pool.is_flexible). */
+    flexible?: boolean;
+    /** Недельный пакет (weekly_package.py): пул выдаётся заново каждую неделю. */
+    weeklyPackage?: boolean;
+    weeklyHours?: number;
+    /** Понедельник (yyyy-mm-dd) недели, за которую выдан текущий пул. */
+    packageWeek?: string;
 }
 
 export interface DiscountLogEntry {

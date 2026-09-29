@@ -695,6 +695,63 @@ def check_slots_availability(
     return results
 
 
+# ─── Порядок оплаты: бонус → абонемент → баланс ──────────────────────────────
+
+def _resolve_with_bonus(
+    session: Session,
+    pricing_service,
+    owner: User,
+    requested: Optional[str],
+    quote,
+    *,
+    resource_id: str,
+    start_dt: datetime,
+    duration_minutes: int,
+    format_type: str,
+    bonus_left: float,
+    extras_price: float = 0.0,
+    consume: bool = True,
+):
+    """Выбрать способ оплаты брони и, если это бонус, потратить бонусные часы.
+
+    Порядок (владелец 29.09): 1) бонусные часы, если их хватает на ВСЮ бронь;
+    2) абонемент, если покрывает; 3) баланс. Явный выбор бонуса уважаем —
+    раньше сервер молча менял его на абонемент (см. resolve_payment_method).
+
+    Бонусную бронь перекотируем БЕЗ абонемента: иначе непокрытый остаток
+    посчитался бы по абонементной цене 0 ₾ (утечка 1630 ₾), а в брони остались
+    бы правило SUBSCRIPTION и часы абонемента. Бонус покрывает всю цену брони
+    вместе с пиком и допуслугами — как и раньше («выданное бонусом бесплатно»).
+
+    Возвращает (method, quote, bonus_covered). consume=False — «примерка»
+    без записи: покрытие считается из `bonus_left`, пул бонусов не трогаем.
+    """
+    from app.services.pricing import resolve_payment_method
+    method = resolve_payment_method(requested, quote, bonus_hours_available=bonus_left)
+    if method != "bonus":
+        return method, quote, 0.0
+    if quote.applied_rule == "SUBSCRIPTION":
+        quote = pricing_service.calculate_price(
+            user=owner,
+            resource_id=resource_id,
+            start_time=start_dt,
+            duration_minutes=duration_minutes,
+            format_type=format_type,
+            ignore_subscription=True,
+        )
+        quote.final_price = round(float(quote.final_price or 0) + float(extras_price or 0), 2)
+    hrs = (duration_minutes or 0) / 60.0
+    if consume:
+        from app.services.bonus_service import consume_free_hours
+        covered = consume_free_hours(session, owner.id, hrs)
+    else:
+        covered = round(min(max(float(bonus_left or 0), 0.0), hrs), 2)
+    if hrs > 0 and covered > 0:
+        _uncovered = max(0.0, hrs - covered)
+        quote.final_price = round(float(quote.final_price or 0) * (_uncovered / hrs), 2)
+    return method, quote, covered
+
+
 # ─── Create booking ──────────────────────────────────────────────────────────
 
 @router.post("/", response_model=BookingRead)
@@ -935,20 +992,24 @@ def create_booking(
         # (списание везде завязано на payment_method) — кабинет уйдёт за 0 ₾.
         # Делать это НАДО до гейтов ниже: от ярлыка зависят и списание часов,
         # и проверка средств, и пиковая надбавка.
-        booking_in.payment_method = resolve_payment_method(booking_in.payment_method, quote)
-
+        #
+        # Порядок (владелец 29.09): бонус, если хватает на всю бронь → абонемент
+        # → баланс; явный выбор бонуса уважаем.
+        #
         # ── Бонусные часы (owner 2026-07-20): выданное бонусом — бесплатно, всё
         # сверх — по обычной цене. Тратим бесплатные часы клиента (FIFO), а цену
         # оставляем только за НЕпокрытую часть — она уйдёт с баланса ниже. Раньше
         # «бонус» списывал полную цену с баланса, а сам бонус не трогал (клиент −20).
-        bonus_covered = 0.0
-        if booking_in.payment_method == "bonus":
-            from app.services.bonus_service import consume_free_hours
-            _bonus_hrs = (booking_in.duration or 0) / 60.0
-            bonus_covered = consume_free_hours(session, booking_owner.id, _bonus_hrs)
-            if _bonus_hrs > 0 and bonus_covered > 0:
-                _uncovered = max(0.0, _bonus_hrs - bonus_covered)
-                quote.final_price = round(float(quote.final_price or 0) * (_uncovered / _bonus_hrs), 2)
+        from app.services.bonus_service import available_free_hours
+        booking_in.payment_method, quote, bonus_covered = _resolve_with_bonus(
+            session, pricing_service, booking_owner, booking_in.payment_method, quote,
+            resource_id=booking_in.resource_id,
+            start_dt=start_dt,
+            duration_minutes=booking_in.duration,
+            format_type=booking_in.format,
+            bonus_left=available_free_hours(session, booking_owner.id),
+            extras_price=extras_price,
+        )
 
         if booking_in.payment_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
@@ -1269,7 +1330,9 @@ def create_booking(
                 "Арендатор": booking_owner.name or booking_owner.email,
                 "Когда":     f"{date_label} · {time_label}",
                 "Кабинет":   f"{res_name} · {loc_name}",
-                "Сумма":     f"{booking.final_price:g} ₾" if booking.final_price else "по абонементу",
+                "Сумма":     (f"{booking.final_price:g} ₾" if booking.final_price
+                              else "бонусные часы" if booking.payment_method == "bonus"
+                              else "по абонементу"),
             }
             if extras_pretty:
                 # Inline note on the main alert AND a separate focused alert
@@ -1454,6 +1517,10 @@ def create_multi_slot_booking(
     created_bookings = []
     total_cost = 0.0
     pricing_service = PricingService(session)
+    # Бонусные часы клиента: тратятся по слотам, пока хватает на слот целиком
+    # (порядок оплаты владельца 29.09: бонус → абонемент → баланс).
+    from app.services.bonus_service import available_free_hours
+    _bonus_left = available_free_hours(session, booking_owner.id)
 
     for s, d in parsed_slots:
         try:
@@ -1478,7 +1545,15 @@ def create_multi_slot_booking(
         # Ярлык решается ПО СЛОТУ, а не на всю пачку: часы абонемента могут
         # кончиться на середине, и тогда следующие слоты честно уйдут на баланс.
         # `data.payment_method` не трогаем — он общий на весь запрос.
-        slot_method = resolve_payment_method(data.payment_method, quote)
+        slot_method, quote, slot_bonus_hours = _resolve_with_bonus(
+            session, pricing_service, booking_owner, data.payment_method, quote,
+            resource_id=s.resource_id,
+            start_dt=start_dt,
+            duration_minutes=s.duration,
+            format_type=s.format,
+            bonus_left=_bonus_left,
+        )
+        _bonus_left = max(0.0, _bonus_left - slot_bonus_hours)
 
         if slot_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
@@ -1505,7 +1580,7 @@ def create_multi_slot_booking(
                     remaining_hours=max(0.0, remaining - hours_deducted),
                     used_hours=used + hours_deducted,
                 )
-        else:  # balance
+        else:  # balance (и bonus — остаток сверх бонусных часов)
             if not defer_charge_multi:
                 available_funds = (booking_owner.balance or 0) + (booking_owner.credit_limit or 0)
                 if available_funds < quote.final_price:
@@ -1536,7 +1611,8 @@ def create_multi_slot_booking(
             payment_source=(
                 "subscription" if slot_method == "subscription" else "deposit"
             ),
-            hours_deducted=quote.hours_deducted,
+            # Бонусная бронь хранит потраченные бонус-часы — их вернёт отмена.
+            hours_deducted=(slot_bonus_hours if slot_method == "bonus" else quote.hours_deducted),
             format=s.format,
             user_id=booking_owner.email,
             user_uuid=booking_owner.id,
@@ -1760,7 +1836,12 @@ def quote_recurring_booking(
     items = []
     total_money = 0.0
     total_hours = 0.0
+    total_bonus_hours = 0.0
     warnings = []
+    # Бонусные часы — только ЧИТАЕМ остаток и «тратим» его локально по датам,
+    # как это сделает создание серии (бонус → абонемент → баланс).
+    from app.services.bonus_service import available_free_hours
+    _bonus_left = available_free_hours(session, booking_owner.id)
     for d in dates:
         try:
             h, m = map(int, data.start_time.split(":"))
@@ -1774,7 +1855,17 @@ def quote_recurring_booking(
             duration_minutes=data.duration,
             format_type=data.format,
         )
-        occ_method = resolve_payment_method(data.payment_method, quote)
+        occ_method, quote, occ_bonus = _resolve_with_bonus(
+            session, pricing_service, booking_owner, data.payment_method, quote,
+            resource_id=data.resource_id,
+            start_dt=start_dt,
+            duration_minutes=data.duration,
+            format_type=data.format,
+            bonus_left=_bonus_left,
+            consume=False,
+        )
+        _bonus_left = max(0.0, _bonus_left - occ_bonus)
+        total_bonus_hours += occ_bonus
         if occ_method == "subscription" and quote.applied_rule != "SUBSCRIPTION":
             # Создание на такой дате упало бы 400 — честно помечаем и считаем
             # деньгами (так поведёт себя клиент, переключив способ оплаты).
@@ -1795,6 +1886,7 @@ def quote_recurring_booking(
             "method": occ_method,
             "amount": round(amount, 2),
             "hours": hours,
+            "bonus_hours": occ_bonus,
         })
 
     return {
@@ -1803,6 +1895,7 @@ def quote_recurring_booking(
         "items": items,
         "total_money": round(total_money, 2),
         "total_hours": round(total_hours, 2),
+        "total_bonus_hours": round(total_bonus_hours, 2),
         "subscription_short_dates": warnings,
     }
 
@@ -2026,6 +2119,11 @@ def create_recurring_booking(
         session.add(anchor_booking)
         created_bookings.append(str(anchor_booking.id))
 
+    # Бонусные часы клиента тратятся по датам серии, пока хватает на встречу
+    # целиком (порядок оплаты владельца 29.09: бонус → абонемент → баланс).
+    from app.services.bonus_service import available_free_hours
+    _bonus_left = available_free_hours(session, booking_owner.id)
+
     # Iterate over only the dates we actually need to create.
     for d in create_dates:
         try:
@@ -2056,7 +2154,15 @@ def create_recurring_booking(
 
         # Ярлык — по каждому вхождению серии: часы абонемента могут кончиться
         # в середине, и остаток серии честно уйдёт на баланс.
-        occ_method = resolve_payment_method(data.payment_method, quote)
+        occ_method, quote, occ_bonus_hours = _resolve_with_bonus(
+            session, pricing_service, booking_owner, data.payment_method, quote,
+            resource_id=data.resource_id,
+            start_dt=start_dt,
+            duration_minutes=data.duration,
+            format_type=data.format,
+            bonus_left=_bonus_left,
+        )
+        _bonus_left = max(0.0, _bonus_left - occ_bonus_hours)
 
         if occ_method == "subscription":
             if quote.applied_rule != "SUBSCRIPTION":
@@ -2097,7 +2203,12 @@ def create_recurring_booking(
             applied_rule=quote.applied_rule,
             discount_amount=quote.discount_amount,
             discount_percent=quote.discount_percent,
-            hours_deducted=quote.hours_deducted if occ_method == "subscription" else None,
+            # Бонусная встреча хранит потраченные бонус-часы — их вернёт отмена.
+            hours_deducted=(
+                quote.hours_deducted if occ_method == "subscription"
+                else (occ_bonus_hours or None) if occ_method == "bonus"
+                else None
+            ),
             payment_method=occ_method,
             format=data.format,
             extras=[],
@@ -2618,6 +2729,16 @@ def extend_recurring_series(
     _ext_ps = _PS(session)
     created = 0
     total_cost = 0.0
+    # Порядок оплаты (владелец 29.09): бонус → абонемент → баланс. Бонусный
+    # ярлык шаблона — это результат авто-выбора, а не выбор клиента, поэтому
+    # новые даты решаем заново («реши сам» = balance).
+    _ext_requested = template.payment_method or "balance"
+    if _ext_requested == "bonus":
+        _ext_requested = "balance"
+    _ext_bonus_left = 0.0
+    if booking_owner is not None:
+        from app.services.bonus_service import available_free_hours
+        _ext_bonus_left = available_free_hours(session, booking_owner.id)
     for d in new_dates:
         _q = None
         if booking_owner is not None:
@@ -2633,11 +2754,23 @@ def extend_recurring_series(
             except Exception:
                 logger.exception("[extend-series] пересчёт %s не удался — берём шаблон", d)
         if _q is not None:
-            _method = _rpm(template.payment_method or "balance", _q)
+            _method, _q, _ext_bonus = _resolve_with_bonus(
+                session, _ext_ps, booking_owner, _ext_requested, _q,
+                resource_id=template.resource_id,
+                start_dt=d.replace(hour=_h, minute=_m, second=0, microsecond=0),
+                duration_minutes=template.duration,
+                format_type=template.format or "individual",
+                bonus_left=_ext_bonus_left,
+            )
+            _ext_bonus_left = max(0.0, _ext_bonus_left - _ext_bonus)
             _final, _base = _q.final_price, _q.base_price
             _rule = _q.applied_rule
             _damt, _dpct = _q.discount_amount, _q.discount_percent
-            _hrs = _q.hours_deducted if _method == "subscription" else None
+            _hrs = (
+                _q.hours_deducted if _method == "subscription"
+                else (_ext_bonus or None) if _method == "bonus"
+                else None
+            )
         else:
             _method = template.payment_method
             _final, _base = template.final_price, template.base_price

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
@@ -9,7 +9,11 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { useCrmStore } from '../../store/crmStore';
 import { bookingsApi } from '../../api/bookings';
-import { bonusesApi, type Bonus } from '../../api/bonuses';
+import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
+import {
+    balanceLockedReason, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
+    subscriptionHours, subscriptionHoursLabel, type PayMethod,
+} from '../../utils/paymentPriority';
 import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../utils/data';
 import { calculatePrice } from '../../utils/pricing';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
@@ -23,7 +27,7 @@ import type { Format } from '../../types';
  * What it covers:
  *   - Format selector (chips, three options)
  *   - Extras toggles (sandbox / projector / flipchart / sandbox-toys)
- *   - Payment method (balance / subscription) when applicable
+ *   - Payment method (bonus / subscription / balance) — порядок как на сервере
  *   - Price breakdown
  *   - One-shot "Забронировать" CTA (sticky bottom)
  *
@@ -64,17 +68,6 @@ export function MobileCheckout() {
     // Занятые даты серии — показываем списком с выбором «создать остальные».
     const [seriesConflicts, setSeriesConflicts] = useState<Array<{ date: string; reason?: string }> | null>(null);
 
-    // Активные подарочные часы (welcome bonus). Бэкенд хранит тип 'free_hour';
-    // принимаем и camelCase на случай легаси-записей (как в десктопном мастере).
-    const [activeBonuses, setActiveBonuses] = useState<Bonus[]>([]);
-    useEffect(() => {
-        if (!currentUser) return;
-        bonusesApi.getMyBonuses()
-            .then(bs => setActiveBonuses(bs.filter(b =>
-                b.status === 'active' && (b.type === 'free_hour' || b.type === 'freeHour'))))
-            .catch(() => {});
-    }, [currentUser]);
-
     // Admin actor flag — only admins/owner can book on behalf of a specialist.
     const isAdminActor = !!(currentUser && (
         currentUser.role === 'owner'
@@ -107,6 +100,11 @@ export function MobileCheckout() {
         const u = users?.find(x => x.email === state.bookingForUser || x.id === state.bookingForUser);
         return u ?? currentUser;
     }, [state.bookingForUser, users, currentUser]);
+
+    // Активные бонусные часы того, ЗА КОГО бронь (сервер тратит именно их).
+    // Тип 'free_hour' и срок годности учитывает activeBonusHours.
+    const isProxy = !!effectiveUser && effectiveUser.id !== currentUser?.id;
+    const totalBonusHours = useActiveBonusHours(effectiveUser?.id, isProxy);
 
     // If we got here without a slot selection, kick back to Find.
     useEffect(() => {
@@ -185,36 +183,41 @@ export function MobileCheckout() {
         return hoursUntil >= 0 && hoursUntil < threshold;
     }, [priced.items]);
 
-    /** Subscription eligibility — copy of the desktop wizard's logic, simplified. */
-    const subInfo = useMemo(() => {
-        const sub = effectiveUser?.subscription;
-        if (!sub) return { eligible: false, reason: 'Нет абонемента' };
-        if (sub.isFrozen) return { eligible: false, reason: 'Абонемент заморожен' };
-        if (sub.remainingHours < totalDurationHours - 0.1) {
-            return { eligible: false, reason: `Осталось ${sub.remainingHours.toFixed(1)}ч, нужно ${totalDurationHours.toFixed(1)}ч` };
-        }
-        return { eligible: true, reason: '' };
-    }, [effectiveUser, totalDurationHours]);
+    // ── Порядок оплаты (владелец 29.09): бонус → абонемент → баланс ──
+    // Абонемент: честный остаток — часы будущих, ещё не списанных броней уже
+    // обещаны, и «Осталось 6 ч» без них обманывало (G4-client-mobile-M1).
+    const isSeries = recurPattern !== 'once';
+    const subHours = useMemo(() => subscriptionHours(effectiveUser?.subscription, {
+        format: state.format,
+        bookingDate: state.date,
+        bookings,
+        ownerEmail: effectiveUser?.email,
+    }), [effectiveUser, state.format, state.date, bookings]);
+    // Серию бонусом явно не оплачиваем: сервер сам потратит бонус на первые
+    // даты, если его хватит на встречу целиком (это видно в «примерке» серии).
+    const plan = useMemo(
+        () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total }),
+        [totalDurationHours, totalBonusHours, subHours, isSeries, priced.total],
+    );
 
-    // Бонусные часы. Право = бонус-часов хватает на всю бронь И это одиночная
-    // бронь (серию бонусом не покрываем — welcome bonus 1ч не хватит на серию).
-    const totalBonusHours = activeBonuses.reduce((s, b) => s + (b.quantity || 0), 0);
-    // !state.bookingForUser — в режиме «админ за клиента» бонусы принадлежат
-    // админу, не клиенту, поэтому бонусную оплату там не предлагаем.
-    const bonusEligible = recurPattern === 'once'
-        && !state.bookingForUser
-        && totalBonusHours > 0
-        && totalBonusHours >= totalDurationHours - 0.01;
-
-    // Reset payment to balance if subscription got disabled by hours change.
+    // Способ по умолчанию — тот, что выберет сервер. Раньше стоял «Баланс»,
+    // и экран писал «Спишется 45 ₾ с баланса», пока сервер брал часы
+    // абонемента (G4-01). Пока клиент сам не переключал, выбор следует за
+    // планом (бонусы подгружаются позже); ручной выбор сбрасываем, только
+    // если он стал недоступен.
+    const userPickedPay = useRef(false);
     useEffect(() => {
-        if (!subInfo.eligible && state.paymentMethod === 'subscription') {
-            useBookingStore.setState({ paymentMethod: 'balance' });
-        }
-        if (!bonusEligible && state.paymentMethod === 'bonus') {
-            useBookingStore.setState({ paymentMethod: 'balance' });
-        }
-    }, [subInfo.eligible, bonusEligible, state.paymentMethod]);
+        const cur: PayMethod = state.paymentMethod ?? 'balance';
+        const want: PayMethod = isSeries ? 'balance' : plan.auto;
+        if (userPickedPay.current && isSelectable(cur, plan, isSeries)) return;
+        userPickedPay.current = false;
+        if (cur !== want) useBookingStore.setState({ paymentMethod: want });
+    }, [plan, isSeries, state.paymentMethod]);
+    const pickPay = (m: PayMethod) => {
+        if (!isSelectable(m, plan, isSeries)) return;
+        userPickedPay.current = true;
+        useBookingStore.setState({ paymentMethod: m });
+    };
 
     const firstSlot = priced.items[0];
     const resource = firstSlot ? RESOURCES.find(r => r.id === firstSlot.resourceId) : null;
@@ -304,7 +307,7 @@ export function MobileCheckout() {
 
     // «Примерка» серии на бэке (аудит 30.08): точная сумма той же математикой,
     // что и создание. Пока не пришла — кнопка показывает оценку «цена × N».
-    const [seriesQuote, setSeriesQuote] = useState<{ totalMoney: number; totalHours: number; occurrences: number; subscriptionShortDates: string[] } | null>(null);
+    const [seriesQuote, setSeriesQuote] = useState<{ totalMoney: number; totalHours: number; totalBonusHours?: number; occurrences: number; subscriptionShortDates: string[] } | null>(null);
     useEffect(() => {
         setSeriesQuote(null);
         if (recurPattern === 'once' || !firstSlot || effectiveOccurrences < 1) return;
@@ -327,12 +330,26 @@ export function MobileCheckout() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [recurPattern, effectiveOccurrences, firstSlot?.resourceId, firstSlot?.startTime, firstSlot?.duration, state.format, state.paymentMethod, state.date, state.bookingForUser]);
 
-    const resolveFinalMethod = (): 'balance' | 'subscription' | 'bonus' =>
-        (bonusEligible && state.paymentMethod === 'bonus')
-            ? 'bonus'
-            : (subInfo.eligible && state.paymentMethod === 'subscription')
-                ? 'subscription'
-                : 'balance';
+    const resolveFinalMethod = (): PayMethod => resolvePayMethod(state.paymentMethod, plan, isSeries);
+
+    // Что реально спишется — для итога, подписи и кнопки (G4-01: кнопка всегда
+    // писала «Забронировать · 45 ₾», даже когда платили часами).
+    const payMethod = resolveFinalMethod();
+    const extrasTotal = priced.items.reduce((s, i) => s + i.price.extrasPrice, 0);
+    const peakTotal = priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0);
+    // При абонементе деньгами идут только пиковая надбавка и допуслуги.
+    const subMoney = peakTotal + extrasTotal;
+    const subMoneyNote = subMoney > 0
+        ? ` (+${subMoney.toFixed(0)} ₾ ${peakTotal > 0 && extrasTotal > 0 ? 'за пиковые часы и допуслуги' : peakTotal > 0 ? 'за пиковые часы' : 'за допуслуги'})`
+        : '';
+    const payLabel = payMethod === 'bonus'
+        ? `${fmtHours(totalDurationHours)} из бонусов`
+        : payMethod === 'subscription'
+            ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${subMoney.toFixed(0)} ₾` : ''}`
+            : `${priced.total.toFixed(0)} ₾`;
+    const payName = payMethod === 'bonus' ? 'бонусные часы' : payMethod === 'subscription' ? 'абонемент' : 'баланс';
+    const payChoices = (['bonus', 'subscription', 'balance'] as PayMethod[])
+        .filter(m => isSelectable(m, plan, isSeries)).length;
 
     /** Создание серии. skipConflicts=true — пропустить занятые даты (после того,
      *  как человек увидел их список и нажал «Создать остальные»). Раньше любой
@@ -400,10 +417,11 @@ export function MobileCheckout() {
         }
 
         // Balance check: bail with toast if the user can't afford it within
-        // their credit limit. Subscription path skips this — backend
-        // validates remaining hours. We check the *effective* user (target
-        // if admin-proxy, else current user).
-        if (finalMethod === 'balance' && effectiveUser?.email === currentUser.email) {
+        // their credit limit. Только когда платим деньгами: бонусы и абонемент
+        // сервер спишет часами — раньше владелец абонемента с малым балансом
+        // получал «Не хватает 45 ₾», хотя деньги бы не понадобились (G4-01).
+        // We check the *effective* user (target if admin-proxy, else current user).
+        if (finalMethod === 'balance' && priced.total > 0 && effectiveUser?.email === currentUser.email) {
             // Skip the projected-balance gate when admin is booking for someone
             // else — let the backend enforce against the target's wallet.
             const projected = (effectiveUser.balance ?? 0) - priced.total;
@@ -497,7 +515,7 @@ export function MobileCheckout() {
         <>
             <div style={{
                 paddingTop: 8,
-                paddingBottom: 'calc(120px + env(safe-area-inset-bottom, 0px))',
+                paddingBottom: 'calc(156px + env(safe-area-inset-bottom, 0px))',
                 display: 'flex', flexDirection: 'column', gap: 18,
             }}>
                 {/* Header */}
@@ -959,42 +977,56 @@ export function MobileCheckout() {
                 </Section>
                 )}
 
-                {/* Payment */}
+                {/* Payment — варианты в порядке сервера: бонус → абонемент → баланс. */}
+                <div id="m-checkout-pay" style={{ scrollMarginTop: 12 }}>
                 <Section title="Оплата">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {currentUser?.subscription && (
-                            <PaymentRow
-                                label="Абонемент"
-                                sub={subInfo.eligible
-                                    ? `Осталось ${currentUser.subscription.remainingHours.toFixed(1)} ч`
-                                    : subInfo.reason}
-                                disabled={!subInfo.eligible}
-                                active={state.paymentMethod === 'subscription'}
-                                onClick={() => useBookingStore.setState({ paymentMethod: 'subscription' })}
-                            />
-                        )}
-                        {totalBonusHours > 0 && recurPattern === 'once' && !state.bookingForUser && (
+                    <div role="radiogroup" aria-label="Способ оплаты" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {totalBonusHours > 0 && !isSeries && !plan.free && (
                             <PaymentRow
                                 label="Бонусные часы"
-                                sub={bonusEligible
-                                    ? `${totalBonusHours.toFixed(1)} ч бесплатно`
-                                    : `Нужно ${totalDurationHours.toFixed(1)} ч, есть ${totalBonusHours.toFixed(1)} ч`}
-                                disabled={!bonusEligible}
-                                active={state.paymentMethod === 'bonus'}
-                                onClick={() => bonusEligible && useBookingStore.setState({ paymentMethod: 'bonus' })}
+                                sub={plan.bonusCovers
+                                    ? `${fmtHours(totalBonusHours)} бесплатно`
+                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}`}
+                                disabled={!plan.bonusCovers}
+                                active={payMethod === 'bonus'}
+                                onClick={() => pickPay('bonus')}
+                            />
+                        )}
+                        {effectiveUser?.subscription && (
+                            <PaymentRow
+                                label="Абонемент"
+                                sub={!subHours.ok
+                                    ? subHours.reason
+                                    : plan.subCovers
+                                        ? subscriptionHoursLabel(subHours)
+                                        : `${subscriptionHoursLabel(subHours)}, нужно ${fmtHours(totalDurationHours)}`}
+                                disabled={!plan.subCovers}
+                                active={payMethod === 'subscription'}
+                                onClick={() => pickPay('subscription')}
                             />
                         )}
                         <PaymentRow
                             label="Баланс"
                             // Показываем баланс того, ЗА КОГО бронь (админ-прокси
                             // бронирует за клиента — списание идёт с клиента, не
-                            // с админа; аудит 30.08).
-                            sub={effectiveUser ? `${(effectiveUser.balance ?? 0).toFixed(0)} ₾` : ''}
-                            active={state.paymentMethod !== 'subscription' && state.paymentMethod !== 'bonus'}
-                            onClick={() => useBookingStore.setState({ paymentMethod: 'balance' })}
+                            // с админа; аудит 30.08). Пока бронь покрывают бонусы
+                            // или абонемент, сервер деньги не возьмёт — вариант
+                            // недоступен, и мы говорим почему.
+                            sub={(() => {
+                                const bal = effectiveUser ? `${(effectiveUser.balance ?? 0).toFixed(0)} ₾` : '';
+                                if (!isSelectable('balance', plan, isSeries)) {
+                                    return `${bal} · ${balanceLockedReason(plan).toLowerCase()}`;
+                                }
+                                if (isSeries && plan.subCovers) return `${bal} · сначала спишутся часы абонемента`;
+                                return bal;
+                            })()}
+                            disabled={!isSelectable('balance', plan, isSeries)}
+                            active={payMethod === 'balance'}
+                            onClick={() => pickPay('balance')}
                         />
                     </div>
                 </Section>
+                </div>
 
                 {/* Price summary */}
                 <div style={{ padding: '0 16px' }}>
@@ -1024,21 +1056,45 @@ export function MobileCheckout() {
                             />
                         )}
                         <div style={{ height: 1, background: 'rgba(0,0,0,0.08)', margin: '4px 0' }} />
-                        <Row label="Итого" value={`${priced.total.toFixed(0)} ₾`} bold />
-                        {state.paymentMethod === 'subscription' && subInfo.eligible && (
+                        <Row
+                            label="Итого"
+                            value={isSeries || payMethod === 'balance'
+                                ? `${priced.total.toFixed(0)} ₾`
+                                : payMethod === 'bonus'
+                                    ? '0 ₾'
+                                    : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${subMoney.toFixed(0)} ₾` : ''}`}
+                            bold
+                        />
+                        {!isSeries && payMethod === 'subscription' && (() => {
+                            const firstStart = priced.items[0]?.start;
+                            const deferred = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
+                            return (
+                                <>
+                                    <div style={{ fontSize: 12, color: '#666' }}>
+                                        Спишется {fmtHours(totalDurationHours)} абонемента{subMoneyNote}
+                                        {deferred && firstStart ? ` — ${formatChargeAt(firstStart)}, за сутки до начала.` : '.'}
+                                    </div>
+                                    {/* Часть остатка уже обещана будущим броням: честно
+                                        говорим, что при нехватке часов крон за сутки до
+                                        встречи возьмёт деньги (billing_defer). */}
+                                    {!plan.subFreeCovers && (
+                                        <div style={{ fontSize: 12, color: '#b3453a' }}>
+                                            Свободно только {fmtHours(subHours.free)}: {fmtHours(subHours.reserved)} уже в других бронях.
+                                            {' '}Если к списанию часов не хватит, одна из броней спишется с баланса по обычной цене.
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
+                        {!isSeries && payMethod === 'bonus' && (
                             <div style={{ fontSize: 12, color: '#666' }}>
-                                Спишется {totalDurationHours.toFixed(1)} ч с абонемента
-                            </div>
-                        )}
-                        {state.paymentMethod === 'bonus' && bonusEligible && (
-                            <div style={{ fontSize: 12, color: '#666' }}>
-                                Спишется {totalDurationHours.toFixed(1)} ч из бонуса — с баланса 0 ₾
+                                Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса 0 ₾
                             </div>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
                             честно предупреждаем про уход в долг — раньше клиент
                             узнавал о минусе постфактум из истории баланса. */}
-                        {state.paymentMethod !== 'subscription' && state.paymentMethod !== 'bonus' && effectiveUser && (() => {
+                        {!isSeries && payMethod === 'balance' && effectiveUser && (() => {
                             const bal = effectiveUser.balance ?? 0;
                             const after = bal - priced.total;
                             const debt = after < 0 ? Math.min(priced.total, -after) : 0;
@@ -1069,7 +1125,8 @@ export function MobileCheckout() {
                                 <>
                                     <div style={{ fontSize: 12, color: '#666' }}>
                                         Серия из {seriesQuote.occurrences}: точно {seriesQuote.totalMoney.toFixed(0)} ₾
-                                        {seriesQuote.totalHours > 0 ? ` + ${seriesQuote.totalHours.toFixed(1)} ч с абонемента` : ''}
+                                        {seriesQuote.totalHours > 0 ? ` + ${fmtHours(seriesQuote.totalHours)} с абонемента` : ''}
+                                        {(seriesQuote.totalBonusHours ?? 0) > 0 ? ` + ${fmtHours(seriesQuote.totalBonusHours ?? 0)} из бонусов` : ''}
                                     </div>
                                     {(seriesQuote.subscriptionShortDates?.length ?? 0) > 0 && (
                                         <div style={{ fontSize: 12, color: '#b3453a' }}>
@@ -1101,6 +1158,30 @@ export function MobileCheckout() {
                 zIndex: 90,
                 pointerEvents: 'none',
             }}>
+                {/* Способ оплаты виден у кнопки — сам блок «Оплата» ниже первого
+                    экрана, и раньше клиент жал кнопку, не видя, откуда спишется. */}
+                {!confirmed && !isSeries && (
+                    <div style={{
+                        pointerEvents: 'auto',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                        background: '#fff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10,
+                        padding: '6px 10px', marginBottom: 6, fontSize: 12, color: '#555',
+                    }}>
+                        <span>Оплата: <b style={{ color: '#0E0E0E' }}>{payName}</b></span>
+                        {payChoices > 1 && (
+                            <button
+                                onClick={() => document.getElementById('m-checkout-pay')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                                style={{
+                                    background: 'none', border: 'none', padding: 4, cursor: 'pointer',
+                                    fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+                                    color: '#0E0E0E', textDecoration: 'underline',
+                                }}
+                            >
+                                Изменить
+                            </button>
+                        )}
+                    </div>
+                )}
                 <button
                     onClick={submit}
                     disabled={submitting || confirmed}
@@ -1141,8 +1222,8 @@ export function MobileCheckout() {
                                     ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['сессию', 'сессии', 'сессий'])} · ${(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences).toFixed(0)} ₾`
                                     : 'Выбери число повторов или дату')
                                 : isHotBooking
-                                    ? `Отправить на одобрение · ${priced.total.toFixed(0)} ₾`
-                                    : `Забронировать · ${priced.total.toFixed(0)} ₾`}
+                                    ? `Отправить на одобрение · ${payLabel}`
+                                    : `Забронировать · ${payLabel}`}
                 </button>
             </div>
 
@@ -1244,6 +1325,8 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
         <button
             onClick={onClick}
             disabled={disabled}
+            role="radio"
+            aria-checked={active && !disabled}
             style={{
                 background: '#fff',
                 border: `1px solid ${active && !disabled ? '#0E0E0E' : 'rgba(0,0,0,0.10)'}`,

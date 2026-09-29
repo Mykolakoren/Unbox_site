@@ -1750,6 +1750,9 @@ def _book_do_confirm(
     final_price = getattr(result, "final_price", None)
     applied_rule = getattr(result, "applied_rule", None)
     status = getattr(result, "status", "confirmed")
+    # Бонусные часы идут первыми (владелец 29.09) — бот обязан так и сказать,
+    # а не «Списано с баланса: 0 ₾».
+    paid_by_bonus = getattr(result, "payment_method", None) == "bonus"
 
     day_label = _fmt_full_day(d_obj)
     end_label = _compute_end_time(time_str, mins)
@@ -1759,7 +1762,10 @@ def _book_do_confirm(
         footer = "Админ одобрит её в ближайшее время — мы пришлём сообщение."
     else:
         header = "✅ <b>Бронь подтверждена!</b>"
-        if applied_rule == "SUBSCRIPTION":
+        if paid_by_bonus:
+            footer = "Оплачено бонусными часами." + (
+                f" Доплата с баланса: {final_price:g} ₾" if final_price else "")
+        elif applied_rule == "SUBSCRIPTION":
             footer = "Списано с абонемента."
         else:
             footer = f"Списано с баланса: {final_price:g} ₾" if final_price is not None else ""
@@ -1789,7 +1795,8 @@ def _book_do_confirm(
         who = escape(user.name or user.email or "—")
         badge = "⏳ На согласовании" if status == "pending_approval" else "🆕 Новая бронь"
         price_line = (
-            f"\n💸 {final_price:g} ₾" if final_price is not None and applied_rule != "SUBSCRIPTION"
+            "\n🎁 Бонусные часы" if paid_by_bonus
+            else f"\n💸 {final_price:g} ₾" if final_price is not None and applied_rule != "SUBSCRIPTION"
             else "\n🎫 Абонемент" if applied_rule == "SUBSCRIPTION" else ""
         )
         alert_markup = None

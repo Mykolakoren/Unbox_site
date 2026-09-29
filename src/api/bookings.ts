@@ -392,8 +392,10 @@ export const bookingsApi = {
         targetUserId?: string;
     }): Promise<{
         ok: boolean; occurrences: number;
-        items: { date: string; method: string; amount: number; hours: number }[];
+        items: { date: string; method: string; amount: number; hours: number; bonusHours?: number }[];
         totalMoney: number; totalHours: number;
+        /** Бонусные часы, которые сервер потратит на первые даты (бонус → абонемент → баланс). */
+        totalBonusHours?: number;
         subscriptionShortDates: string[];
     }> => {
         const response = await api.post('/bookings/recurring/quote', {

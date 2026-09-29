@@ -139,9 +139,19 @@ def _sweep_due_bookings(session: Session) -> dict[str, Any]:
                         start = booking_start_dt_tbilisi(b)
                         when = start.strftime("%d.%m %H:%M") if start else "—"
                         amount = float(b.charge_amount or 0)
+                        _pm = (b.payment_method or "").lower()
+                        # Абонемент исчерпан → settle списал ДЕНЬГИ и обнулил
+                        # hours_deducted: тогда это ₾, а не «ч абонемента» —
+                        # иначе списание денег было замаскировано (M1).
                         method_label = (
-                            "ч абонемента" if (b.payment_method or "").lower() == "subscription"
+                            "ч абонемента" if _pm == "subscription" and (b.hours_deducted or 0) > 0
                             else "₾"
+                        )
+                        # Бронь целиком оплачена бонусными часами (они потрачены
+                        # при создании) — «💸 0 ₾» только путает.
+                        amount_line = (
+                            "🎁 Оплачено бонусными часами" if _pm == "bonus" and amount <= 0
+                            else f"💸 {amount:g} {method_label}"
                         )
 
                         # Resource + location names — fall back to the raw id
@@ -190,7 +200,7 @@ def _sweep_due_bookings(session: Session) -> dict[str, Any]:
                             f"📍 {res_name}{loc_line}"
                             f"{client_line}"
                             f"{series_line}\n"
-                            f"💸 {amount:g} {method_label}\n\n"
+                            f"{amount_line}\n\n"
                             f"После 24 часов до начала бронь нельзя отменить с возвратом — "
                             f"если случилось что-то непредвиденное, напишите администратору."
                             f"{credit_warn}"

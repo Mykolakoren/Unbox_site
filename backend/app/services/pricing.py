@@ -54,20 +54,47 @@ class PriceBreakdown(BaseModel):
 _CLIENT_PAID_METHODS = {"balance", "bonus"}
 
 
-def resolve_payment_method(requested: Optional[str], quote: PriceBreakdown) -> str:
+def resolve_payment_method(
+    requested: Optional[str],
+    quote: PriceBreakdown,
+    bonus_hours_available: float = 0.0,
+) -> str:
     """Привести ярлык оплаты брони в соответствие с котировкой.
 
-    `_apply_subscription` — приоритет №1: движок применяет абонемент всякий раз,
-    когда план покрывает слот, и НЕ смотрит, что клиент выбрал в интерфейсе.
-    А списывают часы только там, где `payment_method == "subscription"`.
+    Порядок оплаты (владелец 29.09):
+      1) бонусные часы — если их хватает на ВСЮ бронь;
+      2) иначе абонемент — если он покрывает слот;
+      3) иначе баланс.
+    `balance` значит «реши сам» (так шлёт и Telegram-бот), поэтому к нему
+    применяется весь порядок. Явный выбор `bonus` уважаем: раньше сервер
+    молча менял его на абонемент, и бесплатные часы сгорали. Явный
+    `subscription` не трогаем (его проверяет вызывающий код).
+
+    `_apply_subscription` применяет абонемент всякий раз, когда план покрывает
+    слот, а списывают часы только там, где `payment_method == "subscription"`.
     Из-за этого бронь с абонементной ценой, но ярлыком `balance`, отдавала
     кабинет за 0 ₾ и не жгла часы: 63 брони, 84.5 ч, ~1630 ₾ до этого фикса.
-    Telegram-бот подставлял `balance` жёстко, поэтому через него текло всегда.
+    Поэтому если бонус НЕ покрывает бронь целиком, а котировка абонементная —
+    ярлык обязан стать `subscription` (частичный бонус посчитал бы остаток по
+    абонементной цене 0 ₾ — та же утечка). Бонусную бронь вызывающий код
+    перекотирует без абонемента (см. `_resolve_with_bonus` в bookings/routes).
 
-    Ярлык обязан следовать за деньгами.
+    Бонус не тратим на бронь, которая и так ничего не стоит (comp-аккаунт,
+    персональные 100 %): иначе бесплатный час сгорел бы зря — даже если
+    `bonus` пришёл явным выбором (экран не знает про comp-аккаунты).
     """
     method = (requested or "balance").lower()
-    if quote.applied_rule == "SUBSCRIPTION" and method in _CLIENT_PAID_METHODS:
+    if method not in _CLIENT_PAID_METHODS:
+        return method
+    booked = float(quote.booked_hours or 0)
+    costs_something = (
+        quote.applied_rule == "SUBSCRIPTION" or float(quote.final_price or 0) > 0
+    )
+    if not costs_something:
+        return "balance"
+    if booked > 0 and float(bonus_hours_available or 0) >= booked - 0.01:
+        return "bonus"
+    if quote.applied_rule == "SUBSCRIPTION":
         return "subscription"
     return method
 
@@ -329,6 +356,9 @@ class PricingService:
 
         # 3. Apply Hierarchy
         # Order: Subscription -> Manual (N/A here) -> Max(Weekly, Duration, Hot)
+        # NB (владелец 29.09): бонусные часы, если их хватает на всю бронь, идут
+        # ещё раньше абонемента — это решает resolve_payment_method + перекотировка
+        # с ignore_subscription при создании брони, а не сама цена.
 
         # A. Subscription (Priority 1)
         if not ignore_subscription and self._apply_subscription(user, breakdown, resource, format_type):

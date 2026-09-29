@@ -2,7 +2,7 @@ import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
 import type { PricingResult } from '../types';
 
-import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck, Sunrise, Plus } from 'lucide-react';
+import { Users, Clock, Tag, ShoppingCart, Zap, CalendarClock, TrendingUp, UserCheck, Sunrise, Plus, Wallet } from 'lucide-react';
 import { useMemo } from 'react';
 import { calculatePrice } from '../utils/pricing';
 import { EXTRAS, RESOURCES } from '../utils/data';
@@ -205,49 +205,18 @@ export function Summary() {
                         </div>
                     </div>
 
-                    <div className="pt-2">
-                        <div className="text-xs text-gray-400 mb-2 uppercase font-medium tracking-wider">Оплата за счет</div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                onClick={() => state.setPaymentMethod('subscription')}
-                                className="flex flex-col items-center justify-center p-2 rounded-xl transition-all"
-                                style={state.paymentMethod === 'subscription' ? {
-                                    background: 'rgba(212,226,225,0.70)',
-                                    backdropFilter: 'blur(16px) saturate(150%)',
-                                    WebkitBackdropFilter: 'blur(16px) saturate(150%)',
-                                    border: '1px solid rgba(71,109,107,0.35)',
-                                    boxShadow: '0 2px 8px rgba(71,109,107,0.12), inset 0 1px 0 rgba(255,255,255,0.60)',
-                                    color: '#2C3240',
-                                } : {
-                                    background: 'rgba(255,255,255,0.40)',
-                                    backdropFilter: 'blur(16px) saturate(130%)',
-                                    WebkitBackdropFilter: 'blur(16px) saturate(130%)',
-                                    border: '1px solid rgba(255,255,255,0.55)',
-                                    color: '#9299A3',
-                                }}
-                            >
-                                <span className="text-sm font-medium">Абонемент</span>
-                            </button>
-                            <button
-                                onClick={() => state.setPaymentMethod('balance')}
-                                className="flex flex-col items-center justify-center p-2 rounded-xl transition-all"
-                                style={state.paymentMethod === 'balance' ? {
-                                    background: 'rgba(212,226,225,0.70)',
-                                    backdropFilter: 'blur(16px) saturate(150%)',
-                                    WebkitBackdropFilter: 'blur(16px) saturate(150%)',
-                                    border: '1px solid rgba(71,109,107,0.35)',
-                                    boxShadow: '0 2px 8px rgba(71,109,107,0.12), inset 0 1px 0 rgba(255,255,255,0.60)',
-                                    color: '#2C3240',
-                                } : {
-                                    background: 'rgba(255,255,255,0.40)',
-                                    backdropFilter: 'blur(16px) saturate(130%)',
-                                    WebkitBackdropFilter: 'blur(16px) saturate(130%)',
-                                    border: '1px solid rgba(255,255,255,0.55)',
-                                    color: '#9299A3',
-                                }}
-                            >
-                                <span className="text-sm font-medium">Депозит</span>
-                            </button>
+                    {/* G3-03: тут был второй переключатель «Абонемент | Депозит» —
+                        без бонусов и с другими словами, чем в «Способе оплаты».
+                        Выбор живёт в одном месте (ConfirmationStep), здесь — только
+                        итог того, что выбрано. */}
+                    <div className="flex items-center gap-3 text-sm">
+                        <div className="text-gray-400"><Wallet size={16} /></div>
+                        <div>
+                            <div className="text-gray-500">Оплата</div>
+                            <div>{
+                                state.paymentMethod === 'bonus' ? 'Бонусные часы' :
+                                state.paymentMethod === 'subscription' ? 'Абонемент' : 'Баланс'
+                            }</div>
                         </div>
                     </div>
                 </div>
@@ -324,7 +293,11 @@ export function Summary() {
                 })()}
                 <div className="flex justify-between items-center pt-2 text-xl font-bold">
                     <span>Итого</span>
-                    <span>{total.finalPrice.toFixed(1)} ₾</span>
+                    {/* Бонусные часы покрывают бронь целиком (иначе их не выбрать);
+                        абонемент платит часами — деньгами только пиковая доплата. */}
+                    <span>{state.paymentMethod === 'subscription'
+                        ? `${Number(cartBookings.reduce((s, b) => s + b.duration / 60, 0).toFixed(1))} ч${total.finalPrice > 0 ? ` + ${total.finalPrice.toFixed(1)} ₾` : ''}`
+                        : `${(state.paymentMethod === 'bonus' ? 0 : total.finalPrice).toFixed(1)} ₾`}</span>
                 </div>
             </div>
 

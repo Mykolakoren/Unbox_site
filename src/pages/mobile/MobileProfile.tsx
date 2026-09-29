@@ -7,6 +7,7 @@ import { api } from '../../api/client';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { getFavoriteCabinet, setFavoriteCabinet } from './favoriteCabinet';
+import { reservedSubscriptionHours } from '../../utils/paymentPriority';
 import { resetTour } from './OnboardingTour';
 
 const BOT_USERNAME = 'Unbox_Booking_G_Bot';
@@ -21,7 +22,7 @@ const LOC_ADDRESSES = [
 
 export function MobileProfile() {
     const navigate = useNavigate();
-    const { currentUser, logout, fetchCurrentUser } = useUserStore();
+    const { currentUser, logout, fetchCurrentUser, bookings } = useUserStore();
     const [tgBusy, setTgBusy] = useState(false);
     const [bonuses, setBonuses] = useState<Bonus[]>([]);
     const [favCab, setFavCab] = useState<string | null>(() => getFavoriteCabinet(currentUser?.id));
@@ -44,6 +45,9 @@ export function MobileProfile() {
     const balance = currentUser.balance ?? 0;
     const debt = balance < 0 ? -balance : 0;
     const sub = currentUser.subscription;
+    // Часы будущих, ещё не списанных броней «с абонемента» уже обещаны —
+    // без них «осталось 6 ч» обманывало (G4-client-mobile-M1).
+    const subReserved = reservedSubscriptionHours(sub, bookings, currentUser.email);
 
     const openInBot = () => {
         window.open(`https://t.me/${BOT_USERNAME}`, '_blank', 'noopener,noreferrer');
@@ -117,7 +121,13 @@ export function MobileProfile() {
                             }}
                             aria-label="Открыть страницу абонемента"
                         >
-                            <Stat label="Абонемент →" value={`${sub.remainingHours} ч`} sub={`/ ${sub.totalHours}`} />
+                            <Stat
+                                label="Абонемент →"
+                                value={`${sub.remainingHours} ч`}
+                                sub={subReserved > 0.01
+                                    ? `/ ${sub.totalHours} · ${Number(subReserved.toFixed(1))} в бронях`
+                                    : `/ ${sub.totalHours}`}
+                            />
                         </button>
                     )}
                     {debt > 0 && <Stat label="Долг" value={`${debt.toFixed(0)} ₾`} tone="danger" />}
