@@ -141,10 +141,18 @@ def register_new_user(
             detail="Такой email уже зарегистрирован. Войдите или используйте другой адрес.",
         )
         
-    user = User.model_validate(user_in, update={"hashed_password": security.get_password_hash(user_in.password)})
-    # Новым клиентам — лимит брони 50 ₾ (если форма его не прислала).
-    if not user.credit_limit:
-        user.credit_limit = NEW_CLIENT_CREDIT_LIMIT
+    # Регистрация публичная: из запроса берём ТОЛЬКО имя, почту, телефон и
+    # пароль. Раньше сюда целиком копировалось тело запроса (все поля UserBase),
+    # и любой мог прислать role="owner", permissions, balance, is_admin и
+    # получить аккаунт владельца (аудит 29.09). Роль, права и деньги выдаёт
+    # только админка. Новым клиентам — лимит брони 50 ₾.
+    user = User(
+        email=user_in.email,
+        name=user_in.name,
+        phone=user_in.phone,
+        hashed_password=security.get_password_hash(user_in.password),
+        credit_limit=NEW_CLIENT_CREDIT_LIMIT,
+    )
     session.add(user)
     session.commit()
     session.refresh(user)

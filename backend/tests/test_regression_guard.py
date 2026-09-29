@@ -666,23 +666,6 @@ def test_calendar_autosync_endpoint_secret_gated():
         "автосинк без секрет-гейта — любой сможет дергать синк")
 
 
-if __name__ == "__main__":
-    failures = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"  ✓ {name}")
-            except AssertionError as exc:
-                failures += 1
-                print(f"  ✗ {name}: {exc}")
-            except Exception as exc:  # noqa: BLE001
-                failures += 1
-                print(f"  ✗ {name}: {exc!r}")
-    print("СТОРОЖ: OK" if not failures else f"СТОРОЖ УПАЛ ({failures}) — деплой НЕ выкатывать")
-    sys.exit(1 if failures else 0)
-
-
 def test_session_notes_never_pushed_to_google_calendar():
     """Ревизия приватности 29.08: заметки терапевта шифруются в базе и не
     должны уходить открытым текстом в описание события Google. Пуш сессии
@@ -1041,3 +1024,38 @@ def test_convert_pending_booking_does_not_double_deduct_hours():
     assert "_subscription_category(" in sale, "несуществующая категория кассы уронит продажу (внешний ключ)"
     modal = (pathlib.Path(__file__).parent.parent.parent / "src/components/admin/modals/AssignSubscriptionModal.tsx").read_text()
     assert "await onConfirm(" in modal and "|| busy" in modal, "двойной клик снова проведёт продажу абонемента дважды"
+
+
+def test_register_ignores_role_permissions_and_money():
+    """29.09 аудит: POST /auth/register делал User.model_validate(user_in) и
+    копировал ВСЕ поля UserBase из тела запроса — любой без входа мог создать
+    себе аккаунт role="owner" с правами и балансом. Публичная регистрация
+    берёт только имя, почту, телефон и пароль."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/auth.py").read_text()
+    i = src.find("def register_new_user")
+    body = src[i:src.find("\n@router.", i)]
+    assert "User.model_validate(user_in" not in body, \
+        "регистрация снова копирует все поля запроса — можно прислать role/balance/permissions"
+    for field in ("role", "permissions", "balance", "is_admin", "subscription", "pricing_system",
+                  "personal_discount_percent", "tags", "crm_data", "telegram_id", "google_id"):
+        assert f"{field}=user_in" not in body and f"user_in.{field}" not in body, \
+            f"регистрация берёт {field} из запроса клиента"
+    assert "credit_limit=NEW_CLIENT_CREDIT_LIMIT" in body, "новым клиентам пропал лимит брони 50 ₾"
+
+
+if __name__ == "__main__":
+    failures = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            try:
+                fn()
+                print(f"  ✓ {name}")
+            except AssertionError as exc:
+                failures += 1
+                print(f"  ✗ {name}: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                failures += 1
+                print(f"  ✗ {name}: {exc!r}")
+    print("СТОРОЖ: OK" if not failures else f"СТОРОЖ УПАЛ ({failures}) — деплой НЕ выкатывать")
+    sys.exit(1 if failures else 0)
