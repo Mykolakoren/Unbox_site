@@ -84,8 +84,16 @@ def update_user_me(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Update own profile."""
+    user_data = user_in.dict(exclude_unset=True)
+    # G3-01 (аудит 29.09): стёртое в профиле имя уходило сюда как name="" и
+    # сохранялось — клиент пропадал из поиска и шахматки. Имя обрезаем
+    # и пустым не принимаем. Проверка до try: иначе 400 завернётся в str(e).
+    if "name" in user_data:
+        clean_name = (user_data["name"] or "").strip()
+        if not clean_name:
+            raise HTTPException(status_code=400, detail="Имя не может быть пустым")
+        user_data["name"] = clean_name
     try:
-        user_data = user_in.dict(exclude_unset=True)
         for key, value in user_data.items():
             setattr(current_user, key, value)
 

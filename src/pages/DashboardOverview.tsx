@@ -673,18 +673,18 @@ function GridHouseDashboardOverview({
 
             {/* KPI strip */}
             <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 0, borderTop: ghdoHairline, marginBottom: 32 }}>
-                {/* Balance */}
+                {/* Balance — в лари (₾). До 29.09 тут по ошибке стоял знак гривны (G3-04) */}
                 <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 0', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
                     <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БАЛАНС</div>
                     <div style={{
                         fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700,
                         color: isNegative ? GH.danger : GH.ink, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
                     }}>
-                        {currentUser.balance?.toLocaleString('ru-RU') || '0'} ₴
+                        {currentUser.balance?.toLocaleString('ru-RU') || '0'} ₾
                     </div>
                     {creditLimit > 0 && (
                         <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
-                            Кредит: {availableCredit.toLocaleString('ru-RU')} ₴ из {creditLimit.toLocaleString('ru-RU')} ₴
+                            Кредит: {availableCredit.toLocaleString('ru-RU')} ₾ из {creditLimit.toLocaleString('ru-RU')} ₾
                         </div>
                     )}
                 </div>
@@ -819,7 +819,7 @@ function GridHouseDashboardOverview({
                                             </div>
                                         </div>
                                         <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, color: t.amount >= 0 ? GH.accent : GH.danger }}>
-                                            {t.amount >= 0 ? '+' : ''}{t.amount?.toLocaleString('ru-RU')} ₴
+                                            {t.amount >= 0 ? '+' : ''}{t.amount?.toLocaleString('ru-RU')} {!t.currency || t.currency === 'GEL' ? '₾' : t.currency}
                                         </span>
                                     </div>
                                 );

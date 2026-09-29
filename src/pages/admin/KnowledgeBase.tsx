@@ -249,18 +249,19 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                     </div>
                     <div style={boxHair}>
                         <div style={subhead}>Приветственный бонус</div>
+                        {/* X3-02 (аудит 29.09): это 1 бесплатный час (Bonus type='free_hour',
+                            auth.py), а не 20 ₾ на счёт — по этому тексту админы объясняют клиентам. */}
                         <p style={{ ...para, fontSize: 14, marginTop: 0, marginBottom: 10, lineHeight: 1.55 }}>
-                            При регистрации на счёт клиента автоматически зачисляется{' '}
-                            <strong style={{ fontWeight: 700 }}>20 ₾</strong> — эквивалент одного часа индивидуального
-                            бронирования. Бонус ведёт себя как обычные деньги: может быть использован для оплаты
-                            <strong style={{ fontWeight: 700 }}> любой</strong> брони (кабинет, капсула, групповой формат).
-                            При оформлении брони бонус автоматически вычитается из суммы; если бронь дороже — клиент
-                            доплачивает разницу с основного баланса.
+                            При регистрации клиенту автоматически начисляется{' '}
+                            <strong style={{ fontWeight: 700 }}>1 бесплатный час</strong> аренды. На денежный баланс
+                            он не попадает — это отдельный бонус. Им можно оплатить
+                            <strong style={{ fontWeight: 700 }}> любую</strong> бронь (кабинет, капсула, групповой формат):
+                            один час брони становится бесплатным, остальные часы клиент оплачивает как обычно.
                         </p>
                         <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
                             <div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Номинал</div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>20 GEL</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Подарок</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>1 час</div>
                             </div>
                             <div>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Срок действия</div>

@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { SubscriptionCard } from '../components/SubscriptionCard';
 import { toast } from 'sonner';
 import { api } from '../api/client';
+import { apiErrorMessage } from '../utils/errors';
 import { hasPermission } from '../utils/permissions';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
@@ -503,11 +504,94 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
 
 interface GridHouseProfilePageProps {
     currentUser: any;
-    updateUser: (data: any) => void;
+    updateUser: (data: any) => Promise<void>;
     isAdmin: boolean | "" | undefined;
 }
 
+/** Тост об ошибке сохранения профиля. Общий перехватчик (api/client.ts) сам
+ *  показывает тост на 5xx, 422, 409 и обрыв связи — их не дублируем. Остальное
+ *  (например, 400 «Имя не может быть пустым») раньше молча уходило в консоль. */
+function toastProfileSaveError(err: any, fallback: string) {
+    const status = err?.response?.status;
+    const shownByInterceptor = status
+        ? status >= 500 || status === 422 || status === 409
+        : err?.code === 'ECONNABORTED' || err?.message === 'Network Error';
+    if (shownByInterceptor) return;
+    const detail = err?.response?.data?.detail;
+    toast.error(detail ? apiErrorMessage(err, fallback) : fallback);
+}
+
 function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHouseProfilePageProps) {
+    // G3-01 (аудит 29.09): раньше каждое нажатие клавиши сразу уходило PATCH'ем
+    // на сервер, а поле ждало ответа — при быстром наборе буквы терялись, курсор
+    // прыгал в конец, стёртое имя сохранялось пустым, а «Сохранить изменения»
+    // ничего не делала. Теперь имя и телефон — черновик на странице, на сервер
+    // уходят один раз по кнопке. Та же страница — /dashboard/profile,
+    // /crm/account и /admin/account.
+    const savedName: string = currentUser.name || '';
+    const savedPhone: string = currentUser.phone || '';
+    const [name, setName] = useState(savedName);
+    const [phone, setPhone] = useState(savedPhone);
+    const [saving, setSaving] = useState(false);
+    // Данные пришли с сервера заново (сохранили, подтянули профиль) — обновляем
+    // черновик. Фоновый опрос Telegram-привязки имя не меняет, набор не собьёт.
+    useEffect(() => { setName(savedName); }, [savedName]);
+    useEffect(() => { setPhone(savedPhone); }, [savedPhone]);
+
+    const isDirty = name.trim() !== savedName || phone.trim() !== savedPhone;
+
+    const handleSave = async () => {
+        if (saving) return;
+        const nextName = name.trim();
+        const nextPhone = phone.trim();
+        if (!nextName) {
+            toast.error('Имя не может быть пустым');
+            return;
+        }
+        if (nextPhone && nextPhone !== savedPhone && nextPhone.replace(/\D/g, '').length < 8) {
+            toast.error('Похоже, номер телефона неполный — проверьте его');
+            return;
+        }
+        const updates: { name?: string; phone?: string } = {};
+        if (nextName !== savedName) updates.name = nextName;
+        if (nextPhone !== savedPhone) updates.phone = nextPhone;
+        if (Object.keys(updates).length === 0) return;
+        setSaving(true);
+        try {
+            await updateUser(updates);
+            setName(nextName);
+            setPhone(nextPhone);
+            toast.success('Изменения сохранены');
+        } catch (err) {
+            toastProfileSaveError(err, 'Не удалось сохранить. Попробуйте ещё раз.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const onFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+    };
+
+    // PATCH /users/me не принимает telegram_id (защита от угона уведомлений,
+    // models/user.py → UserUpdate) — сервер может молча проигнорировать поле.
+    // Сверяем ответ, чтобы не показывать успех, которого не было.
+    const saveTelegram = async (v: string) => {
+        try {
+            await updateUser({ telegramId: v });
+            const saved = useUserStore.getState().currentUser?.telegramId || '';
+            if (saved === v) {
+                toast.success(v ? 'Telegram сохранён' : 'Telegram отключён');
+            } else {
+                toast.error(v
+                    ? 'Номер не сохранился. Подключите Telegram кнопкой «Подключить Telegram».'
+                    : 'Не получилось отключить Telegram. Напишите администратору.');
+            }
+        } catch (err) {
+            toastProfileSaveError(err, 'Не удалось сохранить Telegram. Попробуйте ещё раз.');
+        }
+    };
+
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* Header */}
@@ -565,8 +649,11 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                     <input
                         type="text"
                         style={ghpInput}
-                        value={currentUser.name}
-                        onChange={(e) => updateUser({ name: e.target.value })}
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        onKeyDown={onFieldKeyDown}
+                        disabled={saving}
+                        autoComplete="name"
                     />
                 </div>
 
@@ -579,8 +666,10 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                     <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>ТЕЛЕФОН</label>
                     <PhoneInput
                         style={ghpInput}
-                        value={currentUser.phone || ''}
-                        onChange={(v) => updateUser({ phone: v })}
+                        value={phone}
+                        onChange={setPhone}
+                        onKeyDown={onFieldKeyDown}
+                        disabled={saving}
                     />
                 </div>
 
@@ -588,17 +677,24 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                     <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>TELEGRAM</label>
                     <GridHouseTelegramConnect
                         value={currentUser.telegramId || ''}
-                        onChange={(v) => updateUser({ telegramId: v })}
+                        onChange={saveTelegram}
                     />
                 </div>
 
                 <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saving || !isDirty}
                     style={{
                         padding: '10px 24px', background: GH.ink, color: GH.paper, fontWeight: 700,
-                        fontSize: 13, fontFamily: GH_SANS, border: 'none', cursor: 'pointer', marginTop: 8,
+                        fontSize: 13, fontFamily: GH_SANS, border: 'none', marginTop: 8,
+                        cursor: saving ? 'wait' : isDirty ? 'pointer' : 'default',
+                        opacity: saving || !isDirty ? 0.5 : 1,
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
                     }}
                 >
-                    Сохранить изменения
+                    {saving && <Loader2 size={14} className="animate-spin" />}
+                    {saving ? 'Сохраняем…' : 'Сохранить изменения'}
                 </button>
             </div>
 

@@ -25,6 +25,10 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
             }));
         } catch (error) {
             console.error("Failed to update profile", error);
+            // G3-01 (аудит 29.09): ошибка глоталась — профиль молча не
+            // сохранялся, а человек думал, что всё ок. Пробрасываем, чтобы
+            // экран показал настоящий ответ сервера.
+            throw error;
         }
     },
 
@@ -122,7 +126,9 @@ export const createUserSlice: StateCreator<UserStore, [], [], UserSlice> = (set,
 
             // Call API to persist
             // This is "bonus", maybe just update balance.
-            get().updateUser({ balance: newBalance }); // using our new async action
+            // updateUser теперь пробрасывает ошибку — тут вызов «выстрелил и
+            // забыл», поэтому гасим её, чтобы не было необработанного промиса.
+            get().updateUser({ balance: newBalance }).catch(() => {}); // using our new async action
 
             return { amount: bonus, totalHours, discountPercent };
         }
