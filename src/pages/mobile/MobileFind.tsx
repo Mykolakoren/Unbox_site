@@ -13,6 +13,9 @@ import { tbilisiNow } from '../../utils/dateUtils';
 import { getFavoriteCabinet } from './favoriteCabinet';
 import { LoadErrorCard, SkeletonRows } from './LoadStates';
 import type { BookingHistoryItem } from '../../store/types';
+import { canBookCabinets } from '../../utils/permissions';
+import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
+import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
 
@@ -33,6 +36,10 @@ export function MobileFind() {
     const occupancyReady = occupancyStatus === 'ready';
     const reset = useBookingStore(s => s.reset);
     const favCab = getFavoriteCabinet(currentUser?.id);
+    // Новую бронь сервер создаст только специалисту или админу. Остальным
+    // свободные окна показываем, но вместо оформления — анкета.
+    const canBook = canBookCabinets(currentUser);
+    const applicationStatus = useSpecialistApplicationStatus(currentUser, !!currentUser && !canBook);
 
     // Reschedule mode: when ?reschedule=<id> is present, the user is moving an
     // existing booking instead of creating a new one. We re-use the same
@@ -320,6 +327,21 @@ export function MobileFind() {
         }
 
         // Normal create path → /m/checkout.
+        // Не специалист — оформление закончилось бы отказом сервера (403).
+        // Не ведём на /m/checkout, а сразу показываем дорогу к анкете.
+        if (!canBook) {
+            if (applicationStatus === 'pending') {
+                toast.info('Анкета на проверке — бронирование откроется после одобрения');
+            } else if (applicationStatus === 'approved') {
+                toast.info('Анкета одобрена — доступ к бронированию скоро откроет администратор');
+            } else {
+                toast.info('Чтобы бронировать, заполни анкету специалиста', {
+                    action: { label: 'Анкета', onClick: () => navigate(SPECIALIST_APPLICATION_PATH) },
+                });
+            }
+            return;
+        }
+
         const slotStrs: string[] = [];
         for (let m = startMin; m < startMin + duration; m += 30) {
             slotStrs.push(`${resourceId}|${minsToHHMM(m)}`);
@@ -360,6 +382,14 @@ export function MobileFind() {
                         </p>
                     )}
                 </div>
+
+                {/* Ещё не специалист — наверху объясняем, почему оформить бронь
+                    пока нельзя, и даём дорогу к анкете (до выбора времени). */}
+                {!canBook && !rescheduleId && !linkSessionMeta && (
+                    <div style={{ padding: '0 16px' }}>
+                        <SpecialistGateCard variant="mobile" status={applicationStatus} />
+                    </div>
+                )}
 
                 {/* 2026-06-06 owner: админ может попасть на /m/find через
                     FAB из /m/admin/bookings, чтобы создать бронь от имени

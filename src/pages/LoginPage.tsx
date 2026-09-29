@@ -6,6 +6,11 @@ import { User, Lock, Phone, LogIn, Eye, EyeOff } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { TelegramLoginButton } from '../components/TelegramLoginButton';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { safeRedirectPath } from '../utils/loginRedirect';
+
+// Компьютерные кабинеты: на телефоне у них свой интерфейс /m, поэтому
+// возврат туда после входа с телефона не делаем (как и раньше — в /m).
+const DESKTOP_SHELL_RE = /^\/(?:dashboard|crm|admin|profile)(?:[/?#]|$)/;
 
 function useGHNarrow(bp = 768) {
     const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
@@ -37,6 +42,13 @@ export function LoginPage() {
     const { login, register, googleLogin } = useUserStore();
     const [isRegistering, setIsRegistering] = useState(
         () => new URLSearchParams(window.location.search).get('register') === '1'
+    );
+    // ?redirect= — куда вернуть после входа (анкета специалиста, выбранный
+    // кабинет, страница, где истекла сессия). Читаем один раз при открытии:
+    // переключение «Вход ↔ Регистрация» его не теряет. Чужие адреса
+    // (https://…, //host) отбрасываем.
+    const [redirectTo] = useState(
+        () => safeRedirectPath(new URLSearchParams(window.location.search).get('redirect'))
     );
     const [isLoading, setIsLoading] = useState(false);
     // Surface the reason the Telegram-callback page bounced us here, so the
@@ -75,7 +87,11 @@ export function LoginPage() {
 
     /** Post-login routing.
      *
-     *  Mobile (phone-width / standalone PWA): always → /m. The /m shell
+     *  First: a safe local ?redirect= (see redirectTo above) — the page that
+     *  sent the user here. On a phone, desktop shells (/dashboard, /crm,
+     *  /admin) are skipped in favour of /m.
+     *
+     *  Mobile (phone-width / standalone PWA): otherwise → /m. The /m shell
      *  handles role gating internally (admin/owner sees /m/admin tab in
      *  bottom bar, specialists see /m/crm, etc.).
      *
@@ -94,7 +110,9 @@ export function LoginPage() {
             const isPhoneWidth = window.matchMedia?.('(max-width: 768px)').matches;
             const inStandalone = window.matchMedia?.('(display-mode: standalone)').matches
                 || (window.navigator as any).standalone === true;
-            if (isPhoneWidth || inStandalone) return '/m';
+            const isMobileEntry = isPhoneWidth || inStandalone;
+            if (redirectTo && !(isMobileEntry && DESKTOP_SHELL_RE.test(redirectTo))) return redirectTo;
+            if (isMobileEntry) return '/m';
 
             // Desktop — роутим по роли
             const u = useUserStore.getState().currentUser;
@@ -107,7 +125,7 @@ export function LoginPage() {
             }
             return '/dashboard';
         } catch {
-            return '/dashboard';
+            return redirectTo ?? '/dashboard';
         }
     };
 
@@ -160,6 +178,9 @@ export function LoginPage() {
                 formData={formData}
                 setFormData={setFormData}
                 handleSubmit={handleSubmit}
+                notice={redirectTo === '/become-specialist'
+                    ? 'Войдите или создайте аккаунт — затем откроется анкета специалиста'
+                    : null}
                 onGoogleSuccess={async (credential: string) => {
                     try {
                         await googleLogin(credential);
@@ -199,6 +220,8 @@ interface GridHouseLoginPageProps {
     formData: { name: string; email: string; password: string; phone: string };
     setFormData: (v: { name: string; email: string; password: string; phone: string }) => void;
     handleSubmit: (e: React.FormEvent) => void;
+    /** Одна строка над формой — зачем человека попросили войти. */
+    notice?: string | null;
     onGoogleSuccess: (credential: string) => Promise<void>;
     onGoogleError: () => void;
 }
@@ -214,6 +237,7 @@ function GridHouseLoginPage({
     formData,
     setFormData,
     handleSubmit,
+    notice,
     onGoogleSuccess,
     onGoogleError,
 }: GridHouseLoginPageProps) {
@@ -364,6 +388,22 @@ function GridHouseLoginPage({
                                 }}
                             >
                                 {error}
+                            </div>
+                        )}
+
+                        {notice && (
+                            <div
+                                role="note"
+                                style={{
+                                    borderLeft: `2px solid ${GH.accent}`,
+                                    padding: '4px 0 4px 12px',
+                                    marginBottom: 24,
+                                    fontSize: 14,
+                                    lineHeight: 1.5,
+                                    color: GH.ink,
+                                }}
+                            >
+                                {notice}
                             </div>
                         )}
 

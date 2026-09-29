@@ -29,6 +29,9 @@ import { RescheduleScopeChoiceModal } from '../components/RescheduleScopeChoiceM
 import type { BookingHistoryItem } from '../store/types';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SpecialistGateCard } from '../components/SpecialistGate';
+import { useSpecialistApplicationStatus } from '../hooks/useSpecialistApplication';
+import { canBookCabinets } from '../utils/permissions';
 import { ChessboardScroller } from '../components/ui/ChessboardScroller';
 import { waitlistApi } from '../api/waitlist';
 import { WaitlistSubscribeModal } from '../components/ui/WaitlistSubscribeModal';
@@ -3673,6 +3676,10 @@ function GridHouseMyBookings({
     // no sense for them. Микола (owner) was seeing it because we matched
     // only role==='specialist'.
     const isStaffOrSpecialist = !!currentUser?.role && currentUser.role !== 'user';
+    // Бронировать сервер даёт только специалистам и админам (require_can_book).
+    // Остальным — карточка с анкетой сразу, а не отказ на кнопке «Оплатить».
+    const canBook = canBookCabinets(currentUser);
+    const applicationStatus = useSpecialistApplicationStatus(currentUser, !!currentUser && !canBook);
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, paddingBottom: 80 }}>
@@ -3693,7 +3700,7 @@ function GridHouseMyBookings({
                             </span>
                         </div>
                     </div>
-                    {viewMode === 'list' && (
+                    {viewMode === 'list' && canBook && (
                         <button
                             onClick={() => setViewMode('grid')}
                             style={{ padding: '8px 16px', background: GH.ink, color: GH.paper, fontWeight: 700, fontSize: 12, fontFamily: GH_SANS, border: 'none', cursor: 'pointer' }}
@@ -3835,6 +3842,13 @@ function GridHouseMyBookings({
                 </div>
             </div>
 
+            {/* Ещё не специалист — объясняем до выбора слота в шахматке. */}
+            {currentUser && !canBook && (
+                <div style={{ padding: '16px 16px 0' }}>
+                    <SpecialistGateCard variant="desktop" status={applicationStatus} />
+                </div>
+            )}
+
             {/* Subscription card */}
             {currentUser?.subscription && (
                 <div style={{ padding: '16px 16px 0' }}>
@@ -3920,7 +3934,7 @@ function GridHouseMyBookings({
                             ))}
                         </div>
                     )}
-                    {totalBookings === 0 && (
+                    {totalBookings === 0 && (canBook ? (
                         <EmptyState
                             title="Пока нет бронирований"
                             hint="Переключитесь на «Шахматку» сверху и кликните по свободному слоту."
@@ -3929,7 +3943,12 @@ function GridHouseMyBookings({
                                 onClick: () => setViewMode('grid'),
                             }}
                         />
-                    )}
+                    ) : (
+                        <EmptyState
+                            title="Пока нет бронирований"
+                            hint="Бронирование откроется после проверки анкеты специалиста."
+                        />
+                    ))}
                 </div>
             )}
 

@@ -242,9 +242,17 @@ def delete_specialist(
 def get_my_specialist_profile(
     *,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_specialist)
+    current_user: User = Depends(get_current_user)
 ):
-    """Specialist: get own profile."""
+    """Own specialist profile / application, or 404 if there is none.
+
+    Любой вошедший (не только specialist): новичок с ролью user подаёт анкету
+    через /apply и должен видеть её статус («на проверке», «отклонена»), а
+    экраны брони — показывать ему «Анкета на проверке» вместо «заполните
+    анкету». Раньше require_specialist отвечал ему 403, и страница анкеты
+    после перезагрузки открывалась пустой. Отдаём только собственную строку
+    (по user_id), правка — по-прежнему только через PATCH /me для специалистов.
+    """
     specialist = session.exec(
         select(Specialist).where(Specialist.user_id == current_user.id)
     ).first()

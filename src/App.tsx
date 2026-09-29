@@ -9,6 +9,9 @@ import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 // Store
 import { useBookingStore } from './store/bookingStore';
 import { useUserStore } from './store/userStore';
+import { canBookCabinets } from './utils/permissions';
+import { useSpecialistApplicationStatus } from './hooks/useSpecialistApplication';
+import { SpecialistGateCard } from './components/SpecialistGate';
 
 // "/" — the only page on the critical path, so it is the only eager one.
 // Everything below used to be eager too, which meant a visitor landing on "/"
@@ -112,6 +115,12 @@ function BookingWizard() {
   const wizardMode = useBookingStore(s => s.mode);
   const selectedSlots = useBookingStore(s => s.selectedSlots);
   const users = useUserStore(s => s.users);
+  // Вошедший, но ещё не специалист (роль user): сервер откажет в брони на
+  // «Оплатить». Говорим об этом сразу, до выбора времени и оплаты.
+  // Перенос/правка своей брони (editBookingId) — не новая бронь, её не трогаем.
+  const currentUser = useUserStore(s => s.currentUser);
+  const needsApplication = !!currentUser && !canBookCabinets(currentUser) && !editBookingId;
+  const applicationStatus = useSpecialistApplicationStatus(currentUser, needsApplication);
 
   // Excel #73 — warn before leaving an in-progress booking.
   // Browser-native confirm via beforeunload covers: tab close, page reload,
@@ -121,7 +130,7 @@ function BookingWizard() {
   // useBlocker solution would need upgrading to a data router; beforeunload
   // already catches the real "oh no I closed the tab" case.
   useEffect(() => {
-    const hasUnsavedWork = selectedSlots.length > 0 && step >= 2 && !editBookingId;
+    const hasUnsavedWork = selectedSlots.length > 0 && step >= 2 && !editBookingId && !needsApplication;
     if (!hasUnsavedWork) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -132,7 +141,7 @@ function BookingWizard() {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [selectedSlots.length, step, editBookingId]);
+  }, [selectedSlots.length, step, editBookingId, needsApplication]);
 
   // Resolve friendly name for the "booking-for" admin-proxy banner
   const proxyUser = bookingForUser
@@ -146,6 +155,16 @@ function BookingWizard() {
     borderRadius: 12,
     overflow: 'hidden',
   };
+
+  if (needsApplication) {
+    return (
+      <MinimalLayout glassMode noPadding>
+        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8">
+          <SpecialistGateCard variant="desktop" status={applicationStatus} />
+        </div>
+      </MinimalLayout>
+    );
+  }
 
   return (
     <MinimalLayout glassMode fullWidth={step === 2} noPadding>

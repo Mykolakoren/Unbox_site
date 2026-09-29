@@ -1,5 +1,6 @@
 import { Outlet, useNavigate, Navigate, useLocation, Link } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
+import { loginPathWithRedirect } from '../../utils/loginRedirect';
 import { SidebarLayout } from '../../components/SidebarLayout';
 import { QuickActionsFab, type QuickAction } from '../../components/ui/QuickActionsFab';
 import {
@@ -91,6 +92,7 @@ export function CrmLayout() {
     const { currentUser } = useUserStore();
     const { fetchPaymentAccounts } = useCrmStore();
     const navigate = useNavigate();
+    const location = useLocation();
     const hasToken = Boolean(localStorage.getItem('token'));
     const [accessStatus, setAccessStatus] = useState<CrmAccessStatus | null>(null);
     const [accessLoading, setAccessLoading] = useState(true);
@@ -119,8 +121,8 @@ export function CrmLayout() {
     ];
 
     useEffect(() => {
-        if (!hasToken) navigate('/login');
-    }, [hasToken, navigate]);
+        if (!hasToken) navigate(loginPathWithRedirect(location.pathname + location.search));
+    }, [hasToken, navigate, location.pathname, location.search]);
 
     // Load specialist's payment accounts
     useEffect(() => {
@@ -145,7 +147,7 @@ export function CrmLayout() {
             .finally(() => setAccessLoading(false));
     }, [currentUser]);
 
-    if (!hasToken) return <Navigate to="/login" replace />;
+    if (!hasToken) return <Navigate to={loginPathWithRedirect(location.pathname + location.search)} replace />;
     if (!currentUser) return null;
 
     // Show loading while checking access

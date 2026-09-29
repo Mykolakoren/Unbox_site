@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '../utils/errors';
+import { loginPathWithRedirect } from '../utils/loginRedirect';
 
 // API URL:
 // In development, use VITE_API_URL or fallback to relative path (proxied by Vite)
@@ -71,10 +72,15 @@ api.interceptors.response.use(
         const method = (error.config?.method || 'get').toLowerCase();
         const isReadOnly = method === 'get' || method === 'head' || method === 'options';
 
-        // Clear invalid/expired token and redirect to login
+        // Clear invalid/expired token and redirect to login — с возвратом на
+        // текущую страницу (?redirect=), чтобы после входа продолжить дело.
+        // Уже на /login — оставляем его параметры как есть.
         if (status === 401 || (status === 403 && detail === 'Could not validate credentials')) {
             localStorage.removeItem('token');
-            window.location.href = '/login';
+            const { pathname, search, hash } = window.location;
+            window.location.href = pathname.startsWith('/login')
+                ? '/login' + search
+                : loginPathWithRedirect(pathname + search + hash);
             return Promise.reject(error);
         }
 

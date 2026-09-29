@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { ChevronRight, LogOut, Send, MessageCircle, MapPin, Phone, Briefcase, Gift, HelpCircle } from 'lucide-react';
+import { ChevronRight, ClipboardCheck, LogOut, Send, MessageCircle, MapPin, Phone, Briefcase, Gift, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { api } from '../../api/client';
@@ -9,6 +9,7 @@ import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { getFavoriteCabinet, setFavoriteCabinet } from './favoriteCabinet';
 import { reservedSubscriptionHours } from '../../utils/paymentPriority';
 import { resetTour } from './OnboardingTour';
+import { canBookCabinets } from '../../utils/permissions';
 
 const BOT_USERNAME = 'Unbox_Booking_G_Bot';
 const ADMIN_TG = 'UnboxCenter';
@@ -289,6 +290,16 @@ export function MobileProfile() {
 
             {/* Quick navigation: CRM (for specialists/admins), desktop, rules */}
             <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {/* Анкета специалиста — единственная дорога к бронированию для
+                    нового аккаунта (роль user). Раньше в /m её не было вовсе. */}
+                {!canBookCabinets(currentUser) && (
+                    <NavRow
+                        icon={<ClipboardCheck size={16} />}
+                        label="Анкета специалиста"
+                        sub="Нужна, чтобы бронировать кабинеты"
+                        onClick={() => navigate('/become-specialist')}
+                    />
+                )}
                 {isSpecialist && (
                     <NavRow
                         icon={<Briefcase size={16} />}

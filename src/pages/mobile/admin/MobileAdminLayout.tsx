@@ -6,6 +6,7 @@ import { hasCompletedTour } from '../OnboardingTour';
 import { MobileAdminTour, ADMIN_TOUR_PREFIX } from './MobileAdminTour';
 import { NotificationsBell } from '../NotificationsBell';
 import { Z_TABBAR } from './sheetLayers';
+import { loginPathWithRedirect } from '../../../utils/loginRedirect';
 
 /**
  * Mobile admin shell — separate workspace at /m/admin.
@@ -24,9 +25,11 @@ export function MobileAdminLayout() {
 
     useEffect(() => {
         const token = localStorage.getItem('token');
-        if (!token) { navigate('/login'); return; }
-        if (!currentUser) fetchCurrentUser().catch(() => navigate('/login'));
-    }, [currentUser, fetchCurrentUser, navigate]);
+        // На вход — с возвратом на этот же экран админки.
+        const toLogin = () => navigate(loginPathWithRedirect(location.pathname + location.search));
+        if (!token) { toLogin(); return; }
+        if (!currentUser) fetchCurrentUser().catch(toLogin);
+    }, [currentUser, fetchCurrentUser, navigate, location.pathname, location.search]);
 
     useEffect(() => {
         if (!currentUser) return;

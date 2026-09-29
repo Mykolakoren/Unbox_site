@@ -6,6 +6,7 @@ import { OnboardingTour, hasCompletedTour } from './OnboardingTour';
 import { registerPtrScrollContainer } from './usePullToRefresh';
 import { forceUnlockScroll } from './useScrollLock';
 import { InstallBanner } from './InstallBanner';
+import { loginPathWithRedirect } from '../../utils/loginRedirect';
 
 /**
  * Mobile beta shell.
@@ -40,11 +41,15 @@ export function MobileLayout() {
         forceUnlockScroll();
     }, [location.pathname]);
 
+    // Без входа — на /login с возвратом сюда же (?redirect=): после входа
+    // человек попадает туда, куда шёл (например, /m/find?cab=… с выбранным
+    // кабинетом), а не на пустое «Сегодня».
     useEffect(() => {
         const token = localStorage.getItem('token');
-        if (!token) { navigate('/login'); return; }
-        if (!currentUser) fetchCurrentUser().catch(() => navigate('/login'));
-    }, [currentUser, fetchCurrentUser, navigate]);
+        const toLogin = () => navigate(loginPathWithRedirect(location.pathname + location.search));
+        if (!token) { toLogin(); return; }
+        if (!currentUser) fetchCurrentUser().catch(toLogin);
+    }, [currentUser, fetchCurrentUser, navigate, location.pathname, location.search]);
 
     // First-visit tour trigger. Two entry points:
     //  1. `?tour=1` query — force open (used for previewing without resetting

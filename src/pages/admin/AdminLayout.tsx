@@ -10,6 +10,7 @@ import { useUserStore } from '../../store/userStore';
 import { IntegrationStatus } from '../../components/admin/IntegrationStatus';
 import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
+import { loginPathWithRedirect } from '../../utils/loginRedirect';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 
 const NAV_ITEMS = [
@@ -58,8 +59,8 @@ export function AdminLayout() {
     // ── Access Guard ──────────────────────────────────────────────────────────
     const hasToken = Boolean(localStorage.getItem('token'));
 
-    // No token → redirect to login immediately (no flash)
-    if (!hasToken) return <Navigate to="/login" replace />;
+    // No token → redirect to login immediately (no flash), with a way back here
+    if (!hasToken) return <Navigate to={loginPathWithRedirect(location.pathname + location.search)} replace />;
 
     // Token exists but user not yet loaded → show blank screen while fetching
     if (!currentUser) return null;

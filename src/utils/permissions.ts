@@ -45,3 +45,14 @@ export function hasPermission(user: User | null | undefined, permission: string)
     // Explicit permissions in user record (overrides/extras)
     return (user.permissions ?? []).includes(permission);
 }
+
+/** Роли, которым сервер разрешает бронировать кабинеты — тот же список, что
+ *  в backend deps.require_can_book. Всем остальным (новый аккаунт = role
+ *  'user') создание брони отвечает 403 «подайте анкету на /become-specialist»,
+ *  поэтому экраны брони заранее показывают им анкету вместо кнопок. */
+const CAN_BOOK_ROLES = ['specialist', 'owner', 'senior_admin', 'admin'];
+
+export function canBookCabinets(user: Pick<User, 'role'> | null | undefined): boolean {
+    if (!user) return false;
+    return CAN_BOOK_ROLES.includes((user.role || '').toLowerCase());
+}

@@ -17,6 +17,7 @@ import { api } from '../../api/client';
 import { useLocations } from '../../hooks/useLocations';
 import { useUserStore } from '../../store/userStore';
 import { getMyBookingsPath, getHomePath } from '../../utils/userPaths';
+import { canBookCabinets } from '../../utils/permissions';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { Specialist } from '../Specialists/SpecialistCard';
 import { getBadge } from '../../utils/specialistBadges';
@@ -1288,6 +1289,9 @@ function SpecialistRoute({ onReset }: { onReset: () => void }) {
                                         → В кабинет CRM
                                     </HeroCta>
                                 )}
+                                {!canBookCabinets(currentUser) && (
+                                    <HeroCta to="/become-specialist">Подать заявку →</HeroCta>
+                                )}
                             </>
                         ) : (
                             <>
@@ -1310,7 +1314,10 @@ function SpecialistRoute({ onReset }: { onReset: () => void }) {
                                     → Войти
                                 </button>
                                 <HeroCta to="#cabinets">Кабинеты Unbox →</HeroCta>
-                                <HeroCta to="/login?register=1">Подать заявку →</HeroCta>
+                                {/* Регистрация, а после неё — сразу анкета специалиста
+                                    (раньше после регистрации человек попадал в кабинет
+                                    клиента, и с телефона анкету было не найти). */}
+                                <HeroCta to={`/login?register=1&redirect=${encodeURIComponent('/become-specialist')}`}>Подать заявку →</HeroCta>
                             </>
                         )}
                     </div>

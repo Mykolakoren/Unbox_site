@@ -19,6 +19,17 @@ import { calculatePrice } from '../../utils/pricing';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
 import { ruPlural } from '../../utils/plural';
 import type { Format } from '../../types';
+import { canBookCabinets } from '../../utils/permissions';
+import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
+import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
+
+/** Отказ require_can_book: «бронирование только для специалистов, подайте
+ *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
+function isSpecialistOnlyRefusal(e: any): boolean {
+    const detail = e?.response?.data?.detail;
+    return e?.response?.status === 403 && typeof detail === 'string'
+        && (detail.includes('become-specialist') || detail.includes('верифицированным специалистам'));
+}
 
 /**
  * Mobile-native checkout — replaces the desktop OptionsStep+ConfirmationStep
@@ -44,6 +55,16 @@ export function MobileCheckout() {
     const state = useBookingStore();
     const [submitting, setSubmitting] = useState(false);
     const [confirmed, setConfirmed] = useState(false);
+    // Бронь только для специалистов (require_can_book). Знаем заранее по роли,
+    // а если сервер всё же ответил таким 403 — показываем ту же карточку с
+    // анкетой вместо красного тоста с адресом, на который нельзя нажать.
+    const [specialistOnlyRefused, setSpecialistOnlyRefused] = useState(false);
+    const needsApplication = !!currentUser && (!canBookCabinets(currentUser) || specialistOnlyRefused);
+    const applicationStatus = useSpecialistApplicationStatus(currentUser, needsApplication);
+    const showSpecialistGate = () => {
+        setSpecialistOnlyRefused(true);
+        document.querySelector('[data-mobile-scroll]')?.scrollTo({ top: 0, behavior: 'smooth' });
+    };
     // Recurring series state — local to the checkout, not persisted in store
     // (one-shot decision). 'once' = single booking (default).
     const [recurPattern, setRecurPattern] = useState<'once' | 'weekly' | 'biweekly' | 'monthly'>('once');
@@ -395,6 +416,8 @@ export function MobileCheckout() {
             if (typeof detail === 'object' && detail?.conflicts) {
                 // Показываем занятые даты и даём выбор — создать остальные.
                 setSeriesConflicts(detail.conflicts);
+            } else if (isSpecialistOnlyRefusal(e)) {
+                showSpecialistGate();
             } else {
                 const msg = typeof detail === 'string' ? detail : (e.message || 'Не удалось создать серию');
                 toast.error(msg);
@@ -501,6 +524,10 @@ export function MobileCheckout() {
                 navigate('/m/bookings', { replace: true });
             }
         } catch (e: any) {
+            if (isSpecialistOnlyRefusal(e)) {
+                showSpecialistGate();
+                return;
+            }
             const detail = e?.response?.data?.detail;
             const msg = typeof detail === 'string' ? detail : (e.message || 'Не удалось забронировать');
             toast.error(msg);
@@ -537,6 +564,12 @@ export function MobileCheckout() {
                         Подтверждение
                     </h1>
                 </div>
+
+                {needsApplication && (
+                    <div style={{ padding: '0 16px' }}>
+                        <SpecialistGateCard variant="mobile" status={applicationStatus} />
+                    </div>
+                )}
 
                 {/* Admin-proxy specialist picker — visible only to admins. */}
                 {isAdminActor && specialistChoices.length > 0 && (
@@ -1160,7 +1193,7 @@ export function MobileCheckout() {
             }}>
                 {/* Способ оплаты виден у кнопки — сам блок «Оплата» ниже первого
                     экрана, и раньше клиент жал кнопку, не видя, откуда спишется. */}
-                {!confirmed && !isSeries && (
+                {!confirmed && !isSeries && !needsApplication && (
                     <div style={{
                         pointerEvents: 'auto',
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
@@ -1183,7 +1216,8 @@ export function MobileCheckout() {
                     </div>
                 )}
                 <button
-                    onClick={submit}
+                    // Не специалист: вместо заведомого отказа — к анкете.
+                    onClick={needsApplication ? () => navigate(SPECIALIST_APPLICATION_PATH) : submit}
                     disabled={submitting || confirmed}
                     className="press"
                     style={{
@@ -1215,6 +1249,8 @@ export function MobileCheckout() {
                     {submitting && <Loader2 size={18} className="animate-spin-fast" />}
                     {confirmed
                         ? 'Готово'
+                        : needsApplication
+                            ? (applicationStatus === 'none' ? 'Заполнить анкету специалиста' : 'Открыть анкету')
                         : submitting
                             ? (recurPattern !== 'once' ? 'Создаём серию…' : 'Бронируем…')
                             : recurPattern !== 'once'

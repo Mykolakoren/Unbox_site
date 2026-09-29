@@ -7,6 +7,7 @@ import type { MobileCrmOutletContext } from './crmDataVersion';
 import { hasCompletedTour } from '../OnboardingTour';
 import { MobileCrmTour, CRM_TOUR_PREFIX } from './MobileCrmTour';
 import { NotificationsBell } from '../NotificationsBell';
+import { loginPathWithRedirect } from '../../../utils/loginRedirect';
 
 /**
  * Mobile CRM shell — separate workspace from /m (cabinet).
@@ -27,9 +28,11 @@ export function MobileCrmLayout() {
 
     useEffect(() => {
         const token = localStorage.getItem('token');
-        if (!token) { navigate('/login'); return; }
-        if (!currentUser) fetchCurrentUser().catch(() => navigate('/login'));
-    }, [currentUser, fetchCurrentUser, navigate]);
+        // На вход — с возвратом на этот же экран CRM.
+        const toLogin = () => navigate(loginPathWithRedirect(location.pathname + location.search));
+        if (!token) { toLogin(); return; }
+        if (!currentUser) fetchCurrentUser().catch(toLogin);
+    }, [currentUser, fetchCurrentUser, navigate, location.pathname, location.search]);
 
     // Fire the CRM-specific tour on first visit. ?tour=1 forces it for admins
     // previewing the experience. Cabinet vs CRM tours track independently.

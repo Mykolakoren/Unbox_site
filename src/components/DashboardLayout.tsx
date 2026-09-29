@@ -5,6 +5,8 @@ import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, Log
 import { useEffect, useState } from 'react';
 import { CrmAccessToggle } from './CrmAccessToggle';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { loginPathWithRedirect } from '../utils/loginRedirect';
+import { canBookCabinets } from '../utils/permissions';
 
 export function DashboardLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
@@ -14,8 +16,10 @@ export function DashboardLayout() {
 
     useEffect(() => {
         const token = localStorage.getItem('token');
+        // На вход — с возвратом на эту же страницу кабинета (?redirect=).
+        const loginPath = loginPathWithRedirect(location.pathname + location.search);
         if (!token) {
-            navigate('/login');
+            navigate(loginPath);
             return;
         }
         if (currentUser) {
@@ -26,9 +30,9 @@ export function DashboardLayout() {
             .then(() => setIsLoading(false))
             .catch(() => {
                 localStorage.removeItem('token');
-                navigate('/login');
+                navigate(loginPath);
             });
-    }, [currentUser, navigate, fetchCurrentUser]);
+    }, [currentUser, navigate, fetchCurrentUser, location.pathname, location.search]);
 
     if (isLoading || !currentUser) {
         return (
@@ -106,7 +110,11 @@ export function DashboardLayout() {
     const quickActions: QuickAction[] = [
         // Excel #17: was '/booking' (wizard) but admins wanted the chessboard.
         // /dashboard/bookings is where users actually pick a slot and confirm.
-        { label: 'Забронировать кабинет', sub: 'Выбрать слот в шахматке', path: '/dashboard/bookings', icon: Plus },
+        // Кому сервер бронь не даст (роль user) — сразу анкета, а не шахматка
+        // с отказом на кнопке «Оплатить».
+        canBookCabinets(currentUser)
+            ? { label: 'Забронировать кабинет', sub: 'Выбрать слот в шахматке', path: '/dashboard/bookings', icon: Plus }
+            : { label: 'Заполнить анкету', sub: 'Бронь — после проверки анкеты', path: '/become-specialist', icon: Plus },
         { label: 'Мои бронирования', sub: 'Ближайшие и история', path: '/dashboard/bookings', icon: Calendar },
         { label: 'Найти специалиста', sub: 'Каталог и запись', path: '/specialists', icon: Search },
     ];

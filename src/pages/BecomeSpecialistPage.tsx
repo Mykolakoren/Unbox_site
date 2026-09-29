@@ -7,6 +7,8 @@ import { specialistsApi, type SpecialistProfile, type SpecialistApplicationPaylo
 import { api, API_URL } from '../api/client';
 import { compressImage } from '../utils/imageCompress';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { markSpecialistApplicationSent } from '../hooks/useSpecialistApplication';
+import { getHomePath } from '../utils/userPaths';
 
 // Self-service application page. Anyone with an account can fill out the
 // form; on submit the row goes into the Specialist table with
@@ -157,6 +159,8 @@ export function BecomeSpecialistPage() {
                 bio: form.bio?.trim() || '',
             });
             setProfile(result);
+            // Экраны брони покажут «Анкета на проверке» вместо «заполните анкету».
+            markSpecialistApplicationSent(currentUser?.id);
             toast.success(profile ? 'Заявка обновлена и снова на проверке' : 'Заявка отправлена. Админ свяжется с вами.');
         } catch (err: any) {
             toast.error(err?.response?.data?.detail || 'Не удалось отправить заявку');
@@ -172,6 +176,12 @@ export function BecomeSpecialistPage() {
             </div>
         );
     }
+
+    const isMobileEntry = typeof window !== 'undefined' && (
+        window.matchMedia?.('(max-width: 768px)').matches
+        || window.matchMedia?.('(display-mode: standalone)').matches
+    );
+    const homePath = isMobileEntry ? '/m/today' : getHomePath(currentUser);
 
     const status = profile?.applicationStatus;
     const statusBanner = (() => {
@@ -194,6 +204,11 @@ export function BecomeSpecialistPage() {
     return (
         <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
             <div style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 96px' }}>
+                {/* Дорога обратно: с телефона анкета открывается вне /m, без
+                    нижнего меню — без этой ссылки оставалась только «назад». */}
+                <Link to={homePath} style={{ ...ghMono, display: 'inline-block', marginBottom: 16, color: GH.ink, textDecoration: 'none' }}>
+                    ← В личный кабинет
+                </Link>
                 <div style={ghMono}>Анкета специалиста</div>
                 <h1 style={{
                     fontSize: 'clamp(28px, 4vw, 44px)',
@@ -207,8 +222,9 @@ export function BecomeSpecialistPage() {
                     Заполните карточку — она появится в каталоге <Link to="/specialists" style={{ color: GH.ink, textDecoration: 'underline' }}>/specialists</Link> после подтверждения админом.
                 </p>
 
-                {/* Инфоблок про каталог — ЧЕРНОВИК-ЗАГЛУШКА (owner отредактирует
-                    реальные цену и условия). Плейсхолдеры помечены __ */}
+                {/* Инфоблок про каталог. Цену и условия размещения владелец ещё
+                    не назвал — вместо заглушек с прочерками нейтральная строка
+                    без цифр (аудит G1-01). Появятся цифры — вписать сюда. */}
                 <div style={{
                     border: `1px solid ${GH.ink10}`, background: GH.ink5,
                     padding: '16px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6, color: GH.ink,
@@ -220,12 +236,8 @@ export function BecomeSpecialistPage() {
                         <b>Что это.</b> Каталог <Link to="/specialists" style={{ color: GH.ink }}>/specialists</Link> — публичная витрина специалистов Unbox.
                         Клиенты находят вас, читают анкету и записываются онлайн.
                     </p>
-                    <p style={{ margin: '0 0 8px' }}>
-                        <b>Сколько стоит.</b> Размещение в каталоге — __ ₾ / __ (месяц/год). {/* TODO: owner впишет реальную цену */}
-                    </p>
                     <p style={{ margin: 0 }}>
-                        <b>Условия размещения.</b> __ (например: подтверждённое образование/сертификаты,
-                        заполненная анкета с фото, актуальное расписание). {/* TODO: owner впишет условия */}
+                        Условия размещения в каталоге расскажем после одобрения анкеты.
                     </p>
                 </div>
 

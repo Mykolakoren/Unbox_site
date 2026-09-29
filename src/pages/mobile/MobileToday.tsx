@@ -15,6 +15,9 @@ import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { getRecurrence, withRecurrence, nextDeadline } from './admin/taskRecurrence';
 import { toast } from 'sonner';
 import type { BookingHistoryItem } from '../../store/types';
+import { canBookCabinets } from '../../utils/permissions';
+import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
+import { SpecialistGateCard } from '../../components/SpecialistGate';
 
 const sectionPad: React.CSSProperties = { padding: '0 16px' };
 
@@ -189,6 +192,12 @@ export function MobileToday() {
         return out;
     }, [myBookings, now]);
 
+    // Бронировать сервер даёт только специалистам и админам. Новичку (роль
+    // user) вместо кнопок брони — карточка с анкетой: раньше он проходил весь
+    // мастер и получал отказ на последней кнопке.
+    const canBook = canBookCabinets(currentUser);
+    const applicationStatus = useSpecialistApplicationStatus(currentUser, !!currentUser && !canBook);
+
     if (!currentUser) return null;
 
     const goToFind = () => navigate('/m/find');
@@ -268,6 +277,13 @@ export function MobileToday() {
                                 </button>
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* Ещё не специалист — сначала анкета (или её статус). */}
+                {!canBook && (
+                    <div style={sectionPad}>
+                        <SpecialistGateCard variant="mobile" status={applicationStatus} />
                     </div>
                 )}
 
@@ -419,7 +435,7 @@ export function MobileToday() {
                 {/* Regular-slot CTA — Egor 2026-05-27. If the user has a
                     weekly pattern (e.g. Tue 17:00 Cabinet 5) and hasn't yet
                     booked the next occurrence, surface a 1-tap shortcut. */}
-                {regularSlot && (
+                {canBook && regularSlot && (
                     <div style={sectionPad}>
                         <button
                             onClick={() => repeatBooking(regularSlot.booking)}
@@ -464,7 +480,8 @@ export function MobileToday() {
                     </div>
                 )}
 
-                {/* Quick actions */}
+                {/* Quick actions — только тем, кому бронь откроется (иначе 403 в конце). */}
+                {canBook && (
                 <div style={sectionPad}>
                     <SectionTitle>Быстро</SectionTitle>
                     <button
@@ -538,6 +555,7 @@ export function MobileToday() {
                         </div>
                     )}
                 </div>
+                )}
 
                 {/* Admin contact — small Telegram-blue link, always visible
                     so users can ping support when something's off without
@@ -603,7 +621,9 @@ export function MobileToday() {
                 </div>
             </div>
 
-            {/* Sticky CTA above tab bar */}
+            {/* Sticky CTA above tab bar — не специалисту бронь недоступна,
+                дорога к анкете уже в карточке наверху. */}
+            {canBook && (
             <div style={{
                 position: 'fixed',
                 bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
@@ -641,6 +661,7 @@ export function MobileToday() {
                     <ArrowRight size={18} />
                 </button>
             </div>
+            )}
 
             {openBooking && (
                 <BookingDetailSheet
