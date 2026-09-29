@@ -6,6 +6,7 @@ import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
+import { LoadErrorCard, SkeletonRows, StaleBar } from './LoadStates';
 import { prepareRepeat } from './repeatBooking';
 import { priceLabel } from './priceLabel';
 import { NotificationsBell } from './NotificationsBell';
@@ -25,6 +26,8 @@ export function MobileToday() {
     const currentUser = useUserStore(s => s.currentUser);
     const bookings = useUserStore(s => s.bookings);
     const fetchBookings = useUserStore(s => s.fetchBookings);
+    const bookingsStatus = useUserStore(s => s.bookingsStatus);
+    const bookingsLoadedAt = useUserStore(s => s.bookingsLoadedAt);
     const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [repeatOpen, setRepeatOpen] = useState(false);
@@ -92,7 +95,7 @@ export function MobileToday() {
     const myBookings = useMemo(() => {
         if (!currentUser) return [];
         return bookings.filter(b =>
-            (b.userId === currentUser.email || (b as any).user_uuid === currentUser.id)
+            (b.userId === currentUser.email || (!!currentUser.id && (b as any).userUuid === currentUser.id))
             && b.status === 'confirmed'
         );
     }, [bookings, currentUser]);
@@ -564,10 +567,22 @@ export function MobileToday() {
                     </a>
                 </div>
 
-                {/* Upcoming */}
+                {/* Upcoming. «Ближайших сессий нет» — только когда брони
+                    реально пришли с сервера. Пока грузятся — заглушки, при
+                    сбое — ошибка с «Повторить» (раньше в обоих случаях
+                    писали «нет», и клиент думал, что бронь слетела). */}
                 <div style={sectionPad}>
                     <SectionTitle>Ближайшие</SectionTitle>
-                    {upcoming.length === 0 ? (
+                    <StaleBar status={bookingsStatus} loadedAt={bookingsLoadedAt} onRetry={() => { fetchBookings(); }} />
+                    {bookingsLoadedAt == null && bookingsStatus !== 'error' ? (
+                        <SkeletonRows />
+                    ) : bookingsLoadedAt == null ? (
+                        <LoadErrorCard
+                            title="Не удалось загрузить брони"
+                            text="Они никуда не делись — просто сейчас не загрузились."
+                            onRetry={() => { fetchBookings(); }}
+                        />
+                    ) : upcoming.length === 0 ? (
                         <div style={{
                             background: '#F4F4F2',
                             borderRadius: 14,

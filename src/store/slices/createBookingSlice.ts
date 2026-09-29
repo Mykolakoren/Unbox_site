@@ -3,10 +3,26 @@ import { toast } from 'sonner';
 import type { UserStore, BookingSlice, BookingHistoryItem } from '../types';
 import { bookingsApi } from '../../api/bookings';
 
+// Номер последнего запуска fetchBookings и номер последнего ПРИМЕНЁННОГО
+// ответа. На старте App.tsx и экран зовут fetchBookings одновременно — без
+// этого запоздавший старый ответ (например, упавший) перетирал свежий.
+let fetchSeq = 0;
+let appliedSeq = 0;
+
 export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> = (set, get) => ({
     bookings: [],
+    bookingsStatus: 'idle',
+    bookingsLoadedAt: null,
+    occupancyStatus: 'idle',
 
     fetchBookings: async () => {
+        const seq = ++fetchSeq;
+        // Уже загруженное обновляем тихо (статус 'ready' остаётся), а с нуля
+        // или после ошибки — честно показываем «загружаем».
+        set(s => ({
+            bookingsStatus: s.bookingsStatus === 'ready' ? 'ready' : 'loading',
+            occupancyStatus: s.occupancyStatus === 'ready' ? 'ready' : 'loading',
+        }));
         try {
             // Use Promise.allSettled to fetch both in parallel and survive individual failures
             const [myResult, publicResult] = await Promise.allSettled([
@@ -14,23 +30,42 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
                 bookingsApi.getPublicBookings()
             ]);
 
-            let myBookings: BookingHistoryItem[] = [];
-            let publicBookings: BookingHistoryItem[] = [];
+            // Пока ждали, ушёл запрос новее и его ответ уже применён —
+            // этот ответ устарел, не трогаем стор.
+            if (seq < appliedSeq) return;
+            appliedSeq = seq;
 
-            if (myResult.status === 'fulfilled') {
-                myBookings = myResult.value;
-            }
+            // Упавшую часть НЕ заменяем пустым списком: раньше сбой /me
+            // стирал уже показанные брони («броней нет»), а сбой /public —
+            // занятость (занятые кабинеты выглядели свободными). Берём
+            // прошлые данные этой части: у публичных строк userId пустой
+            // (сервер его скрывает), у моих — заполнен.
+            const prev = get().bookings;
+            const myOk = myResult.status === 'fulfilled';
+            const publicOk = publicResult.status === 'fulfilled';
 
-            if (publicResult.status === 'fulfilled') {
-                publicBookings = publicResult.value;
-            }
+            const myBookings: BookingHistoryItem[] = myOk
+                ? myResult.value
+                : prev.filter(b => !!b.userId);
+            const publicBookings: BookingHistoryItem[] = publicOk
+                ? publicResult.value
+                : prev.filter(b => !b.userId);
 
             // 3. Merge: prefer 'myBookings' (more details) over 'publicBookings'
             const myIds = new Set(myBookings.map(b => b.id));
             const uniquePublic = publicBookings.filter(b => !myIds.has(b.id));
 
-            set({ bookings: [...myBookings, ...uniquePublic] });
+            set({
+                bookings: [...myBookings, ...uniquePublic],
+                bookingsStatus: myOk ? 'ready' : 'error',
+                ...(myOk ? { bookingsLoadedAt: Date.now() } : {}),
+                occupancyStatus: publicOk ? 'ready' : 'error',
+            });
         } catch (error) {
+            if (seq >= appliedSeq) {
+                appliedSeq = seq;
+                set({ bookingsStatus: 'error', occupancyStatus: 'error' });
+            }
             toast.error('Не удалось загрузить бронирования');
         }
     },

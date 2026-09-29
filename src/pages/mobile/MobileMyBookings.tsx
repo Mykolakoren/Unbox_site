@@ -6,6 +6,7 @@ import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
+import { LoadErrorCard, SkeletonRows, StaleBar } from './LoadStates';
 import { prepareRepeat } from './repeatBooking';
 import { priceLabel } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
@@ -24,6 +25,11 @@ export function MobileMyBookings() {
     const currentUser = useUserStore(s => s.currentUser);
     const bookings = useUserStore(s => s.bookings);
     const fetchBookings = useUserStore(s => s.fetchBookings);
+    const bookingsStatus = useUserStore(s => s.bookingsStatus);
+    const bookingsLoadedAt = useUserStore(s => s.bookingsLoadedAt);
+    // Брони хоть раз пришли с сервера. До этого ни «· 0», ни «броней нет»
+    // писать нельзя — это неправда, данные просто ещё не загружены.
+    const loaded = bookingsLoadedAt != null;
     const [tab, setTab] = useState<Tab>('upcoming');
     const [openBooking, setOpenBooking] = useState<BookingHistoryItem | null>(null);
     // Подтверждение постановки на пересдачу: свайп — жест лёгкий, а действие
@@ -76,7 +82,7 @@ export function MobileMyBookings() {
     const myBookings = useMemo(() => {
         if (!currentUser) return [];
         return bookings.filter(b =>
-            b.userId === currentUser.email || (b as any).user_uuid === currentUser.id
+            b.userId === currentUser.email || (!!currentUser.id && (b as any).userUuid === currentUser.id)
         );
     }, [bookings, currentUser]);
 
@@ -138,8 +144,8 @@ export function MobileMyBookings() {
                     gap: 4,
                 }}>
                     {([
-                        ['upcoming', `Будущие · ${upcoming.length}`],
-                        ['series', `Серии · ${series.length}`],
+                        ['upcoming', loaded ? `Будущие · ${upcoming.length}` : 'Будущие'],
+                        ['series', loaded ? `Серии · ${series.length}` : 'Серии'],
                         ['past', 'Прошедшие'],
                     ] as Array<[Tab, string]>).map(([id, label]) => {
                         const active = tab === id;
@@ -168,9 +174,41 @@ export function MobileMyBookings() {
             </div>
 
             <div className="stagger-in" style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {tab === 'upcoming' && (
+                <StaleBar status={bookingsStatus} loadedAt={bookingsLoadedAt} onRetry={() => { fetchBookings(); }} />
+                {!loaded && bookingsStatus !== 'error' && <SkeletonRows height={118} />}
+                {!loaded && bookingsStatus === 'error' && (
+                    <LoadErrorCard
+                        title="Не удалось загрузить брони"
+                        text="Они никуда не делись — просто сейчас не загрузились."
+                        onRetry={() => { fetchBookings(); }}
+                    />
+                )}
+                {loaded && tab === 'upcoming' && (
                     upcoming.length === 0
-                        ? <Empty>Будущих бронь пока нет</Empty>
+                        ? (
+                            <Empty>
+                                Будущих броней пока нет
+                                <div>
+                                    <button
+                                        onClick={() => navigate('/m/find')}
+                                        style={{
+                                            marginTop: 12,
+                                            background: '#0E0E0E',
+                                            color: '#fff',
+                                            border: 'none',
+                                            borderRadius: 10,
+                                            padding: '10px 18px',
+                                            fontSize: 14,
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            fontFamily: 'inherit',
+                                        }}
+                                    >
+                                        Найти время
+                                    </button>
+                                </div>
+                            </Empty>
+                        )
                         : upcoming.map(({ b, dt }) => {
                             const hoursToStart = (dt!.getTime() - Date.now()) / 3600000;
                             const within24h = hoursToStart >= 0 && hoursToStart < 24;
@@ -204,7 +242,7 @@ export function MobileMyBookings() {
                             );
                         })
                 )}
-                {tab === 'series' && (
+                {loaded && tab === 'series' && (
                     series.length === 0
                         ? <Empty>Активных серий нет</Empty>
                         : series.map(s => (
@@ -224,7 +262,7 @@ export function MobileMyBookings() {
                             />
                         ))
                 )}
-                {tab === 'past' && (
+                {loaded && tab === 'past' && (
                     past.length === 0
                         ? <Empty>Истории нет</Empty>
                         : past.map(({ b, dt }) => (

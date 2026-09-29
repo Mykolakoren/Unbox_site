@@ -175,8 +175,21 @@ export interface Credentials {
     password?: string;
 }
 
+/** Состояние загрузки списка с сервера. 'loading' — идёт ПЕРВАЯ загрузка
+ *  (или повтор после ошибки); фоновое обновление уже загруженных данных
+ *  статус 'ready' не сбрасывает, чтобы экран не мигал заглушками. */
+export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 export interface BookingSlice {
     bookings: BookingHistoryItem[];
+    /** Мои брони (/bookings/me). Пустое «броней нет» можно показывать
+     *  только при 'ready' — иначе клиент видит ложное «бронь пропала». */
+    bookingsStatus: LoadStatus;
+    /** Когда мои брони последний раз УСПЕШНО пришли с сервера (ms). */
+    bookingsLoadedAt: number | null;
+    /** Занятость кабинетов (/bookings/public). Пока не 'ready', экран
+     *  «Свободно» не имеет права показывать кабинеты свободными. */
+    occupancyStatus: LoadStatus;
     fetchBookings: () => Promise<void>;
     fetchAllBookings: () => Promise<void>; // Admin only
     addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<BookingHistoryItem | null>;

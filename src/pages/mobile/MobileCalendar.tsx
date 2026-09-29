@@ -109,7 +109,7 @@ export function MobileCalendar() {
     };
 
     const isOwnBooking = (b: BookingHistoryItem) =>
-        b.userId === currentUser?.email || (b as any).user_uuid === currentUser?.id;
+        b.userId === currentUser?.email || (!!currentUser?.id && (b as any).userUuid === currentUser.id);
 
     return (
         <>

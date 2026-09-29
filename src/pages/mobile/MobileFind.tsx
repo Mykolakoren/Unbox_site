@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Check, ExternalLink, Link as LinkIcon, Move, Repeat, X } from 'lucide-react';
+import { ArrowRight, Check, ExternalLink, Link as LinkIcon, Loader2, Move, Repeat, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -11,6 +11,7 @@ import { crmApi } from '../../api/crm';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
 import { tbilisiNow } from '../../utils/dateUtils';
 import { getFavoriteCabinet } from './favoriteCabinet';
+import { LoadErrorCard, SkeletonRows } from './LoadStates';
 import type { BookingHistoryItem } from '../../store/types';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
@@ -24,6 +25,12 @@ export function MobileFind() {
     const currentUser = useUserStore(s => s.currentUser);
     const bookings = useUserStore(s => s.bookings);
     const fetchBookings = useUserStore(s => s.fetchBookings);
+    // Занятость кабинетов. Пока она не загрузилась (или упала), показывать
+    // кабинеты свободными нельзя: раньше при сбое /bookings/public экран
+    // выдавал занятые кабинеты за свободные, и клиент узнавал об этом
+    // только на оформлении («слот занят»).
+    const occupancyStatus = useUserStore(s => s.occupancyStatus);
+    const occupancyReady = occupancyStatus === 'ready';
     const reset = useBookingStore(s => s.reset);
     const favCab = getFavoriteCabinet(currentUser?.id);
 
@@ -145,6 +152,14 @@ export function MobileFind() {
     const [spaces, setSpaces] = useState<Set<SpaceType>>(
         () => cabResource ? new Set([spaceOfRes(cabResource)]) : new Set(['individual', 'group', 'capsule']));
     const [rescheduling, setRescheduling] = useState(false);
+    // Защита от повторного тапа, пока идёт запрос привязки/переноса. Второй
+    // тап по соседнему кабинету создавал ВТОРУЮ бронь (со списанием), а при
+    // переносе — переносил бронь ещё раз. ref ловит тап в том же кадре, до
+    // перерисовки; pendingChip — какой чип нажат (на нём крутится спиннер).
+    const inFlightRef = useRef(false);
+    const [pendingChip, setPendingChip] = useState<string | null>(null);
+    const chipsBusy = linking || rescheduling;
+    const releaseChips = () => { inFlightRef.current = false; setPendingChip(null); };
 
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
 
@@ -216,6 +231,7 @@ export function MobileFind() {
 
     async function chooseWindow(startMin: number, resourceId: string) {
         if (!resourceId) return;
+        if (inFlightRef.current) return;
 
         // Link-session path: create the booking immediately (balance, no
         // extras) and link it to the source CRM session. No checkout step —
@@ -223,7 +239,10 @@ export function MobileFind() {
         // session sheet. Failures during the link don't roll back the
         // booking — the user can re-attach from the desktop CRM if needed.
         if (linkSessionMeta) {
+            inFlightRef.current = true;
+            setPendingChip(`${startMin}|${resourceId}`);
             setLinking(true);
+            let left = false;
             try {
                 const resource = RESOURCES.find(r => r.id === resourceId);
                 const created = await bookingsApi.createBooking({
@@ -244,12 +263,15 @@ export function MobileFind() {
                 }
                 toast.success('Кабинет забронирован и привязан');
                 navigate(`/m/crm/today${linkSessionMeta.date ? `?date=${linkSessionMeta.date}` : ''}`, { replace: true });
+                left = true;
             } catch (e: unknown) {
                 const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
                 const msg = typeof detail === 'string' ? detail : ((e as Error)?.message || 'Не удалось забронировать');
                 toast.error(msg);
             } finally {
-                setLinking(false);
+                // После успеха уходим с экрана — чипы не разблокируем, чтобы
+                // тап в этот момент не создал вторую бронь.
+                if (!left) { setLinking(false); releaseChips(); }
             }
             return;
         }
@@ -258,7 +280,10 @@ export function MobileFind() {
         // new one. Backend handles GCal sync, balance reconciliation, and
         // (if applicable) propagation through a series.
         if (rescheduleBooking) {
+            inFlightRef.current = true;
+            setPendingChip(`${startMin}|${resourceId}`);
             setRescheduling(true);
+            let left = false;
             try {
                 await bookingsApi.rescheduleBooking(rescheduleBooking.id, {
                     newDate: fmtDate(targetDate, 'yyyy-MM-dd'),
@@ -273,13 +298,14 @@ export function MobileFind() {
                 await fetchBookings();
                 toast.success('Бронь перенесена');
                 navigate('/m/bookings', { replace: true });
+                left = true;
             } catch (e: any) {
                 const detail = e?.response?.data?.detail;
                 const msg = typeof detail === 'string' ? detail
                     : (detail?.conflicts ? `Конфликт: ${detail.conflicts.map((c: any) => c.date).join(', ')}` : (e.message || 'Не удалось перенести'));
                 toast.error(msg);
             } finally {
-                setRescheduling(false);
+                if (!left) { setRescheduling(false); releaseChips(); }
             }
             return;
         }
@@ -405,12 +431,6 @@ export function MobileFind() {
                     </div>
                 )}
 
-                {rescheduling && (
-                    <div style={{ padding: '0 16px', fontSize: 13, color: '#666' }}>
-                        Переносим…
-                    </div>
-                )}
-
                 {/* Link-session banner — surfaces the source CRM session so the
                     user can verify before tapping a slot. */}
                 {linkSessionMeta && (
@@ -444,12 +464,6 @@ export function MobileFind() {
                                 <X size={16} />
                             </button>
                         </div>
-                    </div>
-                )}
-
-                {linking && (
-                    <div style={{ padding: '0 16px', fontSize: 13, color: '#666' }}>
-                        Создаём бронь и привязываем…
                     </div>
                 )}
 
@@ -631,16 +645,41 @@ export function MobileFind() {
                     </div>
                 </FieldGroup>
 
-                {/* Results */}
+                {/* Results. Чипы — только когда занятость загружена: пока
+                    грузится — заглушки, при сбое — ошибка с «Повторить». */}
                 <div style={{ padding: '0 16px' }}>
-                    <SectionTitle>{slots.length === 0 ? 'Свободных окон нет' : `Найдено: ${slots.length}`}</SectionTitle>
+                    <SectionTitle>
+                        {!occupancyReady
+                            ? (occupancyStatus === 'error' ? 'Занятость не загрузилась' : 'Проверяем занятость…')
+                            : slots.length === 0 ? 'Свободных окон нет' : `Найдено: ${slots.length}`}
+                    </SectionTitle>
+                    {/* Статус запроса — рядом со списком, а не над «Когда»:
+                        чипы обычно ниже первого экрана, и надпись вверху
+                        никто не видел. */}
+                    {chipsBusy && (
+                        <div role="status" style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            fontSize: 13, color: '#666', marginBottom: 8,
+                        }}>
+                            <Loader2 size={14} className="animate-spin" />
+                            {linking ? 'Создаём бронь и привязываем…' : 'Переносим…'}
+                        </div>
+                    )}
+                    {occupancyStatus === 'error' && (
+                        <LoadErrorCard
+                            title="Не удалось проверить, что свободно"
+                            text="Без этого легко выбрать уже занятое время. Подожди немного и повтори."
+                            onRetry={() => { fetchBookings(); }}
+                        />
+                    )}
+                    {!occupancyReady && occupancyStatus !== 'error' && <SkeletonRows height={84} />}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {/* One chip per (time, resource) — owner+Galina 2026-05-31:
                             раньше строка показывала «Свободно: Каб.1, Каб.2, ...»
                             и тап всегда брал первый из списка. Пользователь
                             думал что бронит Каб.2, а вписывался Каб.1. Теперь
                             каждый кабинет — отдельная кликабельная карточка. */}
-                        {slots.map(s => (
+                        {occupancyReady && slots.map(s => (
                             <div
                                 key={s.startMin}
                                 style={{
@@ -660,10 +699,13 @@ export function MobileFind() {
                                     {s.freeResIds.map(rid => {
                                         const r = RESOURCES.find(x => x.id === rid);
                                         const isReRent = s.reRentResIds.includes(rid);
+                                        const isPending = pendingChip === `${s.startMin}|${rid}`;
                                         return (
                                             <button
                                                 key={rid}
                                                 onClick={() => chooseWindow(s.startMin, rid)}
+                                                disabled={chipsBusy}
+                                                aria-busy={isPending || undefined}
                                                 className="press"
                                                 title={isReRent ? 'Слот на переаренде — кто-то освободил, можно забрать' : undefined}
                                                 style={{
@@ -677,11 +719,15 @@ export function MobileFind() {
                                                     padding: '7px 12px',
                                                     fontSize: 12,
                                                     fontWeight: 700,
-                                                    cursor: 'pointer',
+                                                    cursor: chipsBusy ? 'default' : 'pointer',
                                                     fontFamily: 'inherit',
                                                     display: 'inline-flex',
                                                     alignItems: 'center',
                                                     gap: 5,
+                                                    // Пока идёт запрос — все чипы
+                                                    // неактивны, нажатый остаётся ярким.
+                                                    opacity: chipsBusy && !isPending ? 0.5 : 1,
+                                                    pointerEvents: chipsBusy ? 'none' : undefined,
                                                 }}
                                             >
                                                 {isReRent && <Repeat size={11} />}
@@ -693,9 +739,11 @@ export function MobileFind() {
                                                         {r.hourlyRate}₾/ч
                                                     </span>
                                                 )}
-                                                {isReRent
-                                                    ? <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>переаренда</span>
-                                                    : <ArrowRight size={11} />}
+                                                {isPending
+                                                    ? <Loader2 size={11} className="animate-spin" />
+                                                    : isReRent
+                                                        ? <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>переаренда</span>
+                                                        : <ArrowRight size={11} />}
                                             </button>
                                         );
                                     })}
@@ -703,7 +751,7 @@ export function MobileFind() {
                             </div>
                         ))}
                     </div>
-                    {slots.length === 0 && (locs.size === 0 || spaces.size === 0) && (
+                    {occupancyReady && slots.length === 0 && (locs.size === 0 || spaces.size === 0) && (
                         <div style={{
                             background: '#F4F4F2',
                             borderRadius: 14,
@@ -715,7 +763,7 @@ export function MobileFind() {
                             Выбери хотя бы одну локацию и тип помещения.
                         </div>
                     )}
-                    {slots.length === 0 && locs.size > 0 && spaces.size > 0 && (
+                    {occupancyReady && slots.length === 0 && locs.size > 0 && spaces.size > 0 && (
                         <div style={{
                             background: '#F4F4F2',
                             borderRadius: 14,
