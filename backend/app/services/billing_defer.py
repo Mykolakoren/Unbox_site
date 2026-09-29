@@ -313,13 +313,14 @@ def waive_charge(session: Session, b: Booking, *, reason: str, by_user: User) ->
     # → возврат ДЕНЕГ, иначе вернули бы фантомные часы в пул + не отдали деньги.
     hours_actually_used = float(b.hours_deducted or 0)
     if method == "subscription" and hours_actually_used > 0:
-        rem = subscription_pool.get_float(user.subscription, "remaining_hours")
-        used = subscription_pool.get_float(user.subscription, "used_hours")
-        user.subscription = subscription_pool.update(
-            user.subscription,
-            remaining_hours=rem + hours_actually_used,
-            used_hours=max(0.0, used - hours_actually_used),
-        )
+        if subscription_pool.hours_return_allowed(user.subscription, b.date):
+            rem = subscription_pool.get_float(user.subscription, "remaining_hours")
+            used = subscription_pool.get_float(user.subscription, "used_hours")
+            user.subscription = subscription_pool.update(
+                user.subscription,
+                remaining_hours=rem + hours_actually_used,
+                used_hours=max(0.0, used - hours_actually_used),
+            )
         # Аудит 2026-08-27: пиковая надбавка (final_price у абонементной брони)
         # — деньги, списанные отдельно от часов. Возврат часов её не покрывал.
         _peak = float(b.final_price or 0)

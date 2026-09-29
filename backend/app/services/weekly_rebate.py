@@ -33,6 +33,7 @@ from app.models.user import User
 from app.models.weekly_rebate import WeeklyRebate
 from app.models.cashbox_transaction import CashboxTransaction
 from app.services.pricing import PricingService
+from app.services import subscription_pool
 
 # Минимальный кредит — мелочь не начисляем (шум в кассе/балансе).
 MIN_REBATE_GEL = 0.5
@@ -115,6 +116,10 @@ def run_weekly_rebates(
         if user is None and first.user_id:
             user = session.exec(select(User).where(User.email == first.user_id)).first()
         if user is None:
+            continue
+        # Недельный пакет (фикс. цена за N часов в неделю, 29.09) уже со скидкой —
+        # скидка за объём к нему не применяется, в т.ч. к часам сверх пакета.
+        if subscription_pool.get(user.subscription, "weekly_package", False):
             continue
 
         # Итоговый тариф недели — по ВСЕМ подтверждённым часам (любой способ оплаты).
@@ -282,7 +287,7 @@ def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
         "booking_rebate": 0.0, "booking_net_estimate": float(booking.final_price or 0.0),
         "week_rebate": 0.0,
     }
-    if user is None:
+    if user is None or subscription_pool.get(user.subscription, "weekly_package", False):
         return empty
 
     conds = [Booking.status == "confirmed", Booking.date >= start_dt, Booking.date < end_dt]

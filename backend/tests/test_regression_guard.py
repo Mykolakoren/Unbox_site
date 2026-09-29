@@ -966,3 +966,33 @@ def test_admin_requests_2026_09_25_hold():
     assert "est.tierPercent" in hints and "est.tier_percent" not in hints, \
         "ответ API приходит в camelCase (интерцептор) — snake_case поля будут undefined"
     assert "Depends(require_reports)" in rec, "выгрузка по всем клиентам — только с правом отчётов"
+
+
+def test_weekly_package_rollover():
+    """29.09 (Галина Белостоцкая): недельный пакет 16 ч за 160 ₾. Выдача пула на
+    неделю — в вс 00:00 Тбилиси (брони недели списываются за 24 ч), идемпотентно
+    по package_week; пакет не получает недельную скидку за объём."""
+    import pathlib
+    from datetime import datetime
+    from app.services.weekly_package import target_week_start, package_fields
+    assert str(target_week_start(datetime(2026, 10, 3, 20, 0))) == "2026-10-05"   # вс 00:00 → след. пн
+    assert str(target_week_start(datetime(2026, 10, 3, 19, 59))) == "2026-09-28"  # ещё сб → текущая
+    assert str(target_week_start(datetime(2026, 10, 5, 8, 0))) == "2026-10-05"    # опоздали → догоняем
+    f = package_fields(target_week_start(datetime(2026, 10, 3, 20, 0)), 16)
+    assert f["remaining_hours"] == 16.0 and f["used_hours"] == 0.0 and f["package_week"] == "2026-10-05"
+    src = (pathlib.Path(__file__).parent.parent / "app/services/weekly_package.py").read_text()
+    assert 'get(sub, "package_week") == wk.isoformat()' in src, "повторный запуск снова спишет 160 дважды"
+    assert '"is_frozen"' in src, "пакет на паузе не должен оплачиваться"
+    wr = (pathlib.Path(__file__).parent.parent / "app/services/weekly_rebate.py").read_text()
+    assert wr.count('"weekly_package"') >= 2, "пакет снова получает недельную скидку за объём"
+    root = pathlib.Path(__file__).parent.parent
+    routes = (root / "app/api/v1/bookings/routes.py").read_text()
+    assert routes.count("hours_return_allowed(") >= 4, \
+        "отмена/обрезка/цена/сокращение брони прошлой недели пакета снова вернёт часы в новый пул"
+    assert "hours_return_allowed(" in (root / "app/services/billing_defer.py").read_text()
+    assert ".with_for_update()" in src and "session.commit()" in src, "двойной запуск снова спишет пакет дважды"
+    from app.services import subscription_pool as sp
+    sub = {"weekly_package": True, "package_week": "2026-09-28"}
+    assert sp.hours_return_allowed(sub, datetime(2026, 10, 4, 15)) is True
+    assert sp.hours_return_allowed(sub, datetime(2026, 9, 27, 11)) is False
+    assert sp.hours_return_allowed({"plan_id": "PRO_PLUS"}, datetime(2020, 1, 1)) is True

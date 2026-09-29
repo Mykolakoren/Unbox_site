@@ -19,6 +19,8 @@
 
 # Недельный перерасчёт скидки (кредит на баланс), понедельник ночью.
 0 1 * * 1 cd /var/www/unbox/backend && venv/bin/python3 run_weekly_rebate.py >> /var/log/unbox-weekly-rebate.log 2>&1
+# Недельные пакеты часов (weekly_package.py): вс 00:00 Тбилиси = сб 20:00 UTC
+0 20 * * 6 cd /var/www/unbox/backend && venv/bin/python3 run_weekly_packages.py >> /var/log/unbox-weekly-packages.log 2>&1
 # ДЕНЬГИ: ревизор инвариантов (касса, абонементы) — ежедневно 6:00, алерт в TG
 # владельцу при расхождениях (read-only, ничего не пишет). scripts/money_audit.py.
 0 6 * * * cd /var/www/unbox/backend && venv/bin/python3 scripts/money_audit.py --alert >> /var/log/unbox-money-audit.log 2>&1

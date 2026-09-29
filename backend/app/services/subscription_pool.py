@@ -46,6 +46,11 @@ _ALIASES: dict[str, str] = {
     # Жизненный цикл: active | frozen | completed. Стамп ставит крон/ревизор;
     # РЕАЛЬНЫЙ гейт денег — is_active(), считается вживую, а не по этому полю.
     "status": "status",
+    # Недельный пакет (29.09, weekly_package.py): фикс. цена за N часов в неделю.
+    "weekly_package": "weeklyPackage",
+    "weekly_hours": "weeklyHours",
+    "weekly_price": "weeklyPrice",
+    "package_week": "packageWeek",
 }
 
 
@@ -101,6 +106,27 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
     except (ValueError, TypeError):
         return None
+
+
+def hours_return_allowed(sub: Optional[dict], booking_date: Any) -> bool:
+    """Можно ли вернуть часы брони обратно в пул.
+
+    Для недельного пакета — только если бронь из ТЕКУЩЕЙ недели пакета: пул
+    каждую неделю выдаётся заново, и часы отменённой брони прошлой недели иначе
+    попали бы в пул новой недели (лишние часы сверх оплаченных). Неиспользованные
+    часы недели сгорают — это суть пакета. Для обычных абонементов — всегда да.
+    """
+    if not get(sub, "weekly_package", False):
+        return True
+    pw = get(sub, "package_week")
+    if not pw or booking_date is None:
+        return True
+    d = booking_date.date() if isinstance(booking_date, datetime) else booking_date
+    try:
+        from datetime import timedelta as _td
+        return (d - _td(days=d.weekday())).isoformat() == str(pw)
+    except Exception:
+        return True
 
 
 def is_flexible(sub: Optional[dict]) -> bool:

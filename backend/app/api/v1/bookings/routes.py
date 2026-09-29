@@ -299,6 +299,10 @@ def _refund_booking_to_owner(
             )
             refund_hours = round(full_hours * refund_percent, 4)
             retained_hours = round(full_hours - refund_hours, 4)
+            if not subscription_pool.hours_return_allowed(new_sub, booking.date):
+                # Бронь из прошлой недели недельного пакета — её часы сгорели
+                # вместе с неделей; в пул новой недели не возвращаем.
+                refund_hours = 0.0
             rem = subscription_pool.get_float(new_sub, "remaining_hours")
             # Mirror waive_charge in billing_defer.py: refunding hours back to
             # the pool must also decrement used_hours, or the pool drifts
@@ -3761,7 +3765,8 @@ def trim_booking(
         removed_hours = round(orig_hours - new_hours, 4)
         # Refund the removed hours to the pool: bump remaining_hours, drop
         # used_hours (floored at 0) — subscription_pool keeps both dialects.
-        if not pending and removed_hours > 0 and owner and owner.subscription:
+        if (not pending and removed_hours > 0 and owner and owner.subscription
+                and subscription_pool.hours_return_allowed(owner.subscription, booking.date)):
             rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
             used = subscription_pool.get_float(owner.subscription, "used_hours")
             owner.subscription = subscription_pool.update(
@@ -4534,13 +4539,14 @@ def set_booking_price(
             old_hours = float(booking.hours_deducted or (booking.duration or 0) / 60.0)
             new_hours = old_hours * (new_price / old_price) if old_price > 0 else old_hours
             hours_delta = round(old_hours - new_hours, 4)
-            rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
-            used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
-            booking_owner.subscription = subscription_pool.update(
-                booking_owner.subscription,
-                remaining_hours=rem + hours_delta,
-                used_hours=max(0.0, used - hours_delta),
-            )
+            if subscription_pool.hours_return_allowed(booking_owner.subscription, booking.date):
+                rem = subscription_pool.get_float(booking_owner.subscription, "remaining_hours")
+                used = subscription_pool.get_float(booking_owner.subscription, "used_hours")
+                booking_owner.subscription = subscription_pool.update(
+                    booking_owner.subscription,
+                    remaining_hours=rem + hours_delta,
+                    used_hours=max(0.0, used - hours_delta),
+                )
             booking.hours_deducted = round(new_hours, 4)
         else:
             # delta знаковая: >0 — возврат клиенту, <0 — доплата.
@@ -5274,13 +5280,14 @@ def shorten_booking(
             target_user = session.exec(select(User).where(User.email == booking.user_id)).first()
         if target_user:
             if (booking.payment_method or "").lower() == "subscription" and refund_hours > 0:
-                rem = subscription_pool.get_float(target_user.subscription, "remaining_hours")
-                used = subscription_pool.get_float(target_user.subscription, "used_hours")
-                target_user.subscription = subscription_pool.update(
-                    target_user.subscription,
-                    remaining_hours=rem + refund_hours,
-                    used_hours=max(0.0, used - refund_hours),
-                )
+                if subscription_pool.hours_return_allowed(target_user.subscription, booking.date):
+                    rem = subscription_pool.get_float(target_user.subscription, "remaining_hours")
+                    used = subscription_pool.get_float(target_user.subscription, "used_hours")
+                    target_user.subscription = subscription_pool.update(
+                        target_user.subscription,
+                        remaining_hours=rem + refund_hours,
+                        used_hours=max(0.0, used - refund_hours),
+                    )
             else:
                 wallet.credit(session, target_user, refund_price, reason="shorten_refund",
                               description="Возврат за сокращённое время брони",
