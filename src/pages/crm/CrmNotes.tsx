@@ -14,6 +14,8 @@ import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import type { CrmNoteCreate, CrmNote, CrmClient } from '../../api/crm';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { NoteDeletePreview } from '../../components/crm/NoteDeletePreview';
 
 export function CrmNotes() {
         const { notes, clients, fetchNotes, fetchClients, createNote, deleteNote, loading } =
@@ -21,6 +23,7 @@ export function CrmNotes() {
     const [filterClient, setFilterClient] = useState<string>('');
     const [showForm, setShowForm] = useState(false);
     const [search, setSearch] = useState('');
+    const { confirm: askConfirm } = useConfirmDialog();
 
     useEffect(() => {
         fetchClients();
@@ -72,11 +75,22 @@ export function CrmNotes() {
                     toast.success('Заметка создана');
                 }}
                 onDelete={async (id) => {
+                    // Заметка стирается из базы насовсем — один клик по корзине
+                    // больше не удаляет, сначала спрашиваем (аудит 29.09, G5-01).
+                    const note = notes.find((n) => n.id === id);
+                    const clientName = note ? clientMap.get(note.clientId)?.name : undefined;
+                    const ok = await askConfirm({
+                        title: clientName ? `Удалить заметку о клиенте ${clientName}?` : 'Удалить заметку?',
+                        message: <NoteDeletePreview content={note?.content} />,
+                        confirmLabel: 'Удалить',
+                        destructive: true,
+                    });
+                    if (!ok) return;
                     try {
                         await deleteNote(id);
                         toast.success('Заметка удалена');
                     } catch {
-                        toast.error('Ошибка удаления');
+                        // Ошибку уже показал стор (crmStore.deleteNote) — второй тост не нужен.
                     }
                 }}
             />
@@ -511,6 +525,7 @@ function GridHouseCrmNotes({
                                         e.currentTarget.style.color = GH.ink60;
                                     }}
                                     title="Удалить заметку"
+                                    aria-label="Удалить заметку"
                                 >
                                     <Trash2 style={{ width: 14, height: 14 }} />
                                 </button>

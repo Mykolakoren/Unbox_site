@@ -15,7 +15,8 @@ interface AdminTaskState {
     fetchTasks: () => Promise<void>;
     addTask: (data: CreateTaskPayload) => Promise<AdminTask | null>;
     updateTask: (id: string, updates: UpdateTaskPayload) => Promise<void>;
-    deleteTask: (id: string) => Promise<void>;
+    /** true — задача удалена на сервере; false — не вышло (тост «Удалено» не показывать). */
+    deleteTask: (id: string) => Promise<boolean>;
     moveTask: (id: string, newStatus: TaskStatus) => Promise<void>;
     reorderTasks: (items: { id: string; sortOrder: number; status?: string }[]) => Promise<void>;
 }
@@ -63,8 +64,10 @@ export const useAdminTaskStore = create<AdminTaskState>()((set, get) => ({
         try {
             await adminTasksApi.delete(id);
             set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) }));
+            return true;
         } catch (e: any) {
             console.error('Failed to delete task:', e);
+            return false;
         }
     },
 

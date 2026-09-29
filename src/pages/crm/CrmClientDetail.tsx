@@ -4,6 +4,7 @@ import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
 import { AccountSelect } from '../../components/crm/AccountSelect';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
+import { NoteDeletePreview } from '../../components/crm/NoteDeletePreview';
 import type { CrmClient, CrmSession, CrmNote, CrmPayment } from '../../api/crm';
 import {
     ArrowLeft, Phone, Mail, Tag, Wallet, Calendar, StickyNote,
@@ -16,6 +17,13 @@ import { toast } from 'sonner';
 import { parseUTC } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+
+/** «GEL» → «₾» для текста в окнах подтверждения. */
+function currencySymbol(code?: string): string {
+    if (!code) return '';
+    return CURRENCIES.find(c => c.code === code)?.symbol ?? code;
+}
 
 const STATUS_COLORS: Record<string, string> = {
     PLANNED: 'bg-blue-100 text-blue-700',
@@ -44,6 +52,10 @@ export function CrmClientDetail() {
     const { clientId } = useParams<{ clientId: string }>();
     const navigate = useNavigate();
     const { updateSession, createNote, deleteNote, paymentAccounts } = useCrmStore();
+    // Одно окно подтверждения на всё, что стирает деньги или записи
+    // (аудит 29.09, G5-07/G5-01): раньше часть мест спрашивала через
+    // window.confirm, а часть не спрашивала вовсе.
+    const { confirm: askConfirm } = useConfirmDialog();
 
     const [client, setClient] = useState<CrmClient | null>(null);
     const [sessions, setSessions] = useState<CrmSession[]>([]);
@@ -143,6 +155,21 @@ export function CrmClientDetail() {
     };
 
     const handleUnmarkPaid = async (sessionId: string) => {
+        // Снятие оплаты удаляет платёж целиком: у клиента снова появляется
+        // долг, а повторная отметка запишет оплату сегодняшним числом. Раньше
+        // это делал один клик по плашке «Оплачено» — теперь только через вопрос.
+        const s = sessions.find(x => x.id === sessionId);
+        const what = s
+            ? ` ${s.price ?? client?.basePrice ?? 0} ${currencySymbol(s.currency ?? client?.currency)} за ${format(parseUTC(s.date), 'd MMM', { locale: ru })}`
+            : '';
+        const ok = await askConfirm({
+            title: `Снять оплату${what}?`,
+            message: 'Платёж удалится из истории оплат, и сессия снова станет долгом. Если потом отметить её заново, оплата запишется сегодняшним числом.',
+            confirmLabel: 'Снять оплату',
+            cancelLabel: 'Оставить',
+            destructive: true,
+        });
+        if (!ok) return;
         try {
             await crmApi.unmarkPaidSession(sessionId);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: false } : s));
@@ -155,7 +182,11 @@ export function CrmClientDetail() {
 
     const handleMarkAllPaid = async () => {
         if (!clientId || !client) return;
-        if (!confirm(`Отметить ${stats.unpaidCount} неоплаченных сессий как оплаченные?`)) return;
+        const ok = await askConfirm({
+            title: `Отметить ${stats.unpaidCount} неоплаченных сессий как оплаченные?`,
+            confirmLabel: 'Отметить',
+        });
+        if (!ok) return;
         setMarkingAll(true);
         try {
             const result = await crmApi.markAllPaid(clientId);
@@ -250,17 +281,36 @@ export function CrmClientDetail() {
     };
 
     const handleDeleteNote = async (noteId: string) => {
+        // Заметка стирается из базы насовсем (мягкого удаления нет) —
+        // поэтому сначала спрашиваем и показываем, какую именно (G5-01).
+        const note = notes.find(n => n.id === noteId);
+        const ok = await askConfirm({
+            title: 'Удалить заметку?',
+            message: <NoteDeletePreview content={note?.content} />,
+            confirmLabel: 'Удалить',
+            destructive: true,
+        });
+        if (!ok) return;
         try {
             await deleteNote(noteId);
             setNotes(prev => prev.filter(n => n.id !== noteId));
             toast.success('Заметка удалена');
         } catch {
-            toast.error('Ошибка удаления');
+            // Ошибку уже показал стор (crmStore.deleteNote) — второй тост не нужен.
         }
     };
 
     const handleDeletePayment = async (paymentId: string) => {
-        if (!window.confirm('Удалить эту оплату? Если она была единственной по своей сессии, сессия снова станет неоплаченной.')) return;
+        const p = payments.find(x => x.id === paymentId);
+        const ok = await askConfirm({
+            title: p
+                ? `Удалить оплату ${p.amount} ${currencySymbol(p.currency)} от ${format(parseISO(p.date || p.createdAt), 'd MMM', { locale: ru })}?`
+                : 'Удалить оплату?',
+            message: 'Если это единственная оплата сессии, сессия снова станет неоплаченной.',
+            confirmLabel: 'Удалить',
+            destructive: true,
+        });
+        if (!ok) return;
         try {
             await crmApi.deletePayment(paymentId);
             toast.success('Оплата удалена');
@@ -832,11 +882,21 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                         {note.tags}
                                                     </span>
                                                 )}
+                                                {/* Зона нажатия 32×32, а вид прежний: отрицательные
+                                                    поля не дают строке с датой вырасти. */}
                                                 <button
                                                     onClick={() => handleDeleteNote(note.id)}
-                                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30, padding: 2 }}
+                                                    title="Удалить заметку"
+                                                    aria-label="Удалить заметку"
+                                                    style={{
+                                                        background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30,
+                                                        width: 32, height: 32, margin: '-9px -10px -9px -4px',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                                    }}
+                                                    onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
+                                                    onMouseLeave={e => (e.currentTarget.style.color = GH.ink30)}
                                                 >
-                                                    <Trash2 size={12} />
+                                                    <Trash2 size={13} />
                                                 </button>
                                             </div>
                                         </div>
@@ -1083,17 +1143,31 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                         </span>
                                                         {!isCancelled && (
                                                             session.isPaid ? (
-                                                                <button
-                                                                    onClick={() => handleUnmarkPaid(session.id)}
-                                                                    style={{
+                                                                // «Оплачено» — только статус, не кнопка: раньше
+                                                                // один клик по нему удалял платёж (G5-07). Снять
+                                                                // оплату — отдельный крестик с подтверждением.
+                                                                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                                                    <span style={{
                                                                         ...ghMono, fontSize: 9, padding: '3px 8px',
                                                                         background: 'rgba(71,109,107,0.10)', color: GH.accent,
-                                                                        border: 'none', cursor: 'pointer',
-                                                                    }}
-                                                                    title="Нажми чтобы отменить оплату"
-                                                                >
-                                                                    Оплачено
-                                                                </button>
+                                                                    }}>
+                                                                        Оплачено
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => handleUnmarkPaid(session.id)}
+                                                                        title="Снять оплату"
+                                                                        aria-label="Снять оплату"
+                                                                        style={{
+                                                                            width: 32, height: 32, margin: '-8px -4px -8px 0',
+                                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                            background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30,
+                                                                        }}
+                                                                        onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
+                                                                        onMouseLeave={e => (e.currentTarget.style.color = GH.ink30)}
+                                                                    >
+                                                                        <X size={12} />
+                                                                    </button>
+                                                                </span>
                                                             ) : (
                                                                 <button
                                                                     onClick={() => handleQuickPay(session.id, isEditing ? editSessionAccount : undefined)}

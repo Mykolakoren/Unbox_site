@@ -22,6 +22,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -62,8 +63,27 @@ export function AdminTasksBoard() {
     const [filterAssignee, setFilterAssignee] = useState<string>('');
     const [showArchive, setShowArchive] = useState(false);
     const [activeId, setActiveId] = useState<string | null>(null);
+    const { confirm: askConfirm } = useConfirmDialog();
 
     useEffect(() => { fetchTasks(); }, [fetchTasks]);
+
+    // Задача удаляется с сервера насовсем вместе с чек-листом и комментариями.
+    // Раньше хватало одного промаха по крошечной корзине рядом с DONE —
+    // теперь сначала вопрос, а «Удалено» только после ответа сервера (G8-04).
+    const confirmDeleteTask = async (task: AdminTask): Promise<boolean> => {
+        const name = task.title.length > 60 ? `${task.title.slice(0, 60).trimEnd()}…` : task.title;
+        const ok = await askConfirm({
+            title: `Удалить задачу «${name}»?`,
+            message: 'Чек-лист и комментарии удалятся вместе с ней. Вернуть её не получится.',
+            confirmLabel: 'Удалить',
+            destructive: true,
+        });
+        if (!ok) return false;
+        const deleted = await deleteTask(task.id);
+        if (deleted) toast.success('Задача удалена');
+        else toast.error('Не получилось удалить задачу');
+        return deleted;
+    };
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -163,7 +183,7 @@ export function AdminTasksBoard() {
                 getColumnTasks={getColumnTasks}
                 archivedCount={archivedCount}
                 hasFilters={hasFilters}
-                deleteTask={deleteTask}
+                confirmDeleteTask={confirmDeleteTask}
                 moveTask={moveTask}
                 updateTask={updateTask}
                 addTask={addTask}
@@ -549,7 +569,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                     )}
                 </div>
                 <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 sticky bottom-0 bg-white rounded-b-2xl">
-                    {onDelete ? <button onClick={onDelete} className="text-sm text-red-400 hover:text-red-600 flex items-center gap-1"><Trash2 size={14} />Удалить</button> : <div />}
+                    {onDelete ? <button onClick={onDelete} className="text-sm text-red-400 hover:text-red-600 flex items-center gap-1 py-2 -my-2"><Trash2 size={14} />Удалить</button> : <div />}
                     <div className="flex gap-2">
                         <Button variant="outline" onClick={onClose}>Отмена</Button>
                         <Button onClick={handleSave} disabled={saving}>{saving ? <><Loader2 size={14} className="animate-spin mr-1" />Сохранение...</> : isNew ? 'Создать' : 'Сохранить'}</Button>
@@ -584,7 +604,7 @@ type GHTBProps = {
     getColumnTasks: (status: TaskStatus) => AdminTask[];
     archivedCount: number;
     hasFilters: boolean;
-    deleteTask: (id: string) => void;
+    confirmDeleteTask: (task: AdminTask) => Promise<boolean>;
     moveTask: (id: string, status: TaskStatus) => void;
     updateTask: (id: string, data: any) => Promise<any>;
     addTask: (data: any) => Promise<any>;
@@ -819,7 +839,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                                             task={task}
                                                             index={i}
                                                             onEdit={() => p.setEditingTask(task)}
-                                                            onDelete={() => { p.deleteTask(task.id); toast.success('Удалено'); }}
+                                                            onDelete={() => { p.confirmDeleteTask(task); }}
                                                             onMove={(status) => { p.moveTask(task.id, status); toast.success(`Перемещено в "${GH_COLUMNS.find(c => c.id === status)?.title}"`); }}
                                                         />
                                                     ))}
@@ -866,7 +886,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                         else { await p.addTask(data as any); toast.success('Создано'); }
                         p.setEditingTask(null);
                     }}
-                    onDelete={p.editingTask.id ? async () => { await p.deleteTask(p.editingTask!.id); p.setEditingTask(null); toast.success('Удалено'); } : undefined}
+                    onDelete={p.editingTask.id ? async () => { if (await p.confirmDeleteTask(p.editingTask!)) p.setEditingTask(null); } : undefined}
                 />
             )}
         </div>
@@ -972,14 +992,26 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
                         <GripVertical size={12} />
                     </div>
                     {onDelete && (
-                        <button
-                            onClick={e => { e.stopPropagation(); onDelete(); }}
-                            style={{ padding: 3, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}
-                            onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
-                            onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
-                        >
-                            <Trash2 size={12} />
-                        </button>
+                        // Корзина отодвинута от ручки и кнопок перемещения чертой-разделителем;
+                        // зона нажатия 32×32 (отрицательные поля держат высоту строки),
+                        // а само удаление всё равно спрашивает подтверждение.
+                        <>
+                            <span aria-hidden style={{ width: 1, background: GH.ink10, marginLeft: 6 }} />
+                            <button
+                                onClick={e => { e.stopPropagation(); onDelete(); }}
+                                title="Удалить задачу"
+                                aria-label="Удалить задачу"
+                                style={{
+                                    width: 32, height: 32, margin: '-8px -9px -8px 0',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
+                                }}
+                                onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
+                                onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
+                            >
+                                <Trash2 size={12} />
+                            </button>
+                        </>
                     )}
                 </div>
             </div>
