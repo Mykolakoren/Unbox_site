@@ -752,6 +752,43 @@ def _resolve_with_bonus(
     return method, quote, covered
 
 
+def _bonus_hours_on(booking: Booking) -> float:
+    """Сколько бонусных часов потрачено на бронь при создании (их вернёт отмена).
+
+    Бонус тратится при СОЗДАНИИ, а в брони остаётся payment_method='bonus',
+    hours_deducted=потраченные часы и final_price — только НЕпокрытая часть
+    (обычно 0 ₾). Правки брони, которые пересчитывают цену «как для денежной»,
+    обязаны это учитывать — иначе клиент платит полную цену за слот, уже
+    оплаченный бонус-часом, а сам час пропадает.
+    """
+    if (booking.payment_method or "").lower() != "bonus":
+        return 0.0
+    return max(0.0, float(booking.hours_deducted or 0))
+
+
+def _bonus_uncovered_price(booking: Booking, price: float, duration_minutes: int) -> float:
+    """Цена брони за вычетом доли, покрытой её бонусными часами.
+
+    Та же формула, что при создании (_resolve_with_bonus): бонус покрывает
+    covered/hrs брони, деньгами — остальное. Длительность не меняется, значит
+    потраченные бонус-часы по-прежнему покрывают ту же долю — пул бонусов не
+    трогаем. Не бонусная бронь — цена как есть.
+    """
+    hrs = (duration_minutes or 0) / 60.0
+    covered = min(_bonus_hours_on(booking), hrs)
+    if hrs <= 0 or covered <= 0:
+        return price
+    return round(float(price or 0) * (hrs - covered) / hrs, 2)
+
+
+# Правки, меняющие длительность бонусной брони, требуют вернуть/дотратить
+# бонус-часы — пока этого нет, честно отказываем (как у абонемента).
+_BONUS_RESIZE_DETAIL = (
+    "Бронь оплачена бонусными часами — {what}. Можно отменить её "
+    "(бонусные часы вернутся) и забронировать заново."
+)
+
+
 # ─── Create booking ──────────────────────────────────────────────────────────
 
 @router.post("/", response_model=BookingRead)
@@ -3477,6 +3514,13 @@ def reschedule_booking(
                 detail="Нельзя менять длительность для бронирований по абонементу. "
                 "Отмените текущее и создайте новое.",
             )
+        # Бонусная бронь: бонус-часы потрачены при создании под ЭТУ длительность.
+        # Другая длительность — надо вернуть/дотратить бонус, а этого пока нет.
+        if duration_changed and _bonus_hours_on(booking) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=_BONUS_RESIZE_DETAIL.format(what="длительность при переносе не меняется"),
+            )
 
         booking_owner = _resolve_booking_owner(session, booking)
         if not booking_owner:
@@ -3522,6 +3566,13 @@ def reschedule_booking(
                 # SUBSCRIPTION/0₾ — и родилась бы «нулёвка» balance+0 (сигнатура
                 # утечки 1630₾). Перевод на абонемент — только явной кнопкой.
                 ignore_subscription=True,
+            )
+            # Бонусная бронь: её бонус-часы едут вместе с ней и покрывают ту
+            # же долю — деньгами считаем только непокрытое (как при создании).
+            # Без этого old_price=0, а новая цена полная: клиент платил весь
+            # слот деньгами (сразу или кроном T-24ч), а бонус-час пропадал.
+            new_quote.final_price = _bonus_uncovered_price(
+                booking, new_quote.final_price, new_duration,
             )
 
             new_price = new_quote.final_price
@@ -3801,6 +3852,15 @@ def trim_booking(
         raise HTTPException(
             status_code=400,
             detail="Нельзя редактировать бронь, ожидающую подтверждения",
+        )
+
+    # Бонусная бронь: ни денежная, ни абонементная ветка ниже её не знают —
+    # остатки получили бы полную цену (крон списал бы её), а вырезанные
+    # бонус-часы не вернулись бы клиенту.
+    if _bonus_hours_on(booking) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=_BONUS_RESIZE_DETAIL.format(what="часть времени из неё не вырезать"),
         )
 
     # ── Past booking protection (same message as cancel) ──
@@ -4525,6 +4585,10 @@ def change_booking_format(
         # свежекупленный абонемент не должен тихо занулять цену (balance+0₾).
         ignore_subscription=(booking.payment_method or "").lower() != "subscription",
     )
+    # Бонусная бронь: длительность та же, её бонус-часы покрывают ту же долю —
+    # деньгами только непокрытое. Иначе old_price=0, а новая цена полная, и
+    # клиент доплачивал весь слот, уже оплаченный бонус-часом.
+    quote.final_price = _bonus_uncovered_price(booking, quote.final_price, booking.duration)
 
     old_price = float(booking.final_price or 0)
     old_hours = float(booking.hours_deducted or 0) if (booking.payment_method or "").lower() == "subscription" else 0.0
@@ -5220,6 +5284,14 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
 
     if booking.payment_method == "subscription":
         raise ValueError("Бронь уже списана с абонемента")
+    # Бонусная бронь: денег к возврату нет (0 ₾), а перекраска стёрла бы запись
+    # о потраченном бонус-часе — клиент потерял бы его И часы абонемента за тот
+    # же слот.
+    if booking.payment_method == "bonus":
+        raise ValueError(
+            "Бронь оплачена бонусными часами — на абонемент её не перевести. "
+            "Можно отменить её (бонусные часы вернутся) и создать новую."
+        )
 
     owner = _resolve_booking_owner(session, booking)
     if owner is None:
@@ -5392,6 +5464,14 @@ def shorten_booking(
         raise HTTPException(
             status_code=409,
             detail="У брони снят штраф — сначала восстановите оплату или создайте новую бронь",
+        )
+
+    # Бонусная бронь: пропорция ниже вернула бы деньги (которых нет), а
+    # освободившиеся бонус-часы так и остались бы потраченными.
+    if _bonus_hours_on(booking) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=_BONUS_RESIZE_DETAIL.format(what="сократить её не получится"),
         )
 
     remove = int(payload.remove_minutes or 0)
@@ -5604,6 +5684,10 @@ def split_booking(
     # до копейки при любом округлении. Пересчитывать «как новые» нельзя: цена
     # могла содержать допы, бонусные часы или ручную правку.
     extras_price = round(float(PricingService.calculate_extras_price(list(booking.extras or []))), 2)
+    # У бонусной брони допы покрыты бонусом вместе с часами (final_price=0) —
+    # без потолка комната ушла бы в минус, и части получили бы отрицательные
+    # цены (крон «списал» бы их с баланса).
+    extras_price = min(extras_price, max(0.0, round(float(booking.final_price or 0), 2)))
     room_total = round(float(booking.final_price or 0) - extras_price, 2)
 
     weights = [float(q.final_price) if q is not None else float(p)

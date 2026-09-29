@@ -752,6 +752,9 @@ export function AdminChessboardView() {
         // ограничивает — проверяет только активность абонемента и покрытие.
         if (!b) return false;
         if (b.paymentMethod === 'subscription') return false;
+        // Бонусная бронь: бонус-час уже потрачен, перевод стёр бы его и списал
+        // ещё и часы абонемента за тот же слот (бэкенд тоже откажет).
+        if (b.paymentMethod === 'bonus') return false;
         const client = users.find(u => u.email === b.userId || u.id === b.userId);
         return subscriptionLifecycle((client as any)?.subscription) === 'active';
     };

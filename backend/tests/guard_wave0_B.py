@@ -13,7 +13,10 @@
   * десктопный мастер снова шлёт «Бонусные часы» как 'balance' и списывает
     деньги (G3-03);
   * проверка баланса снова блокирует бронь, за которую деньги не берутся
-    (владелец абонемента с малым балансом, новичок с бонус-часом — G4-01).
+    (владелец абонемента с малым балансом, новичок с бонус-часом — G4-01);
+  * правки уже созданной бонусной брони (перенос, смена формата, вырезать,
+    сократить, разделить, «на абонемент») снова берут с клиента полную цену
+    деньгами или стирают потраченный бонус-час (ревью wave0-B).
 
 Без сети и без боевой базы (SQLite в памяти + чтение исходников):
 
@@ -276,6 +279,261 @@ def test_cron_message_says_money_on_subscription_fallback():
     TG писал «N ч абонемента» — списание денег было замаскировано."""
     src = _read("app/api/v1/billing.py", _BACKEND)
     assert '_pm == "subscription" and (b.hours_deducted or 0) > 0' in src
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Правки уже созданной бонусной брони (ревью wave0-B). Бонус теперь идёт
+# первым — бонусных броней стало много (каждый приветственный час). Бонус
+# тратится при создании: payment_method='bonus', hours_deducted=бонус-часы,
+# final_price=0. Перенос / смена формата пересчитывали цену «как денежной» —
+# клиент платил весь слот деньгами, а бонус-час пропадал.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _bonus_booking(**over):
+    base = dict(
+        id=uuid4(), status="confirmed", user_uuid="owner-1", user_id="c@x.ge",
+        date=datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=5),
+        start_time="12:00", duration=60, resource_id="room_1", location_id="unbox_uni",
+        format="individual", extras=[], gcal_event_id=None,
+        payment_method="bonus", payment_status="paid", final_price=0.0, charge_amount=0.0,
+        hours_deducted=1.0, base_price=20.0, applied_rule="NONE",
+        discount_amount=0.0, discount_percent=0, reminder_sent_at=None, updated_at=None,
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+class _FakeSession:
+    def __init__(self, booking, owner):
+        self.booking, self.owner = booking, owner
+
+    def get(self, model, key):
+        from app.models.booking import Booking
+        from app.models.user import User
+        return {Booking: self.booking, User: self.owner}.get(model)
+
+    def exec(self, *a, **kw):
+        return SimpleNamespace(first=lambda: None, all=lambda: [])
+
+    def add(self, *a):
+        pass
+
+    def commit(self):
+        pass
+
+    def refresh(self, *a):
+        pass
+
+    def rollback(self):
+        pass
+
+
+def _run_with_fakes(fn, booking, per_hour: float):
+    """Вызвать эндпоинт брони без БД/сети: цена — per_hour ₾/ч, кошелёк пишет
+    вызовы в список. Возвращает (результат | HTTPException, движения кошелька)."""
+    import app.services.pricing as pricing_mod
+    import app.services.telegram as tg_mod
+    import app.services.timeline as tl_mod
+    from app.api.v1.bookings import routes
+    from fastapi import HTTPException
+
+    moves = []
+
+    class _Wallet:
+        @staticmethod
+        def debit(session, user, amount, reason, **kw):
+            moves.append(("debit", round(float(amount), 2)))
+
+        @staticmethod
+        def credit(session, user, amount, reason, **kw):
+            moves.append(("credit", round(float(amount), 2)))
+
+        @staticmethod
+        def apply(session, user, delta, reason, **kw):
+            moves.append(("apply", round(float(delta), 2)))
+
+    class _Pricing:
+        def __init__(self, *a, **kw):
+            pass
+
+        def calculate_price(self, **kw):
+            hrs = kw["duration_minutes"] / 60.0
+            return PriceBreakdown(base_price=per_hour * hrs, hourly_rate=per_hour, booked_hours=hrs,
+                                  applied_rule="NONE", final_price=per_hour * hrs)
+
+        @staticmethod
+        def calculate_extras_price(ids):
+            return 0.0
+
+    _silent = SimpleNamespace(log_event=lambda **kw: None,
+                              send_booking_rescheduled=lambda **kw: None,
+                              send_admin_event=lambda **kw: None,
+                              _send_message=lambda **kw: None)
+    owner = SimpleNamespace(id="owner-1", email="c@x.ge", name="Клиент", role="user",
+                            balance=100.0, credit_limit=0.0, telegram_id=None, subscription=None)
+    patches = [
+        (routes, "wallet", _Wallet), (routes, "check_availability", lambda **kw: (True, None)),
+        (routes, "_sync_linked_session_to_booking", lambda *a, **kw: None),
+        (routes, "timeline_service", _silent), (routes, "telegram_service", _silent),
+        (pricing_mod, "PricingService", _Pricing),
+        (tg_mod, "telegram_service", _silent), (tl_mod, "timeline_service", _silent),
+    ]
+    saved = [(m, n, getattr(m, n)) for m, n, _ in patches]
+    fake_wl = SimpleNamespace(notify_waitlist_for_freed_slot=lambda *a, **kw: None)
+    saved_wl = sys.modules.get("app.services.waitlist_notify")
+    try:
+        for m, n, v in patches:
+            setattr(m, n, v)
+        sys.modules["app.services.waitlist_notify"] = fake_wl
+        try:
+            out = fn(routes, _FakeSession(booking, owner), owner)
+        except HTTPException as exc:
+            out = exc
+    finally:
+        for m, n, v in saved:
+            setattr(m, n, v)
+        if saved_wl is not None:
+            sys.modules["app.services.waitlist_notify"] = saved_wl
+        else:
+            sys.modules.pop("app.services.waitlist_notify", None)
+    return out, moves
+
+
+def _reschedule(booking, per_hour, new_time="19:00", new_duration=None):
+    from fastapi import BackgroundTasks
+
+    def call(routes, session, owner):
+        return routes.reschedule_booking(
+            booking_id=str(booking.id),
+            data=routes.RescheduleRequest(new_date=booking.date.strftime("%Y-%m-%d"),
+                                          new_start_time=new_time, new_duration=new_duration),
+            background_tasks=BackgroundTasks(), session=session, current_user=owner,
+        )
+    return _run_with_fakes(call, booking, per_hour)
+
+
+def test_reschedule_control_money_booking_still_pays_difference():
+    """Контроль (фейки рабочие): денежная бронь 20 ₾ → слот за 25 ₾ — доплата 5 ₾."""
+    b = _bonus_booking(payment_method="balance", final_price=20.0, charge_amount=20.0, hours_deducted=None)
+    out, moves = _reschedule(b, per_hour=25.0)
+    assert not isinstance(out, Exception), out
+    assert moves == [("debit", 5.0)], moves
+    assert b.final_price == 25.0
+
+
+def test_reschedule_paid_bonus_booking_charges_nothing():
+    """Оплаченная бонус-часом бронь переносится бесплатно: без списания,
+    цена 0, бонус-час остаётся на брони (его вернёт отмена)."""
+    b = _bonus_booking()
+    out, moves = _reschedule(b, per_hour=25.0)
+    assert not isinstance(out, Exception), out
+    assert moves == [], f"перенос бонусной брони двинул деньги: {moves}"
+    assert b.final_price == 0.0 and b.charge_amount == 0.0, (b.final_price, b.charge_amount)
+    assert b.payment_method == "bonus" and b.hours_deducted == 1.0
+    assert b.start_time == "19:00"
+
+
+def test_reschedule_pending_bonus_booking_keeps_zero_for_cron():
+    """Бронь ещё pending: final_price не должен стать полной ценой — крон
+    T-24ч (settle_pending_charge, ветка bonus) списал бы её с баланса."""
+    b = _bonus_booking(payment_status="pending", charge_amount=None)
+    out, moves = _reschedule(b, per_hour=25.0)
+    assert not isinstance(out, Exception), out
+    assert moves == [] and b.final_price == 0.0, (moves, b.final_price)
+
+
+def test_reschedule_partial_bonus_reprices_only_uncovered_part():
+    """2 ч, из них 1 ч бонусом, 20 ₾ деньгами → слот 25 ₾/ч: деньгами
+    непокрытая половина 25 ₾, доплата 5 ₾ (а не 30)."""
+    b = _bonus_booking(duration=120, final_price=20.0, charge_amount=20.0)
+    out, moves = _reschedule(b, per_hour=25.0)
+    assert not isinstance(out, Exception), out
+    assert moves == [("debit", 5.0)], moves
+    assert b.final_price == 25.0 and b.hours_deducted == 1.0
+
+
+def test_reschedule_bonus_booking_duration_change_refused():
+    """Смена длительности бонусной брони требует вернуть/дотратить бонус —
+    пока честно отказываем, ничего не двигая."""
+    b = _bonus_booking()
+    out, moves = _reschedule(b, per_hour=25.0, new_duration=90)
+    assert getattr(out, "status_code", None) == 400, out
+    assert "бонусными часами" in str(out.detail)
+    assert moves == [] and b.duration == 60 and b.start_time == "12:00"
+
+
+def test_change_format_bonus_booking_charges_nothing():
+    """Смена формата бонусной брони: длительность та же — бонус покрывает ту
+    же долю, деньгами 0 (раньше списывалась полная цена группового слота)."""
+    b = _bonus_booking()
+
+    def call(routes, session, owner):
+        return routes.change_booking_format(
+            booking_id=str(b.id), payload=routes.ChangeFormatRequest(new_format="group"),
+            session=session, current_user=owner,
+        )
+    out, moves = _run_with_fakes(call, b, per_hour=35.0)
+    assert not isinstance(out, Exception), out
+    assert all(abs(v) < 0.005 for _, v in moves), f"смена формата двинула деньги: {moves}"
+    assert b.final_price == 0.0 and b.format == "group"
+
+
+def test_bonus_uncovered_price_formula():
+    """Формула доли — как при создании (_resolve_with_bonus)."""
+    from app.api.v1.bookings.routes import _bonus_uncovered_price
+    assert _bonus_uncovered_price(_bonus_booking(), 25.0, 60) == 0.0
+    assert _bonus_uncovered_price(_bonus_booking(hours_deducted=1.0), 50.0, 120) == 25.0
+    # Не бонусная бронь / бонус не потрачен — цена как есть.
+    assert _bonus_uncovered_price(_bonus_booking(payment_method="balance"), 25.0, 60) == 25.0
+    assert _bonus_uncovered_price(_bonus_booking(hours_deducted=None), 25.0, 60) == 25.0
+
+
+def test_trim_and_shorten_refuse_bonus_booking():
+    """Вырезать/сократить бонусную бронь: денежная ветка её не знает —
+    остатки получали полную цену, а бонус-часы не возвращались. Отказ
+    должен стоять ДО любых движений денег."""
+    src = _read("app/api/v1/bookings/routes.py", _BACKEND)
+    for fn, money in (("def trim_booking", "wallet.credit("), ("def shorten_booking", "wallet.credit(")):
+        body = _body(src, fn)
+        g = body.find("if _bonus_hours_on(booking) > 0:")
+        assert g != -1, f"{fn}: нет отказа для бонусной брони"
+        assert g < body.find(money), f"{fn}: отказ для бонусной брони стоит после денег"
+
+
+def test_split_parts_never_negative_for_bonus_booking():
+    """Бонусная бронь с допами: final_price=0, а допы 5 ₾ — «комната» уходила
+    в минус, и части получали отрицательные цены."""
+    src = _read("app/api/v1/bookings/routes.py", _BACKEND)
+    body = _body(src, "def split_booking")
+    assert "extras_price = min(extras_price, max(0.0," in body
+
+
+def test_bonus_booking_cannot_be_converted_to_subscription():
+    """«Перевести на абонемент» для бонусной брони стирал запись о бонус-часе
+    и списывал ещё и часы абонемента. Отказ — и на сервере, и во всех трёх
+    кнопках админки (шахматка, список, карточка клиента)."""
+    from app.api.v1.bookings.routes import _convert_booking_to_subscription
+    b = _bonus_booking()
+    try:
+        _convert_booking_to_subscription(None, b, None)
+    except ValueError as exc:
+        assert "бонусными часами" in str(exc), exc
+    else:
+        raise AssertionError("бонусную бронь перевели на абонемент")
+    assert b.payment_method == "bonus" and b.hours_deducted == 1.0
+    assert "if (b.paymentMethod === 'bonus') return false;" in _read("src/components/admin/AdminChessboardView.tsx")
+    assert "if (b.paymentMethod === 'bonus') return false;" in _read("src/pages/admin/Bookings.tsx")
+    assert "booking.paymentMethod !== 'bonus'" in _read("src/components/admin/UserBookingsTab.tsx")
+
+
+def test_desktop_reschedule_shows_bonus_share_not_full_price():
+    """Десктопный перенос бонусной брони: «Разница к оплате» и проверка
+    баланса — от непокрытой доли (новичок с 0 ₾ не должен упираться в
+    «Недостаточно средств»)."""
+    src = _read("src/components/Wizard/ConfirmationStep.tsx")
+    assert "oldBooking.paymentMethod !== 'bonus'" in src
+    assert "netPrice = rescheduleDiff;" in src
+    assert "totalPrice - oldBooking.finalPrice" not in src, "разница снова от полной цены"
 
 
 if __name__ == "__main__":

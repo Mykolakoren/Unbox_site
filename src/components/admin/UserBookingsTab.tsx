@@ -245,6 +245,7 @@ export function UserBookingsTab({
                                     спишется час. Дата брони не важна (бэк не ограничивает). */}
                                 {onToSubscription && hasActiveSubscription
                                     && booking.paymentMethod !== 'subscription'
+                                    && booking.paymentMethod !== 'bonus'
                                     && booking.status !== 'cancelled' && (
                                     <button
                                         onClick={() => onToSubscription(booking.id)}

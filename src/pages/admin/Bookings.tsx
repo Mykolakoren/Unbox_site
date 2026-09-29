@@ -279,6 +279,9 @@ export function AdminBookings() {
     const canToSubscription = (b: BookingHistoryItem): boolean => {
         if (bookingBucket(bookingStartMs(b)) !== 'today') return false;
         if (b.paymentMethod === 'subscription') return false;
+        // Бонусная бронь: бонус-час уже потрачен — перевод списал бы ещё и
+        // часы абонемента за тот же слот (бэкенд тоже откажет).
+        if (b.paymentMethod === 'bonus') return false;
         const client = users.find(u => u.email === b.userId || u.id === b.userId);
         return subscriptionLifecycle(client?.subscription as any) === 'active';
     };

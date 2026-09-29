@@ -337,6 +337,18 @@ export function ConfirmationStep() {
         userPickedPay.current = true;
         state.setPaymentMethod(m);
     };
+    // Перенос бонусной брони: её бонус-часы едут вместе с ней, деньгами —
+    // только доля, не покрытая бонусом (так считает сервер). Иначе «Разница к
+    // оплате» показывала полную цену, а новичок с 0 ₾ упирался в «Недостаточно
+    // средств», хотя переносит бесплатную бронь.
+    const rescheduleBonusShare = useMemo(() => {
+        if (!oldBooking || oldBooking.paymentMethod !== 'bonus') return 0;
+        const hrs = (oldBooking.duration || 0) / 60;
+        const covered = Math.min(Number(oldBooking.hoursDeducted) || 0, hrs);
+        return hrs > 0 ? covered / hrs : 0;
+    }, [oldBooking]);
+    const rescheduleNewPrice = Math.round(totalPrice * (1 - rescheduleBonusShare) * 100) / 100;
+    const rescheduleDiff = oldBooking ? rescheduleNewPrice - (oldBooking.finalPrice || 0) : 0;
 
 
     const handleConfirm = async () => {
@@ -457,7 +469,7 @@ export function ConfirmationStep() {
             if (effectiveUser && chargesMoney && !isBookingForOther) {
                 let netPrice = totalPrice;
                 if (isRescheduling && oldBooking && effectiveUser) {
-                    netPrice = totalPrice - oldBooking.finalPrice;
+                    netPrice = rescheduleDiff;
                 }
 
                 const projectedBalance = effectiveUser.balance - netPrice;
@@ -1266,7 +1278,7 @@ export function ConfirmationStep() {
                                     {RESOURCES.find(r => r.id === (cartDetails[0]?.resourceId || state.resourceId))?.name}
                                 </div>
                                 <div className="text-sm font-bold mt-1 text-unbox-green">
-                                    {totalPrice} ₾
+                                    {rescheduleNewPrice} ₾
                                 </div>
                             </div>
                         </div>
@@ -1274,9 +1286,11 @@ export function ConfirmationStep() {
                         <div className="mt-4 pt-3 border-t border-unbox-light flex justify-between items-center text-sm">
                             <span className="text-unbox-dark">Разница к оплате:</span>
                             <span className="font-bold text-lg text-unbox-dark">
-                                {totalPrice - oldBooking.finalPrice > 0
-                                    ? `+${(totalPrice - oldBooking.finalPrice).toFixed(1)} ₾`
-                                    : `${(totalPrice - oldBooking.finalPrice).toFixed(1)} ₾ (Возврат)`
+                                {rescheduleDiff > 0.005
+                                    ? `+${rescheduleDiff.toFixed(1)} ₾`
+                                    : rescheduleDiff < -0.005
+                                        ? `${rescheduleDiff.toFixed(1)} ₾ (Возврат)`
+                                        : '0 ₾'
                                 }
                             </span>
                         </div>
