@@ -5,15 +5,20 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
 import clsx from 'clsx';
+import type { BookingHistoryItem } from '../../store/types';
 
 
 
 interface UserLoyaltyCardProps {
     email: string;
+    /** Брони ЭТОГО клиента (карточка грузит их с сервера). Общий стор админа
+     *  держит только свои + публичные брони без userId — по нему у любого
+     *  клиента выходило «0.0 часов · Базовый» (аудит 29.09, G7-03). */
+    bookings?: BookingHistoryItem[];
 }
 
-export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
-    const { users, bookings, updatePersonalDiscount } = useUserStore();
+export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyaltyCardProps) {
+    const { users, bookings: storeBookings, updatePersonalDiscount } = useUserStore();
     const user = users.find(u => u.email === email);
     const [isEditDiscount, setIsEditDiscount] = useState(false);
     const [newDiscount, setNewDiscount] = useState(0);
@@ -22,8 +27,8 @@ export function UserLoyaltyCard({ email }: UserLoyaltyCardProps) {
     if (!user) return null;
 
     // Calculate Total Hours
-    const totalHours = bookings
-        .filter(b => b.userId === user.email && (b.status === 'completed' || b.status === 'confirmed'))
+    const totalHours = (clientBookings ?? storeBookings.filter(b => b.userId === user.email))
+        .filter(b => b.status === 'completed' || b.status === 'confirmed')
         .reduce((sum, b) => sum + (b.duration / 60), 0);
 
     // Determine Level

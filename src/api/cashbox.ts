@@ -116,9 +116,12 @@ export const cashboxApi = {
 
     // «Общая сумма оплат» клиента — из реальных кассовых приходов (backend),
     // а не из фронтового стора. userId — UUID или email.
+    // Ответ проходит через toCamelCase (api/client.ts): сервер шлёт total_paid,
+    // сюда приходит totalPaid. Раньше читали data.total_paid → undefined → у
+    // КАЖДОГО клиента в карточке крупно «0.00 ₾» (аудит 29.09, G7-03).
     getClientTotalPaid: async (userId: string): Promise<number> => {
         const { data } = await api.get(`/cashbox/client-total-paid/${encodeURIComponent(userId)}`);
-        return Number(data?.total_paid || 0);
+        return Number(data?.totalPaid ?? data?.total_paid ?? 0);
     },
 
     getTransactions: async (params?: {

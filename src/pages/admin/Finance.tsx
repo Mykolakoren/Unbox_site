@@ -30,6 +30,11 @@ type TxType = 'all' | 'income' | 'expense';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
+// Сколько операций за период тянем за раз — это потолок бэкенда
+// (/cashbox/transactions, limit ≤ 1000). Было 200: за «Диапазон» или
+// насыщенный месяц ранние операции молча выпадали из итогов.
+const TX_LIMIT = 1000;
+
 const TABS: { id: Tab; label: string }[] = [
     { id: 'transactions', label: 'Транзакции' },
     { id: 'categories', label: 'Категории' },
@@ -123,7 +128,10 @@ export function AdminFinance() {
         if (periodMode === 'custom') {
             const from = customFrom ? new Date(customFrom) : new Date(0);
             const to = customTo ? new Date(customTo + 'T23:59:59') : new Date();
-            return { from, to, label: 'Диапазон' };
+            // Подпись с датами: итоги в «01 Баланс» подписаны периодом, и
+            // «Диапазон» без дат не говорил, за что эти цифры.
+            const label = `${customFrom ? format(from, 'd MMM yyyy', { locale: ru }) : 'с начала'} – ${format(to, 'd MMM yyyy', { locale: ru })}`;
+            return { from, to, label };
         }
         return getPeriodRange(periodMode, periodOffset);
     }, [periodMode, periodOffset, customFrom, customTo]);
@@ -162,7 +170,7 @@ export function AdminFinance() {
     const refetchTransactions = () => {
         const dateFrom = format(period.from, "yyyy-MM-dd'T'00:00:00");
         const dateTo = format(period.to, "yyyy-MM-dd'T'23:59:59");
-        fetchTransactions({ dateFrom, dateTo, limit: 200 });
+        fetchTransactions({ dateFrom, dateTo, limit: TX_LIMIT });
     };
 
     useEffect(() => {
@@ -172,15 +180,27 @@ export function AdminFinance() {
 
     const canGoNext = periodMode !== 'custom' && periodOffset < 0;
 
-    const filtered = useMemo((): CashboxTransaction[] => {
+    // Операции периода и филиала — БЕЗ фильтра «Приходы/Расходы» журнала.
+    // Итоги в «01 Баланс» считаются отсюда: раньше они брали отфильтрованный
+    // журнал, и после клика «Приходы» внизу «Расход» наверху становился 0
+    // (аудит 29.09, G7-admin-core-M2).
+    const periodTx = useMemo((): CashboxTransaction[] => {
         return transactions.filter(tx => {
             if (selectedBranch && tx.branch !== selectedBranch) return false;
-            if (txType !== 'all' && tx.type !== txType) return false;
             const d = new Date(tx.date);
             if (d < period.from || d > period.to) return false;
             return true;
         });
-    }, [transactions, selectedBranch, txType, period]);
+    }, [transactions, selectedBranch, period]);
+
+    const filtered = useMemo((): CashboxTransaction[] => {
+        if (txType === 'all') return periodTx;
+        return periodTx.filter(tx => tx.type === txType);
+    }, [periodTx, txType]);
+
+    // Сервер отдал ровно потолок — за период операций, скорее всего, больше,
+    // и итоги неполные. Честно говорим об этом в карточке.
+    const totalsTruncated = transactions.length >= TX_LIMIT;
 
     return (
 
@@ -206,6 +226,8 @@ export function AdminFinance() {
                 period={period}
                 canGoNext={canGoNext}
                 filtered={filtered}
+                periodTx={periodTx}
+                totalsTruncated={totalsTruncated}
                 canManageCategories={canManageCategories}
                 canCorrectBalance={canCorrectBalance}
                 refetchTransactions={refetchTransactions}
@@ -240,6 +262,9 @@ type GHAFProps = {
     period: { from: Date; to: Date; label: string };
     canGoNext: boolean;
     filtered: CashboxTransaction[];
+    /** Операции периода и филиала без фильтра типа — для итогов. */
+    periodTx: CashboxTransaction[];
+    totalsTruncated: boolean;
     canManageCategories: boolean;
     canCorrectBalance: boolean;
     refetchTransactions: () => void;
@@ -533,7 +558,11 @@ function GridHouseAdminFinance(p: GHAFProps) {
                 {/* 01 — Баланс */}
                 <GHFSection number="01" title="Баланс.">
                     <div style={{ border: `1px solid ${GH.ink10}`, padding: 24 }}>
-                        <BalanceCard filteredTransactions={p.filtered} periodLabel={p.period.label} />
+                        <BalanceCard
+                            filteredTransactions={p.periodTx}
+                            periodLabel={p.period.label}
+                            truncated={p.totalsTruncated}
+                        />
                     </div>
                 </GHFSection>
 

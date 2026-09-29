@@ -5,17 +5,24 @@ import type { CashboxTransaction } from '../../../api/cashbox';
 import clsx from 'clsx';
 
 interface Props {
+    /** Операции выбранного периода и филиала (без фильтра типа журнала). */
     filteredTransactions: CashboxTransaction[];
     periodLabel: string;
+    /** Сервер отдал потолок операций — итоги за период могут быть неполными. */
+    truncated?: boolean;
 }
 
-export function BalanceCard({ filteredTransactions }: Props) {
+export function BalanceCard({ filteredTransactions, periodLabel, truncated }: Props) {
     const { balances } = useCashboxStore();
 
     const stats = useMemo(() => {
         let income = 0;
         let expense = 0;
         for (const tx of filteredTransactions) {
+            // Корректировки (payment_method='adjustment': правка баланса клиента,
+            // недельная скидка) — бухгалтерские проводки, а не деньги в кассе:
+            // в остатки по счетам они тоже не входят. В журнале видны, в итогах — нет.
+            if (tx.paymentMethod === 'adjustment') continue;
             if (tx.type === 'income') income += tx.amount;
             else expense += tx.amount;
         }
@@ -61,6 +68,14 @@ export function BalanceCard({ filteredTransactions }: Props) {
             </div>
 
             {/* Period stats row */}
+            <div className="text-[11px] text-unbox-grey">
+                За период: <span className="font-medium text-unbox-dark">{periodLabel}</span> · без корректировок баланса
+                {truncated && (
+                    <span className="block text-orange-600 font-medium mt-0.5">
+                        Операций больше, чем загрузилось, — итог неполный. Выберите период короче.
+                    </span>
+                )}
+            </div>
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <div className="bg-white rounded-xl sm:rounded-2xl border border-unbox-light/50 shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3">
                     <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-green-50 flex items-center justify-center">

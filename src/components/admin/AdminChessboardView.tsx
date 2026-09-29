@@ -20,7 +20,9 @@ import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { BookingMoneyHints } from './BookingMoneyHints';
 import { computeDueByBooking, dueLabel } from '../../utils/dueAmounts';
-import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
+import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type RefundOption } from './AdminCancelBookingModal';
+import { BookingPriceModal } from './BookingPriceModal';
+import { ruCountWord, ruPlural } from '../../utils/plural';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { parseUTC, tbilisiNow } from '../../utils/dateUtils';
@@ -112,10 +114,13 @@ export function AdminChessboardView() {
             endTime: endTimeStr,
         });
     }, []);
-    // When the admin clicks "Удалить" on a booking that's part of a recurring
-    // series, we show a 3-button choice (this / series / cancel) instead of
-    // a plain confirm() so they don't have to delete N rows one-by-one.
-    const [seriesCancelTarget, setSeriesCancelTarget] = useState<BookingHistoryItem | null>(null);
+    // «Удалить» открывает окно отмены (AdminCancelBookingModal): возврат
+    // 100/50/0% и — для брони из серии — явный выбор «только эту / эту и все
+    // следующие». Раньше обычная бронь отменялась системным confirm() всегда
+    // со 100% возвратом, а серия — отдельным окном без выбора возврата.
+    const [cancelTarget, setCancelTarget] = useState<BookingHistoryItem | null>(null);
+    // Правка цены — окно с полем, которое принимает «22,5» (было prompt()).
+    const [priceBooking, setPriceBooking] = useState<BookingHistoryItem | null>(null);
 
     // Same idea for "Перенести": when the moved booking lives in a series we
     // ask whether the new time/resource should propagate to every later
@@ -680,18 +685,42 @@ export function AdminChessboardView() {
 
     // ── Actions ───────────────────────────────────────────────────────────────
     const handleCancel = (id: string) => {
-        // If the booking belongs to a series, give the admin the same
-        // "this / series" choice Google Calendar offers — otherwise admins
-        // had to click N times to clean up a recurring weekly slot.
         const target = selectedBooking && selectedBooking.id === id ? selectedBooking : bookings.find(b => b.id === id) || null;
-        if (target?.recurringGroupId) {
-            setSeriesCancelTarget(target);
-            return;
+        if (target) setCancelTarget(target);
+    };
+    const cancelSeries = cancelTarget ? seriesTailOf(cancelTarget, bookings) : null;
+    const handleCancelConfirm = async (option: RefundOption, reason: string, scope: CancelScope) => {
+        const target = cancelTarget;
+        if (!target) return;
+        const refundPercent = option === 'full' ? 1.0 : option === 'half' ? 0.5 : 0.0;
+        const pct = Math.round(refundPercent * 100);
+        if (scope === 'series' && target.recurringGroupId) {
+            // «Эта и все следующие»: якорь — эта бронь, ранние брони серии
+            // остаются; выбранный возврат применяется к каждой отменённой.
+            try {
+                const res = await bookingsApi.cancelRecurringSeries(
+                    target.recurringGroupId, target.id,
+                    { refundPercent, reason: reason || undefined },
+                );
+                toast.success(`Отменено ${ruCountWord(res?.cancelled ?? 0, ['бронь', 'брони', 'броней'])} серии, возврат ${pct}%`);
+            } catch (e: any) {
+                const d = e?.response?.data?.detail;
+                toast.error(typeof d === 'string' ? d : 'Не удалось отменить серию');
+                return;
+            }
+        } else {
+            try {
+                await cancelBooking(target.id, undefined, undefined, undefined, {
+                    refundPercent,
+                    reason: reason || undefined,
+                });
+                toast.success(`Бронь отменена, возврат ${pct}%`);
+            } catch {
+                return; // cancelBooking уже показал ошибку
+            }
         }
-        if (confirm('Отменить это бронирование?')) {
-            cancelBooking(id);
-            setSelectedBooking(null);
-        }
+        setSelectedBooking(null);
+        await fetchAllBookings();
     };
     // «Час в подарок» (15.09, просьба Валентины): раньше админ считал скидку
     // вручную через «Цена», а бонус клиента оставался непогашенным.
@@ -707,31 +736,11 @@ export function AdminChessboardView() {
         }
     };
 
-    const handleEditPrice = async (b: BookingHistoryItem) => {
-        // Replaces the legacy local-only setManualPrice — that one mutated
-        // the Zustand store and never hit the server, so the value reverted
-        // on reload. Now persists via PATCH /bookings/{id}/price; server
-        // adjusts the owner's balance/sub by the delta if the row was paid.
-        const val = prompt(`Новая цена (GEL). Текущая: ${b.finalPrice}₾.`, String(b.finalPrice));
-        if (val === null) return;
-        const p = parseFloat(val);
-        if (isNaN(p) || p < 0) {
-            toast.error('Введите неотрицательное число');
-            return;
-        }
-        if (Math.abs(p - (b.finalPrice || 0)) < 0.005) {
-            toast.error('Новая цена совпадает со старой');
-            return;
-        }
-        const reason = prompt('Причина (необязательно — для аудита):', '') || undefined;
-        try {
-            await bookingsApi.setPrice(b.id, p, reason);
-            toast.success(`Цена изменена: ${b.finalPrice}₾ → ${p}₾`);
-            setSelectedBooking(null);
-            await fetchAllBookings();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
-        }
+    const handleEditPrice = (b: BookingHistoryItem) => {
+        // Сохраняет через PATCH /bookings/{id}/price; для оплаченной брони
+        // сервер сразу двигает разницу по балансу клиента. Окно принимает
+        // запятую («22,5» раньше сохранялось как 22) и показывает эффект.
+        setPriceBooking(b);
     };
     // Перевод брони с баланса на абонемент — та же правка, что в списке.
     // Показываем, когда бронь сегодня, не на абонементе, а у клиента есть
@@ -1912,18 +1921,23 @@ export function AdminChessboardView() {
                 onClose={() => setShortenModalBooking(null)}
                 onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
             />
-            {seriesCancelTarget && seriesCancelTarget.recurringGroupId && (
-                <CancelBookingChoiceModal
-                    bookingId={seriesCancelTarget.id}
-                    groupId={seriesCancelTarget.recurringGroupId}
-                    onClose={() => setSeriesCancelTarget(null)}
-                    onCompleted={async () => {
-                        setSeriesCancelTarget(null);
-                        setSelectedBooking(null);
-                        await fetchAllBookings();
-                    }}
-                />
-            )}
+            <AdminCancelBookingModal
+                isOpen={!!cancelTarget}
+                onClose={() => setCancelTarget(null)}
+                onConfirm={handleCancelConfirm}
+                bookingLabel={cancelTarget
+                    ? `${getUserName(cancelTarget.userId)} · ${cancelTarget.startTime} · ${cancelTarget.finalPrice}₾`
+                    : ''}
+                series={cancelSeries}
+            />
+            <BookingPriceModal
+                booking={priceBooking}
+                onClose={() => setPriceBooking(null)}
+                onSaved={async () => {
+                    setSelectedBooking(null);
+                    await fetchAllBookings();
+                }}
+            />
 
             {seriesMoveTarget && (
                 <RescheduleScopeChoiceModal
@@ -1982,6 +1996,10 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExtended: () => void }) {
     const [groupInfo, setGroupInfo] = useState<{ futureCount: number; totalCount: number; pattern: string } | null>(null);
     const [extending, setExtending] = useState(false);
+    // Сколько повторений добавить — поле прямо в карточке вместо prompt():
+    // там Enter со значением по умолчанию сразу создавал 8 броней (аудит 29.09).
+    const [extendOpen, setExtendOpen] = useState(false);
+    const [extendCount, setExtendCount] = useState('8');
 
     useEffect(() => {
         let cancelled = false;
@@ -1996,9 +2014,7 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
     }, [groupId]);
 
     const handleExtend = async () => {
-        const raw = prompt('На сколько повторений продлить серию?', '8');
-        if (!raw) return;
-        const n = parseInt(raw, 10);
+        const n = parseInt(extendCount, 10);
         if (!n || n < 1 || n > 52) {
             toast.error('От 1 до 52');
             return;
@@ -2006,7 +2022,8 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
         setExtending(true);
         try {
             const res = await bookingsApi.extendRecurringSeries(groupId, n);
-            toast.success(`Серия продлена на ${res.created} броней`);
+            toast.success(`Серия продлена на ${ruCountWord(res.created, ['бронь', 'брони', 'броней'])}`);
+            setExtendOpen(false);
             onExtended();
         } catch (e: any) {
             const detail = e?.response?.data?.detail;
@@ -2035,14 +2052,46 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
             <div className="text-[11px] text-unbox-grey mb-2">
                 Осталось <span className="font-semibold text-unbox-dark">{groupInfo.futureCount}</span> из {groupInfo.totalCount} сессий
             </div>
-            {groupInfo.futureCount <= 3 && (
+            {groupInfo.futureCount <= 3 && !extendOpen && (
                 <button
-                    onClick={handleExtend}
-                    disabled={extending}
-                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 transition-colors disabled:opacity-60"
+                    onClick={() => setExtendOpen(true)}
+                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 transition-colors"
                 >
-                    {extending ? '…' : 'Продлить серию'}
+                    Продлить серию
                 </button>
+            )}
+            {extendOpen && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 space-y-2">
+                    <label className="flex items-center gap-2 text-xs text-unbox-dark">
+                        Добавить
+                        <input
+                            type="number"
+                            min={1}
+                            max={52}
+                            value={extendCount}
+                            onChange={e => setExtendCount(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+                            className="w-14 px-1.5 py-1 rounded border border-orange-200 bg-white text-center tabular-nums"
+                        />
+                        {ruPlural(parseInt(extendCount, 10) || 0, ['бронь', 'брони', 'броней'])} в серию
+                    </label>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setExtendOpen(false)}
+                            disabled={extending}
+                            className="flex-1 py-1.5 text-xs font-medium rounded-lg bg-white border border-orange-200 text-unbox-dark disabled:opacity-60"
+                        >
+                            Отмена
+                        </button>
+                        <button
+                            onClick={handleExtend}
+                            disabled={extending}
+                            className="flex-1 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-60"
+                        >
+                            {extending ? '…' : 'Добавить'}
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     );

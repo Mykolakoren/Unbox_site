@@ -2800,6 +2800,12 @@ def cancel_recurring_bookings(
             "scope (date >= now)."
         ),
     ),
+    # Аудит 29.09 (G7-admin-core-M1): политика возврата админа — как у одиночной
+    # отмены (DELETE /bookings/{id}). Раньше серия всегда возвращалась на 100%,
+    # а выбранный в окне отмены штраф 50% / 0% молча терялся. Применяется к
+    # каждой отменённой брони; не-админам игнорируется (всегда 100%).
+    refund_percent: float = Query(1.0),
+    reason: Optional[str] = Query(None),
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -2846,6 +2852,21 @@ def cancel_recurring_bookings(
     if not is_owner and not is_admin:
         raise HTTPException(403, "Not authorized")
 
+    # Штраф — только админу, как в cancel_booking. Клиент всегда получает 100%.
+    if is_admin:
+        if refund_percent < 0 or refund_percent > 1:
+            raise HTTPException(400, "refund_percent must be between 0 and 1")
+        applied_refund = refund_percent
+    else:
+        applied_refund = 1.0
+    admin_reason = (reason or "").strip()
+    if is_admin and (applied_refund != 1.0 or admin_reason):
+        series_reason = (
+            f"{admin_reason or 'Series cancelled'} ({int(applied_refund * 100)}% возврат)"
+        )
+    else:
+        series_reason = "Series cancelled"
+
     # ── 24h policy gate (mirror single-cancel) ──
     # Single-cancel blocks non-admin clients from cancelling a still-upcoming
     # booking less than 24h before start. The series path used to refund every
@@ -2876,10 +2897,11 @@ def cancel_recurring_bookings(
     # recompute, but de-duplicated so a series in one room/day runs it once.
     recompute_targets: dict = {}
     for b in bookings:
-        # Refund via shared helper (handles balance + subscription)
+        # Refund via shared helper (handles balance + subscription). При штрафе
+        # 0% — как в одиночной отмене — ничего не возвращаем.
         booking_owner = _resolve_booking_owner(session, b)
-        if booking_owner:
-            _refund_booking_to_owner(session, b, booking_owner)
+        if booking_owner and applied_refund > 0:
+            _refund_booking_to_owner(session, b, booking_owner, refund_percent=applied_refund)
 
         # GCal delete
         if b.gcal_event_id:
@@ -2892,7 +2914,7 @@ def cancel_recurring_bookings(
                 )
 
         b.status = "cancelled"
-        b.cancellation_reason = "Series cancelled"
+        b.cancellation_reason = series_reason
         b.cancelled_by = current_user.email
         session.add(b)
 
@@ -2938,7 +2960,12 @@ def cancel_recurring_bookings(
 
     session.commit()
 
-    return {"ok": True, "cancelled": cancelled, "group_id": group_id}
+    return {
+        "ok": True,
+        "cancelled": cancelled,
+        "group_id": group_id,
+        "refund_percent": applied_refund,
+    }
 
 
 # ─── Cancel booking ──────────────────────────────────────────────────────────

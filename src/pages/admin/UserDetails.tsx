@@ -34,6 +34,8 @@ import { UserBonuses } from '../../components/admin/UserBonuses';
 import { AddFundsModal } from '../../components/admin/modals/AddFundsModal';
 import { AssignSubscriptionModal } from '../../components/admin/modals/AssignSubscriptionModal';
 import { EditCreditLimitModal } from '../../components/admin/modals/EditCreditLimitModal';
+import { ResetPasswordModal } from '../../components/admin/modals/ResetPasswordModal';
+import { MergeAccountsModal } from '../../components/admin/modals/MergeAccountsModal';
 import { api } from '../../api/client';
 import { cashboxApi } from '../../api/cashbox';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
@@ -75,6 +77,10 @@ export function AdminUserDetails() {
     const [isAssignSubOpen, setIsAssignSubOpen] = useState(false);
     const [isEditLimitOpen, setIsEditLimitOpen] = useState(false);
     const [isBalanceCorrectionOpen, setIsBalanceCorrectionOpen] = useState(false);
+    // Сброс пароля и склейка аккаунтов — свои окна вместо prompt()/confirm()
+    // (аудит 29.09, G7-04). Хуки — до раннего return «Загрузка…».
+    const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
+    const [isMergeOpen, setIsMergeOpen] = useState(false);
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
     const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
     const [adminPickerType, setAdminPickerType] = useState<'responsible' | 'attracted' | null>(null);
@@ -426,6 +432,22 @@ export function AdminUserDetails() {
                 currentBalance={Number(user.balance || 0)}
                 onClose={() => setIsBalanceCorrectionOpen(false)}
                 onSaved={async () => { await useUserStore.getState().fetchUsers(); }}
+            />
+            <ResetPasswordModal
+                open={isResetPasswordOpen}
+                onClose={() => setIsResetPasswordOpen(false)}
+                user={{ id: user.id, email: user.email, name: user.name }}
+            />
+            <MergeAccountsModal
+                open={isMergeOpen}
+                onClose={() => setIsMergeOpen(false)}
+                target={user}
+                users={users}
+                onMerged={async () => {
+                    // Раньше после склейки просили «Обновите страницу» —
+                    // теперь сами подтягиваем баланс, брони и сумму оплат.
+                    await Promise.all([fetchUsers(), reloadUserBookings(user.email), reloadTotalPaid()]);
+                }}
             />
 
             {/* Header */}
@@ -779,36 +801,10 @@ export function AdminUserDetails() {
                             <div className="border-t border-unbox-light pt-4">
                                 <div className="text-xs font-semibold text-unbox-grey uppercase tracking-wider mb-3">Безопасность</div>
                                 <button
-                                    onClick={async () => {
-                                        // Excel #46 — renamed to "Сбросить пароль" to distinguish
-                                        // this admin action from a user's self-change (which requires
-                                        // the old password). Added a confirm step so admin knows
-                                        // they're overriding someone else's credentials.
-                                        const ok = window.confirm(
-                                            `Сбросить пароль пользователя ${user.email}?\n\n` +
-                                            'Вы устанавливаете новый пароль ОТ ЕГО ИМЕНИ, без подтверждения старого.\n' +
-                                            'Действие будет записано в журнал аудита.\n\n' +
-                                            'Продолжить?',
-                                        );
-                                        if (!ok) return;
-                                        const newPassword = prompt('Новый пароль (мин. 6 символов):');
-                                        if (!newPassword) return;
-                                        if (newPassword.length < 6) {
-                                            toast.error('Пароль должен быть не менее 6 символов');
-                                            return;
-                                        }
-                                        const confirmPassword = prompt('Подтвердите новый пароль:');
-                                        if (newPassword !== confirmPassword) {
-                                            toast.error('Пароли не совпадают');
-                                            return;
-                                        }
-                                        try {
-                                            await api.post(`/users/${user.id}/change-password`, { new_password: newPassword });
-                                            toast.success('Пароль сброшен · запись в журнале аудита');
-                                        } catch (err: any) {
-                                            toast.error(err.response?.data?.detail || 'Ошибка сброса пароля');
-                                        }
-                                    }}
+                                    // Excel #46 — «Сбросить пароль» (админ задаёт новый без старого).
+                                    // Аудит 29.09: окно со скрытым полем и показом пароля один раз
+                                    // вместо двух prompt() с паролем открытым текстом.
+                                    onClick={() => setIsResetPasswordOpen(true)}
                                     className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
                                 >
                                     <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
@@ -932,31 +928,9 @@ export function AdminUserDetails() {
                                 {/* Merge two accounts — senior_admin/owner only */}
                                 {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
                                     <button
-                                        onClick={async () => {
-                                            const source = prompt(
-                                                `Слить другой аккаунт В этот (${user.email})?\n\n` +
-                                                'Введите email или UUID поглощаемого аккаунта.\n' +
-                                                'Его брони, waitlist, транзакции и баланс перейдут сюда.\n' +
-                                                'Поглощённый аккаунт будет удалён.',
-                                            );
-                                            if (!source) return;
-                                            const trimmed = source.trim();
-                                            if (!trimmed) return;
-                                            const ok = window.confirm(
-                                                `Слить аккаунт?\n\n` +
-                                                `Поглощаемый: ${trimmed}\n` +
-                                                `Оставить:    ${user.email}\n\n` +
-                                                'Действие необратимо. Продолжить?',
-                                            );
-                                            if (!ok) return;
-                                            try {
-                                                const { usersApi } = await import('../../api/users');
-                                                await usersApi.mergeUsers(trimmed, user.id);
-                                                toast.success(`Аккаунт ${trimmed} слит в текущий. Обновите страницу.`);
-                                            } catch (err: any) {
-                                                toast.error(err.response?.data?.detail || 'Ошибка слияния');
-                                            }
-                                        }}
+                                        // Аудит 29.09: раньше email дубликата вводили вслепую в prompt().
+                                        // Теперь поиск + предпросмотр обоих аккаунтов до подтверждения.
+                                        onClick={() => setIsMergeOpen(true)}
                                         className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-indigo-50 border border-dashed border-indigo-200 transition-colors text-left"
                                     >
                                         <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
@@ -1430,7 +1404,7 @@ export function AdminUserDetails() {
                             </Card>
 
                             {/* Loyalty System (New) */}
-                            <UserLoyaltyCard email={user.email} />
+                            <UserLoyaltyCard email={user.email} bookings={userBookings} />
 
                             {/* CRM Access — показываем внизу только для active (pending/expired/rejected — вверху) */}
                             {crmAccess && crmAccess.accessStatus === 'active' && (

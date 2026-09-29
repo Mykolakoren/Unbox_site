@@ -464,13 +464,22 @@ export const bookingsApi = {
      *
      * Omit it to fall back to legacy "every future booking" scope —
      * kept for callers that don't yet know the anchor.
+     *
+     * opts — политика возврата админа, как у одиночной отмены (cancelBooking):
+     * refundPercent 1.0 / 0.5 / 0.0 применяется к КАЖДОЙ отменённой брони,
+     * reason пишется в причину отмены. Клиентам сервер это игнорирует.
      */
     cancelRecurringSeries: async (
         groupId: string,
         fromBookingId?: string,
+        opts?: { refundPercent?: number; reason?: string },
     ): Promise<{ ok: boolean; cancelled: number }> => {
+        const params: Record<string, any> = {};
+        if (fromBookingId) params.from_booking_id = fromBookingId;
+        if (opts?.refundPercent !== undefined) params.refund_percent = opts.refundPercent;
+        if (opts?.reason) params.reason = opts.reason;
         const response = await api.delete(`/bookings/recurring/${groupId}`, {
-            params: fromBookingId ? { from_booking_id: fromBookingId } : undefined,
+            params: Object.keys(params).length ? params : undefined,
         });
         return response.data;
     },

@@ -10,8 +10,10 @@ import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
-import { ConfirmationModal, PromptModal } from '../../components/ui/ConfirmationModal';
-import { AdminCancelBookingModal } from '../../components/admin/AdminCancelBookingModal';
+import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type SeriesTail } from '../../components/admin/AdminCancelBookingModal';
+import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
+import { ruCountWord } from '../../utils/plural';
 import { ExtendBookingModal, AddExtrasModal } from '../../components/admin/BookingTodayEditModals';
 import { subscriptionLifecycle } from '../../utils/subscription';
 
@@ -88,7 +90,7 @@ export function AdminBookings() {
     // chessboard right away so the highlighted booking is visible.
     const viewFromQuery = searchParams.get('view');
     const navigate = useNavigate();
-    const { bookings, users, fetchUsers, cancelBooking, listForReRent, fetchBookings } = useUserStore();
+    const { bookings, users, fetchUsers, cancelBooking, listForReRent } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
@@ -99,7 +101,9 @@ export function AdminBookings() {
 
     // Modal state for replacing native confirm/prompt
     const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; destructive?: boolean }>({ open: false, title: '', message: '', onConfirm: () => {} });
-    const [priceModal, setPriceModal] = useState<{ open: boolean; bookingId: string; currentPrice: number }>({ open: false, bookingId: '', currentPrice: 0 });
+    // Правка цены — своё окно (BookingPriceModal): принимает «22,5», показывает,
+    // сколько вернётся или спишется с баланса клиента.
+    const [priceBooking, setPriceBooking] = useState<BookingHistoryItem | null>(null);
     const [extendModalId, setExtendModalId] = useState<string | null>(null);
     const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
 
@@ -167,8 +171,8 @@ export function AdminBookings() {
             return ra === 2 ? mb - ma : ma - mb;
         });
 
-    const handleEditPrice = (bookingId: string, currentPrice: number) => {
-        setPriceModal({ open: true, bookingId, currentPrice });
+    const handleEditPrice = (bookingId: string, _currentPrice?: number) => {
+        setPriceBooking(bookings.find(b => b.id === bookingId) || null);
     };
 
     // Excel #66 — instead of a yes/no confirm, open the admin cancel modal
@@ -176,9 +180,9 @@ export function AdminBookings() {
     // for anything other than the default full refund.
     const [cancelModal, setCancelModal] = useState<{
         open: boolean; bookingId: string; label: string;
-        // Excel #24 — if this booking is part of a series, track the size and
-        // let the admin pick single vs whole-series cancellation.
-        seriesGroupId?: string; seriesSize?: number; seriesScope?: 'single' | 'all';
+        // Excel #24 — бронь из серии: выбор «только эту / эту и следующие»
+        // делается прямо в окне отмены.
+        seriesGroupId?: string; series?: SeriesTail | null;
     }>({ open: false, bookingId: '', label: '' });
 
     const handleCancel = (bookingId: string) => {
@@ -186,38 +190,39 @@ export function AdminBookings() {
         const userName = b ? getUserName(b.userId) : '';
         const label = b ? `${userName} · ${b.startTime} · ${b.finalPrice}₾` : '';
 
-        // Excel #24 — if booking is part of a multi-slot / recurring series,
-        // ask scope first via a native confirm (quick and universal).
-        const groupId = (b as any)?.recurringGroupId;
-        if (groupId) {
-            const seriesSize = bookings.filter(x => (x as any).recurringGroupId === groupId).length;
-            if (seriesSize > 1) {
-                const answer = window.confirm(
-                    `Эта бронь — часть серии из ${seriesSize} периодов.\n\n` +
-                    `OK — отменить ВСЮ серию (${seriesSize} броней).\n` +
-                    `Отмена — отменить только этот период.`,
-                );
-                setCancelModal({
-                    open: true, bookingId, label,
-                    seriesGroupId: groupId, seriesSize,
-                    seriesScope: answer ? 'all' : 'single',
-                });
-                return;
-            }
-        }
-        setCancelModal({ open: true, bookingId, label });
+        // Аудит 29.09 (G7-admin-core-M1): раньше тут был системный confirm, где
+        // «ОК» отменял ВСЮ серию, а выбранный потом штраф к серии не применялся.
+        // Теперь выбор — в окне отмены, по умолчанию «только эта бронь».
+        const series = b ? seriesTailOf(b, bookings) : null;
+        setCancelModal({
+            open: true, bookingId, label,
+            seriesGroupId: series ? b?.recurringGroupId : undefined,
+            series,
+        });
     };
 
-    const handleCancelConfirm = async (option: 'full' | 'half' | 'none', reason: string) => {
+    const handleCancelConfirm = async (option: 'full' | 'half' | 'none', reason: string, scope: CancelScope) => {
         const refundPercent = option === 'full' ? 1.0 : option === 'half' ? 0.5 : 0.0;
-        try {
-            if (cancelModal.seriesScope === 'all' && cancelModal.seriesGroupId) {
-                // Whole-series cancel via dedicated endpoint (server handles refunds).
-                await bookingsApi.cancelRecurringSeries(cancelModal.seriesGroupId);
-                toast.success(`Серия отменена — ${cancelModal.seriesSize ?? ''} броней`);
-                useUserStore.getState().fetchAllBookings();
-                return;
+        if (scope === 'series' && cancelModal.seriesGroupId) {
+            // «Эта и все следующие»: якорь — эта бронь (более ранние брони серии
+            // остаются), выбранный возврат применяется к каждой отменённой брони.
+            try {
+                const res = await bookingsApi.cancelRecurringSeries(
+                    cancelModal.seriesGroupId, cancelModal.bookingId,
+                    { refundPercent, reason: reason || undefined },
+                );
+                toast.success(
+                    `Отменено ${ruCountWord(res?.cancelled ?? 0, ['бронь', 'брони', 'броней'])} серии, `
+                    + `возврат ${Math.round(refundPercent * 100)}%`,
+                );
+            } catch (e: any) {
+                const d = e?.response?.data?.detail;
+                toast.error(typeof d === 'string' ? d : 'Не удалось отменить серию');
             }
+            useUserStore.getState().fetchAllBookings();
+            return;
+        }
+        try {
             await cancelBooking(cancelModal.bookingId, undefined, undefined, undefined, {
                 refundPercent,
                 reason: reason || undefined,
@@ -361,6 +366,7 @@ export function AdminBookings() {
                 onClose={() => setCancelModal(p => ({ ...p, open: false }))}
                 onConfirm={handleCancelConfirm}
                 bookingLabel={cancelModal.label}
+                series={cancelModal.series}
             />
             <ConfirmationModal
                 isOpen={confirmModal.open}
@@ -371,42 +377,12 @@ export function AdminBookings() {
                 isDestructive={confirmModal.destructive}
                 confirmLabel={confirmModal.destructive ? 'Да, отменить' : 'Подтвердить'}
             />
-            <PromptModal
-                isOpen={priceModal.open}
-                onClose={() => setPriceModal(p => ({ ...p, open: false }))}
-                onSubmit={async (val) => {
-                    // Server-side persist (replaces legacy local-only mutation
-                    // that lost the change on reload). Server adjusts owner's
-                    // balance/sub by the delta if the row was paid.
-                    const newPrice = parseFloat(val);
-                    if (isNaN(newPrice) || newPrice < 0) {
-                        toast.error('Некорректная цена');
-                        return;
-                    }
-                    if (Math.abs(newPrice - (priceModal.currentPrice || 0)) < 0.005) {
-                        toast.error('Новая цена совпадает со старой');
-                        return;
-                    }
-                    try {
-                        await bookingsApi.setPrice(priceModal.bookingId, newPrice);
-                        toast.success(`Цена обновлена: ${newPrice} ₾`);
-                        await fetchBookings?.();
-                    } catch (e: any) {
-                        toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
-                    }
-                }}
-                title="Изменить цену"
-                inputLabel="Новая цена (GEL)"
-                inputType="number"
-                defaultValue={priceModal.currentPrice.toString()}
-                placeholder="0.00"
-                submitLabel="Сохранить"
-                validate={(v) => {
-                    const n = parseFloat(v);
-                    if (isNaN(n)) return 'Введите число';
-                    if (n < 0) return 'Цена не может быть отрицательной';
-                    return null;
-                }}
+            <BookingPriceModal
+                booking={priceBooking}
+                onClose={() => setPriceBooking(null)}
+                // fetchAllBookings, а не fetchBookings: тот грузит только «мои + публичные»
+                // и после правки цены список админа терял чужие брони.
+                onSaved={() => useUserStore.getState().fetchAllBookings()}
             />
             <ExtendBookingModal
                 bookingId={extendModalId}
