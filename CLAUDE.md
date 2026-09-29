@@ -110,7 +110,7 @@ git push --force-with-lease origin main
 - Баланс по методам оплаты
 
 ### Бонусы
-- Welcome bonus: 1 час бесплатно при регистрации (90 дней)
+- Welcome bonus: 1 час бесплатно при регистрации (15 дней, WELCOME_BONUS_EXPIRY_DAYS; тексты на сайте должны совпадать)
 - Оплата бронирования бонусами (payment_method='bonus')
 - FIFO списание при использовании
 
