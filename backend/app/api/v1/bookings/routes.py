@@ -2762,10 +2762,11 @@ def extend_recurring_series(
     # rule=SUBSCRIPTION из старых пересчётов) размножалась каждым продлением:
     # так выросла серия из 501 нулевой брони до 2027 года. Шаблон остаётся
     # fallback'ом только если движок недоступен (owner не найден/ресурс удалён).
-    from app.services.pricing import PricingService as _PS, resolve_payment_method as _rpm
+    from app.services.pricing import PricingService as _PS
     _ext_ps = _PS(session)
     created = 0
     total_cost = 0.0
+    skipped: list[str] = []
     # Порядок оплаты (владелец 29.09): бонус → абонемент → баланс. Бонусный
     # ярлык шаблона — это результат авто-выбора, а не выбор клиента, поэтому
     # новые даты решаем заново («реши сам» = balance).
@@ -2809,6 +2810,13 @@ def extend_recurring_series(
                 else None
             )
         else:
+            # Бонусный шаблон нельзя копировать без движка: вышла бы бронь за
+            # 0 ₾ с payment_method='bonus', а бонусный час не списан — комната
+            # бесплатно. Такую дату пропускаем, админ добавит её вручную.
+            if template.payment_method == "bonus":
+                logger.warning("[extend-series] %s пропущена: бонусный шаблон без пересчёта цены", d)
+                skipped.append(d.strftime("%d.%m"))
+                continue
             _method = template.payment_method
             _final, _base = template.final_price, template.base_price
             _rule = template.applied_rule
@@ -2911,6 +2919,7 @@ def extend_recurring_series(
         "created": created,
         "total_cost": round(total_cost, 2),
         "recurring_group_id": group_id,
+        "skipped": skipped,
     }
 
 

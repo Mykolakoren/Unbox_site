@@ -536,8 +536,14 @@ def test_series_extension_requotes_each_date():
     i = src.find("def extend_recurring_series")
     j = src.find("\ndef ", i + 10)
     body = src[i:j if j != -1 else len(src)]
-    assert "calculate_price" in body and "resolve_payment_method" in body, (
+    # С 29.09 метод выбирает _resolve_with_bonus (бонус → абонемент → баланс),
+    # он сам зовёт resolve_payment_method.
+    assert "calculate_price" in body and (
+        "resolve_payment_method" in body or "_resolve_with_bonus(" in body), (
         "extend_recurring_series снова копирует шаблон без пересчёта")
+    k = src.find("def _resolve_with_bonus")
+    assert k == -1 or "resolve_payment_method(" in src[k:src.find("\ndef ", k + 10)], (
+        "_resolve_with_bonus перестал выбирать метод через resolve_payment_method")
 
 
 def test_series_has_hard_length_cap():

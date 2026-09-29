@@ -536,6 +536,23 @@ def test_desktop_reschedule_shows_bonus_share_not_full_price():
     assert "totalPrice - oldBooking.finalPrice" not in src, "разница снова от полной цены"
 
 
+def test_extend_series_never_copies_bonus_template_for_free():
+    """Ревью 29.09: если движок цен упал при продлении серии, ветка «берём
+    шаблон» копировала payment_method='bonus' с final_price=0 без списания
+    бонусного часа — комната бесплатно. Такая дата должна пропускаться."""
+    src = open(os.path.join(os.path.dirname(__file__), "..", "app/api/v1/bookings/routes.py"),
+               encoding="utf-8").read()
+    i = src.find("def extend_recurring_series")
+    body = src[i:src.find("@router.post(\"/recurring/{group_id}/dismiss-end-reminder\")", i)]
+    fb = body[body.find("берём шаблон"):]
+    guard = fb.find('if template.payment_method == "bonus"')
+    copy = fb.find("_method = template.payment_method")
+    assert guard != -1 and copy != -1 and guard < copy, \
+        "фолбэк продления снова копирует бонусный шаблон бесплатно"
+    assert "continue" in fb[guard:copy] and "skipped.append" in fb[guard:copy]
+    assert '"skipped": skipped' in body, "пропущенные даты не возвращаются админу"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
