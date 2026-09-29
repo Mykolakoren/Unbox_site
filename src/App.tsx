@@ -337,6 +337,9 @@ function App() {
         [/^\/admin\/bookings\/?$/, '/m/admin/bookings'],
         [/^\/admin\/[^/]+\/?$/, '/m/admin'],  // /admin/finance, /admin/users, etc.
         [/^\/crm\/?$/, '/m/crm'],
+        // Расписание — до общего правила ниже, иначе ссылка «Расписание»
+        // с телефона молча открывала «Сегодня».
+        [/^\/crm\/schedule\/?$/, '/m/crm/schedule'],
         [/^\/crm\/[^/]+\/?$/, '/m/crm'],
         [/^\/profile\/?$/, '/m/me'],
         [/^\/explore\/?$/, '/m/find'],
@@ -513,6 +516,10 @@ function App() {
           <Route path="finance" element={<MobileCrmFinance />} />
           <Route path="sessions" element={<MobileCrmSessions />} />
           <Route path="profile" element={<MobileCrmProfile />} />
+          {/* Часы приёма с телефона — тот же экран, что /crm/schedule,
+              в узкой раскладке. Раньше на телефоне расписание было
+              недоступно: /crm/schedule уводил на «Сегодня». */}
+          <Route path="schedule" element={<CrmSchedule compact />} />
         </Route>
 
         {/* Mobile admin workspace — admin/owner only, gated inside layout. */}

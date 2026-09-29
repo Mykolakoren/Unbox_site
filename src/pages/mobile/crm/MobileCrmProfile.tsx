@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Upload, Save, X, Plane } from 'lucide-react';
+import { Loader2, Upload, Save, X, Plane, CalendarClock, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api, API_URL } from '../../../api/client';
 import { compressImage } from '../../../utils/imageCompress';
@@ -107,6 +108,29 @@ export function MobileCrmProfile() {
                 <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
                     Так вас видят клиенты в каталоге специалистов.
                 </p>
+            </div>
+
+            {/* Вход в расписание с телефона: без часов приёма клиенты не
+                могут записаться к специалисту на сайте. */}
+            <div style={{ padding: '0 16px' }}>
+                <Link
+                    to="/m/crm/schedule"
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        background: '#0E0E0E', color: '#fff',
+                        borderRadius: 14, padding: '14px 14px',
+                        textDecoration: 'none',
+                    }}
+                >
+                    <CalendarClock size={22} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>Часы приёма</span>
+                        <span style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>
+                            Клиенты записываются к вам на сайте только в эти часы
+                        </span>
+                    </span>
+                    <ChevronRight size={18} style={{ flexShrink: 0 }} />
+                </Link>
             </div>
 
             {/* Photo */}

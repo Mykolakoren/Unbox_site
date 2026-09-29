@@ -86,7 +86,7 @@ export function NextAvailableSlots({ specialistId, count = 5, onPickSlot }: Prop
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {slots.map((s, i) => (
                     <button
-                        key={`${s.date}-${s.start_time}-${i}`}
+                        key={`${s.date}-${s.startTime}-${i}`}
                         type="button"
                         onClick={() => onPickSlot?.(s)}
                         style={{
@@ -117,7 +117,7 @@ export function NextAvailableSlots({ specialistId, count = 5, onPickSlot }: Prop
                             {fmt(s.date)}
                         </span>
                         <span style={{ fontSize: 15, fontWeight: 700 }}>
-                            {s.start_time}
+                            {s.startTime}
                         </span>
                     </button>
                 ))}

@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { specialistsApi, type ScheduleSlot, type Appointment } from '../../api/specialists';
 import { LOCATIONS } from '../../utils/data';
 import { useUserStore } from '../../store/userStore';
-import { api } from '../../api/client';
+import { ADMIN_ROLES } from '../../utils/permissions';
+import { Link } from 'react-router-dom';
 import { Clock, Save, Loader2, Trash2, Calendar, MapPin, Video, User, Plus, CalendarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -53,75 +54,109 @@ const emptyOverride = (): OverrideEntry => ({
     location_id: 'unbox_uni',
 });
 
-export function CrmSchedule() {
+/** `compact` — экран открыт в мобильном CRM (/m/crm/schedule): узкая
+ *  колонка до 480px, поэтому таблицы складываются в карточки даже на
+ *  широком окне. */
+export function CrmSchedule({ compact = false }: { compact?: boolean } = {}) {
     const currentUser = useUserStore(s => s.currentUser);
-        const [specialistId, setSpecialistId] = useState<string | null>(null);
+    const [specialistId, setSpecialistId] = useState<string | null>(null);
+    // Поиск анкеты: 'pending' пока ищем, 'missing' — анкеты нет (404),
+    // 'error' — не смогли спросить сервер (сеть/5xx). Раньше тупик «нет
+    // анкеты» мигал ещё до ответа сервера и показывался при любой ошибке.
+    const [lookup, setLookup] = useState<'pending' | 'found' | 'missing' | 'error'>('pending');
+    const [lookupAttempt, setLookupAttempt] = useState(0);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [days, setDays] = useState<DaySchedule[]>(Array(7).fill(null).map(DEFAULT_DAY));
     const [overrides, setOverrides] = useState<OverrideEntry[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
 
-    // Find specialist ID for current user.
-    // The shared axios interceptor converts every API response from
-    // snake_case to camelCase before returning, so `Specialist.user_id`
-    // arrives here as `userId`. Earlier code matched on `s.user_id`
-    // and always missed — Mykola (owner, has anketa) saw the empty
-    // "Аккаунт не привязан к анкете" placeholder. We check both keys
-    // defensively in case any future call bypasses the interceptor.
+    // Анкета текущего пользователя — через GET /specialists/me, как в
+    // CrmProfile. Раньше искали в админском /specialists/admin/all: для
+    // специалиста это 403, ошибка глоталась, и каждый психолог без
+    // админских прав упирался в «Аккаунт не привязан к анкете».
+    // Запасной путь только для админа без доступа к Psy-CRM (/me даёт ему
+    // 403): его собственная анкета ищется в админском списке.
     useEffect(() => {
         if (!currentUser) return;
+        let cancelled = false;
         const targetId = String(currentUser.id);
-        const matchUser = (s: any) => (s?.userId ?? s?.user_id) === targetId;
-        api.get('/specialists/admin/all').then(r => {
-            const spec = r.data.find(matchUser);
-            if (spec) {
-                setSpecialistId(spec.id);
-            } else {
-                // Try verified public list
-                api.get('/specialists/').then(r2 => {
-                    const spec2 = r2.data.find(matchUser);
-                    if (spec2) setSpecialistId(spec2.id);
-                }).catch(() => {});
+        const isAdmin = ADMIN_ROLES.includes(currentUser.role ?? '') || !!currentUser.isAdmin;
+        setLookup('pending');
+        (async () => {
+            try {
+                const mine = await specialistsApi.getMine();  // null = 404, анкеты нет
+                if (cancelled) return;
+                if (mine) {
+                    setSpecialistId(mine.id);
+                    setLookup('found');
+                    return;
+                }
+                setLookup('missing');
+            } catch (e: any) {
+                if (cancelled) return;
+                if (e?.response?.status === 403 && isAdmin) {
+                    try {
+                        const all = await specialistsApi.adminList();
+                        if (cancelled) return;
+                        const spec = all.find((x: any) => (x?.userId ?? x?.user_id) === targetId);
+                        if (spec) {
+                            setSpecialistId(spec.id);
+                            setLookup('found');
+                        } else {
+                            setLookup('missing');
+                        }
+                        return;
+                    } catch { /* ниже — общий экран ошибки */ }
+                }
+                if (!cancelled) setLookup(e?.response?.status === 403 ? 'missing' : 'error');
             }
-        }).catch(() => {});
-    }, [currentUser]);
+        })();
+        return () => { cancelled = true; };
+    }, [currentUser, lookupAttempt]);
 
     // Load schedule
     useEffect(() => {
-        if (!specialistId) { setLoading(false); return; }
+        if (!specialistId) {
+            if (lookup !== 'pending') setLoading(false);
+            return;
+        }
         setLoading(true);
         Promise.all([
             specialistsApi.getSchedule(specialistId),
             specialistsApi.getAppointments(specialistId).catch(() => []),
         ]).then(([schedule, appts]) => {
-            // Group weekly slots by day_of_week so the same day can hold
+            // Group weekly slots by dayOfWeek so the same day can hold
             // multiple ranges (e.g. Mon 10:00–13:00 + 16:00–20:00).
+            // Поля ответа — camelCase (интерцептор client.ts). Раньше
+            // читали поля day_of_week / start_time → undefined, и
+            // сохранённое расписание открывалось пустым: одно нажатие
+            // «Сохранить» стёрло бы все часы специалиста.
             const newDays: DaySchedule[] = Array(7).fill(null).map(DEFAULT_DAY);
             const haveAnyRange = Array(7).fill(false);
             const newOverrides: OverrideEntry[] = [];
             schedule.forEach(slot => {
-                if (slot.specific_date) {
+                if (slot.specificDate) {
                     newOverrides.push({
-                        specific_date: slot.specific_date,
-                        is_available: slot.is_available,
-                        start_time: slot.start_time,
-                        end_time: slot.end_time,
-                        location_id: slot.location_id || '__online__',
+                        specific_date: slot.specificDate,
+                        is_available: slot.isAvailable,
+                        start_time: slot.startTime,
+                        end_time: slot.endTime,
+                        location_id: slot.locationId || '__online__',
                     });
-                } else if (slot.day_of_week != null && slot.day_of_week >= 0 && slot.day_of_week <= 6) {
-                    const dow = slot.day_of_week;
+                } else if (slot.dayOfWeek != null && slot.dayOfWeek >= 0 && slot.dayOfWeek <= 6) {
+                    const dow = slot.dayOfWeek;
                     const range: DayRange = {
-                        start_time: slot.start_time,
-                        end_time: slot.end_time,
-                        location_id: slot.location_id || '__online__',
+                        start_time: slot.startTime,
+                        end_time: slot.endTime,
+                        location_id: slot.locationId || '__online__',
                     };
                     if (!haveAnyRange[dow]) {
-                        newDays[dow] = { enabled: slot.is_available, ranges: [range] };
+                        newDays[dow] = { enabled: slot.isAvailable, ranges: [range] };
                         haveAnyRange[dow] = true;
                     } else {
                         newDays[dow].ranges.push(range);
-                        if (slot.is_available) newDays[dow].enabled = true;
+                        if (slot.isAvailable) newDays[dow].enabled = true;
                     }
                 }
             });
@@ -132,9 +167,12 @@ export function CrmSchedule() {
             setOverrides(newOverrides);
             setAppointments(appts);
         }).catch(() => {
-            toast.error('Не удалось загрузить расписание');
+            // Не показываем пустой редактор: «Сохранить» поверх незагруженного
+            // расписания стёрло бы часы. Экран «Не удалось загрузить» + «Повторить».
+            setSpecialistId(null);
+            setLookup('error');
         }).finally(() => setLoading(false));
-    }, [specialistId]);
+    }, [specialistId, lookup]);
 
     const handleSave = async () => {
         if (!specialistId) return;
@@ -148,12 +186,12 @@ export function CrmSchedule() {
                 d.ranges.forEach(r => {
                     if (d.enabled && r.start_time >= r.end_time) return;
                     weeklySlots.push({
-                        day_of_week: i,
-                        specific_date: null,
-                        start_time: r.start_time,
-                        end_time: r.end_time,
-                        location_id: r.location_id === '__online__' ? null : r.location_id,
-                        is_available: d.enabled,
+                        dayOfWeek: i,
+                        specificDate: null,
+                        startTime: r.start_time,
+                        endTime: r.end_time,
+                        locationId: r.location_id === '__online__' ? null : r.location_id,
+                        isAvailable: d.enabled,
                     });
                 });
             });
@@ -165,13 +203,15 @@ export function CrmSchedule() {
                 if (o.is_available && o.start_time >= o.end_time) return;
                 byDate.set(o.specific_date, o);
             });
+            // Ключи camelCase — интерцептор запроса переведёт их в
+            // day_of_week / start_time / … для бэкенда.
             const overrideSlots: Omit<ScheduleSlot, 'id'>[] = Array.from(byDate.values()).map(o => ({
-                day_of_week: null,
-                specific_date: o.specific_date,
-                start_time: o.is_available ? o.start_time : '00:00',
-                end_time: o.is_available ? o.end_time : '00:00',
-                location_id: o.location_id === '__online__' ? null : o.location_id,
-                is_available: o.is_available,
+                dayOfWeek: null,
+                specificDate: o.specific_date,
+                startTime: o.is_available ? o.start_time : '00:00',
+                endTime: o.is_available ? o.end_time : '00:00',
+                locationId: o.location_id === '__online__' ? null : o.location_id,
+                isAvailable: o.is_available,
             }));
             await specialistsApi.updateSchedule(specialistId, [...weeklySlots, ...overrideSlots]);
             toast.success('Расписание сохранено');
@@ -229,7 +269,7 @@ export function CrmSchedule() {
         const today = format(new Date(), 'yyyy-MM-dd');
         return appointments
             .filter(a => a.status === 'confirmed' && a.date >= today)
-            .sort((a, b) => `${a.date}${a.start_time}`.localeCompare(`${b.date}${b.start_time}`));
+            .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
     }, [appointments]);
 
     if (!currentUser) return null;
@@ -240,6 +280,9 @@ export function CrmSchedule() {
             <GridHouseCrmSchedule
                 loading={loading}
                 specialistId={specialistId}
+                lookup={lookup}
+                onRetryLookup={() => setLookupAttempt(n => n + 1)}
+                compact={compact}
                 days={days}
                 updateDay={updateDay}
                 updateRange={updateRange}
@@ -287,6 +330,9 @@ const GH_DOW_LABELS = ['Понедельник', 'Вторник', 'Среда',
 interface GridHouseCrmScheduleProps {
     loading: boolean;
     specialistId: string | null;
+    lookup: 'pending' | 'found' | 'missing' | 'error';
+    onRetryLookup: () => void;
+    compact: boolean;
     days: DaySchedule[];
     updateDay: (i: number, patch: Partial<DaySchedule>) => void;
     updateRange: (dayIdx: number, rangeIdx: number, patch: Partial<DayRange>) => void;
@@ -305,6 +351,9 @@ interface GridHouseCrmScheduleProps {
 function GridHouseCrmSchedule({
     loading,
     specialistId,
+    lookup,
+    onRetryLookup,
+    compact,
     days,
     updateDay,
     updateRange,
@@ -319,7 +368,17 @@ function GridHouseCrmSchedule({
     upcomingAppointments,
     onCancelAppt,
 }: GridHouseCrmScheduleProps) {
-    if (loading) {
+    // Узкий экран (телефон или мобильный CRM): таблицы складываются в
+    // карточки, иначе исключения и записи вылезали за край на 390px.
+    const [narrowWindow, setNarrowWindow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+    useEffect(() => {
+        const onResize = () => setNarrowWindow(window.innerWidth < 640);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+    const narrow = compact || narrowWindow;
+
+    if (loading || lookup === 'pending') {
         return (
             <div
                 style={{
@@ -338,17 +397,34 @@ function GridHouseCrmSchedule({
     }
 
     if (!specialistId) {
+        const isError = lookup === 'error';
+        const btn: React.CSSProperties = {
+            background: GH.ink,
+            color: GH.paper,
+            border: 'none',
+            padding: '14px 22px',
+            fontFamily: GH_MONO,
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.18em',
+            cursor: 'pointer',
+            textDecoration: 'none',
+            display: 'inline-block',
+        };
+        const btnGhost: React.CSSProperties = { ...btn, background: 'transparent', color: GH.ink, border: GH_HAIRLINE_STRONG };
         return (
             <div
                 style={{
                     border: GH_HAIRLINE,
-                    padding: '56px 32px',
+                    padding: narrow ? '40px 20px' : '56px 32px',
+                    margin: narrow ? 16 : 0,
                     background: GH.paper,
                     fontFamily: GH_SANS,
                     textAlign: 'center',
                 }}
             >
-                <div style={{ ...GH_MONO_LABEL, marginBottom: 16 }}>Нет привязки</div>
+                <div style={{ ...GH_MONO_LABEL, marginBottom: 16 }}>{isError ? 'Нет связи' : 'Нет анкеты'}</div>
                 <div
                     style={{
                         fontSize: 'clamp(28px, 3vw, 44px)',
@@ -359,11 +435,24 @@ function GridHouseCrmSchedule({
                         marginBottom: 16,
                     }}
                 >
-                    Аккаунт не привязан к анкете.
+                    {isError ? 'Не удалось загрузить.' : 'Сначала нужна анкета.'}
                 </div>
-                <div style={{ fontSize: 15, color: GH.ink60, lineHeight: 1.5, maxWidth: 460, margin: '0 auto' }}>
-                    Обратитесь к администратору — он свяжет ваш пользовательский профиль с карточкой специалиста в разделе
-                    {' '}Admin · Специалисты.
+                <div style={{ fontSize: 15, color: GH.ink60, lineHeight: 1.5, maxWidth: 460, margin: '0 auto 24px' }}>
+                    {isError
+                        ? 'Проверьте интернет и попробуйте ещё раз.'
+                        : 'Часы приёма привязаны к анкете специалиста, а у этого аккаунта её пока нет. Заполните анкету. Если ваша карточка уже есть на сайте, напишите администратору: он привяжет её к аккаунту.'}
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    {isError ? (
+                        <button type="button" onClick={onRetryLookup} style={btn}>Повторить</button>
+                    ) : (
+                        <>
+                            <Link to="/become-specialist" style={btn}>Заполнить анкету</Link>
+                            <a href="https://t.me/UnboxCenter" target="_blank" rel="noopener noreferrer" style={btnGhost}>
+                                Написать администратору
+                            </a>
+                        </>
+                    )}
                 </div>
             </div>
         );
@@ -376,6 +465,7 @@ function GridHouseCrmSchedule({
                 color: GH.ink,
                 background: GH.paper,
                 maxWidth: 1120,
+                padding: narrow ? '20px 16px 24px' : undefined,
             }}
         >
             {/* ── Header ── */}
@@ -395,7 +485,7 @@ function GridHouseCrmSchedule({
                     <div style={{ ...GH_MONO_LABEL, marginBottom: 8 }}>Раздел · Расписание</div>
                     <h1
                         style={{
-                            fontSize: 'clamp(36px, 4.5vw, 56px)',
+                            fontSize: narrow ? 30 : 'clamp(36px, 4.5vw, 56px)',
                             fontWeight: 800,
                             lineHeight: 0.95,
                             letterSpacing: '-0.025em',
@@ -451,10 +541,10 @@ function GridHouseCrmSchedule({
                     </div>
                 </div>
 
-                {/* Table header */}
+                {/* Table header (на узком экране не нужен — строки-карточки) */}
                 <div
                     style={{
-                        display: 'grid',
+                        display: narrow ? 'none' : 'grid',
                         gridTemplateColumns: '32px 60px 1.4fr 2.4fr',
                         gap: 0,
                         ...GH_MONO_LABEL,
@@ -475,6 +565,7 @@ function GridHouseCrmSchedule({
                         key={i}
                         index={i}
                         day={day}
+                        narrow={narrow}
                         onUpdate={(patch) => updateDay(i, patch)}
                         onUpdateRange={(rangeIdx, patch) => updateRange(i, rangeIdx, patch)}
                         onAddRange={() => addRange(i)}
@@ -518,7 +609,7 @@ function GridHouseCrmSchedule({
                         {/* Header */}
                         <div
                             style={{
-                                display: 'grid',
+                                display: narrow ? 'none' : 'grid',
                                 gridTemplateColumns: '120px 180px 1fr 1fr 40px',
                                 gap: 0,
                                 ...GH_MONO_LABEL,
@@ -536,6 +627,7 @@ function GridHouseCrmSchedule({
                             <GridHouseOverrideRow
                                 key={i}
                                 override={ov}
+                                narrow={narrow}
                                 onUpdate={(patch) => updateOverride(i, patch)}
                                 onRemove={() => removeOverride(i)}
                                 isLast={i === overrides.length - 1}
@@ -544,6 +636,38 @@ function GridHouseCrmSchedule({
                     </div>
                 )}
             </section>
+
+            {/* На телефоне кнопка в шапке уезжает далеко вверх — дублируем
+                её после редактируемых блоков. */}
+            {narrow && (
+                <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={{
+                        width: '100%',
+                        background: GH.ink,
+                        color: GH.paper,
+                        border: 'none',
+                        padding: '16px 24px',
+                        marginTop: -24,
+                        marginBottom: 48,
+                        fontFamily: GH_MONO,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.18em',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        opacity: saving ? 0.5 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 10,
+                    }}
+                >
+                    <Save size={14} />
+                    {saving ? 'Сохранение…' : 'Сохранить расписание'}
+                </button>
+            )}
 
             {/* ── Upcoming appointments ── */}
             <section>
@@ -577,7 +701,7 @@ function GridHouseCrmSchedule({
                         {/* Header */}
                         <div
                             style={{
-                                display: 'grid',
+                                display: narrow ? 'none' : 'grid',
                                 gridTemplateColumns: '32px 88px 1.4fr 1fr 1fr 40px',
                                 gap: 0,
                                 ...GH_MONO_LABEL,
@@ -598,8 +722,9 @@ function GridHouseCrmSchedule({
                                 key={appt.id}
                                 style={{
                                     display: 'grid',
-                                    gridTemplateColumns: '32px 88px 1.4fr 1fr 1fr 40px',
-                                    gap: 0,
+                                    // Узко: [дата | клиент | ✕] над [время | локация]
+                                    gridTemplateColumns: narrow ? '64px 1fr 32px' : '32px 88px 1.4fr 1fr 1fr 40px',
+                                    gap: narrow ? '6px 8px' : 0,
                                     padding: '14px 16px',
                                     alignItems: 'center',
                                     borderBottom: i === upcomingAppointments.length - 1 ? 'none' : GH_HAIRLINE,
@@ -608,6 +733,7 @@ function GridHouseCrmSchedule({
                             >
                                 <div
                                     style={{
+                                        display: narrow ? 'none' : undefined,
                                         fontFamily: GH_MONO,
                                         fontSize: 11,
                                         color: GH.ink60,
@@ -618,6 +744,8 @@ function GridHouseCrmSchedule({
                                 </div>
                                 <div
                                     style={{
+                                        gridColumn: narrow ? 1 : undefined,
+                                        gridRow: narrow ? 1 : undefined,
                                         fontFamily: GH_MONO,
                                         fontSize: 12,
                                         fontVariantNumeric: 'tabular-nums',
@@ -626,9 +754,9 @@ function GridHouseCrmSchedule({
                                 >
                                     {format(new Date(appt.date + 'T00:00'), 'dd MMM', { locale: ru })}
                                 </div>
-                                <div>
-                                    <div style={{ fontWeight: 600, color: GH.ink }}>{appt.client_name}</div>
-                                    {appt.client_phone && (
+                                <div style={narrow ? { gridColumn: 2, gridRow: 1, minWidth: 0 } : undefined}>
+                                    <div style={{ fontWeight: 600, color: GH.ink }}>{appt.clientName}</div>
+                                    {appt.clientPhone && (
                                         <div
                                             style={{
                                                 fontFamily: GH_MONO,
@@ -637,21 +765,25 @@ function GridHouseCrmSchedule({
                                                 marginTop: 2,
                                             }}
                                         >
-                                            {appt.client_phone}
+                                            {appt.clientPhone}
                                         </div>
                                     )}
                                 </div>
                                 <div
                                     style={{
+                                        gridColumn: narrow ? 1 : undefined,
+                                        gridRow: narrow ? 2 : undefined,
                                         fontFamily: GH_MONO,
                                         fontSize: 13,
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
                                 >
-                                    {appt.start_time}
+                                    {appt.startTime}
                                 </div>
                                 <div
                                     style={{
+                                        gridColumn: narrow ? 2 : undefined,
+                                        gridRow: narrow ? 2 : undefined,
                                         fontFamily: GH_MONO,
                                         fontSize: 11,
                                         textTransform: 'uppercase',
@@ -659,9 +791,9 @@ function GridHouseCrmSchedule({
                                         color: GH.ink60,
                                     }}
                                 >
-                                    {appt.location_id ? LOCATIONS.find(l => l.id === appt.location_id)?.name || appt.location_id : 'Онлайн'}
+                                    {appt.locationId ? LOCATIONS.find(l => l.id === appt.locationId)?.name || appt.locationId : 'Онлайн'}
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gridColumn: narrow ? 3 : undefined, gridRow: narrow ? 1 : undefined }}>
                                     <button
                                         onClick={() => onCancelAppt(appt.id)}
                                         title="Отменить запись"
@@ -691,6 +823,7 @@ function GridHouseCrmSchedule({
 function GridHouseDayRow({
     index,
     day,
+    narrow,
     onUpdate,
     onUpdateRange,
     onAddRange,
@@ -698,6 +831,7 @@ function GridHouseDayRow({
 }: {
     index: number;
     day: DaySchedule;
+    narrow: boolean;
     onUpdate: (patch: Partial<DaySchedule>) => void;
     onUpdateRange: (rangeIdx: number, patch: Partial<DayRange>) => void;
     onAddRange: () => void;
@@ -709,8 +843,10 @@ function GridHouseDayRow({
         <div
             style={{
                 display: 'grid',
-                gridTemplateColumns: '32px 60px 1.4fr 2.4fr',
-                gap: 0,
+                // Узко: [тумблер | день | «Выходной»], часы включённого дня —
+                // отдельной строкой во всю ширину
+                gridTemplateColumns: narrow ? '56px 1fr auto' : '32px 60px 1.4fr 2.4fr',
+                gap: narrow ? '10px 0' : 0,
                 padding: '16px 0',
                 alignItems: 'flex-start',
                 borderBottom: GH_HAIRLINE,
@@ -722,6 +858,7 @@ function GridHouseDayRow({
             {/* # */}
             <div
                 style={{
+                    display: narrow ? 'none' : undefined,
                     fontFamily: GH_MONO,
                     fontSize: 11,
                     color: GH.ink60,
@@ -775,7 +912,7 @@ function GridHouseDayRow({
             </div>
 
             {/* Range list (time + location) — one row per range. */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, gridColumn: narrow && enabled ? '1 / -1' : undefined }}>
                 {enabled ? (
                     <>
                         {day.ranges.map((range, ri) => (
@@ -784,14 +921,14 @@ function GridHouseDayRow({
                                     type="time"
                                     value={range.start_time}
                                     onChange={e => onUpdateRange(ri, { start_time: e.target.value })}
-                                    style={GH_TIME_INPUT}
+                                    style={narrow ? { ...GH_TIME_INPUT, width: 100 } : GH_TIME_INPUT}
                                 />
                                 <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
                                 <input
                                     type="time"
                                     value={range.end_time}
                                     onChange={e => onUpdateRange(ri, { end_time: e.target.value })}
-                                    style={GH_TIME_INPUT}
+                                    style={narrow ? { ...GH_TIME_INPUT, width: 100 } : GH_TIME_INPUT}
                                 />
                                 <select
                                     value={range.location_id}
@@ -809,6 +946,9 @@ function GridHouseDayRow({
                                         outline: 'none',
                                         flex: 1,
                                         minWidth: 120,
+                                        // Узко: локация своей строкой под временем
+                                        flexBasis: narrow ? '100%' : undefined,
+                                        order: narrow ? 2 : undefined,
                                         cursor: 'pointer',
                                     }}
                                 >
@@ -894,11 +1034,13 @@ function bumpHour(t: string, n: number): string {
 // ── Single override row (Grid House) ──
 function GridHouseOverrideRow({
     override,
+    narrow,
     onUpdate,
     onRemove,
     isLast,
 }: {
     override: OverrideEntry;
+    narrow: boolean;
     onUpdate: (patch: Partial<OverrideEntry>) => void;
     onRemove: () => void;
     isLast: boolean;
@@ -908,8 +1050,9 @@ function GridHouseOverrideRow({
         <div
             style={{
                 display: 'grid',
-                gridTemplateColumns: '120px 180px 1fr 1fr 40px',
-                gap: 0,
+                // Узко: [дата | ✕], ниже во всю ширину статус, время, локация
+                gridTemplateColumns: narrow ? '1fr 40px' : '120px 180px 1fr 1fr 40px',
+                gap: narrow ? '10px 0' : 0,
                 padding: '12px 16px',
                 alignItems: 'center',
                 borderBottom: isLast ? 'none' : GH_HAIRLINE,
@@ -923,6 +1066,8 @@ function GridHouseOverrideRow({
                 value={override.specific_date}
                 onChange={(e) => onUpdate({ specific_date: e.target.value })}
                 style={{
+                    gridColumn: narrow ? 1 : undefined,
+                    gridRow: narrow ? 1 : undefined,
                     fontFamily: GH_MONO,
                     fontSize: 12,
                     border: 'none',
@@ -937,7 +1082,7 @@ function GridHouseOverrideRow({
             />
 
             {/* Status toggle */}
-            <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 4, gridColumn: narrow ? '1 / -1' : undefined }}>
                 <button
                     onClick={() => onUpdate({ is_available: false })}
                     style={{
@@ -977,7 +1122,7 @@ function GridHouseOverrideRow({
             </div>
 
             {/* Time range */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: narrow && !is_available ? 'none' : 'flex', gap: 8, alignItems: 'center', gridColumn: narrow ? '1 / -1' : undefined }}>
                 {is_available ? (
                     <>
                         <input
@@ -993,7 +1138,7 @@ function GridHouseOverrideRow({
                                 padding: '4px 2px',
                                 color: GH.ink,
                                 outline: 'none',
-                                width: 70,
+                                width: narrow ? 100 : 70,
                             }}
                         />
                         <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
@@ -1010,7 +1155,7 @@ function GridHouseOverrideRow({
                                 padding: '4px 2px',
                                 color: GH.ink,
                                 outline: 'none',
-                                width: 70,
+                                width: narrow ? 100 : 70,
                             }}
                         />
                     </>
@@ -1020,7 +1165,7 @@ function GridHouseOverrideRow({
             </div>
 
             {/* Location */}
-            <div>
+            <div style={narrow ? { gridColumn: '1 / -1', display: is_available ? undefined : 'none' } : undefined}>
                 {is_available ? (
                     <select
                         value={override.location_id}
@@ -1050,7 +1195,7 @@ function GridHouseOverrideRow({
             </div>
 
             {/* Remove */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gridColumn: narrow ? 2 : undefined, gridRow: narrow ? 1 : undefined }}>
                 <button
                     onClick={onRemove}
                     title="Удалить"

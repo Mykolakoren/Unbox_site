@@ -1,45 +1,52 @@
 import { api } from './client';
 
+// Поля в camelCase — так их реально видит фронт: интерцептор ответа в
+// client.ts переводит все ключи из snake_case (start_time → startTime).
+// Раньше тут были snake_case-типы, и запись к специалисту читала
+// undefined вместо времени (слоты без часов, запрос без start_time → 422).
+// Тела запросов интерцептор переводит обратно в snake_case, так что
+// бэкенд по-прежнему получает start_time / location_id / client_name.
+
 export interface ScheduleSlot {
     id?: string;
-    day_of_week?: number | null;  // 0=Mon..6=Sun
-    specific_date?: string | null;  // "YYYY-MM-DD"
-    start_time: string;
-    end_time: string;
-    location_id: string | null;  // null = online
-    is_available: boolean;
+    dayOfWeek?: number | null;  // 0=Mon..6=Sun
+    specificDate?: string | null;  // "YYYY-MM-DD"
+    startTime: string;
+    endTime: string;
+    locationId: string | null;  // null = online
+    isAvailable: boolean;
 }
 
 export interface AvailableSlot {
     date: string;
-    start_time: string;
-    end_time: string;
-    location_id: string | null;
+    startTime: string;
+    endTime: string;
+    locationId: string | null;
 }
 
 export interface Appointment {
     id: string;
-    specialist_id: string;
-    client_name: string;
-    client_phone?: string;
-    client_email?: string;
+    specialistId: string;
+    clientName: string;
+    clientPhone?: string | null;
+    clientEmail?: string | null;
     date: string;
-    start_time: string;
+    startTime: string;
     duration: number;
-    location_id: string | null;
+    locationId: string | null;
     status: string;
-    notes?: string;
-    created_at: string;
+    notes?: string | null;
+    createdAt: string;
 }
 
 export interface AppointmentCreate {
-    client_name: string;
-    client_phone?: string;
-    client_email?: string;
+    clientName: string;
+    clientPhone?: string;
+    clientEmail?: string;
     date: string;
-    start_time: string;
+    startTime: string;
     duration?: number;
-    location_id?: string | null;
+    locationId?: string | null;
     notes?: string;
 }
 

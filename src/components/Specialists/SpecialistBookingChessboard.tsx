@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, MapPin, Video, Loader2, Check, X } from 'luc
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../../utils/errors';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 
@@ -53,7 +54,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
     // Build lookup: "YYYY-MM-DD|HH:MM" → AvailableSlot
     const slotMap = useMemo(() => {
         const map = new Map<string, AvailableSlot>();
-        slots.forEach(s => map.set(`${s.date}|${s.start_time}`, s));
+        slots.forEach(s => map.set(`${s.date}|${s.startTime}`, s));
         return map;
     }, [slots]);
 
@@ -86,7 +87,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
 
     const mobileDaySlotMap = useMemo(() => {
         const map = new Map<string, AvailableSlot>();
-        mobileDaySlots.forEach(s => map.set(s.start_time, s));
+        mobileDaySlots.forEach(s => map.set(s.startTime, s));
         return map;
     }, [mobileDaySlots]);
 
@@ -95,12 +96,12 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
         setSubmitting(true);
         try {
             const data: AppointmentCreate = {
-                client_name: bookingForm.name.trim(),
-                client_phone: bookingForm.phone.trim() || undefined,
-                client_email: bookingForm.email.trim() || undefined,
+                clientName: bookingForm.name.trim(),
+                clientPhone: bookingForm.phone.trim() || undefined,
+                clientEmail: bookingForm.email.trim() || undefined,
                 date: selectedSlot.date,
-                start_time: selectedSlot.start_time,
-                location_id: selectedSlot.location_id,
+                startTime: selectedSlot.startTime,
+                locationId: selectedSlot.locationId,
             };
             await specialistsApi.createAppointment(specialistId, data);
             toast.success('Вы записаны! Специалист получит уведомление.');
@@ -111,8 +112,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
             specialistsApi.getAvailableSlots(specialistId, dateFrom, dateTo, locParam)
                 .then(setSlots);
         } catch (e: any) {
-            const msg = e.response?.data?.detail || 'Ошибка при записи';
-            toast.error(msg);
+            toast.error(apiErrorMessage(e, 'Не удалось записаться. Попробуйте ещё раз.'));
         } finally {
             setSubmitting(false);
         }
@@ -185,12 +185,12 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-unbox-dark/60">Время:</span>
-                                <span className="font-medium">{selectedSlot.start_time} — {selectedSlot.end_time}</span>
+                                <span className="font-medium">{selectedSlot.startTime} — {selectedSlot.endTime}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-unbox-dark/60">Формат:</span>
                                 <span className="font-medium flex items-center gap-1">
-                                    {selectedSlot.location_id ? <><MapPin size={12} /> {getLocationLabel(selectedSlot.location_id)}</> : <><Video size={12} /> Онлайн</>}
+                                    {selectedSlot.locationId ? <><MapPin size={12} /> {getLocationLabel(selectedSlot.locationId)}</> : <><Video size={12} /> Онлайн</>}
                                 </span>
                             </div>
                             <div className="flex justify-between">
@@ -327,7 +327,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                     {[{ time: left, slot: leftSlot }, { time: right, slot: rightSlot }].map(({ time, slot: availSlot }, colIdx) => {
                                         if (!time) return <div key={`empty-${colIdx}`} className="flex-1" />;
 
-                                        const isSelected = selectedSlot && selectedSlot.date === format(mobileDate, 'yyyy-MM-dd') && selectedSlot.start_time === time;
+                                        const isSelected = selectedSlot && selectedSlot.date === format(mobileDate, 'yyyy-MM-dd') && selectedSlot.startTime === time;
 
                                         if (!availSlot) {
                                             return (
@@ -355,7 +355,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                                     <span className={clsx('text-sm font-bold tabular-nums', isSelected ? 'text-white' : 'text-unbox-dark')}>
                                                         {time}
                                                     </span>
-                                                    {availSlot.location_id ? (
+                                                    {availSlot.locationId ? (
                                                         <MapPin size={11} className={isSelected ? 'text-white/70' : 'text-unbox-green/60'} />
                                                     ) : (
                                                         <Video size={11} className={isSelected ? 'text-white/70' : 'text-unbox-green/60'} />
@@ -432,7 +432,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                             const dateStr = format(day, 'yyyy-MM-dd');
                                             const key = `${dateStr}|${time}`;
                                             const slot = slotMap.get(key);
-                                            const isSelected = selectedSlot && selectedSlot.date === dateStr && selectedSlot.start_time === time;
+                                            const isSelected = selectedSlot && selectedSlot.date === dateStr && selectedSlot.startTime === time;
 
                                             return (
                                                 <td key={i} className="p-0.5">
@@ -444,9 +444,9 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                                                     ? 'bg-unbox-green text-white shadow-md scale-105'
                                                                     : 'bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/25 hover:scale-105'
                                                             }`}
-                                                            title={`${time} — ${getLocationLabel(slot.location_id)}`}
+                                                            title={`${time} — ${getLocationLabel(slot.locationId)}`}
                                                         >
-                                                            {slot.location_id ? (
+                                                            {slot.locationId ? (
                                                                 <MapPin size={10} className="mx-auto" />
                                                             ) : (
                                                                 <Video size={10} className="mx-auto" />

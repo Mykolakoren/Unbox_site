@@ -11,6 +11,7 @@ import { LOCATIONS } from '../../utils/data';
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../../utils/errors';
 
 interface Props {
     specialistId: string;
@@ -106,14 +107,14 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                     if (booked.has(`${dow}|${start}`)) continue;
                     fake.push({
                         date: format(d, 'yyyy-MM-dd'),
-                        start_time: start,
-                        end_time: `${String(h + 1).padStart(2, '0')}:00`,
-                        location_id: dayLocation,
+                        startTime: start,
+                        endTime: `${String(h + 1).padStart(2, '0')}:00`,
+                        locationId: dayLocation,
                     });
                 }
             }
             const locParam = locationFilter === 'all' ? undefined : locationFilter;
-            const filtered = locParam === undefined || locParam === 'all' ? fake : fake.filter(s => s.location_id === locParam);
+            const filtered = locParam === undefined || locParam === 'all' ? fake : fake.filter(s => s.locationId === locParam);
             setSlots(filtered);
             setLoading(false);
             return;
@@ -127,7 +128,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
 
     const slotMap = useMemo(() => {
         const map = new Map<string, AvailableSlot>();
-        slots.forEach(s => map.set(`${s.date}|${s.start_time}`, s));
+        slots.forEach(s => map.set(`${s.date}|${s.startTime}`, s));
         return map;
     }, [slots]);
 
@@ -157,13 +158,15 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
         if (!selectedSlot || !bookingForm.name.trim()) return;
         setSubmitting(true);
         try {
+            // Ключи в camelCase — интерцептор запроса сам переведёт их
+            // в client_name / start_time / location_id для бэкенда.
             const data: AppointmentCreate = {
-                client_name: bookingForm.name.trim(),
-                client_phone: bookingForm.phone.trim() || undefined,
-                client_email: bookingForm.email.trim() || undefined,
+                clientName: bookingForm.name.trim(),
+                clientPhone: bookingForm.phone.trim() || undefined,
+                clientEmail: bookingForm.email.trim() || undefined,
                 date: selectedSlot.date,
-                start_time: selectedSlot.start_time,
-                location_id: selectedSlot.location_id,
+                startTime: selectedSlot.startTime,
+                locationId: selectedSlot.locationId,
             };
             await specialistsApi.createAppointment(specialistId, data);
             toast.success('Записано.');
@@ -172,8 +175,18 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
             const locParam = locationFilter === 'all' ? undefined : locationFilter;
             specialistsApi.getAvailableSlots(specialistId, dateFrom, dateTo, locParam).then(setSlots);
         } catch (e: any) {
-            const msg = e.response?.data?.detail || 'Ошибка при записи';
-            toast.error(msg);
+            if (e?.response?.status === 409) {
+                // Время успели занять, пока клиент заполнял форму —
+                // обновляем сетку, чтобы он выбрал другой час.
+                toast.error('Это время уже заняли. Выберите другое.');
+                setSelectedSlot(null);
+                const locParam = locationFilter === 'all' ? undefined : locationFilter;
+                specialistsApi.getAvailableSlots(specialistId, dateFrom, dateTo, locParam).then(setSlots).catch(() => {});
+            } else {
+                // detail бывает массивом (422) — рендер его в toast ронял
+                // всё приложение (React #31). Только через apiErrorMessage.
+                toast.error(apiErrorMessage(e, 'Не удалось записаться. Попробуйте ещё раз.'));
+            }
         } finally {
             setSubmitting(false);
         }
@@ -255,8 +268,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '10px 16px', fontSize: '15px', alignItems: 'baseline' }}>
                     {[
                         { label: 'ДАТА', value: format(new Date(selectedSlot.date + 'T00:00'), 'EEEE, d MMMM', { locale: ru }), mono: false },
-                        { label: 'ВРЕМЯ', value: `${selectedSlot.start_time} — ${selectedSlot.end_time}`, mono: true },
-                        { label: 'ФОРМАТ', value: getLocationLabel(selectedSlot.location_id), mono: false },
+                        { label: 'ВРЕМЯ', value: `${selectedSlot.startTime} — ${selectedSlot.endTime}`, mono: true },
+                        { label: 'ФОРМАТ', value: getLocationLabel(selectedSlot.locationId), mono: false },
                         { label: 'СТОИМОСТЬ', value: `${basePriceGel} ₾`, mono: true, bold: true },
                     ].map(({ label, value, mono, bold }) => (
                         <div key={label} style={{ display: 'contents' }}>
@@ -559,7 +572,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                     const dateStr = format(day, 'yyyy-MM-dd');
                                     const key = `${dateStr}|${time}`;
                                     const slot = slotMap.get(key);
-                                    const isSelected = !!selectedSlot && selectedSlot.date === dateStr && selectedSlot.start_time === time;
+                                    const isSelected = !!selectedSlot && selectedSlot.date === dateStr && selectedSlot.startTime === time;
 
                                     return (
                                         <div
@@ -584,7 +597,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                                     (e.currentTarget as HTMLDivElement).style.background = '#FFFFFF';
                                                 }
                                             }}
-                                            title={slot ? `${time} · ${getLocationLabel(slot.location_id)}` : undefined}
+                                            title={slot ? `${time} · ${getLocationLabel(slot.locationId)}` : undefined}
                                         >
                                             {slot && (
                                                 <>
@@ -617,7 +630,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                                             fontWeight: 600,
                                                         }}
                                                     >
-                                                        {getLocationMark(slot.location_id)}
+                                                        {getLocationMark(slot.locationId)}
                                                     </div>
                                                 </>
                                             )}
@@ -787,10 +800,10 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
             ) : (
                 <div style={{ borderTop: `1px solid ${GH.ink}` }}>
                     {mobileDaySlots.map((slot, i) => {
-                        const isSelected = selectedSlot?.date === slot.date && selectedSlot?.start_time === slot.start_time;
+                        const isSelected = selectedSlot?.date === slot.date && selectedSlot?.startTime === slot.startTime;
                         return (
                             <div
-                                key={`${slot.date}|${slot.start_time}|${i}`}
+                                key={`${slot.date}|${slot.startTime}|${i}`}
                                 onClick={() => setSelectedSlot(slot)}
                                 style={{
                                     display: 'flex',
@@ -812,7 +825,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                         fontFeatureSettings: '"tnum"',
                                     }}
                                 >
-                                    {slot.start_time}
+                                    {slot.startTime}
                                 </span>
                                 <span
                                     style={{
@@ -823,7 +836,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                         color: isSelected ? 'rgba(250,250,247,0.7)' : GH.ink60,
                                     }}
                                 >
-                                    {slot.location_id ? getLocationLabel(slot.location_id).toUpperCase() : 'ОНЛАЙН'}
+                                    {slot.locationId ? getLocationLabel(slot.locationId).toUpperCase() : 'ОНЛАЙН'}
                                 </span>
                             </div>
                         );
