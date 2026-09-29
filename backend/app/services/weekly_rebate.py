@@ -331,6 +331,21 @@ def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
 
     this_rebate = round(_rebate_for(booking), 2)
     week_rebate = round(sum(_rebate_for(b) for b in week), 2)
+
+    # Последний недельный кредит за прошлую неделю (если за 8 дней был) — чтобы
+    # попап брони мог сказать «в т.ч. недельная скидка +9 ₾ от 28.09 — уже на балансе».
+    from app.models.balance_ledger import BalanceLedger
+    last = session.exec(
+        select(BalanceLedger).where(
+            BalanceLedger.user_id == str(user.id),
+            BalanceLedger.reason == "weekly_rebate",
+            BalanceLedger.created_at >= datetime.utcnow() - timedelta(days=8),
+        ).order_by(BalanceLedger.created_at.desc())
+    ).first()
+    last_rebate = (
+        {"amount": float(last.delta), "date": (last.created_at + timedelta(hours=4)).strftime("%d.%m")}
+        if last else None
+    )
     if week_rebate < MIN_REBATE_GEL:
         week_rebate, this_rebate = 0.0, 0.0
     applies = booking.payment_method == "balance" and booking.payment_status != "waived"
@@ -344,4 +359,5 @@ def estimate_booking_rebate(session: Session, booking: Booking) -> dict:
         "booking_rebate": this_rebate,
         "booking_net_estimate": round(float(booking.final_price or 0.0) - this_rebate, 2),
         "week_rebate": week_rebate,
+        "last_rebate": last_rebate,
     }

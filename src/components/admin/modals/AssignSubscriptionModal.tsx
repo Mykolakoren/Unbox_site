@@ -8,20 +8,27 @@ import clsx from 'clsx';
 interface AssignSubscriptionModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => void;
+    onConfirm: (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => Promise<void> | void;
     currentSubscriptionName?: string;
 }
 
 export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSubscriptionName }: AssignSubscriptionModalProps) {
     const [selectedPlanIndex, setSelectedPlanIndex] = useState<number | null>(null);
     const [method, setMethod] = useState<'cash' | 'tbc' | 'bog' | 'balance'>('cash');
+    const [busy, setBusy] = useState(false);
 
     if (!isOpen) return null;
 
-    const handleSubmit = () => {
-        if (selectedPlanIndex !== null) {
-            onConfirm(selectedPlanIndex, method);
+    // Ждём ответа сервера и блокируем кнопку: продажа — это деньги в кассе,
+    // двойной клик не должен провести её дважды (ревизия 29.09).
+    const handleSubmit = async () => {
+        if (selectedPlanIndex === null || busy) return;
+        setBusy(true);
+        try {
+            await onConfirm(selectedPlanIndex, method);
             onClose();
+        } finally {
+            setBusy(false);
         }
     };
 
@@ -118,7 +125,7 @@ export function AssignSubscriptionModal({ isOpen, onClose, onConfirm, currentSub
                     <Button
                         variant="primary"
                         onClick={handleSubmit}
-                        disabled={selectedPlanIndex === null}
+                        disabled={selectedPlanIndex === null || busy}
                         className={clsx("flex-1", selectedPlanIndex !== null ? "bg-purple-600 hover:bg-purple-700" : "")}
                     >
                         Назначить

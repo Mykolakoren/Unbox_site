@@ -106,6 +106,7 @@ export const bookingsApi = {
             weekStart: string; applies: boolean; totalHours: number; tierPercent: number;
             nextTierPercent: number | null; hoursToNextTier: number | null;
             bookingRebate: number; bookingNetEstimate: number; weekRebate: number;
+            lastRebate?: { amount: number; date: string } | null;
         }>(`/bookings/${id}/weekly-estimate`);
         return response.data;
     },

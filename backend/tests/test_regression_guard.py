@@ -996,3 +996,48 @@ def test_weekly_package_rollover():
     assert sp.hours_return_allowed(sub, datetime(2026, 10, 4, 15)) is True
     assert sp.hours_return_allowed(sub, datetime(2026, 9, 27, 11)) is False
     assert sp.hours_return_allowed({"plan_id": "PRO_PLUS"}, datetime(2020, 1, 1)) is True
+
+
+def test_subscription_sale_single_operation():
+    """29.09: продажа абонемента одной операцией. Касса с категорией «Абонементы»
+    раньше только зачисляла деньги (Надежда, Марина 12.09), а «Назначить
+    абонемент» при наличных/карте не писал ничего в кассу. Каталог тарифов на
+    сервере обязан совпадать с сайтом (цены, часы)."""
+    import pathlib, re
+    root = pathlib.Path(__file__).parent.parent.parent
+    from app.services.subscription_sale import PLANS
+    data = (root / "src/utils/data.ts").read_text()
+    block = data[data.index("export let SUBSCRIPTION_PLANS"):data.index("];", data.index("export let SUBSCRIPTION_PLANS"))]
+    front = {}
+    for m in re.finditer(r"id:\s*'(\w+)'.*?hours:\s*(\d+).*?price:\s*(\d+)", block, re.S):
+        front[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+    assert front and set(front) == set(PLANS), f"тарифы сайта и сервера разошлись: {front.keys()} vs {PLANS.keys()}"
+    for pid, (h, price) in front.items():
+        assert PLANS[pid]["hours"] == h and PLANS[pid]["price"] == price, f"{pid}: сайт {h} ч/{price} ₾ ≠ сервер"
+    sale = (root / "backend/app/services/subscription_sale.py").read_text()
+    assert 'reason="subscription_purchase"' in sale and 'reason="topup"' in sale
+    assert "_convert_booking_to_subscription" in sale
+    ud = (root / "src/pages/admin/UserDetails.tsx").read_text()
+    assert "usersApi.sellSubscription(" in ud and "addTransaction({" not in ud, \
+        "«Назначить абонемент» снова пишет абонемент без денег"
+    cb = (root / "src/components/admin/cashbox/AddCashboxTransactionModal.tsx").read_text()
+    assert "sellSubscription(" in cb and "id: 'trial'" not in cb, "касса снова продаёт абонемент без включения"
+    due = (root / "src/utils/dueAmounts.ts").read_text()
+    assert "for (let i = charged.length - 1; i >= 0; i--)" in due, "долг должен ложиться на самые свежие списанные брони"
+
+
+def test_convert_pending_booking_does_not_double_deduct_hours():
+    """29.09 (Валерия Костенецкая): «На абонемент» для ещё не списанной брони
+    снимал часы сразу, а крон за 24 ч снимал их второй раз (−6 ч). Для pending
+    часы снимает только крон; перевод лишь перекрашивает бронь."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "app/api/v1/bookings/routes.py").read_text()
+    i = src.find("def _convert_booking_to_subscription")
+    body = src[i:src.find("@router.patch(\"/{booking_id}/to-subscription\"", i)]
+    assert 'is_pending = booking.payment_status == "pending"' in body and "if not is_pending:" in body, \
+        "перевод pending-брони на абонемент снова снимает часы дважды (сейчас + крон)"
+    assert "booking.charge_amount = None if is_pending else peak_left" in body
+    sale = (pathlib.Path(__file__).parent.parent / "app/services/subscription_sale.py").read_text()
+    assert "_subscription_category(" in sale, "несуществующая категория кассы уронит продажу (внешний ключ)"
+    modal = (pathlib.Path(__file__).parent.parent.parent / "src/components/admin/modals/AssignSubscriptionModal.tsx").read_text()
+    assert "await onConfirm(" in modal and "|| busy" in modal, "двойной клик снова проведёт продажу абонемента дважды"

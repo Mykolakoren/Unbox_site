@@ -717,6 +717,54 @@ def topup_subscription(
     return user
 
 
+@router.post("/{user_id}/subscription/sell")
+def sell_subscription_endpoint(
+    user_id: str,
+    payload: dict = Body(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(deps.require_admin),
+) -> Any:
+    """Продажа абонемента одной операцией: касса/баланс + списание за абонемент +
+    включение абонемента + перевод будущих денежных броней на часы.
+    payload: { plan_id, payment_method: cash|card_tbc|card_bog|balance, amount?, branch? }
+    См. app/services/subscription_sale.py."""
+    if current_user.role == "admin" and not deps.has_permission(current_user, "subscriptions.manage"):
+        raise HTTPException(403, "Нужно право «Абонементы: управление» — обратитесь к старшему администратору")
+    from app.services.subscription_sale import sell_subscription, SaleError
+    from app.services.timeline import timeline_service
+
+    user = _resolve_user(session, user_id)
+    user = session.exec(select(User).where(User.id == user.id).with_for_update()).one()
+    amount = payload.get("amount")
+    try:
+        result = sell_subscription(
+            session, user,
+            plan_id=str(payload.get("plan_id") or ""),
+            method=str(payload.get("payment_method") or ""),
+            actor=current_user,
+            amount=float(amount) if amount not in (None, "") else None,
+            branch=payload.get("branch") or None,
+            category_id=payload.get("category_id") or None,
+        )
+    except SaleError as e:
+        session.rollback()
+        raise HTTPException(400, str(e))
+    timeline_service.log_event(
+        session=session,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_id=str(user.id),
+        target_type="user",
+        event_type="subscription_sold",
+        description=(f"Продан абонемент «{result['plan']}» за {result['price']:g} ₾ ({result['method']})"
+                     + (f", перенесено {result['carried_hours']:g} ч" if result["carried_hours"] else "")
+                     + (f", на часы переведено броней: {len(result['converted_bookings'])}" if result["converted_bookings"] else "")),
+        metadata=result,
+    )
+    session.commit()
+    return result
+
+
 # ── Change email (senior_admin / owner only) ─────────────────────────────────
 # Excel #47. Email is used as a soft foreign key in legacy tables
 # (Booking.user_id, Waitlist.user_id, etc.). This endpoint atomically updates

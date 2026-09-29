@@ -5,6 +5,7 @@ import { bookingsApi } from '../../api/bookings';
 import { cashboxApi } from '../../api/cashbox';
 import { useUserStore } from '../../store/userStore';
 import type { BookingHistoryItem } from '../../store/types';
+import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
 import { AddFundsModal } from './modals/AddFundsModal';
 
 type Estimate = Awaited<ReturnType<typeof bookingsApi.getWeeklyEstimate>>;
@@ -18,7 +19,7 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toString().replace('.', '
  *  - баланс клиента и кнопка «Принять оплату» — то же пополнение через кассу,
  *    что в карточке клиента, без перехода в неё.
  */
-export function BookingMoneyHints({ booking }: { booking: BookingHistoryItem }) {
+export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryItem; due?: DueInfo }) {
     const users = useUserStore(s => s.users);
     const fetchUsers = useUserStore(s => s.fetchUsers);
     const client = users.find(u => u.email === booking.userId || u.id === booking.userId);
@@ -84,8 +85,25 @@ export function BookingMoneyHints({ booking }: { booking: BookingHistoryItem }) 
         }
     }
 
+    const rebateLine = est?.lastRebate && est.lastRebate.amount > 0
+        ? `в т.ч. недельная скидка +${fmt(est.lastRebate.amount)} ₾ от ${est.lastRebate.date} — уже на балансе`
+        : null;
+
     return (
         <>
+            {due && (
+                <div className="flex justify-between gap-3">
+                    <span className="text-unbox-grey shrink-0">К оплате</span>
+                    <span className={`font-semibold text-right ${due.due > 0 ? 'text-unbox-dark' : 'text-emerald-700'}`}
+                        title="Считается из баланса клиента: долг — за самые свежие списанные брони, плюс на балансе (недельная скидка, предоплата) покрывает ближайшие брони.">
+                        {due.due > 0 ? `${fmt(due.due)} ₾` : dueLabel(due)}
+                        {due.due > 0 && due.due < due.price && (
+                            <span className="block text-[11px] font-normal text-unbox-grey">из {fmt(due.price)} ₾ — часть уже на балансе</span>
+                        )}
+                        {rebateLine && <span className="block text-[11px] font-normal text-emerald-700">{rebateLine}</span>}
+                    </span>
+                </div>
+            )}
             {weeklyLine && (
                 <div className="flex justify-between gap-3">
                     <span className="text-unbox-grey shrink-0">С недельной</span>

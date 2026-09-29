@@ -69,6 +69,19 @@ export const usersApi = {
         return response.data;
     },
 
+    /** Продажа абонемента одной операцией (касса/баланс + списание + включение). */
+    sellSubscription: async (id: string, data: { planId: string; paymentMethod: 'cash' | 'card_tbc' | 'card_bog' | 'balance'; amount?: number; branch?: string; categoryId?: string }) => {
+        const response = await api.post<{
+            plan: string; price: number; method: string; carriedHours: number;
+            convertedBookings: { date: string; startTime: string; hours: number }[];
+            remainingHours: number; expiryDate: string; balance: number;
+        }>(`/users/${encodeURIComponent(id)}/subscription/sell`, {
+            plan_id: data.planId, payment_method: data.paymentMethod, amount: data.amount, branch: data.branch,
+            category_id: data.categoryId,
+        });
+        return response.data;
+    },
+
     toggleSubscriptionFreeze: async (id: string) => {
         const response = await api.post<User>(`/users/${id}/subscription/freeze`);
         return response.data;

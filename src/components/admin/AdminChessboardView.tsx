@@ -19,6 +19,7 @@ import type { Format } from '../../types';
 import { ChessboardScroller } from '../ui/ChessboardScroller';
 import { ExtendBookingModal, AddExtrasModal, MoveBookingModal, ShortenBookingModal, SplitBookingModal, splitOptions } from './BookingTodayEditModals';
 import { BookingMoneyHints } from './BookingMoneyHints';
+import { computeDueByBooking, dueLabel } from '../../utils/dueAmounts';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
@@ -203,6 +204,19 @@ export function AdminChessboardView() {
         if (userId.includes('@')) return userId.split('@')[0];
         return userId.slice(0, 10);
     };
+
+    // «К оплате» по каждой брони из баланса клиента (вариант В, 29.09): долг —
+    // на самые свежие списанные брони, плюс на балансе (недельная скидка,
+    // предоплата) — на ближайшие ещё не списанные. Только отображение.
+    const dueMap = useMemo(() => {
+        const bal = new Map<string, number>();
+        for (const u of users) {
+            const v = Number((u as any).balance ?? 0);
+            if (u.email) bal.set(u.email, v);
+            if (u.id) bal.set(String(u.id), v);
+        }
+        return computeDueByBooking(bookings, uid => (bal.has(uid) ? bal.get(uid)! : null));
+    }, [bookings, users]);
 
     // ── Bookings on selected date ─────────────────────────────────────────────
     const bookingsOnDate = useMemo(() => {
@@ -1131,7 +1145,7 @@ export function AdminChessboardView() {
                                     />
                                 )}
                                 <InfoRow label="Статус" value={statusLabel(selectedBooking)} />
-                                <BookingMoneyHints booking={selectedBooking} />
+                                <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
                                 {/* Deferred-billing payment status — only show if explicitly set
                                     (legacy rows = NULL = silent). Keeps the panel uncluttered for
                                     bookings created before the 24h-defer rollout. */}
@@ -1497,7 +1511,7 @@ export function AdminChessboardView() {
                                                                 ? 'ring-2 ring-unbox-green ring-offset-1 shadow-sm'
                                                                 : 'hover:brightness-95 hover:shadow-sm'
                                                         )}
-                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${b.finalPrice}₾ — перетащи, чтобы перенести`}
+                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${b.finalPrice}₾${dueMap.get(b.id) ? ` · ${dueLabel(dueMap.get(b.id))}` : ''} — перетащи, чтобы перенести`}
                                                     >
                                                         <div className="font-semibold truncate text-[10px] leading-tight flex items-center gap-0.5">
                                                             {/* Recurring marker — orange star for series. */}
@@ -1507,6 +1521,13 @@ export function AdminChessboardView() {
                                                         {(cell.colspan ?? 1) >= 3 && (
                                                             <div className="text-[9px] opacity-60 truncate">
                                                                 {b.startTime} · {b.finalPrice}₾
+                                                                {(() => {
+                                                                    const d = dueMap.get(b.id);
+                                                                    if (!d) return null;
+                                                                    if (d.due <= 0) return <span title={dueLabel(d)}> ✓</span>;
+                                                                    if (d.due < d.price) return <span className="font-bold opacity-100"> → {Math.round(d.due * 10) / 10}₾</span>;
+                                                                    return null;
+                                                                })()}
                                                             </div>
                                                         )}
                                                     </button>
@@ -1723,7 +1744,7 @@ export function AdminChessboardView() {
                             label="Статус"
                             value={statusLabel(selectedBooking)}
                         />
-                        <BookingMoneyHints booking={selectedBooking} />
+                        <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
                         {/* Recurring series banner — shows "Постоянная бронь · осталось N
                             сессий" plus a [Продлить] button when this booking is part
                             of a series. Future-count comes from /recurring-groups. */}

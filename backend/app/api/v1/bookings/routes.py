@@ -5114,22 +5114,30 @@ def _convert_booking_to_subscription(session: Session, booking: Booking, actor: 
         )
         refunded = refund
 
-    # 2. Списание часов с абонемента.
-    rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
-    used = subscription_pool.get_float(owner.subscription, "used_hours")
-    owner.subscription = subscription_pool.update(
-        owner.subscription,
-        remaining_hours=max(0.0, rem - hours),
-        used_hours=used + hours,
-    )
-    session.add(owner)
+    # 2. Списание часов с абонемента — ТОЛЬКО для уже списанной брони.
+    #    Бронь в ожидании (pending, дальше 24 ч) часы ещё не тратила: их снимет
+    #    крон за 24 ч до начала (billing_defer.settle_pending_charge берёт
+    #    hours_deducted). Раньше часы снимались и здесь, и в кроне — двойное
+    #    списание (Валерия Костенецкая 29.09: 6 ч).
+    is_pending = booking.payment_status == "pending"
+    if not is_pending:
+        rem = subscription_pool.get_float(owner.subscription, "remaining_hours")
+        used = subscription_pool.get_float(owner.subscription, "used_hours")
+        owner.subscription = subscription_pool.update(
+            owner.subscription,
+            remaining_hours=max(0.0, rem - hours),
+            used_hours=used + hours,
+        )
+        session.add(owner)
 
     # 3. Перекраска брони.
     booking.payment_method = "subscription"
     booking.applied_rule = "SUBSCRIPTION"
     booking.hours_deducted = hours
     booking.final_price = peak_left
-    booking.charge_amount = peak_left
+    # Для pending снимок «сколько списано» ставит крон; до него — пусто, как
+    # у обычной отложенной абонементной брони.
+    booking.charge_amount = None if is_pending else peak_left
     booking.updated_at = datetime.now()
     session.add(booking)
 

@@ -53,7 +53,7 @@ const SUB_TITLE: Record<string, string> = {
 export function AdminUserDetails() {
     const { email } = useParams<{ email: string }>();
     const navigate = useNavigate();
-    const { users, updateUserById, addTransaction, currentUser, cancelBooking } = useUserStore();
+    const { users, updateUserById, currentUser, cancelBooking } = useUserStore();
 
     /** The URL param can arrive in three forms — already-decoded, %-encoded,
      *  or with stray whitespace from a copy-paste. Normalize to lowercase
@@ -287,52 +287,28 @@ export function AdminUserDetails() {
         }
     };
 
-    const handleAssignSubscription = (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => {
+    const handleAssignSubscription = async (planIndex: number, method: 'cash' | 'tbc' | 'bog' | 'balance') => {
+        // Продажа одной операцией на сервере (29.09): касса/баланс + списание за
+        // абонемент + включение. Раньше при оплате наличными/картой в кассу и в
+        // историю баланса не попадало ничего, а «с баланса» могло молча не списать.
         const plan = SUBSCRIPTION_PLANS[planIndex];
         if (!plan) return;
-
-        // Balance Check
-        if (method === 'balance') {
-            if (user.balance < plan.price) {
-                toast.error(`Недостаточно средств. Баланс: ${user.balance} ₾`);
-                return;
-            }
-            // Deduct balance
-            updateUserById(user.email, { balance: user.balance - plan.price });
+        const methodMap = { cash: 'cash', tbc: 'card_tbc', bog: 'card_bog', balance: 'balance' } as const;
+        try {
+            const r = await usersApi.sellSubscription(user.id || user.email, {
+                planId: plan.id,
+                paymentMethod: methodMap[method],
+            });
+            await useUserStore.getState().fetchUsers();
+            toast.success(
+                `Абонемент «${r.plan}» включён: ${r.remainingHours} ч до ${safeFormat(r.expiryDate, 'd.MM.yyyy')}`
+                + (r.carriedHours ? ` (перенесено ${r.carriedHours} ч)` : '')
+                + (r.convertedBookings?.length ? `. Броней переведено на часы: ${r.convertedBookings.length}` : ''),
+                { duration: 8000 },
+            );
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось продать абонемент');
         }
-
-        const totalWithBonus = plan.hours + (plan.bonusHours || 0);
-
-        const newSubscription = {
-            id: crypto.randomUUID(),
-            planId: plan.id,
-            name: plan.name,
-            totalHours: plan.hours,
-            bonusHours: plan.bonusHours || 0,
-            remainingHours: totalWithBonus,
-            freeReschedules: plan.perks?.includes('1 бесплатный перенос') ? 1 : 0,
-            expiryDate: new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000).toISOString(),
-            isFrozen: false,
-            freezeCount: 0,
-            discountPercent: plan.discountPercent,
-            includedFormats: plan.formats as any
-        };
-
-        updateUserById(user.email, { subscription: newSubscription });
-
-        // Record Transaction
-        addTransaction({
-            userId: user.email,
-            type: 'subscription_purchase',
-            amount: plan.price,
-            paymentMethod: method,
-            adminId: currentUser?.email,
-            adminName: currentUser?.name || 'Admin',
-            description: `Абонемент ${plan.name}`,
-            relatedEntityId: newSubscription.id
-        });
-
-        toast.success(`Абонемент "${plan.name}" назначен`);
     };
 
     const handleCancelBooking = (id: string) => {

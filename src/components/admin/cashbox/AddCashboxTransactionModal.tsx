@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { SUBSCRIPTION_PLANS } from '../../../utils/data';
 import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
@@ -65,13 +66,6 @@ const ACCOUNTS = [
     { id: 'card_bog', label: 'Карта BOG' },
 ] as const;
 
-const SUBSCRIPTION_PLANS = [
-    { id: 'trial', name: 'Пробный', price: 70 },
-    { id: 'warm-start', name: 'Тёплый старт', price: 180 },
-    { id: 'regular', name: 'Регулярный практик', price: 350 },
-    { id: 'pro', name: 'Профи+', price: 650 },
-    { id: 'group', name: 'Групповой мастер', price: 450 },
-];
 
 export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const { createTransaction, categories } = useCashboxStore();
@@ -132,6 +126,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (saving) return; // двойной Enter не должен записать приход дважды
         const value = parseFloat(amount);
         if (isNaN(value) || value <= 0) {
             toast.error('Введите корректную сумму');
@@ -153,6 +148,47 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                 `Если это оплата клиента — закрой окно и выбери клиента, тогда сумма пойдёт на его баланс.\n\n` +
                 `Всё равно записать без клиента?`
             )) return;
+        }
+
+        // Продажа абонемента: касса сразу включает абонемент клиенту (29.09).
+        // Раньше категория «Абонементы» только клала деньги на баланс, а сам
+        // абонемент не включался — брони продолжали списываться деньгами.
+        const selectedCatObj = flatCats.find(c => c.id === categoryId);
+        const isSubscriptionSale = type === 'income' && !!selectedCatObj
+            && selectedCatObj.name.toLowerCase().includes('абонемент');
+        if (isSubscriptionSale) {
+            if (!selectedPlan) { toast.error('Выберите тариф абонемента'); return; }
+            if (!clientId) { toast.error('Выберите клиента — без клиента абонемент не включится'); return; }
+            const plan = SUBSCRIPTION_PLANS.find(pl => pl.id === selectedPlan);
+            if (plan && value !== plan.price && !window.confirm(
+                `Сумма ${value} ₾ отличается от цены тарифа «${plan.name}» (${plan.price} ₾). Продать за ${value} ₾?`
+            )) return;
+            setSaving(true);
+            try {
+                const { usersApi } = await import('../../../api/users');
+                const r = await usersApi.sellSubscription(clientId, {
+                    categoryId: categoryId || undefined,
+                    planId: selectedPlan,
+                    paymentMethod: paymentMethod as 'cash' | 'card_tbc' | 'card_bog',
+                    amount: value,
+                    branch: branch || undefined,
+                });
+                const who = bookingUsers.find(c => c.id === clientId)?.name || 'клиенту';
+                toast.success(
+                    `Абонемент «${r.plan}» включён: ${who}, ${r.remainingHours} ч`
+                    + (r.carriedHours ? ` (из них ${r.carriedHours} ч перенесено)` : '')
+                    + (r.convertedBookings?.length ? `. Броней переведено на часы: ${r.convertedBookings.length}` : ''),
+                    { duration: 8000 },
+                );
+                try { await useCashboxStore.getState().fetchBalance(); } catch { /* обновится при следующем открытии */ }
+                resetForm();
+                onClose();
+            } catch (err: any) {
+                toast.error(err?.response?.data?.detail || 'Не удалось продать абонемент');
+            } finally {
+                setSaving(false);
+            }
+            return;
         }
 
         setSaving(true);
