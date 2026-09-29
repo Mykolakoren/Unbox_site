@@ -1045,17 +1045,31 @@ def test_register_ignores_role_permissions_and_money():
 
 
 if __name__ == "__main__":
+    import glob
+    import runpy
+
+    # Проверки по волнам лежат в отдельных guard_*.py рядом — гоняем их здесь
+    # же, чтобы перед деплоем хватало одной команды.
+    suites = [("", globals())]
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in sorted(glob.glob(os.path.join(here, "guard_*.py"))):
+        suites.append((os.path.basename(path)[:-3] + ": ", runpy.run_path(path, run_name="guard")))
+
     failures = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"  ✓ {name}")
-            except AssertionError as exc:
-                failures += 1
-                print(f"  ✗ {name}: {exc}")
-            except Exception as exc:  # noqa: BLE001
-                failures += 1
-                print(f"  ✗ {name}: {exc!r}")
+    total = 0
+    for prefix, scope in suites:
+        for name, fn in sorted(scope.items()):
+            if name.startswith("test_") and callable(fn):
+                total += 1
+                try:
+                    fn()
+                    print(f"  ✓ {prefix}{name}")
+                except AssertionError as exc:
+                    failures += 1
+                    print(f"  ✗ {prefix}{name}: {exc}")
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    print(f"  ✗ {prefix}{name}: {exc!r}")
+    print(f"проверок: {total}")
     print("СТОРОЖ: OK" if not failures else f"СТОРОЖ УПАЛ ({failures}) — деплой НЕ выкатывать")
     sys.exit(1 if failures else 0)
