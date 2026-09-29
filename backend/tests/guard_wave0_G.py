@@ -145,6 +145,27 @@ def test_series_cancel_default_and_client_stay_full_refund():
 # G7-admin-core-M1 — фронт: без системного confirm, якорь + процент уходят.
 # ─────────────────────────────────────────────────────────────────────────
 
+def _assert_chessboard_modals_in_both_branches(cb: str):
+    """У шахматки два return: мобильный (<768px) и десктопный. Кнопки
+    «Удалить»/«Цена» есть в обоих — значит и окна должны быть смонтированы в
+    обоих, иначе на телефоне кнопка молча ничего не делает (ревью 29.09)."""
+    m = cb.find("// ── MOBILE VIEW ──")
+    d = cb.find("// ── DESKTOP VIEW ──")
+    assert m != -1 and d != -1 and m < d, "не нашёл мобильную/десктопную ветки шахматки"
+    for branch_name, branch in (("мобильной", cb[m:d]), ("десктопной", cb[d:])):
+        has_shared = "{cancelAndPriceModals}" in branch
+        if "handleCancel(" in branch:
+            assert has_shared or "<AdminCancelBookingModal" in branch, \
+                f"в {branch_name} шахматке «Удалить» есть, а окна отмены нет — кнопка мёртвая"
+        if "handleEditPrice(" in branch:
+            assert has_shared or "<BookingPriceModal" in branch, \
+                f"в {branch_name} шахматке «Цена» есть, а окна цены нет — кнопка мёртвая"
+    if "{cancelAndPriceModals}" in cb:
+        shared = _fn_body(cb, "const cancelAndPriceModals = (", "// ── MOBILE VIEW ──")
+        assert "<AdminCancelBookingModal" in shared and "<BookingPriceModal" in shared, \
+            "общий блок окон шахматки потерял окно отмены или цены"
+
+
 def test_admin_cancel_dialogs_pass_scope_anchor_and_refund():
     api = _read("src/api/bookings.ts")
     body = _fn_body(api, "cancelRecurringSeries: async (", "extendRecurringSeries")
@@ -165,6 +186,8 @@ def test_admin_cancel_dialogs_pass_scope_anchor_and_refund():
         "шахматка снова отменяет бронь системным confirm без выбора возврата"
     assert "<CancelBookingChoiceModal" not in cb
     assert "target.recurringGroupId, target.id," in cb and "{ refundPercent, reason" in cb
+
+    _assert_chessboard_modals_in_both_branches(cb)
 
     modal = _read("src/components/admin/AdminCancelBookingModal.tsx")
     assert "useState<CancelScope>('single')" in modal, \

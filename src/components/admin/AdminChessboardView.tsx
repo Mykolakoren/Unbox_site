@@ -872,6 +872,31 @@ export function AdminChessboardView() {
 
     // ─── Render ───────────────────────────────────────────────────────────────
 
+    // Окна отмены и цены — одни на обе ветки: кнопки «Удалить» и «Цена» есть
+    // в карточке брони и на телефоне, и на десктопе. Если смонтировать их
+    // только в десктопной ветке, на экране <768px кнопки молча ничего не делают.
+    const cancelAndPriceModals = (
+        <>
+            <AdminCancelBookingModal
+                isOpen={!!cancelTarget}
+                onClose={() => setCancelTarget(null)}
+                onConfirm={handleCancelConfirm}
+                bookingLabel={cancelTarget
+                    ? `${getUserName(cancelTarget.userId)} · ${cancelTarget.startTime} · ${cancelTarget.finalPrice}₾`
+                    : ''}
+                series={cancelSeries}
+            />
+            <BookingPriceModal
+                booking={priceBooking}
+                onClose={() => setPriceBooking(null)}
+                onSaved={async () => {
+                    setSelectedBooking(null);
+                    await fetchAllBookings();
+                }}
+            />
+        </>
+    );
+
     // ── MOBILE VIEW ──
     if (isMobile) {
         const mobileBlock = mobileRes ? getNewBlockForResource(mobileRes.id) : null;
@@ -1356,6 +1381,7 @@ export function AdminChessboardView() {
                     onClose={() => setShortenModalBooking(null)}
                     onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
                 />
+                {cancelAndPriceModals}
             </div>
         );
     }
@@ -1921,23 +1947,7 @@ export function AdminChessboardView() {
                 onClose={() => setShortenModalBooking(null)}
                 onSubmit={(m, sd) => shortenModalBooking ? doShorten(shortenModalBooking, m, sd) : undefined}
             />
-            <AdminCancelBookingModal
-                isOpen={!!cancelTarget}
-                onClose={() => setCancelTarget(null)}
-                onConfirm={handleCancelConfirm}
-                bookingLabel={cancelTarget
-                    ? `${getUserName(cancelTarget.userId)} · ${cancelTarget.startTime} · ${cancelTarget.finalPrice}₾`
-                    : ''}
-                series={cancelSeries}
-            />
-            <BookingPriceModal
-                booking={priceBooking}
-                onClose={() => setPriceBooking(null)}
-                onSaved={async () => {
-                    setSelectedBooking(null);
-                    await fetchAllBookings();
-                }}
-            />
+            {cancelAndPriceModals}
 
             {seriesMoveTarget && (
                 <RescheduleScopeChoiceModal
