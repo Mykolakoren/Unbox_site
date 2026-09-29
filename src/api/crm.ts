@@ -430,9 +430,10 @@ export const crmApi = {
     },
 
     // Notes
-    getNotes: async (clientId?: string, specialistId?: string): Promise<CrmNote[]> => {
+    /** `sessionId` — только заметки к этой сессии (шторка сессии на телефоне). */
+    getNotes: async (clientId?: string, specialistId?: string, sessionId?: string): Promise<CrmNote[]> => {
         const response = await api.get('/crm/notes', {
-            params: { client_id: clientId, specialist_id: specialistId },
+            params: { client_id: clientId, specialist_id: specialistId, session_id: sessionId },
         });
         return response.data;
     },

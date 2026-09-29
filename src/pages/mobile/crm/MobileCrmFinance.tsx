@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { crmApi, type CrmDashboard } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
+import { useCrmDataVersion } from './crmDataVersion';
 
 /**
  * Mobile CRM Финансы — money snapshot for the active specialist.
@@ -20,8 +21,15 @@ export function MobileCrmFinance() {
     const navigate = useNavigate();
     const { clients, fetchClients } = useCrmStore();
     const [monthOffset, setMonthOffset] = useState(0);
-    const [dashboard, setDashboard] = useState<CrmDashboard | null>(null);
+    // Данные храним вместе с месяцем, за который они пришли: при смене
+    // месяца цифры прошлого не показываются под новым заголовком.
+    const [loaded, setLoaded] = useState<{ month: string; data: CrmDashboard } | null>(null);
     const [loading, setLoading] = useState(true);
+    // Сбой загрузки — отдельное состояние. Раньше при ошибке экран рисовал
+    // «0 ₾» и «Нет задолженностей», и казалось, что все расплатились.
+    const [failed, setFailed] = useState(false);
+    const [retryTick, setRetryTick] = useState(0);
+    const dataVersion = useCrmDataVersion();
 
     const monthDate = useMemo(() => {
         const d = new Date();
@@ -38,12 +46,16 @@ export function MobileCrmFinance() {
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
+        setFailed(false);
         crmApi.getDashboard(undefined, monthParam)
-            .then(d => { if (!cancelled) setDashboard(d); })
-            .catch(() => { if (!cancelled) setDashboard(null); })
+            .then(d => { if (!cancelled) setLoaded({ month: monthParam, data: d }); })
+            .catch(() => { if (!cancelled) setFailed(true); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [monthParam]);
+    }, [monthParam, retryTick, dataVersion]);
+
+    const dashboard = !failed && loaded?.month === monthParam ? loaded.data : null;
+    const pending = loading && !dashboard;
 
     const debts = useMemo(() => {
         if (!dashboard?.debtByClient) return [];
@@ -89,16 +101,48 @@ export function MobileCrmFinance() {
                     icon={<TrendingUp size={12} />}
                     label="Доход за месяц"
                     value={dashboard?.revenueThisMonth}
-                    loading={loading}
+                    loading={pending}
                 />
                 <TotalCell
                     icon={<AlertCircle size={12} />}
                     label="Долг (всего)"
                     value={dashboard?.totalActiveDebt}
-                    loading={loading}
+                    loading={pending}
                     warning
                 />
             </div>
+
+            {failed && !loading && (
+                <div style={{
+                    background: '#FEF3C7',
+                    border: '1px solid #FCD34D',
+                    color: '#8A5A00',
+                    borderRadius: 12,
+                    padding: '12px 14px',
+                    marginBottom: 14,
+                    fontSize: 13,
+                    lineHeight: 1.4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                }}>
+                    <span style={{ flex: 1 }}>
+                        Не удалось загрузить финансы.
+                    </span>
+                    <button
+                        onClick={() => setRetryTick(t => t + 1)}
+                        style={{
+                            background: '#0E0E0E', color: '#fff',
+                            border: 'none', borderRadius: 8,
+                            padding: '8px 12px',
+                            fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                            cursor: 'pointer', flexShrink: 0,
+                        }}
+                    >
+                        Повторить
+                    </button>
+                </div>
+            )}
 
             {/* Secondary metrics */}
             {dashboard && (
@@ -116,11 +160,16 @@ export function MobileCrmFinance() {
 
             {/* Debt by client */}
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>
-                Должники · {debts.length}
+                Должники{dashboard ? ` · ${debts.length}` : ''}
             </div>
-            {loading ? (
+            {pending ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
                     <Loader2 size={18} className="animate-spin" style={{ color: '#888' }} />
+                </div>
+            ) : !dashboard ? (
+                // Сбой: не пишем «Нет задолженностей» — мы этого не знаем.
+                <div style={{ textAlign: 'center', padding: 24, color: '#888', fontSize: 13 }}>
+                    —
                 </div>
             ) : debts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 24, color: '#888', fontSize: 13 }}>
@@ -215,7 +264,7 @@ function TotalCell({
                 letterSpacing: '-0.02em',
                 lineHeight: 1.1,
             }}>
-                {loading ? '…' : (value || 0).toFixed(0)}
+                {loading ? '…' : value === undefined || value === null ? '—' : value.toFixed(0)}
                 <span style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>₾</span>
             </div>
         </div>

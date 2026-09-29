@@ -776,6 +776,20 @@ export function CrmBookings() {
         const sessionDate = `${bookingDate || new Date().toISOString().split('T')[0]}T${offsetTime}:00`;
         const dur = slotDuration || modalBooking.duration || 60;
 
+        // 29.09: «Заметка к сессии» — обычная заметка (TherapistNote),
+        // как в карточке клиента. Раньше текст уходил в поле session.notes,
+        // которое не показывается ни во вкладке «Заметки», ни в истории клиента.
+        const noteText = notes.trim();
+        const addSessionNote = async (sessionId: string) => {
+            if (!noteText) return;
+            // Сессия уже сохранена — сбой заметки не должен выглядеть как
+            // сбой привязки (иначе повтор создаст вторую сессию). Тост
+            // «Не удалось создать заметку» покажет сам стор.
+            try {
+                await useCrmStore.getState().createNote({ clientId, sessionId, content: noteText });
+            } catch { /* тост уже показан */ }
+        };
+
         if (modalExistingSessionId) {
             // 02.09: раньше выбранный клиент здесь ИГНОРИРОВАЛСЯ — окно
             // называлось «Изменить клиента сессии», а клиента не меняло.
@@ -784,21 +798,21 @@ export function CrmBookings() {
                 date: sessionDate,
                 durationMinutes: dur,
                 price: price || undefined,
-                notes: notes || undefined,
             });
+            await addSessionNote(modalExistingSessionId);
             toast.success('Сессия обновлена');
         } else {
-            await useCrmStore.getState().createSession({
+            const created = await useCrmStore.getState().createSession({
                 clientId,
                 date: sessionDate,
                 durationMinutes: dur,
                 price: price || undefined,
-                notes: notes || undefined,
                 bookingId: modalBooking.id,
                 isBooked: true,
             });
             // Accumulate offset for next slot in split mode
             slotOffsetRef.current += dur;
+            await addSessionNote(created.id);
         }
 
         // Refresh sessions

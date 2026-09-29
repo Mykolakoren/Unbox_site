@@ -7,6 +7,7 @@ import { crmApi, type CrmSession } from '../../../api/crm';
 import { useCrmStore } from '../../../store/crmStore';
 import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
 import { SessionActionSheet } from './SessionActionSheet';
+import { useCrmDataVersion } from './crmDataVersion';
 
 type Window = '7d' | '30d' | 'past7d' | 'past30d' | 'all';
 
@@ -36,6 +37,8 @@ export function MobileCrmSessions() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [q, setQ] = useState('');
     const { clients, fetchClients } = useCrmStore();
+    // Прошедшие сессии закрылись автоматически → статусы поменялись.
+    const dataVersion = useCrmDataVersion();
 
     useEffect(() => {
         if (clients.length === 0) fetchClients(true).catch(() => {});
@@ -67,7 +70,7 @@ export function MobileCrmSessions() {
         }
     };
 
-    useEffect(() => { reload(); }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { reload(); }, [period, dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const filtered = useMemo(() => {
         const needle = q.trim().toLowerCase();

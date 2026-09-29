@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Phone, MessageCircle, Mail, Plus } from 'lucide-react';
-import { format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { crmApi, type CrmClient, type CrmSession, type CrmPayment, type CrmNote } from '../../../api/crm';
 import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
 import { CheckCircle2, Clock, XCircle, Wallet, FileText, Calendar as CalIcon } from 'lucide-react';
+import { useCrmDataVersion } from './crmDataVersion';
 
 /**
  * Mobile CRM — single client card.
@@ -29,11 +29,17 @@ export function MobileCrmClient() {
     // shape, not the declared one.
     const [balance, setBalance] = useState<{ totalPaid: number; totalExpected: number; debt: number; prepayment: number } | null>(null);
     const [loading, setLoading] = useState(true);
+    // Растёт, когда прошедшие сессии автоматически закрылись — долг мог
+    // измениться, перечитываем карточку (см. MobileCrmLayout).
+    const dataVersion = useCrmDataVersion();
+    const loadedFor = useRef<string | null>(null);
 
     useEffect(() => {
         if (!clientId) return;
         let cancelled = false;
-        setLoading(true);
+        // Полноэкранное «Загружаю…» — только при смене клиента; тихое
+        // обновление той же карточки не прячет её.
+        if (loadedFor.current !== clientId) setLoading(true);
         Promise.all([
             crmApi.getClient(clientId),
             crmApi.getSessions({ clientId }),
@@ -43,6 +49,7 @@ export function MobileCrmClient() {
         ])
             .then(([c, ss, bal, pp, nn]) => {
                 if (cancelled) return;
+                loadedFor.current = clientId;
                 setClient(c);
                 setSessions(ss);
                 setBalance(bal as any);
@@ -55,7 +62,7 @@ export function MobileCrmClient() {
             })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [clientId]);
+    }, [clientId, dataVersion]);
 
     const recentSessions = useMemo(() => {
         // parseUTC for sort — same UTC-naive convention as everywhere in CRM.
@@ -84,8 +91,9 @@ export function MobileCrmClient() {
             if (Number.isFinite(ts)) out.push({ kind: 'payment', ts, payment: p });
         }
         for (const n of notes) {
-            const t = (n as any).createdAt || (n as any).created_at;
-            const ts = t ? new Date(t).getTime() : 0;
+            // createdAt с сервера — UTC без зоны, как даты сессий: parseUTC,
+            // иначе заметки съезжают в ленте на смещение часового пояса.
+            const ts = n.createdAt ? parseUTC(n.createdAt).getTime() : 0;
             if (Number.isFinite(ts) && ts > 0) out.push({ kind: 'note', ts, note: n });
         }
         return out.sort((a, b) => b.ts - a.ts).slice(0, 30);
@@ -307,11 +315,15 @@ function TimelineRow({ item }: { item: TimelineItemUnion }) {
         const s = item.session;
         const isCancelled = s.status?.startsWith('CANCELLED');
         const isPlanned = s.status === 'PLANNED';
+        // Прошла, но не отмечена — как на экране дня: жёлтым, а не «Запланирована».
+        const isUnmarked = isPlanned && item.ts + (s.durationMinutes ?? 60) * 60000 < Date.now();
         const color = isCancelled
             ? { bg: 'rgba(179,38,30,0.10)', fg: '#B3261E' }
-            : isPlanned
-                ? { bg: 'rgba(76,138,255,0.10)', fg: '#3F6BD8' }
-                : { bg: 'rgba(76,138,107,0.10)', fg: '#1B7430' };
+            : isUnmarked
+                ? { bg: '#FEF3C7', fg: '#8A5A00' }
+                : isPlanned
+                    ? { bg: 'rgba(76,138,255,0.10)', fg: '#3F6BD8' }
+                    : { bg: 'rgba(76,138,107,0.10)', fg: '#1B7430' };
         const Icon = isCancelled ? XCircle : isPlanned ? Clock : CheckCircle2;
         return (
             <div style={{
@@ -329,7 +341,7 @@ function TimelineRow({ item }: { item: TimelineItemUnion }) {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#0E0E0E' }}>
-                        Сессия · {statusLabel(s.status)}
+                        Сессия · {isUnmarked ? 'Не отмечена' : statusLabel(s.status)}
                     </div>
                     <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
                         {formatBatumi(s.date, 'd MMM, EEE HH:mm', ru)}
@@ -367,15 +379,31 @@ function TimelineRow({ item }: { item: TimelineItemUnion }) {
             </div>
         );
     }
-    // note
-    const n = item.note;
-    const created = (n as any).createdAt || (n as any).created_at;
+    return <NoteRow note={item.note} />;
+}
+
+const NOTE_PREVIEW_CHARS = 140;
+
+/** Заметка в ленте клиента. Текст — поле `content` (как во вкладке
+ *  «Заметки»); раньше читалось несуществующее `text`, и плашки были пустыми.
+ *  Длинная заметка обрезается, тап раскрывает её целиком. */
+function NoteRow({ note: n }: { note: CrmNote }) {
+    const [expanded, setExpanded] = useState(false);
+    const content = n.content || '';
+    const isLong = content.length > NOTE_PREVIEW_CHARS;
     return (
-        <div style={{
-            background: '#FFFBEB', border: '1px solid #FCD34D',
-            borderRadius: 10, padding: '9px 12px',
-            display: 'flex', alignItems: 'flex-start', gap: 10,
-        }}>
+        <button
+            type="button"
+            onClick={() => { if (isLong) setExpanded(v => !v); }}
+            aria-expanded={isLong ? expanded : undefined}
+            style={{
+                background: '#FFFBEB', border: '1px solid #FCD34D',
+                borderRadius: 10, padding: '9px 12px',
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                width: '100%', textAlign: 'left', fontFamily: 'inherit',
+                cursor: isLong ? 'pointer' : 'default',
+            }}
+        >
             <div style={{
                 width: 30, height: 30, borderRadius: 8,
                 background: 'rgba(217,119,6,0.15)', color: '#92400E',
@@ -385,16 +413,20 @@ function TimelineRow({ item }: { item: TimelineItemUnion }) {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#92400E' }}>Заметка</div>
-                <div style={{ fontSize: 12, color: '#444', marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
-                    {((n as any).text || '').slice(0, 140)}
-                    {((n as any).text || '').length > 140 ? '…' : ''}
+                <div style={{ fontSize: 12, color: '#444', marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {expanded || !isLong ? content : `${content.slice(0, NOTE_PREVIEW_CHARS)}…`}
                 </div>
-                {created && (
+                {isLong && (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', marginTop: 4 }}>
+                        {expanded ? 'Свернуть' : 'Показать полностью'}
+                    </div>
+                )}
+                {n.createdAt && (
                     <div style={{ fontSize: 10, color: '#8A5A00', marginTop: 3 }}>
-                        {fmtDate(new Date(created), 'd MMM HH:mm', { locale: ru })}
+                        {formatBatumi(n.createdAt, 'd MMM HH:mm', ru)}
                     </div>
                 )}
             </div>
-        </div>
+        </button>
     );
 }

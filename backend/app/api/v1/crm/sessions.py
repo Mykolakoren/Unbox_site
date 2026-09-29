@@ -2,7 +2,7 @@
 import logging
 from typing import List, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Body
 from sqlmodel import Session, select
 from app.api import deps
 
@@ -595,6 +595,7 @@ def accept_merge_suggestion(
 @router.post("/sessions/{session_id}/detach-cabinet")
 def detach_session_cabinet(
     session_id: str,
+    background_tasks: BackgroundTasks,
     cancel_booking: bool = Query(False, description="Also cancel the linked cabinet booking (refunds owner)"),
     session: Session = Depends(deps.get_session),
     current_user: User = Depends(deps.require_specialist),
@@ -625,8 +626,12 @@ def detach_session_cabinet(
         # the circular import (bookings/routes.py imports CRM stuff too).
         from app.api.v1.bookings.routes import cancel_booking as _cancel_booking_fn
         try:
+            # background_tasks обязателен у cancel_booking (с 13.07 через него
+            # удаляется событие GCal). Без него вызов падал TypeError → 500:
+            # «Отменить бронь кабинета» из CRM не срабатывала никогда.
             _cancel_booking_fn(
                 booking_id=detached_booking_id,
+                background_tasks=background_tasks,
                 session=session,
                 current_user=current_user,
             )

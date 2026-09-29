@@ -1,15 +1,19 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useScrollLock } from '../useScrollLock';
 import { toast } from 'sonner';
+import { ru } from 'date-fns/locale';
 import {
     Check, X, MapPin, Calendar, Trash2,
     Unlink, ChevronRight, AlertTriangle,
 } from 'lucide-react';
-import { crmApi, type CrmSession, type CrmClient } from '../../../api/crm';
-import { formatBatumi } from '../../../utils/dateUtils';
-import { RESOURCES } from '../../../utils/data';
+import { crmApi, type CrmSession, type CrmClient, type CrmNote } from '../../../api/crm';
+import { formatBatumi, parseUTC } from '../../../utils/dateUtils';
+import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import { CURRENCIES } from '../../../utils/currency';
+import { useUserStore } from '../../../store/userStore';
+import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
+import type { BookingHistoryItem } from '../../../store/types';
 
 /** Resolve the active currency for a session: session.currency overrides
  * client.currency (frozen at payment time), default to GEL. */
@@ -40,16 +44,48 @@ interface Props {
     onDeleted: (id: string) => void;
 }
 
-type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'delete';
+type Mode = 'main' | 'reschedule' | 'price' | 'notes' | 'delete' | 'cabinet';
+
+/** Служебная пометка, которую бэкенд ставит сессиям из заявок с сайта
+ *  (specialist_schedule.py). Это не заметка специалиста — не предлагаем
+ *  её «переносить» в Заметки. */
+const SITE_REQUEST_MARK = 'Заявка через публичный сайт';
 
 export function SessionActionSheet({ session, client, onClose, onChange, onDeleted }: Props) {
     const [mode, setMode] = useState<Mode>('main');
     const [busy, setBusy] = useState(false);
     const startY = useRef<number | null>(null);
     const sheetRef = useRef<HTMLDivElement | null>(null);
+    const { confirm } = useConfirmDialog();
 
     // Lock scroll while sheet open — ref-counted, не залипает.
     useScrollLock();
+
+    // Заметки к сессии — это те же записи (TherapistNote), что во вкладке
+    // «Заметки», в истории клиента и в десктопной карточке. Раньше шторка
+    // писала в отдельное поле session.notes, и написанное здесь больше
+    // нигде не было видно. null = ещё грузим.
+    const [sessionNotes, setSessionNotes] = useState<CrmNote[] | null>(null);
+    const [notesFailed, setNotesFailed] = useState(false);
+    const loadNotes = useCallback(() => {
+        let cancelled = false;
+        setSessionNotes(null);
+        setNotesFailed(false);
+        crmApi.getNotes(session.clientId, undefined, session.id)
+            // Фильтруем и тут: если сервер не знает session_id, он вернёт
+            // все заметки клиента.
+            .then(list => { if (!cancelled) setSessionNotes(list.filter(n => n.sessionId === session.id)); })
+            .catch(() => { if (!cancelled) { setSessionNotes([]); setNotesFailed(true); } });
+        return () => { cancelled = true; };
+    }, [session.id, session.clientId]);
+    useEffect(() => loadNotes(), [loadNotes]);
+
+    // Старый текст из session.notes (писался шторкой до 29.09). Показываем,
+    // пока его копии нет среди заметок сессии.
+    const legacyText = (session.notes || '').trim();
+    const legacyNote = legacyText && sessionNotes
+        && !sessionNotes.some(n => (n.content || '').trim() === legacyText)
+        ? legacyText : null;
 
     const time = formatBatumi(session.date, 'HH:mm');
     const dateLabel = formatBatumi(session.date, 'd MMMM, EEE');
@@ -114,7 +150,8 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         try {
             await crmApi.detachCabinet(session.id, cancelBooking);
             onChange({ ...session, bookingId: undefined, isBooked: false });
-            toast.success(cancelBooking ? 'Кабинет отменён' : 'Сессия откреплена от кабинета');
+            toast.success(cancelBooking ? 'Бронь кабинета отменена' : 'Сессия откреплена от кабинета');
+            setMode('main');
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
             toast.error(typeof msg === 'string' ? msg : 'Не удалось');
@@ -130,6 +167,41 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
             toast.error(typeof msg === 'string' ? msg : 'Не удалось удалить');
+        } finally { setBusy(false); }
+    };
+
+    const handleAddNote = async (content: string): Promise<boolean> => {
+        const text = content.trim();
+        if (!text) return false;
+        setBusy(true);
+        try {
+            const note = await crmApi.createNote({ clientId: session.clientId, sessionId: session.id, content: text });
+            setSessionNotes(prev => [note, ...(prev ?? [])]);
+            toast.success('Заметка сохранена');
+            return true;
+        } catch (e: unknown) {
+            const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось сохранить заметку');
+            return false;
+        } finally { setBusy(false); }
+    };
+
+    const handleDeleteNote = async (note: CrmNote) => {
+        const ok = await confirm({
+            title: 'Удалить заметку?',
+            message: 'Восстановить её будет нельзя.',
+            confirmLabel: 'Удалить',
+            destructive: true,
+        });
+        if (!ok) return;
+        setBusy(true);
+        try {
+            await crmApi.deleteNote(note.id);
+            setSessionNotes(prev => (prev ?? []).filter(n => n.id !== note.id));
+            toast.success('Заметка удалена');
+        } catch (e: unknown) {
+            const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            toast.error(typeof msg === 'string' ? msg : 'Не удалось удалить заметку');
         } finally { setBusy(false); }
     };
 
@@ -178,14 +250,15 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                         session={session}
                         client={client}
                         busy={busy}
+                        notes={sessionNotes}
+                        legacyNote={legacyNote}
                         onStatus={handleStatus}
                         onPaid={handlePaid}
                         onPrice={() => setMode('price')}
                         onNotes={() => setMode('notes')}
                         onReschedule={() => setMode('reschedule')}
                         onDelete={() => setMode('delete')}
-                        onDetach={() => handleDetach(false)}
-                        onCancelBooking={() => handleDetach(true)}
+                        onCabinet={() => setMode('cabinet')}
                     />
                 )}
                 {mode === 'reschedule' && (
@@ -211,11 +284,25 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                 )}
                 {mode === 'notes' && (
                     <NotesForm
+                        busy={busy}
+                        notes={sessionNotes}
+                        failed={notesFailed}
+                        legacyNote={legacyNote}
+                        onRetry={loadNotes}
+                        onAdd={async (text) => {
+                            if (await handleAddNote(text)) setMode('main');
+                        }}
+                        onMoveLegacy={(text) => { handleAddNote(text); }}
+                        onDeleteNote={handleDeleteNote}
+                        onBack={() => setMode('main')}
+                    />
+                )}
+                {mode === 'cabinet' && (
+                    <CabinetForm
                         session={session}
                         busy={busy}
-                        onSubmit={async (notes) => {
-                            try { await update({ notes }, 'Заметка сохранена'); setMode('main'); } catch { /* */ }
-                        }}
+                        onDetach={() => handleDetach(false)}
+                        onCancelBooking={() => handleDetach(true)}
                         onBack={() => setMode('main')}
                     />
                 )}
@@ -233,25 +320,25 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
 }
 
 function Main({
-    session, client, busy, onStatus, onPaid, onPrice, onNotes, onReschedule,
-    onDelete, onDetach, onCancelBooking,
+    session, client, busy, notes, legacyNote, onStatus, onPaid, onPrice, onNotes, onReschedule,
+    onDelete, onCabinet,
 }: {
     session: CrmSession;
     client?: CrmClient;
     busy: boolean;
+    notes: CrmNote[] | null;
+    legacyNote: string | null;
     onStatus: (s: CrmSession['status']) => void;
     onPaid: (v: boolean) => void;
     onPrice: () => void;
     onNotes: () => void;
     onReschedule: () => void;
     onDelete: () => void;
-    onDetach: () => void;
-    onCancelBooking: () => void;
+    onCabinet: () => void;
 }) {
     const navigate = useNavigate();
-    const cabinet = session.bookingId
-        ? RESOURCES.find(r => r.id === (session as unknown as { resourceId?: string }).resourceId)?.name
-        : null;
+    const cabinet = useLinkedBooking(session, false).label;
+    const latestNote = notes?.[0]?.content || legacyNote;
     const currency = sessionCurrency(session, client);
     const symbol = currencySymbol(currency);
     const currencyIcon = (
@@ -279,7 +366,8 @@ function Main({
                     />
                 )}
                 {/* "Отмена" = удаление: 2026-05-14 spec — больше нет CANCELLED
-                    статуса, отмена просто удаляет запись (и связанную бронь). */}
+                    статуса, отмена просто удаляет запись. Бронь кабинета при
+                    этом НЕ отменяется (delete_session её не трогает). */}
                 <ActionTile
                     icon={<X size={18} />}
                     label="Отменить"
@@ -317,14 +405,13 @@ function Main({
             <Row
                 icon={<MapPin size={16} />}
                 label={session.isBooked ? `Кабинет: ${cabinet ?? 'привязан'}` : 'Привязать кабинет'}
-                sub={session.isBooked ? 'Бронь активна' : 'Забронировать кабинет под эту сессию'}
+                sub={session.isBooked ? 'Бронь активна · открепить или отменить' : 'Забронировать кабинет под эту сессию'}
                 onClick={() => {
                     if (session.isBooked) {
-                        // Already attached — give option to detach OR cancel booking
-                        const cancelToo = confirm(
-                            'Кабинет привязан.\n\nОК = только открепить (бронь останется).\nОтмена = ничего.\n\nЧтобы отменить ещё и бронь, нажмите далее «Отменить бронь».',
-                        );
-                        if (cancelToo) onDetach();
+                        // Отдельный шаг с последствиями: раньше «Отменить бронь»
+                        // срабатывала с одного тапа, а «открепить» спрашивало
+                        // непонятным системным confirm().
+                        onCabinet();
                     } else {
                         const date = formatBatumi(session.date, 'yyyy-MM-dd');
                         const time = formatBatumi(session.date, 'HH:mm');
@@ -333,19 +420,10 @@ function Main({
                     }
                 }}
             />
-            {session.isBooked && (
-                <Row
-                    icon={<Unlink size={16} />}
-                    label="Отменить бронь кабинета"
-                    sub="Освободит слот в шахматке"
-                    onClick={onCancelBooking}
-                    tone="danger-soft"
-                />
-            )}
             <Row
                 icon={<ChevronRight size={16} />}
-                label="Заметка"
-                sub={session.notes ? truncate(session.notes, 60) : 'добавить заметку'}
+                label={notes && notes.length > 1 ? `Заметки · ${notes.length}` : 'Заметка'}
+                sub={notes === null && !legacyNote ? '…' : latestNote ? truncate(latestNote, 60) : 'добавить заметку'}
                 onClick={onNotes}
             />
         </div>
@@ -419,21 +497,173 @@ function PriceForm({ session, client, busy, onSubmit, onBack }: {
     );
 }
 
-function NotesForm({ session, busy, onSubmit, onBack }: {
-    session: CrmSession; busy: boolean;
-    onSubmit: (notes: string) => void; onBack: () => void;
+/** Заметки к сессии: список (новые сверху) + поле для новой. Пишутся
+ *  в общие Заметки, поэтому видны во вкладке «Заметки», в истории клиента
+ *  и на компьютере. Правки на сервере нет — только добавить или удалить. */
+function NotesForm({ busy, notes, failed, legacyNote, onRetry, onAdd, onMoveLegacy, onDeleteNote, onBack }: {
+    busy: boolean;
+    notes: CrmNote[] | null;
+    failed: boolean;
+    legacyNote: string | null;
+    onRetry: () => void;
+    onAdd: (text: string) => void;
+    onMoveLegacy: (text: string) => void;
+    onDeleteNote: (note: CrmNote) => void;
+    onBack: () => void;
 }) {
-    const [text, setText] = useState(session.notes ?? '');
+    const [text, setText] = useState('');
+    const isSiteMark = !!legacyNote && legacyNote.startsWith(SITE_REQUEST_MARK);
     return (
-        <FormShell title="Заметка к сессии" onBack={onBack}>
+        <FormShell title="Заметки к сессии" onBack={onBack}>
             <textarea
                 value={text}
                 onChange={e => setText(e.target.value)}
-                rows={6}
+                rows={5}
                 placeholder="О чём говорили, домашнее задание, наблюдения…"
-                style={{ ...inputStyle, resize: 'vertical', minHeight: 120 }}
+                style={{ ...inputStyle, resize: 'vertical', minHeight: 110 }}
             />
-            <SubmitButton disabled={busy} onClick={() => onSubmit(text)}>Сохранить</SubmitButton>
+            <SubmitButton disabled={busy || !text.trim()} onClick={() => onAdd(text)}>Сохранить</SubmitButton>
+            <div style={{ fontSize: 11, color: '#999', marginTop: 6 }}>
+                Заметка появится во вкладке «Заметки» и в истории клиента.
+            </div>
+
+            {failed && (
+                <div style={warnBox}>
+                    Не удалось загрузить прошлые заметки.
+                    <button onClick={onRetry} style={linkBtn}>Повторить</button>
+                </div>
+            )}
+            {notes === null && !failed && (
+                <div style={{ fontSize: 13, color: '#888', marginTop: 14 }}>Загружаю заметки…</div>
+            )}
+
+            {legacyNote && (
+                <div style={{ ...noteCard, background: '#F4F4F2', borderColor: 'rgba(0,0,0,0.06)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#888', marginBottom: 4 }}>
+                        {isSiteMark ? 'Пометка' : 'Раньше записано здесь · видно только в этой сессии'}
+                    </div>
+                    <div style={noteText}>{legacyNote}</div>
+                    {!isSiteMark && (
+                        <button onClick={() => onMoveLegacy(legacyNote)} disabled={busy} style={{ ...linkBtn, marginLeft: 0, marginTop: 8 }}>
+                            Перенести в «Заметки»
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {(notes ?? []).map(n => (
+                <div key={n.id} style={noteCard}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#8A5A00', flex: 1 }}>
+                            {formatBatumi(n.createdAt, 'd MMM, HH:mm', ru)}
+                        </span>
+                        <button
+                            onClick={() => onDeleteNote(n)}
+                            disabled={busy}
+                            aria-label="Удалить заметку"
+                            style={{ background: 'none', border: 'none', padding: 4, color: '#C8253A', cursor: 'pointer' }}
+                        >
+                            <Trash2 size={15} />
+                        </button>
+                    </div>
+                    <div style={noteText}>{n.content}</div>
+                </div>
+            ))}
+        </FormShell>
+    );
+}
+
+/** Бронь кабинета, привязанная к сессии: ищем в уже загруженных бронях
+ *  пользователя («Сегодня» их грузит). Нет в сторе — подгружаем, но только
+ *  в шаге «Кабинет» (fetchIfMissing), чтобы не тянуть все брони на каждую шторку. */
+function useLinkedBooking(session: CrmSession, fetchIfMissing = true): { booking: BookingHistoryItem | null; label: string | null } {
+    const bookings = useUserStore(s => s.bookings);
+    const fetchBookings = useUserStore(s => s.fetchBookings);
+    const booking = session.bookingId ? bookings.find(b => b.id === session.bookingId) ?? null : null;
+    const missing = fetchIfMissing && !!session.bookingId && !booking;
+    useEffect(() => {
+        if (missing) fetchBookings?.();
+    }, [missing, fetchBookings]);
+    const res = booking ? RESOURCES.find(r => r.id === booking.resourceId) : null;
+    const loc = res ? LOCATIONS.find(l => l.id === res.locationId) : null;
+    const label = res ? (loc ? `${res.name} · ${loc.name}` : res.name) : null;
+    return { booking, label };
+}
+
+/** Начало брони (дата + время) — так же, как в BookingDetailSheet. */
+function bookingStart(b: BookingHistoryItem): Date | null {
+    try {
+        const d = b.date instanceof Date ? b.date : new Date(b.date as unknown as string);
+        if (isNaN(d.getTime()) || !b.startTime) return null;
+        const [h, m] = b.startTime.split(':').map(Number);
+        const out = new Date(d);
+        out.setHours(h, m, 0, 0);
+        return out;
+    } catch { return null; }
+}
+
+/** Шаг «Кабинет»: открепить или отменить бронь — с понятными последствиями.
+ *  Отмена — это обычная отмена брони: оплата возвращается, кабинет
+ *  освобождается; меньше чем за сутки отменить нельзя (правило брони). */
+function CabinetForm({ session, busy, onDetach, onCancelBooking, onBack }: {
+    session: CrmSession;
+    busy: boolean;
+    onDetach: () => void;
+    onCancelBooking: () => void;
+    onBack: () => void;
+}) {
+    const navigate = useNavigate();
+    const { booking, label } = useLinkedBooking(session);
+    const start = (booking && bookingStart(booking)) || parseUTC(session.date);
+    const hoursLeft = (start.getTime() - Date.now()) / 3600000;
+    const whenLabel = booking && booking.startTime
+        ? `${formatBatumi(start, 'd MMMM', ru)}, ${booking.startTime.slice(0, 5)} · ${booking.duration ?? 60} мин`
+        : `${formatBatumi(session.date, 'd MMMM, HH:mm', ru)} · ${session.durationMinutes ?? 60} мин`;
+
+    return (
+        <FormShell title="Кабинет к сессии" onBack={onBack}>
+            <div style={{ ...noteCard, marginTop: 0, background: '#fff', borderColor: 'rgba(0,0,0,0.08)' }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{label ?? 'Кабинет'}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{whenLabel}</div>
+            </div>
+
+            <button onClick={onDetach} disabled={busy} style={{ ...neutralBtn, marginTop: 14 }}>
+                <Unlink size={16} /> Только открепить от сессии
+            </button>
+            <div style={{ fontSize: 12, color: '#888', margin: '6px 2px 0' }}>
+                Бронь останется за вами — её можно привязать к другой сессии.
+            </div>
+
+            <div style={{ height: 1, background: 'rgba(0,0,0,0.08)', margin: '16px 0' }} />
+
+            {hoursLeft <= 0 ? (
+                <div style={{ fontSize: 13, color: '#666' }}>
+                    Бронь уже началась или прошла — отменить её нельзя.
+                </div>
+            ) : hoursLeft < 24 ? (
+                <div style={{ ...warnBox, marginTop: 0 }}>
+                    <div>
+                        До начала меньше суток — отменить бронь уже нельзя.
+                        Можно выставить её на переаренду в «Моих бронях».
+                    </div>
+                    <button onClick={() => navigate('/m/bookings')} style={{ ...linkBtn, marginLeft: 0, marginTop: 8 }}>
+                        Открыть мои брони
+                    </button>
+                </div>
+            ) : (
+                <>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#8A5A00', marginBottom: 10 }}>
+                        <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <span style={{ fontSize: 13, lineHeight: 1.4 }}>
+                            Бронь отменится, и кабинет смогут занять другие. Если бронь
+                            уже оплачена, оплата вернётся полностью. Сессия в CRM останется.
+                        </span>
+                    </div>
+                    <button onClick={onCancelBooking} disabled={busy} style={destructiveBtn}>
+                        Отменить бронь кабинета
+                    </button>
+                </>
+            )}
         </FormShell>
     );
 }
@@ -446,11 +676,11 @@ function DeleteConfirm({ session, busy, onDelete, onBack }: {
 }) {
     return (
         <FormShell title="Отменить сессию?" onBack={onBack}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8A5A00', marginBottom: 8 }}>
-                <AlertTriangle size={16} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#8A5A00', marginBottom: 8 }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
                 <span style={{ fontSize: 13 }}>
-                    Сессия удалится из CRM и Google Calendar. Связанная бронь
-                    кабинета (если есть) тоже отменится.
+                    Сессия удалится из CRM и Google Calendar.
+                    {session.isBooked && ' Бронь кабинета при этом не отменится — если кабинет не нужен, сначала отмените её: «Назад» → «Кабинет».'}
                 </span>
             </div>
             <button onClick={() => onDelete('this')} disabled={busy} style={destructiveBtn}>
@@ -612,6 +842,37 @@ const backBtn: React.CSSProperties = {
     background: 'none', border: 'none', padding: 0,
     fontSize: 14, fontWeight: 600, color: '#666',
     cursor: 'pointer', fontFamily: 'inherit',
+};
+
+const neutralBtn: React.CSSProperties = {
+    background: '#fff', color: '#0E0E0E',
+    border: '1px solid rgba(0,0,0,0.12)', borderRadius: 12,
+    padding: '14px 18px', width: '100%',
+    fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
+    cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+};
+
+const warnBox: React.CSSProperties = {
+    background: '#FEF3C7', border: '1px solid #FCD34D', color: '#8A5A00',
+    borderRadius: 10, padding: '10px 12px', marginTop: 12,
+    fontSize: 13, lineHeight: 1.4,
+};
+
+const linkBtn: React.CSSProperties = {
+    background: 'none', border: 'none', padding: 0, marginLeft: 6,
+    color: '#0E0E0E', fontWeight: 700, fontSize: 13,
+    textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit',
+};
+
+const noteCard: React.CSSProperties = {
+    background: '#FFFBEB', border: '1px solid #FCD34D',
+    borderRadius: 12, padding: '10px 12px', marginTop: 10,
+};
+
+const noteText: React.CSSProperties = {
+    fontSize: 14, color: '#333', lineHeight: 1.45,
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
 };
 
 const destructiveBtn: React.CSSProperties = {

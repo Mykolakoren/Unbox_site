@@ -15,6 +15,9 @@ import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
 import { SessionActionSheet } from './SessionActionSheet';
 import { CURRENCIES } from '../../../utils/currency';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
+import { useCrmDataVersion } from './crmDataVersion';
+
+const NO_SESSIONS: CrmSession[] = [];
 
 function symbolFor(code: string): string {
     return CURRENCIES.find(c => c.code === code)?.symbol ?? code;
@@ -39,8 +42,15 @@ export function MobileCrmToday() {
     const todayStr = formatBatumi(new Date(), 'yyyy-MM-dd');
     const dateStr = searchParams.get('date') || todayStr;
 
-    const [sessions, setSessions] = useState<CrmSession[]>([]);
+    // Список хранится вместе с датой, за которую он загружен. Под заголовком
+    // показываем его, только если дата совпадает с выбранной: раньше при
+    // листании под «10 окт.» висели клиенты прошлого дня, пока шёл запрос,
+    // а при сбое сети — насовсем.
+    const [loaded, setLoaded] = useState<{ date: string; list: CrmSession[] } | null>(null);
+    const [failedDate, setFailedDate] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const reqSeq = useRef(0);
+    const dataVersion = useCrmDataVersion();
     const [syncing, setSyncing] = useState(false);
     const [activeSheet, setActiveSheet] = useState<CrmSession | null>(null);
     const { clients, fetchClients } = useCrmStore();
@@ -58,20 +68,30 @@ export function MobileCrmToday() {
     }, [clients.length, fetchClients]);
 
     const reload = useCallback(async () => {
+        // Номер запроса: при быстром листании ответ за промежуточный день
+        // может прийти последним — такие ответы (и их ошибки) выбрасываем.
+        const seq = ++reqSeq.current;
         setLoading(true);
         try {
             const list = await crmApi.getSessions({ dateFrom: dateStr, dateTo: dateStr });
-            setSessions(list);
-        } catch (e: unknown) {
-            const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-                || (e as Error)?.message || 'Не удалось загрузить';
-            toast.error(typeof msg === 'string' ? msg : 'Не удалось загрузить');
+            if (seq !== reqSeq.current) return;
+            setLoaded({ date: dateStr, list });
+            setFailedDate(null);
+        } catch {
+            if (seq !== reqSeq.current) return;
+            setFailedDate(dateStr);
         } finally {
-            setLoading(false);
+            if (seq === reqSeq.current) setLoading(false);
         }
     }, [dateStr]);
 
-    useEffect(() => { reload(); }, [reload]);
+    useEffect(() => { reload(); }, [reload, dataVersion]);
+
+    const dayLoaded = loaded?.date === dateStr;
+    const sessions = dayLoaded ? loaded.list : NO_SESSIONS;
+    const loadFailed = failedDate === dateStr;
+    const patchSessions = (fn: (list: CrmSession[]) => CrmSession[]) =>
+        setLoaded(prev => (prev ? { ...prev, list: fn(prev.list) } : prev));
 
     // ── Day navigation ────────────────────────────────────────────────
     const shiftDay = useCallback((delta: number) => {
@@ -226,11 +246,18 @@ export function MobileCrmToday() {
                 onTouchEnd={onTouchEnd}
                 style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 200 }}
             >
-                {loading && (
+                {(loading || (!dayLoaded && !loadFailed)) && (
                     <div style={{ color: '#666', fontSize: 14 }}>Загружаю…</div>
                 )}
 
-                {!loading && sorted.length === 0 && (
+                {loadFailed && !loading && (
+                    <div style={errorStyle}>
+                        {dayLoaded ? 'Не удалось обновить день.' : 'Не удалось загрузить день.'}
+                        <button onClick={() => reload()} style={retryBtn}>Повторить</button>
+                    </div>
+                )}
+
+                {dayLoaded && !loading && sorted.length === 0 && (
                     <div style={emptyStyle}>
                         Сессий на эту дату нет.
                         <div style={{ marginTop: 6, fontSize: 12, color: '#aaa' }}>
@@ -325,11 +352,11 @@ export function MobileCrmToday() {
                     client={clientById.get(activeSheet.clientId)}
                     onClose={() => setActiveSheet(null)}
                     onChange={(updated) => {
-                        setSessions(prev => prev.map(x => x.id === updated.id ? updated : x));
+                        patchSessions(list => list.map(x => x.id === updated.id ? updated : x));
                         setActiveSheet(updated);
                     }}
                     onDeleted={(id) => {
-                        setSessions(prev => prev.filter(x => x.id !== id));
+                        patchSessions(list => list.filter(x => x.id !== id));
                         setActiveSheet(null);
                     }}
                 />
@@ -416,6 +443,21 @@ const todayPill: React.CSSProperties = {
     color: '#0E0E0E',
     cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+};
+
+const errorStyle: React.CSSProperties = {
+    background: '#FEF3C7',
+    border: '1px solid #FCD34D',
+    color: '#8A5A00',
+    borderRadius: 12,
+    padding: '12px 14px',
+    fontSize: 14,
+};
+
+const retryBtn: React.CSSProperties = {
+    background: 'none', border: 'none', padding: 0, marginLeft: 8,
+    color: '#0E0E0E', fontWeight: 700, fontSize: 14,
+    textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit',
 };
 
 const emptyStyle: React.CSSProperties = {

@@ -1,7 +1,9 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, FileText, Users, UserCircle, Wallet, Monitor } from 'lucide-react';
 import { useUserStore } from '../../../store/userStore';
+import { crmApi } from '../../../api/crm';
+import type { MobileCrmOutletContext } from './crmDataVersion';
 import { hasCompletedTour } from '../OnboardingTour';
 import { MobileCrmTour, CRM_TOUR_PREFIX } from './MobileCrmTour';
 import { NotificationsBell } from '../NotificationsBell';
@@ -41,6 +43,38 @@ export function MobileCrmLayout() {
         }
     }, [currentUser, location.search]);
 
+    // Автозавершение прошедших сессий — как делает десктопный дашборд
+    // (CrmDashboard.tsx). Без него у тех, кто ведёт CRM только с телефона
+    // и не жмёт «Прошла», прошедшие сессии висели «запланированными», и в
+    // «Финансах» / карточке клиента долг был меньше реального (долг
+    // считается только по завершённым). Запускаем при входе и когда
+    // приложение снова открыли (PWA живёт днями), не чаще раза в 10 минут.
+    // Если что-то закрылось — поднимаем crmDataVersion, экраны перечитают данные.
+    const [crmDataVersion, setCrmDataVersion] = useState(0);
+    const lastAutoCompleteAt = useRef(0);
+    const canUseCrm = !!currentUser && (
+        currentUser.role === 'specialist'
+        || currentUser.role === 'owner'
+        || currentUser.role === 'senior_admin'
+        || currentUser.role === 'admin'
+        || !!currentUser.isAdmin
+    );
+    useEffect(() => {
+        if (!canUseCrm) return;
+        const run = () => {
+            if (Date.now() - lastAutoCompleteAt.current < AUTO_COMPLETE_EVERY_MS) return;
+            lastAutoCompleteAt.current = Date.now();
+            crmApi.autoCompleteSessions()
+                .then(r => { if ((r?.autoCompleted ?? 0) > 0) setCrmDataVersion(v => v + 1); })
+                .catch(() => { lastAutoCompleteAt.current = 0; });
+        };
+        run();
+        const onVisible = () => { if (document.visibilityState === 'visible') run(); };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => document.removeEventListener('visibilitychange', onVisible);
+    }, [canUseCrm]);
+    const outletContext = useMemo<MobileCrmOutletContext>(() => ({ crmDataVersion }), [crmDataVersion]);
+
     if (!currentUser) {
         return (
             <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff' }}>
@@ -49,12 +83,7 @@ export function MobileCrmLayout() {
         );
     }
 
-    const isSpecialist = currentUser.role === 'specialist'
-        || currentUser.role === 'owner'
-        || currentUser.role === 'senior_admin'
-        || currentUser.role === 'admin'
-        || currentUser.isAdmin;
-    if (!isSpecialist) {
+    if (!canUseCrm) {
         // 2026-06-02: bounce to /m (mobile home) instead of /dashboard
         // (десктоп-в-мобиле) — последовательно с тем, что /m теперь основной
         // на телефоне для всех ролей.
@@ -144,7 +173,7 @@ export function MobileCrmLayout() {
 
                 <main data-mobile-scroll style={{ flex: 1, overflow: 'auto' }}>
                     <div key={location.pathname} className="mobile-page">
-                        <Outlet />
+                        <Outlet context={outletContext} />
                     </div>
                 </main>
             </div>
@@ -175,6 +204,8 @@ export function MobileCrmLayout() {
         </div>
     );
 }
+
+const AUTO_COMPLETE_EVERY_MS = 10 * 60 * 1000;
 
 function TabLink({ to, icon: Icon, label }: { to: string; icon: React.ElementType; label: string }) {
     return (
