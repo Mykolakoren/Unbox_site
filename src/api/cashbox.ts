@@ -80,6 +80,17 @@ export interface ShiftOpenLog {
     openedAt: string;
 }
 
+/** GET /cashbox/summary — ключи уже camelCase (интерцептор api/client.ts). */
+export interface CashboxPeriodSummary {
+    income: number;
+    expense: number;
+    net: number;
+    count: number;
+    adjustmentIncome: number;
+    adjustmentExpense: number;
+    adjustmentCount: number;
+}
+
 export interface CashboxAnalytics {
     dailyData: { date: string; income: number; expense: number }[];
     categoryBreakdown: { categoryName: string; total: number; percentage: number }[];
@@ -116,6 +127,7 @@ export const cashboxApi = {
         type?: string;
         categoryId?: string;
         paymentMethod?: string;
+        branch?: string;
         skip?: number;
         limit?: number;
     }): Promise<CashboxTransaction[]> => {
@@ -126,8 +138,26 @@ export const cashboxApi = {
                 type: params?.type,
                 category_id: params?.categoryId,
                 payment_method: params?.paymentMethod,
+                branch: params?.branch,
                 skip: params?.skip,
                 limit: params?.limit,
+            },
+        });
+        return data;
+    },
+
+    /** Итоги за период по ВСЕМ операциям (считает сервер). Корректировки
+     *  (payment_method='adjustment') — не деньги, приходят отдельно. */
+    getPeriodSummary: async (params: {
+        dateFrom: string;
+        dateTo: string;
+        branch?: string;
+    }): Promise<CashboxPeriodSummary> => {
+        const { data } = await api.get('/cashbox/summary', {
+            params: {
+                date_from: params.dateFrom,
+                date_to: params.dateTo,
+                branch: params.branch,
             },
         });
         return data;

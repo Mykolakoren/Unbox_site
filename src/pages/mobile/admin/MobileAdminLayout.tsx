@@ -5,6 +5,7 @@ import { useUserStore } from '../../../store/userStore';
 import { hasCompletedTour } from '../OnboardingTour';
 import { MobileAdminTour, ADMIN_TOUR_PREFIX } from './MobileAdminTour';
 import { NotificationsBell } from '../NotificationsBell';
+import { Z_TABBAR } from './sheetLayers';
 
 /**
  * Mobile admin shell — separate workspace at /m/admin.
@@ -127,7 +128,8 @@ export function MobileAdminLayout() {
                 display: 'grid',
                 gridTemplateColumns: 'repeat(6, 1fr)',
                 paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-                zIndex: 100,
+                // Шторки страниц — Z_SHEET (выше), иначе меню закрывает их кнопки.
+                zIndex: Z_TABBAR,
             }}>
                 {/* 2026-06-02 owner: «Кабинеты» убраны из tab-bar (setup-задача,
                     не daily), вместо них «Брони» — центральная админская

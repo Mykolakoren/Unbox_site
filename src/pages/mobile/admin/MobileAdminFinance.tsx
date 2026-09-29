@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, TrendingUp, TrendingDown, Wallet, ChevronDown, Loader2, X, Check, Lock, Trash2 } from 'lucide-react';
 import { MobileCloseShiftSheet } from './MobileCloseShiftSheet';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
+import { cashboxApi, type CashboxPeriodSummary } from '../../../api/cashbox';
 import { useUserStore } from '../../../store/userStore';
 import { formatBatumi } from '../../../utils/dateUtils';
+import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
 
 const BRANCHES = ['all', 'Unbox Uni', 'Unbox One', 'Neo School'] as const;
 type Branch = typeof BRANCHES[number];
@@ -22,7 +24,13 @@ const METHOD_LABEL: Record<string, string> = {
     cash: 'Наличные',
     card_tbc: 'TBC',
     card_bog: 'BOG',
+    // Недельная скидка, ручная правка баланса клиента: запись для истории,
+    // из кассы ничего не приходит и не уходит.
+    adjustment: 'Корректировка (не деньги)',
 };
+
+/** Лента — последние N операций периода. Итоги считает сервер по всем. */
+const TX_LIMIT = 100;
 
 function getRange(period: Period, offset: number): { from: Date; to: Date; label: string } {
     const now = new Date();
@@ -56,8 +64,8 @@ function getRange(period: Period, offset: number): { from: Date; to: Date; label
  * Sections (top to bottom):
  *   1. Branch chip + period selector
  *   2. Balance cards by method (cash / TBC / BOG) — branch-scoped
- *   3. Period totals (доход / расход / разница)
- *   4. Recent transactions list (last 50 in range)
+ *   3. Period totals (доход / расход / разница) — сервер, /cashbox/summary
+ *   4. Recent transactions list (last 100 in range)
  *   5. FAB → quick add transaction sheet
  *
  * No charts, no shifts, no categories management — those stay on desktop.
@@ -82,39 +90,85 @@ export function MobileAdminFinance() {
     const [closeShiftOpen, setCloseShiftOpen] = useState(false);
 
     const range = useMemo(() => getRange(period, offset), [period, offset]);
+    const branchParam = branch === 'all' ? undefined : branch;
+
+    // Итоги за период — с сервера, по ВСЕМ операциям. Раньше считались
+    // здесь по последним 100 строкам ленты (неделя/месяц молча занижались),
+    // а недельные скидки и правки балансов шли как настоящие деньги.
+    const [summary, setSummary] = useState<CashboxPeriodSummary | null>(null);
+    const [summaryFailed, setSummaryFailed] = useState(false);
+    const summarySeq = useRef(0);
+    const loadSummary = useCallback(async () => {
+        // Быстро листают период — поздний ответ старого запроса не должен
+        // перезаписать итоги нового.
+        const seq = ++summarySeq.current;
+        setSummary(null);
+        try {
+            const s = await cashboxApi.getPeriodSummary({
+                dateFrom: range.from.toISOString(),
+                dateTo: range.to.toISOString(),
+                branch: branchParam,
+            });
+            if (seq !== summarySeq.current) return;
+            setSummary(s);
+            setSummaryFailed(false);
+        } catch {
+            if (seq !== summarySeq.current) return;
+            setSummaryFailed(true);
+        }
+    }, [range, branchParam]);
+
+    const loadTransactions = useCallback(() => fetchTransactions({
+        dateFrom: range.from.toISOString(),
+        dateTo: range.to.toISOString(),
+        branch: branchParam,
+        limit: TX_LIMIT,
+    }), [range, branchParam, fetchTransactions]);
+
+    /** После записи/правки/закрытия смены — остатки, лента и итоги разом. */
+    const reloadAll = () => Promise.all([
+        fetchBalance(branchParam),
+        loadTransactions(),
+        loadSummary(),
+    ]);
 
     useEffect(() => {
-        fetchBalance(branch === 'all' ? undefined : branch);
-    }, [branch, fetchBalance]);
+        fetchBalance(branchParam);
+    }, [branchParam, fetchBalance]);
 
     useEffect(() => {
-        fetchTransactions({
-            dateFrom: range.from.toISOString(),
-            dateTo: range.to.toISOString(),
-            limit: 100,
-        });
-    }, [range, fetchTransactions]);
+        loadTransactions();
+    }, [loadTransactions]);
+
+    useEffect(() => {
+        loadSummary();
+    }, [loadSummary]);
 
     useEffect(() => {
         if (categories.length === 0) fetchCategories().catch(() => {});
     }, [categories.length, fetchCategories]);
 
-    // Branch-scoped client-side filter on transactions — backend route does
-    // not yet accept ?branch=, so we narrow here. Keeping the same shape as
-    // the server response so totals stay aligned with the balance card.
+    // Филиал фильтрует сервер (?branch=). Фильтр здесь — страховка на
+    // случай старого бэкенда, который параметр ещё не знает.
     const scopedTransactions = useMemo(() => {
         if (branch === 'all') return transactions;
         return transactions.filter(t => (t.branch || '') === branch);
     }, [transactions, branch]);
+    const listTruncated = transactions.length >= TX_LIMIT;
 
-    const totals = useMemo(() => {
+    // Запасной счёт по ленте — только если сервер сводку не отдал (бэкенд
+    // ещё без /cashbox/summary). Корректировки и тут не деньги.
+    const fallbackTotals = useMemo(() => {
         let income = 0, expense = 0;
         for (const t of scopedTransactions) {
+            if (t.paymentMethod === 'adjustment') continue;
             if (t.type === 'income') income += t.amount;
             else expense += t.amount;
         }
         return { income, expense, net: income - expense };
     }, [scopedTransactions]);
+
+    const totals = summary ?? (summaryFailed && !isLoading ? fallbackTotals : null);
 
     return (
         <div style={{ padding: '14px 14px 80px' }}>
@@ -212,10 +266,23 @@ export function MobileAdminFinance() {
                 gridTemplateColumns: 'repeat(3, 1fr)',
                 gap: 8,
             }}>
-                <TotalCell icon={<TrendingUp size={12} />} label="Доход" value={totals.income} positive />
-                <TotalCell icon={<TrendingDown size={12} />} label="Расход" value={totals.expense} />
-                <TotalCell icon={<Wallet size={12} />} label="Разница" value={totals.net} positive={totals.net >= 0} />
+                <TotalCell icon={<TrendingUp size={12} />} label="Доход" value={totals?.income} positive />
+                <TotalCell icon={<TrendingDown size={12} />} label="Расход" value={totals?.expense} />
+                <TotalCell icon={<Wallet size={12} />} label="Разница" value={totals?.net} positive={!totals || totals.net >= 0} />
             </div>
+            {summary && summary.adjustmentCount > 0 && (
+                <div style={{ fontSize: 11, color: '#888', marginTop: -8, marginBottom: 14, lineHeight: 1.4 }}>
+                    Корректировки (не деньги):
+                    {summary.adjustmentIncome > 0 && ` +${summary.adjustmentIncome.toFixed(0)} ₾`}
+                    {summary.adjustmentExpense > 0 && ` −${summary.adjustmentExpense.toFixed(0)} ₾`}
+                    {' '}· в итоги не входят
+                </div>
+            )}
+            {!summary && summaryFailed && listTruncated && (
+                <div style={{ fontSize: 11, color: '#B45309', marginTop: -8, marginBottom: 14, lineHeight: 1.4 }}>
+                    Итоги посчитаны по последним {TX_LIMIT} операциям — могут быть неполными.
+                </div>
+            )}
 
             {/* Close shift — только когда выбрана конкретная локация
                 (нельзя закрыть «все» сразу — каждая локация = своя смена). */}
@@ -243,7 +310,7 @@ export function MobileAdminFinance() {
 
             {/* Transactions */}
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>
-                Транзакции · {scopedTransactions.length}
+                Транзакции · {listTruncated ? `последние ${scopedTransactions.length}` : scopedTransactions.length}
             </div>
             {isLoading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
@@ -255,7 +322,7 @@ export function MobileAdminFinance() {
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {scopedTransactions.slice(0, 100).map(t => (
+                    {scopedTransactions.slice(0, TX_LIMIT).map(t => (
                         <TransactionRow
                             key={t.id}
                             tx={t}
@@ -296,15 +363,8 @@ export function MobileAdminFinance() {
                         try {
                             await createTransaction(payload);
                             setShowAdd(false);
-                            // Refresh both totals + list
-                            await Promise.all([
-                                fetchBalance(branch === 'all' ? undefined : branch),
-                                fetchTransactions({
-                                    dateFrom: range.from.toISOString(),
-                                    dateTo: range.to.toISOString(),
-                                    limit: 100,
-                                }),
-                            ]);
+                            // Refresh balances + list + totals
+                            await reloadAll();
                         } catch {
                             /* toast already shown by store */
                         }
@@ -323,14 +383,7 @@ export function MobileAdminFinance() {
                         try {
                             await updateTransaction(editingTx.id, payload);
                             setEditingTx(null);
-                            await Promise.all([
-                                fetchBalance(branch === 'all' ? undefined : branch),
-                                fetchTransactions({
-                                    dateFrom: range.from.toISOString(),
-                                    dateTo: range.to.toISOString(),
-                                    limit: 100,
-                                }),
-                            ]);
+                            await reloadAll();
                         } catch {
                             /* toast already shown by store */
                         }
@@ -339,14 +392,7 @@ export function MobileAdminFinance() {
                         try {
                             await deleteTransaction(editingTx.id);
                             setEditingTx(null);
-                            await Promise.all([
-                                fetchBalance(branch === 'all' ? undefined : branch),
-                                fetchTransactions({
-                                    dateFrom: range.from.toISOString(),
-                                    dateTo: range.to.toISOString(),
-                                    limit: 100,
-                                }),
-                            ]);
+                            await reloadAll();
                         } catch {
                             /* toast already shown by store */
                         }
@@ -361,17 +407,8 @@ export function MobileAdminFinance() {
                     onClose={() => setCloseShiftOpen(false)}
                     onClosed={async () => {
                         setCloseShiftOpen(false);
-                        // После закрытия — рефреш балансов и транзакций.
-                        // branch здесь гарантированно не 'all' (sheet рендерится
-                        // только при branch !== 'all'), поэтому передаём напрямую.
-                        await Promise.all([
-                            fetchBalance(branch),
-                            fetchTransactions({
-                                dateFrom: range.from.toISOString(),
-                                dateTo: range.to.toISOString(),
-                                limit: 100,
-                            }),
-                        ]);
+                        // После закрытия — рефреш балансов, транзакций и итогов.
+                        await reloadAll();
                     }}
                 />
             )}
@@ -421,7 +458,9 @@ function BalanceTile({ label, value }: { label: string; value: number | undefine
 }
 
 function TotalCell({ icon, label, value, positive }: { icon: React.ReactNode; label: string; value: number | undefined | null; positive?: boolean }) {
-    const n = typeof value === 'number' ? value : 0;
+    // Нет числа (итоги ещё грузятся) — «…», а не ложный «0 ₾».
+    const loaded = typeof value === 'number';
+    const n = loaded ? value : 0;
     return (
         <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, opacity: 0.65, marginBottom: 3 }}>
@@ -434,7 +473,7 @@ function TotalCell({ icon, label, value, positive }: { icon: React.ReactNode; la
                 color: positive === false ? '#FF8B7A' : '#fff',
                 letterSpacing: '-0.02em',
             }}>
-                {n >= 0 ? '' : '-'}{Math.abs(n).toFixed(0)} ₾
+                {loaded ? `${n >= 0 ? '' : '-'}${Math.abs(n).toFixed(0)} ₾` : '…'}
             </div>
         </div>
     );
@@ -570,7 +609,9 @@ function AddTransactionSheet({
             style={{
                 position: 'fixed', inset: 0,
                 background: 'rgba(0,0,0,0.5)',
-                zIndex: 100,
+                // Было 100 — как у нижнего меню, и меню (оно в DOM позже)
+                // закрывало кнопку «Сохранить».
+                zIndex: Z_SHEET,
                 display: 'flex',
                 alignItems: 'flex-end',
                 justifyContent: 'center',
@@ -584,8 +625,14 @@ function AddTransactionSheet({
                     background: '#fff',
                     borderTopLeftRadius: 18,
                     borderTopRightRadius: 18,
-                    padding: '14px 16px calc(20px + env(safe-area-inset-bottom, 0px))',
+                    // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER.
+                    padding: '14px 16px 0',
                     boxShadow: '0 -8px 24px rgba(0,0,0,0.18)',
+                    // Форма длинная: на коротком экране прокручивается внутри,
+                    // а кнопки прилипают к низу.
+                    maxHeight: SHEET_MAX_HEIGHT,
+                    overflowY: 'auto',
+                    overscrollBehavior: 'contain',
                 }}
             >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -678,7 +725,7 @@ function AddTransactionSheet({
                 </div>
 
                 {/* Description */}
-                <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 6 }}>
                     <Label>Комментарий</Label>
                     <input
                         type="text"
@@ -689,58 +736,60 @@ function AddTransactionSheet({
                     />
                 </div>
 
-                <button
-                    onClick={handleSave}
-                    disabled={saving || !amount}
-                    style={{
-                        width: '100%',
-                        padding: '13px',
-                        background: '#0E0E0E',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 10,
-                        fontWeight: 700,
-                        fontSize: 14,
-                        cursor: 'pointer',
-                        opacity: (saving || !amount) ? 0.5 : 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 6,
-                    }}
-                >
-                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-                    Сохранить
-                </button>
-
-                {/* Удаление — только в режиме редактирования */}
-                {isEdit && onDelete && (
+                <div style={SHEET_FOOTER}>
                     <button
-                        onClick={async () => {
-                            if (!window.confirm('Удалить эту транзакцию? Если она пополняла баланс клиента — он будет скорректирован.')) return;
-                            setDeleting(true);
-                            try { await onDelete(); } finally { setDeleting(false); }
-                        }}
-                        disabled={saving || deleting}
+                        onClick={handleSave}
+                        disabled={saving || !amount}
                         style={{
                             width: '100%',
-                            padding: '11px',
-                            marginTop: 8,
-                            background: 'transparent',
-                            color: '#B3261E',
-                            border: '1px solid #F2C9C5',
+                            padding: '13px',
+                            background: '#0E0E0E',
+                            color: '#fff',
+                            border: 'none',
                             borderRadius: 10,
-                            fontWeight: 600,
-                            fontSize: 13,
+                            fontWeight: 700,
+                            fontSize: 14,
                             cursor: 'pointer',
-                            opacity: deleting ? 0.5 : 1,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                            opacity: (saving || !amount) ? 0.5 : 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
                         }}
                     >
-                        {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-                        Удалить транзакцию
+                        {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                        Сохранить
                     </button>
-                )}
+
+                    {/* Удаление — только в режиме редактирования */}
+                    {isEdit && onDelete && (
+                        <button
+                            onClick={async () => {
+                                if (!window.confirm('Удалить эту транзакцию? Если она пополняла баланс клиента — он будет скорректирован.')) return;
+                                setDeleting(true);
+                                try { await onDelete(); } finally { setDeleting(false); }
+                            }}
+                            disabled={saving || deleting}
+                            style={{
+                                width: '100%',
+                                padding: '11px',
+                                marginTop: 8,
+                                background: 'transparent',
+                                color: '#B3261E',
+                                border: '1px solid #F2C9C5',
+                                borderRadius: 10,
+                                fontWeight: 600,
+                                fontSize: 13,
+                                cursor: 'pointer',
+                                opacity: deleting ? 0.5 : 1,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                            }}
+                        >
+                            {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                            Удалить транзакцию
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
     );

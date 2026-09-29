@@ -11,6 +11,7 @@ import { api } from '../../../api/client';
 import type { Resource } from '../../../types';
 import type { WaitlistEntry } from '../../../store/types';
 import { LOCATIONS, RESOURCES } from '../../../utils/data';
+import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
 
 type Tab = 'cabinets' | 'maintenance' | 'waitlist';
 
@@ -502,14 +503,16 @@ function CreateMaintenanceSheet({ onClose, onCreated }: { onClose: () => void; o
                 <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="Уборка, ремонт, мероприятие..." style={input} />
             </Field>
 
-            <button
-                onClick={handleSave}
-                disabled={saving}
-                style={primaryBtn}
-            >
-                {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-                Закрыть кабинет
-            </button>
+            <div style={SHEET_FOOTER}>
+                <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={primaryBtn}
+                >
+                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                    Закрыть кабинет
+                </button>
+            </div>
         </BottomSheet>
     );
 }
@@ -648,14 +651,18 @@ function BottomSheet({ onClose, title, children }: { onClose: () => void; title:
         <div onClick={onClose} style={{
             position: 'fixed', inset: 0,
             background: 'rgba(0,0,0,0.5)',
-            zIndex: 100,
+            // Было 100 — как у нижнего меню, и меню закрывало «Закрыть кабинет».
+            zIndex: Z_SHEET,
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
         }}>
             <div onClick={e => e.stopPropagation()} style={{
-                width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto',
+                width: '100%', maxWidth: 480, maxHeight: SHEET_MAX_HEIGHT, overflowY: 'auto',
+                overscrollBehavior: 'contain',
                 background: '#fff',
                 borderTopLeftRadius: 18, borderTopRightRadius: 18,
-                padding: '14px 16px calc(20px + env(safe-area-inset-bottom, 0px))',
+                // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER
+                // (главная кнопка шторки прилипает к низу).
+                padding: '14px 16px 0',
                 boxShadow: '0 -8px 24px rgba(0,0,0,0.18)',
             }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>

@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Inbox, AlertTriangle, CheckCircle, Calendar, X, Loader2, Trash2, Clock, ArrowRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus } from 'lucide-react';
+import { Inbox, AlertTriangle, CheckCircle, Calendar, ArrowRight, Users as UsersIcon, ShieldCheck, BookOpen, DoorOpen, Plus } from 'lucide-react';
 import { format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { bookingsApi } from '../../../api/bookings';
 import type { BookingHistoryItem } from '../../../store/types';
 import { RESOURCES } from '../../../utils/data';
-import { formatBookingDuration } from '../../../utils/bookingHelpers';
+import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
 
 /**
  * Mobile admin dashboard — quick numbers for "what's happening today" plus
@@ -19,12 +18,15 @@ import { formatBookingDuration } from '../../../utils/bookingHelpers';
  * rows live in their own endpoint slice.
  */
 export function MobileAdminDashboard() {
-    const { bookings, fetchBookings } = useUserStore();
+    // fetchAllBookings (/bookings, только админ) — как во вкладке «Брони».
+    // Раньше тут был fetchBookings(): /me + обезличенный /public. В «Сегодня»
+    // не было имён, шторка показывала «0 ₾», и этот урезанный список
+    // затирал полные данные «Броней» в общем сторе.
+    const { bookings, users, fetchAllBookings, fetchUsers } = useUserStore();
     const [pendingApprovals, setPendingApprovals] = useState<BookingHistoryItem[] | null>(null);
     // Owner asked 2026-05-25: today's booking list was inert. Tapping a row
-    // now opens a bottom sheet with admin actions (cancel, +30, set price,
-    // see breakdown). Implemented inline so it shares dashboard's already-
-    // loaded bookings array — no extra fetch.
+    // now opens a bottom sheet with admin actions. Шторки те же, что во
+    // вкладке «Брони» (bookingSheets.tsx): отмена 100/50/0, цена от настоящей.
     const [activeBooking, setActiveBooking] = useState<BookingHistoryItem | null>(null);
     // Owner 2026-06-02: «и ещё 20…» под списком был просто текстом, не
     // открывался. Делаю expand-toggle: тап → раскрывает остальные брони
@@ -36,16 +38,28 @@ export function MobileAdminDashboard() {
     const [forecastExpanded, setForecastExpanded] = useState(false);
 
     useEffect(() => {
-        fetchBookings();
+        fetchAllBookings();
+        if (!users || users.length === 0) fetchUsers();
         bookingsApi.getPendingApprovals().then(setPendingApprovals).catch(() => setPendingApprovals([]));
         bookingsApi.getLimitForecast().then(setForecast).catch(() => setForecast(null));
-    }, [fetchBookings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fetchAllBookings]);
 
     const today = useMemo(() => {
         const todayKey = fmtDate(new Date(), 'yyyy-MM-dd');
         return bookings.filter(b =>
             b.status === 'confirmed' && b.date && fmtDate(new Date(b.date as any), 'yyyy-MM-dd') === todayKey
         );
+    }, [bookings]);
+
+    // Предстоящие активные брони (с сегодняшнего дня). «Все брони в системе»
+    // врали: список обрезан потолком (5000), а броней в базе больше.
+    const upcoming = useMemo(() => {
+        const todayKey = fmtDate(new Date(), 'yyyy-MM-dd');
+        return bookings.filter(b =>
+            (b.status === 'confirmed' || b.status === 'pending_approval')
+            && b.date && fmtDate(new Date(b.date as any), 'yyyy-MM-dd') >= todayKey
+        ).length;
     }, [bookings]);
 
     const tomorrow = useMemo(() => {
@@ -191,8 +205,8 @@ export function MobileAdminDashboard() {
                     />
                     <Stat
                         icon={<Inbox size={16} />}
-                        label="Все брони в системе"
-                        value={bookings.length}
+                        label="Предстоящие брони"
+                        value={upcoming}
                         to="/m/admin/bookings"
                     />
                 </div>
@@ -244,7 +258,7 @@ export function MobileAdminDashboard() {
                                             {RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId}
                                         </div>
                                         <div style={{ fontSize: 11, color: '#666', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {b.userId}
+                                            {getAdminUserName(users, b.userId)}
                                         </div>
                                     </div>
                                     <ArrowRight size={14} style={{ color: '#bbb', flexShrink: 0 }} />
@@ -303,16 +317,11 @@ export function MobileAdminDashboard() {
                 </div>
             </div>
 
-            {activeBooking && (
-                <BookingActionSheet
-                    booking={activeBooking}
-                    onClose={() => setActiveBooking(null)}
-                    onChanged={async () => {
-                        await fetchBookings();
-                        setActiveBooking(null);
-                    }}
-                />
-            )}
+            <AdminBookingSheets
+                booking={activeBooking}
+                getUserName={email => getAdminUserName(users, email)}
+                onClose={() => setActiveBooking(null)}
+            />
 
             {/* 2026-06-06 owner: тот же FAB что и на /m/admin/bookings — для
                 консистентности «создать бронь» доступно с любого админ-
@@ -364,261 +373,6 @@ function QuickLink({ to, icon: Icon, label }: { to: string; icon: React.ElementT
         </Link>
     );
 }
-
-// ── Admin booking action sheet ──────────────────────────────────────────────
-// Bottom sheet shown when admin taps a today/tomorrow booking row. Surfaces
-// the same actions desktop admins have on the chessboard popup (cancel, +30,
-// set price, reschedule), plus the discount/applied-rule breakdown so the
-// admin can answer "why does this say 18 ₾ not 20?" without leaving the page.
-function BookingActionSheet({
-    booking, onClose, onChanged,
-}: {
-    booking: BookingHistoryItem;
-    onClose: () => void;
-    onChanged: () => Promise<void>;
-}) {
-    const [busy, setBusy] = useState<null | 'cancel' | 'extend' | 'price' | 'reschedule'>(null);
-    const [priceInput, setPriceInput] = useState<string>('');
-    const [showPriceForm, setShowPriceForm] = useState(false);
-    const [rescheduleDate, setRescheduleDate] = useState('');
-    const [rescheduleTime, setRescheduleTime] = useState(booking.startTime || '');
-    const [showRescheduleForm, setShowRescheduleForm] = useState(false);
-
-    const resource = RESOURCES.find(r => r.id === booking.resourceId);
-
-    const handleCancel = async () => {
-        if (!confirm('Отменить бронь? Деньги вернутся на баланс юзера.')) return;
-        setBusy('cancel');
-        try {
-            await bookingsApi.cancelBooking(booking.id);
-            toast.success('Бронь отменена');
-            await onChanged();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось отменить');
-        } finally {
-            setBusy(null);
-        }
-    };
-
-    const handleExtend = async () => {
-        setBusy('extend');
-        try {
-            await bookingsApi.extendBooking(booking.id, 30);
-            toast.success('Бронь продлена на 30 минут');
-            await onChanged();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось продлить — возможно, следующий слот занят');
-        } finally {
-            setBusy(null);
-        }
-    };
-
-    const handleSetPrice = async () => {
-        const n = parseFloat(priceInput);
-        if (Number.isNaN(n) || n < 0) {
-            toast.error('Введите неотрицательное число');
-            return;
-        }
-        setBusy('price');
-        try {
-            await bookingsApi.setPrice(booking.id, n);
-            toast.success(`Цена обновлена: ${n} ₾`);
-            await onChanged();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось изменить цену');
-        } finally {
-            setBusy(null);
-        }
-    };
-
-    const handleReschedule = async () => {
-        if (!rescheduleDate || !rescheduleTime) {
-            toast.error('Дата и время обязательны');
-            return;
-        }
-        setBusy('reschedule');
-        try {
-            await bookingsApi.rescheduleBooking(booking.id, {
-                newDate: rescheduleDate,
-                newStartTime: rescheduleTime,
-            });
-            toast.success('Бронь перенесена');
-            await onChanged();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось перенести');
-        } finally {
-            setBusy(null);
-        }
-    };
-
-    return (
-        <div onClick={onClose} style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            zIndex: 200,
-            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        }}>
-            <div onClick={e => e.stopPropagation()} style={{
-                width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
-                background: '#fff',
-                borderTopLeftRadius: 18, borderTopRightRadius: 18,
-                padding: '14px 16px calc(20px + env(safe-area-inset-bottom, 0px))',
-                boxShadow: '0 -8px 24px rgba(0,0,0,0.18)',
-            }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                    <div>
-                        <div style={{ fontWeight: 700, fontSize: 15 }}>
-                            {resource?.name || booking.resourceId}
-                        </div>
-                        <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
-                            {booking.userId}
-                        </div>
-                    </div>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888' }}>
-                        <X size={20} />
-                    </button>
-                </div>
-
-                {/* Inline details */}
-                <div style={{
-                    background: '#F6F6F4', borderRadius: 10, padding: '10px 12px',
-                    fontSize: 13, marginBottom: 14, lineHeight: 1.6,
-                }}>
-                    <Row label="Дата" value={fmtDate(new Date(booking.date as any), 'd MMMM yyyy', { locale: ru })} />
-                    <Row label="Время" value={`${booking.startTime} · ${formatBookingDuration(booking.duration ?? 60)}`} />
-                    {booking.appliedRule && booking.appliedRule !== 'NONE' && booking.appliedRule !== 'SUBSCRIPTION'
-                     && (booking.discountPercent || booking.discountAmount) ? (
-                        <>
-                            <Row label="Цена" value={`${booking.finalPrice} ₾ (база ${booking.basePrice ?? booking.finalPrice} − ${booking.discountAmount?.toFixed(0) ?? 0})`} />
-                            <Row label="Скидка" value={`${discountLabel(booking.appliedRule)} · −${booking.discountPercent ?? 0}%`} />
-                        </>
-                    ) : (
-                        <Row label="Цена" value={`${booking.finalPrice} ₾${booking.appliedRule === 'SUBSCRIPTION' ? ' (по абонементу)' : ''}`} />
-                    )}
-                    <Row label="Статус" value={booking.status === 'confirmed' ? '✅ Активно' : booking.status} />
-                </div>
-
-                {/* Reschedule inline form */}
-                {showRescheduleForm && (
-                    <div style={{ marginBottom: 12, padding: 12, background: '#EFF6FF', borderRadius: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1E40AF', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            Перенос
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                            <input type="date" value={rescheduleDate} onChange={e => setRescheduleDate(e.target.value)} style={inputStyle} />
-                            <input type="time" value={rescheduleTime} onChange={e => setRescheduleTime(e.target.value)} step={1800} style={inputStyle} />
-                        </div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                            <button onClick={() => setShowRescheduleForm(false)} style={secondaryBtn}>Отмена</button>
-                            <button onClick={handleReschedule} disabled={busy !== null} style={primaryBtn}>
-                                {busy === 'reschedule' ? <Loader2 size={14} className="animate-spin" /> : <Clock size={14} />}
-                                Перенести
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Price inline form */}
-                {showPriceForm && (
-                    <div style={{ marginBottom: 12, padding: 12, background: '#FEF3C7', borderRadius: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            Новая цена (₾)
-                        </div>
-                        <input
-                            type="number" inputMode="decimal" min={0}
-                            value={priceInput} onChange={e => setPriceInput(e.target.value)}
-                            placeholder={String(booking.finalPrice ?? 0)}
-                            style={{ ...inputStyle, marginBottom: 8 }}
-                            autoFocus
-                        />
-                        <div style={{ display: 'flex', gap: 6 }}>
-                            <button onClick={() => setShowPriceForm(false)} style={secondaryBtn}>Отмена</button>
-                            <button onClick={handleSetPrice} disabled={busy !== null} style={primaryBtn}>
-                                {busy === 'price' ? <Loader2 size={14} className="animate-spin" /> : null}
-                                Сохранить
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Actions */}
-                {booking.status === 'confirmed' && !showRescheduleForm && !showPriceForm && (
-                    <>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                            <button onClick={() => setShowRescheduleForm(true)} style={actionBtn('#EFF6FF', '#1E40AF')}>
-                                <Clock size={14} /> Перенести
-                            </button>
-                            <button onClick={handleExtend} disabled={busy !== null} style={actionBtn('#ECFDF5', '#065F46')}>
-                                {busy === 'extend' ? <Loader2 size={14} className="animate-spin" /> : null}
-                                +30 мин
-                            </button>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                            <button onClick={() => { setPriceInput(String(booking.finalPrice ?? 0)); setShowPriceForm(true); }} style={actionBtn('#FEF3C7', '#92400E')}>
-                                Цена
-                            </button>
-                            <button onClick={handleCancel} disabled={busy !== null} style={actionBtn('#FEE2E2', '#991B1B')}>
-                                {busy === 'cancel' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                                Удалить
-                            </button>
-                        </div>
-                    </>
-                )}
-            </div>
-        </div>
-    );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-    return (
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ color: '#888' }}>{label}</span>
-            <span style={{ color: '#0E0E0E', textAlign: 'right' }}>{value}</span>
-        </div>
-    );
-}
-
-function discountLabel(rule: string | undefined | null): string {
-    switch (rule) {
-        case 'PERSONAL_DISCOUNT':     return 'Личная скидка';
-        case 'WEEKLY_PROGRESSIVE':    return 'Недельная (накопленные часы)';
-        case 'CONSECUTIVE_HOURS':     return 'За длительность брони';
-        case 'MANUAL_OVERRIDE':       return 'Ручная корректировка';
-        case 'SUBSCRIPTION':          return 'Абонемент';
-        case 'SUBSCRIPTION_DISCOUNT': return 'Скидка по абонементу';
-        case 'HOT_BOOKING':           return 'Горячая бронь';
-        default:                      return rule || '';
-    }
-}
-
-const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '9px 12px',
-    border: '1px solid rgba(0,0,0,0.12)', borderRadius: 8,
-    fontSize: 14, background: '#fff', color: '#0E0E0E', outline: 'none',
-};
-
-const primaryBtn: React.CSSProperties = {
-    flex: 1, padding: '10px',
-    background: '#0E0E0E', color: '#fff',
-    border: 'none', borderRadius: 8,
-    fontWeight: 700, fontSize: 13, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-};
-
-const secondaryBtn: React.CSSProperties = {
-    flex: 1, padding: '10px',
-    background: 'rgba(0,0,0,0.05)', color: '#0E0E0E',
-    border: 'none', borderRadius: 8,
-    fontWeight: 600, fontSize: 13, cursor: 'pointer',
-};
-
-const actionBtn = (bg: string, fg: string): React.CSSProperties => ({
-    padding: '11px 8px',
-    background: bg, color: fg,
-    border: 'none', borderRadius: 9,
-    fontWeight: 700, fontSize: 13, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-});
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return (

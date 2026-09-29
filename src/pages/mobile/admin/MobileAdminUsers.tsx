@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useUserStore } from '../../../store/userStore';
 import { cashboxApi } from '../../../api/cashbox';
 import type { User } from '../../../store/types';
+import { Z_SHEET, SHEET_FOOTER, SHEET_MAX_HEIGHT } from './sheetLayers';
 
 /**
  * Mobile admin — users search & quick view.
@@ -302,7 +303,9 @@ function TopupSheet({ user, onClose, onDone }: {
 
     return (
         <div
-            style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+            // Z_SHEET: было 90 — ниже нижнего меню (100), и оно закрывало
+            // кнопку «Пополнить»; промах уводил на вкладку «Финансы».
+            style={{ position: 'fixed', inset: 0, zIndex: Z_SHEET, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
             onClick={onClose}
         >
             <div
@@ -311,9 +314,10 @@ function TopupSheet({ user, onClose, onDone }: {
                     width: '100%', maxWidth: 480,
                     background: '#fff',
                     borderRadius: '18px 18px 0 0',
-                    padding: '18px 16px',
-                    paddingBottom: 'calc(18px + env(safe-area-inset-bottom, 0px))',
-                    maxHeight: '85vh', overflowY: 'auto',
+                    // Низ с отступом под «домашнюю полоску» несёт SHEET_FOOTER.
+                    padding: '18px 16px 0',
+                    maxHeight: SHEET_MAX_HEIGHT, overflowY: 'auto',
+                    overscrollBehavior: 'contain',
                     display: 'flex', flexDirection: 'column', gap: 14,
                 }}
             >
@@ -366,22 +370,24 @@ function TopupSheet({ user, onClose, onDone }: {
                     </div>
                 </div>
 
-                <button
-                    onClick={submit}
-                    disabled={saving || value <= 0}
-                    style={{
-                        width: '100%', padding: '14px',
-                        borderRadius: 14, border: 'none',
-                        background: '#0E0E0E', color: '#fff',
-                        fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
-                        cursor: 'pointer', opacity: saving || value <= 0 ? 0.55 : 1,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                        minHeight: 50,
-                    }}
-                >
-                    {saving && <Loader2 size={16} className="animate-spin" />}
-                    Пополнить на {value > 0 ? value : '—'} ₾
-                </button>
+                <div style={SHEET_FOOTER}>
+                    <button
+                        onClick={submit}
+                        disabled={saving || value <= 0}
+                        style={{
+                            width: '100%', padding: '14px',
+                            borderRadius: 14, border: 'none',
+                            background: '#0E0E0E', color: '#fff',
+                            fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
+                            cursor: 'pointer', opacity: saving || value <= 0 ? 0.55 : 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                            minHeight: 50,
+                        }}
+                    >
+                        {saving && <Loader2 size={16} className="animate-spin" />}
+                        Пополнить на {value > 0 ? value : '—'} ₾
+                    </button>
+                </div>
             </div>
         </div>
     );

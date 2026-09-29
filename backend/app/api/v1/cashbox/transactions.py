@@ -133,6 +133,7 @@ def list_transactions(
     type: Optional[str] = Query(None),
     category_id: Optional[str] = Query(None),
     payment_method: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
 ):
@@ -156,6 +157,10 @@ def list_transactions(
         stmt = stmt.where(CashboxTransaction.category_id == category_id)
     if payment_method:
         stmt = stmt.where(CashboxTransaction.payment_method == payment_method)
+    # Филиал фильтруем на сервере: телефон раньше брал последние N операций
+    # всей сети и уже потом отбирал свой филиал — от него оставались крохи.
+    if branch:
+        stmt = stmt.where(CashboxTransaction.branch == branch)
 
     stmt = stmt.offset(skip).limit(limit)
     transactions = session.exec(stmt).all()
@@ -175,6 +180,90 @@ def list_transactions(
         data.category_name = cat_names.get(t.category_id) if t.category_id else None
         result.append(data)
     return result
+
+
+# Корректировки — не деньги. Так помечены недельная скидка (weekly_rebate) и
+# ручная правка баланса клиента (users/admin.py): это запись «для истории»,
+# из кассы при этом ничего не приходит и не уходит. /balance их не считает —
+# итоги за период тоже не должны.
+NON_MONEY_METHOD = "adjustment"
+
+
+def _parse_range_bound(value: Optional[str]) -> Optional[datetime]:
+    """Граница периода → наивное UTC (так даты лежат в базе).
+
+    Телефон шлёт toISOString() с 'Z'. До Python 3.11 fromisoformat 'Z' не
+    понимает — меняем на +00:00 сами. Кривую дату не глотаем молча: итог
+    «за всё время» вместо «за неделю» хуже честной ошибки.
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, f"Неверная дата: {value}")
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+@router.get("/summary")
+def get_period_summary(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_cashbox),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
+):
+    """Итоги кассы за период: сколько реально пришло и ушло денег.
+
+    Мобильные «Финансы» считали «Доход / Расход» на телефоне по последним
+    100 операциям — остальное за неделю/месяц молча выпадало, а недельные
+    скидки и правки балансов шли как настоящие деньги. Здесь сумма по ВСЕМ
+    операциям периода, корректировки — отдельной строкой, не в итогах.
+    """
+    dt_from = _parse_range_bound(date_from)
+    dt_to = _parse_range_bound(date_to)
+
+    stmt = select(
+        CashboxTransaction.type,
+        CashboxTransaction.payment_method,
+        func.coalesce(func.sum(CashboxTransaction.amount), 0),
+        func.count(),
+    ).group_by(CashboxTransaction.type, CashboxTransaction.payment_method)
+    if dt_from:
+        stmt = stmt.where(CashboxTransaction.date >= dt_from)
+    if dt_to:
+        stmt = stmt.where(CashboxTransaction.date <= dt_to)
+    if branch:
+        stmt = stmt.where(CashboxTransaction.branch == branch)
+
+    income = expense = adj_income = adj_expense = 0.0
+    count = adj_count = 0
+    for tx_type, method, total, n in session.exec(stmt).all():
+        total = float(total or 0)
+        if method == NON_MONEY_METHOD:
+            adj_count += int(n)
+            if tx_type == "income":
+                adj_income += total
+            else:
+                adj_expense += total
+            continue
+        count += int(n)
+        if tx_type == "income":
+            income += total
+        else:
+            expense += total
+
+    return {
+        "income": round(income, 2),
+        "expense": round(expense, 2),
+        "net": round(income - expense, 2),
+        "count": count,
+        "adjustment_income": round(adj_income, 2),
+        "adjustment_expense": round(adj_expense, 2),
+        "adjustment_count": adj_count,
+    }
 
 
 @router.post("/transactions", response_model=CashboxTransactionRead)
