@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import { ArrowLeft, Check, Clock, Hourglass, MapPin, Loader2, Repeat } from 'lucide-react';
+import { Check, ChevronDown, Hourglass, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
@@ -21,11 +21,15 @@ import type { Format } from '../../types';
 import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
-import { COLOR, STATUS, Z } from '../../design/tokens';
+import { COLOR, RADIUS, STATUS, TEXT, Z } from '../../design/tokens';
 import { formatDateLabel, formatDayMonthShort, formatGel, formatTime } from '../../utils/format';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
+import { Field as FormField, Input, Select } from '../../components/ui/Field';
+import { toastApiError } from '../../utils/errors';
+import { catalogPath } from '../../utils/catalogPath';
 
 /** Отказ require_can_book: «бронирование только для специалистов, подайте
  *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
@@ -59,6 +63,12 @@ export function MobileCheckout() {
     const state = useBookingStore();
     const [submitting, setSubmitting] = useState(false);
     const [confirmed, setConfirmed] = useState(false);
+    // Волна 2 (вёрстка V1): экран подтверждения после брони и шторки
+    // «Время», «Чем платите», раскрытые «Допуслуги».
+    const [done, setDone] = useState<{ pending: boolean } | null>(null);
+    const [timeOpen, setTimeOpen] = useState(false);
+    const [payOpen, setPayOpen] = useState(false);
+    const [extrasOpen, setExtrasOpen] = useState(false);
     // Бронь только для специалистов (require_can_book). Знаем заранее по роли,
     // а если сервер всё же ответил таким 403 — показываем ту же карточку с
     // анкетой вместо красного тоста с адресом, на который нельзя нажать.
@@ -409,7 +419,7 @@ export function MobileCheckout() {
                 ? ` · пропущено занятых: ${result.skipped.length}`
                 : '';
             toast.success(
-                `Серия создана: ${result.created} ${ruPlural(result.created, ['сессия', 'сессии', 'сессий'])} · ${formatGel(result.totalCost, { fraction: 0 })}${skippedNote}`,
+                `Серия создана: ${result.created} ${ruPlural(result.created, ['бронь', 'брони', 'броней'])} · ${formatGel(result.totalCost, { fraction: 0 })}${skippedNote}`,
                 { duration: 6000 },
             );
             // Navigate immediately — the toast container lives at app
@@ -423,8 +433,7 @@ export function MobileCheckout() {
             } else if (isSpecialistOnlyRefusal(e)) {
                 showSpecialistGate();
             } else {
-                const msg = typeof detail === 'string' ? detail : (e.message || 'Не удалось создать серию');
-                toast.error(msg);
+                toastApiError(e, 'Не удалось создать серию');
             }
         } finally {
             setSubmitting(false);
@@ -501,371 +510,181 @@ export function MobileCheckout() {
                 await Promise.all([fetchCurrentUser(), fetchBookings()]);
                 useBookingStore.getState().reset();
                 setConfirmed(true);
-                if ((created as any).status === 'pending_approval') {
-                    toast.success(
-                        'Заявка отправлена на согласование. Администратор одобрит её в ближайшее время — мы пришлём уведомление.',
-                        { duration: 7000 },
-                    );
-                } else {
-                    // «Ещё бронь» — быстрый повтор без полноценной корзины:
-                    // возвращает к выбору свободных окон на ту же дату.
-                    // Дата из уже собранной брони: стор к этому моменту сброшен.
-                    const _d = newBookings[0].date;
-                    toast.success('Бронь создана', {
-                        duration: 6000,
-                        action: {
-                            label: 'Ещё бронь',
-                            onClick: () => navigate(`/m/find?date=${_d}`),
-                        },
-                    });
-                }
-                navigate('/m/bookings', { replace: true });
+                // Волна 2: экран подтверждения вместо уведомления (решение
+                // владельца). Статус — из ответа сервера на ЭТУ бронь:
+                // на одобрении — «Ждём подтверждения администратора».
+                setDone({ pending: (created as any).status === 'pending_approval' });
             } else {
                 // Multi-slot batch — addBookings handles its own toasts/errors.
                 await addBookings(newBookings as any);
                 useBookingStore.getState().reset();
                 setConfirmed(true);
-                toast.success('Брони созданы');
-                navigate('/m/bookings', { replace: true });
+                setDone({ pending: isHotBooking });
             }
         } catch (e: any) {
             if (isSpecialistOnlyRefusal(e)) {
                 showSpecialistGate();
                 return;
             }
-            const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : (e.message || 'Не удалось забронировать');
-            toast.error(msg);
+            toastApiError(e, 'Не удалось забронировать');
         } finally {
             setSubmitting(false);
         }
     };
 
+    // Снимок брони для экрана подтверждения: после успеха стор сбрасывается,
+    // а экран должен показать, что именно забронировано.
+    const summaryRef = useRef<{ day: string; time: string; place: string; more: number } | null>(null);
+    if (firstSlot) {
+        const lastItem = priced.items[priced.items.length - 1];
+        summaryRef.current = {
+            day: formatDateLabel(state.date, { capitalize: true }),
+            time: `${firstSlot.startTime}–${formatTime(lastItem.end)}`,
+            place: [resource?.name, location?.name].filter(Boolean).join(' · '),
+            more: priced.items.length - 1,
+        };
+    }
+
+    // После брони — экран подтверждения вместо уведомления (решение владельца).
+    if (done) {
+        return (
+            <DoneScreen
+                pending={done.pending}
+                summary={summaryRef.current}
+                onBookings={() => navigate('/m/bookings', { replace: true })}
+                onHome={() => navigate('/m/today', { replace: true })}
+            />
+        );
+    }
+
     if (!firstSlot) return null;
+
+    const lastEnd = priced.items[priced.items.length - 1].end;
+    const firstStart = priced.items[0]?.start;
+    const moreThanDay = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
+    const extrasSummary = state.extras.length === 0
+        ? 'Нет'
+        : EXTRAS.filter(e => state.extras.includes(e.id)).map(e => e.name).join(', ');
+    const recurSummary = recurPattern === 'once'
+        ? 'Нет'
+        : `${RECUR_LABEL[recurPattern]}${effectiveOccurrences > 0 ? ` · ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['раз', 'раза', 'раз'])}` : ''}`;
+    // «Чем платите» одной строкой: способ и что спишется (из payLabel/payName).
+    const payTitle = payMethod === 'bonus'
+        ? `Бонусные часы · ${payLabel}`
+        : payMethod === 'subscription'
+            ? `Абонемент · ${payLabel}`
+            : isSeries && plan.subCovers
+                ? 'Сначала часы абонемента, остальное — с баланса'
+                : `С баланса · ${payLabel}`;
 
     return (
         <>
             <div style={{
-                paddingTop: 8,
-                paddingBottom: 'calc(156px + env(safe-area-inset-bottom, 0px))',
-                display: 'flex', flexDirection: 'column', gap: 18,
+                paddingBottom: 'calc(96px + env(safe-area-inset-bottom, 0px))',
+                display: 'flex', flexDirection: 'column', gap: 16,
             }}>
-                {/* Header */}
-                <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <button
-                        onClick={() => navigate(-1)}
-                        aria-label="Назад"
-                        style={{
-                            background: COLOR.sunken,
-                            border: 'none',
-                            borderRadius: 10,
-                            width: 44, height: 44,
-                            display: 'grid', placeItems: 'center',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        <ArrowLeft size={18} />
-                    </button>
-                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
-                        Подтверждение
-                    </h1>
-                </div>
+                {/* «Назад» — через общую шапку: без истории (ссылка) — в «Свободно». */}
+                <MobilePageHeader title="Оформление брони" fallbackTo="/m/find" />
 
                 {needsApplication && (
-                    <div style={{ padding: '0 16px' }}>
+                    <div style={pad}>
                         <SpecialistGateCard variant="mobile" status={applicationStatus} />
                     </div>
                 )}
 
                 {/* Admin-proxy specialist picker — visible only to admins. */}
                 {isAdminActor && specialistChoices.length > 0 && (
-                    <div style={{ padding: '0 16px' }}>
-                        <Section title="За кого бронируете?">
-                            <select
+                    <div style={pad}>
+                        <FormField
+                            label="За кого бронируете"
+                            hint={state.bookingForUser
+                                ? `Списание и абонемент — у ${effectiveUser?.name || state.bookingForUser}.`
+                                : undefined}
+                        >
+                            <Select
                                 value={state.bookingForUser || ''}
                                 onChange={e => useBookingStore.setState({ bookingForUser: e.target.value || null })}
-                                style={{
-                                    width: '100%',
-                                    background: COLOR.card,
-                                    border: `1px solid ${COLOR.ink10}`,
-                                    borderRadius: 12,
-                                    padding: '12px 14px',
-                                    fontSize: 16,
-                                    fontFamily: 'inherit',
-                                    color: COLOR.ink,
-                                    appearance: 'none',
-                                    WebkitAppearance: 'none',
-                                }}
                             >
-                                <option value="">— За себя ({currentUser?.name || currentUser?.email}) —</option>
+                                <option value="">За себя ({currentUser?.name || currentUser?.email})</option>
                                 {specialistChoices
                                     .filter(u => u.email !== currentUser?.email)
                                     .map(u => (
                                         <option key={u.id} value={u.email}>{u.name || u.email}</option>
                                     ))}
-                            </select>
-                            {state.bookingForUser && (
-                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 6 }}>
-                                    Списание/абонемент уйдут с {effectiveUser?.name || state.bookingForUser}.
-                                </div>
-                            )}
-                        </Section>
+                            </Select>
+                        </FormField>
                     </div>
                 )}
 
-                {/* Hot booking notice */}
-                {isHotBooking && (
-                    <div style={{ padding: '0 16px' }}>
-                        <div style={{
-                            background: STATUS.pending.bg,
-                            border: `1px solid ${STATUS.pending.fg}33`,
-                            color: STATUS.pending.fg,
-                            borderRadius: 12,
-                            padding: '10px 12px',
-                            fontSize: 13,
-                            lineHeight: 1.4,
-                        }}>
-                            <Hourglass size={14} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4 }} />
-                            <b>{(() => {
-                                const f = priced.items[0];
-                                if (!f) return 'Скоро старт';
-                                const d = f.start.getDay();
-                                return (d === 0 || d === 6) ? 'Меньше 24 ч до начала (выходной)' : 'Меньше 12 ч до начала';
-                            })()}</b> — бронь уйдёт администратору на одобрение.
-                            Слот закрепится за вами только после подтверждения.
-                        </div>
-                    </div>
-                )}
-
-                {/* Slot summary — cabinet visible prominently + "Change"
-                    affordance (Galina 2026-05-31: бронились не те кабинеты,
-                    а проверить было негде). Tap "Сменить" returns to /m/find
-                    with the same date/duration so user can re-pick. */}
-                <div style={{ padding: '0 16px' }}>
-                    <div style={{
-                        background: COLOR.ink,
-                        color: COLOR.onInk,
-                        borderRadius: 14,
-                        padding: 16,
-                        display: 'flex', flexDirection: 'column', gap: 8,
-                    }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                            {formatDateLabel(state.date)}
-                        </div>
-                        <div style={{ fontSize: 20, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Clock size={18} />
-                            {firstSlot.startTime}–{formatTime(priced.items[priced.items.length - 1].end)}
-                            <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.7 }}>
-                                · {formatBookingDuration(Math.round(totalDurationHours * 60))}
-                            </span>
-                        </div>
-                        <div style={{
-                            fontSize: 15,
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            background: `${COLOR.onInk}1A`,
-                            padding: '8px 10px',
-                            borderRadius: 8,
-                        }}>
-                            <MapPin size={15} /> {resource?.name}
-                            {location && <span style={{ opacity: 0.7, fontWeight: 500 }}>· {location.name}</span>}
+                {/* Карточка брони: день, время (один раз), кабинет · центр · адрес, «Изменить». */}
+                <div style={pad}>
+                    <div style={{ ...card, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: TEXT.body, fontWeight: 600 }}>{formatDateLabel(state.date, { capitalize: true })}</div>
+                            <div className="num" style={{ fontSize: TEXT.title, fontWeight: 600, margin: '2px 0' }}>
+                                {firstSlot.startTime}–{formatTime(lastEnd)}
+                                <span style={{ fontSize: TEXT.small, fontWeight: 500, color: COLOR.ink60 }}>
+                                    {' '}· {formatBookingDuration(Math.round(totalDurationHours * 60))}
+                                </span>
+                            </div>
+                            <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                                {resource?.name}{location ? ` · ${location.name}, ${location.address}` : ''}
+                            </div>
                         </div>
                         <button
-                            onClick={() => navigate(-1)}
-                            style={{
-                                marginTop: 2,
-                                alignSelf: 'flex-start',
-                                background: 'transparent',
-                                color: COLOR.onInk,
-                                border: `1px solid ${COLOR.onInk}4D`,
-                                borderRadius: 8,
-                                minHeight: 44,
-                                padding: '0 12px',
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                opacity: 0.9,
-                            }}
+                            type="button"
+                            onClick={() => (editSlot ? setTimeOpen(true) : navigate(-1))}
+                            style={linkBtn}
                         >
-                            ← Сменить кабинет / время
+                            Изменить
                         </button>
                     </div>
                 </div>
 
                 {/* Клиент Psy-CRM — только для специалистов (у кого есть клиенты). */}
                 {crmClients.length > 0 && (
-                    <Section title="Клиент (Psy-CRM)">
-                        <select
-                            value={selectedCrmClientId}
-                            onChange={e => setSelectedCrmClientId(e.target.value)}
-                            style={{
-                                width: '100%', padding: '12px 14px', borderRadius: 12,
-                                border: `1px solid ${COLOR.ink10}`, background: COLOR.card,
-                                fontFamily: 'inherit', fontSize: 14, color: COLOR.ink,
-                            }}
-                        >
-                            <option value="">Без привязки к клиенту</option>
-                            {crmClients.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </select>
-                        <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 8 }}>
-                            Бронь будет помечена клиентом — видно в шахматке и в CRM.
-                        </div>
-                    </Section>
-                )}
-
-                {/* Время: начало (шаг 30 мин) + длительность. Прямо здесь, рядом с
-                    форматом/допами/ценой — ничего не перекрывает и всё видно. */}
-                {editSlot && (
-                    <Section title="Время">
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                <button
-                                    onClick={() => applyTime(curStartMin - 30, curDurMin)}
-                                    disabled={!isFree(curStartMin - 30, curDurMin)}
-                                    aria-label="Начать на 30 минут раньше"
-                                    style={{
-                                        width: 96, minHeight: 44, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
-                                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                                        border: `1px solid ${COLOR.ink10}`, background: COLOR.card,
-                                        opacity: isFree(curStartMin - 30, curDurMin) ? 1 : 0.35,
-                                    }}
-                                >← Раньше</button>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 22, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                                        {mmToHHMM(curStartMin)}–{mmToHHMM(curStartMin + curDurMin)}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>начало · окончание</div>
-                                </div>
-                                <button
-                                    onClick={() => applyTime(curStartMin + 30, curDurMin)}
-                                    disabled={!isFree(curStartMin + 30, curDurMin)}
-                                    aria-label="Начать на 30 минут позже"
-                                    style={{
-                                        width: 96, minHeight: 44, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
-                                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                                        border: `1px solid ${COLOR.ink10}`, background: COLOR.card,
-                                        opacity: isFree(curStartMin + 30, curDurMin) ? 1 : 0.35,
-                                    }}
-                                >Позже →</button>
-                            </div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                {[60, 90, 120, 180].map(d => {
-                                    const ok = isFree(curStartMin, d);
-                                    const active = curDurMin === d;
-                                    return (
-                                        <button
-                                            key={d}
-                                            onClick={() => ok && applyTime(curStartMin, d)}
-                                            disabled={!ok}
-                                            aria-pressed={active}
-                                            style={{
-                                                flex: 1, minHeight: 44, padding: '12px 0', borderRadius: 12, cursor: ok ? 'pointer' : 'default',
-                                                fontFamily: 'inherit', fontSize: 14, fontWeight: 600,
-                                                border: active ? 'none' : `1px solid ${COLOR.ink10}`,
-                                                background: active ? COLOR.ink : COLOR.card,
-                                                color: active ? COLOR.onInk : COLOR.ink,
-                                                opacity: ok ? 1 : 0.35,
-                                            }}
-                                        >
-                                            {formatBookingDuration(d)}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            <div style={{ fontSize: 12, color: COLOR.ink60 }}>
-                                Серым — время, которое уже занято или выходит за 09:00–22:00.
-                            </div>
-                        </div>
-                    </Section>
+                    <div style={pad}>
+                        <FormField label="Клиент из CRM" hint="Бронь будет помечена клиентом — видно в шахматке и в CRM." optional>
+                            <Select value={selectedCrmClientId} onChange={e => setSelectedCrmClientId(e.target.value)}>
+                                <option value="">Без привязки к клиенту</option>
+                                {crmClients.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </Select>
+                        </FormField>
+                    </div>
                 )}
 
                 {/* Формат — показываем, только если у кабинета правда есть выбор.
-                    В большинстве кабинетов формат один (индивидуальный), и блок
-                    из трёх кнопок, где две серые, только удлинял страницу. */}
+                    В большинстве кабинетов формат один (индивидуальный). */}
                 {(resource?.formats?.length ?? 1) > 1 && (
-                <Section title="Формат">
-                    <div style={{
-                        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
-                    }}>
-                        {([
-                            ['individual', 'Индивидуальный', '1 на 1'],
-                            ['group', 'Групповой', 'от 5 чел. (с терапевтом)'],
-                            ['intervision', 'Интервизия', 'коллеги'],
-                        ] as Array<[Format, string, string]>).map(([id, label, sub]) => {
-                            const active = state.format === id;
-                            const supported = !resource?.formats || resource.formats.includes(id);
-                            return (
-                                <button
-                                    key={id}
-                                    disabled={!supported}
-                                    aria-pressed={active}
-                                    onClick={() => useBookingStore.setState({ format: id })}
-                                    style={{
-                                        background: active ? COLOR.ink : COLOR.card,
-                                        color: active ? COLOR.onInk : COLOR.ink,
-                                        border: active ? 'none' : `1px solid ${COLOR.ink10}`,
-                                        borderRadius: 12,
-                                        padding: '12px 8px',
-                                        fontFamily: 'inherit',
-                                        cursor: supported ? 'pointer' : 'not-allowed',
-                                        opacity: supported ? 1 : 0.4,
-                                        textAlign: 'center',
-                                        display: 'flex', flexDirection: 'column', gap: 2,
-                                    }}
-                                >
-                                    <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
-                                    <span style={{ fontSize: 12, opacity: 0.7 }}>{sub}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </Section>
-                )}
-
-                {/* Extras */}
-                {availableExtras.length > 0 && (
-                    <Section title="Дополнительные услуги">
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {availableExtras.map(e => {
-                                const active = state.extras.includes(e.id);
+                    <Section title="Формат">
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                            {([
+                                ['individual', 'Индивидуальный', '1 на 1'],
+                                ['group', 'Групповой', 'от 5 чел.'],
+                                ['intervision', 'Интервизия', 'коллеги'],
+                            ] as Array<[Format, string, string]>).map(([id, label, sub]) => {
+                                const active = state.format === id;
+                                const supported = !resource?.formats || resource.formats.includes(id);
                                 return (
                                     <button
-                                        key={e.id}
-                                        role="checkbox"
-                                        aria-checked={active}
-                                        onClick={() => state.toggleExtra(e.id)}
+                                        key={id}
+                                        disabled={!supported}
+                                        aria-pressed={active}
+                                        onClick={() => useBookingStore.setState({ format: id })}
+                                        className="press"
                                         style={{
-                                            background: COLOR.card,
-                                            border: `1px solid ${active ? COLOR.ink : COLOR.ink10}`,
-                                            borderRadius: 12,
-                                            padding: '12px 14px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: 12,
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                            textAlign: 'left',
-                                            color: COLOR.ink,
+                                            ...choiceBtn(active),
+                                            cursor: supported ? 'pointer' : 'not-allowed',
+                                            opacity: supported ? 1 : 0.45,
+                                            flexDirection: 'column',
+                                            gap: 2,
+                                            padding: '8px 6px',
                                         }}
                                     >
-                                        <div style={{
-                                            width: 22, height: 22,
-                                            borderRadius: 6,
-                                            background: active ? COLOR.ink : 'transparent',
-                                            border: `1.5px solid ${active ? COLOR.ink : COLOR.ink20}`,
-                                            display: 'grid', placeItems: 'center',
-                                            color: COLOR.onInk,
-                                            flexShrink: 0,
-                                        }}>
-                                            {active && <Check size={14} />}
-                                        </div>
-                                        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{e.name}</span>
-                                        <span style={{ fontSize: 13, color: COLOR.ink60 }}>{e.price > 0 ? `+${formatGel(e.price)}` : 'бесплатно'}</span>
+                                        <span style={{ fontSize: TEXT.caption, fontWeight: 600 }}>{label}</span>
+                                        <span style={{ fontSize: TEXT.caption, color: COLOR.ink60 }}>{sub}</span>
                                     </button>
                                 );
                             })}
@@ -873,231 +692,23 @@ export function MobileCheckout() {
                     </Section>
                 )}
 
-                {/* Повторение — нужно редко, поэтому по умолчанию свёрнуто:
-                    у всех остальных путь до кнопки «Забронировать» короче. */}
-                {!recurOpen && recurPattern === 'once' ? (
-                    <div style={{ padding: '0 16px' }}>
-                        <button
-                            onClick={() => setRecurOpen(true)}
-                            style={{
-                                width: '100%', minHeight: 44, padding: '12px 14px', borderRadius: 12,
-                                border: `1px dashed ${COLOR.ink20}`, background: 'transparent',
-                                fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-                                color: COLOR.ink80, cursor: 'pointer', textAlign: 'left',
-                                display: 'flex', alignItems: 'center', gap: 8,
-                            }}
-                        >
-                            <Repeat size={16} aria-hidden="true" /> Повторять регулярно →
-                        </button>
-                    </div>
-                ) : (
-                <Section title="Повторение">
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {([
-                            ['once', 'Разово'],
-                            ['weekly', 'Каждую неделю'],
-                            ['biweekly', 'Раз в 2 недели'],
-                            ['monthly', 'Раз в 4 недели'],
-                        ] as Array<['once' | 'weekly' | 'biweekly' | 'monthly', string]>).map(([id, label]) => {
-                            const active = recurPattern === id;
-                            return (
-                                <button
-                                    key={id}
-                                    aria-pressed={active}
-                                    onClick={() => setRecurPattern(id)}
-                                    style={{
-                                        background: active ? COLOR.ink : COLOR.sunken,
-                                        color: active ? COLOR.onInk : COLOR.ink,
-                                        border: 'none',
-                                        borderRadius: 10,
-                                        minHeight: 44,
-                                        padding: '0 12px',
-                                        cursor: 'pointer',
-                                        fontFamily: 'inherit',
-                                        fontSize: 12,
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    {label}
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    {recurPattern !== 'once' && (
-                        <div style={{ marginTop: 10 }}>
-                            {/* Mode toggle: N раз / до даты */}
-                            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                                {([
-                                    ['count', 'Сколько раз'],
-                                    ['until', 'До даты'],
-                                ] as Array<['count' | 'until', string]>).map(([id, label]) => {
-                                    const active = recurMode === id;
-                                    return (
-                                        <button
-                                            key={id}
-                                            aria-pressed={active}
-                                            onClick={() => setRecurMode(id)}
-                                            style={{
-                                                flex: 1,
-                                                background: active ? COLOR.card : 'transparent',
-                                                color: COLOR.ink,
-                                                border: `1px solid ${active ? COLOR.ink : COLOR.ink10}`,
-                                                borderRadius: 10,
-                                                minHeight: 44,
-                                                padding: '0 10px',
-                                                cursor: 'pointer',
-                                                fontFamily: 'inherit',
-                                                fontSize: 12,
-                                                fontWeight: 600,
-                                            }}
-                                        >
-                                            {label}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
-                            {recurMode === 'count' ? (
-                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                    {[4, 8, 12, 16, 24].map(n => {
-                                        const active = recurOccurrences === n;
-                                        return (
-                                            <button
-                                                key={n}
-                                                aria-pressed={active}
-                                                onClick={() => setRecurOccurrences(n)}
-                                                style={{
-                                                    background: active ? COLOR.ink : COLOR.sunken,
-                                                    color: active ? COLOR.onInk : COLOR.ink,
-                                                    border: 'none',
-                                                    borderRadius: 10,
-                                                    minWidth: 44,
-                                                    minHeight: 44,
-                                                    padding: '0 14px',
-                                                    cursor: 'pointer',
-                                                    fontFamily: 'inherit',
-                                                    fontSize: 13,
-                                                    fontWeight: 600,
-                                                }}
-                                            >
-                                                {n}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            ) : (
-                                <div>
-                                    <input
-                                        type="date"
-                                        value={recurUntil}
-                                        min={fmtDate(state.date, 'yyyy-MM-dd')}
-                                        onChange={e => setRecurUntil(e.target.value)}
-                                        style={{
-                                            width: '100%',
-                                            background: COLOR.card,
-                                            border: `1px solid ${COLOR.ink10}`,
-                                            borderRadius: 10,
-                                            padding: '10px 12px',
-                                            fontFamily: 'inherit',
-                                            fontSize: 16,
-                                            color: COLOR.ink,
-                                        }}
-                                    />
-                                </div>
-                            )}
-
-                            {recurDates.length > 0 && (
-                                <div style={{
-                                    marginTop: 10,
-                                    background: COLOR.sunken,
-                                    borderRadius: 10,
-                                    padding: '10px 12px',
-                                    fontSize: 12,
-                                    color: COLOR.ink80,
-                                    lineHeight: 1.5,
-                                }}>
-                                    <b>Создастся {recurDates.length} {ruPlural(recurDates.length, ['сессия', 'сессии', 'сессий'])}:</b>{' '}
-                                    {recurDates
-                                        .slice(0, 4)
-                                        .map(d => formatDayMonthShort(d))
-                                        .join(', ')}
-                                    {recurDates.length > 4 && (
-                                        <>, …, <b>{formatDayMonthShort(recurDates[recurDates.length - 1])}</b></>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </Section>
-                )}
-
-                {/* Payment — варианты в порядке сервера: бонус → абонемент → баланс. */}
-                <div id="m-checkout-pay" style={{ scrollMarginTop: 12 }}>
-                <Section title="Оплата">
-                    <div role="radiogroup" aria-label="Способ оплаты" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {totalBonusHours > 0 && !isSeries && !plan.free && (
-                            <PaymentRow
-                                label="Бонусные часы"
-                                sub={plan.bonusCovers
-                                    ? `${fmtHours(totalBonusHours)} бесплатно`
-                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}`}
-                                disabled={!plan.bonusCovers}
-                                active={payMethod === 'bonus'}
-                                onClick={() => pickPay('bonus')}
+                {/* Стоимость — построчно, из того же calculatePrice. Пик (09–10,
+                    20–22) уже внутри цены кабинета — показываем его строкой «в т.ч.»,
+                    чтобы «20 ₾/ч» на карточке и 25 ₾ здесь не выглядели обманом. */}
+                <Section title="Стоимость">
+                    <div style={{ ...card, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {priced.items.map((i, idx) => (
+                            <Row
+                                key={`${i.resourceId}-${i.startTime}-${idx}`}
+                                label={`${RESOURCES.find(r => r.id === i.resourceId)?.name ?? i.resourceId}${priced.items.length > 1 ? `, ${i.startTime}` : ''} · ${formatBookingDuration(i.duration)}`}
+                                value={formatGel(i.price.basePrice, { fraction: 0 })}
                             />
-                        )}
-                        {effectiveUser?.subscription && (
-                            <PaymentRow
-                                label="Абонемент"
-                                sub={!subHours.ok
-                                    ? subHours.reason
-                                    : plan.subCovers
-                                        ? subscriptionHoursLabel(subHours)
-                                        : `${subscriptionHoursLabel(subHours)}, нужно ${fmtHours(totalDurationHours)}`}
-                                disabled={!plan.subCovers}
-                                active={payMethod === 'subscription'}
-                                onClick={() => pickPay('subscription')}
-                            />
-                        )}
-                        <PaymentRow
-                            label="Баланс"
-                            // Показываем баланс того, ЗА КОГО бронь (админ-прокси
-                            // бронирует за клиента — списание идёт с клиента, не
-                            // с админа; аудит 30.08). Пока бронь покрывают бонусы
-                            // или абонемент, сервер деньги не возьмёт — вариант
-                            // недоступен, и мы говорим почему.
-                            sub={(() => {
-                                const bal = effectiveUser ? formatGel(effectiveUser.balance ?? 0, { fraction: 0 }) : '';
-                                if (!isSelectable('balance', plan, isSeries)) {
-                                    return `${bal} · ${balanceLockedReason(plan).toLowerCase()}`;
-                                }
-                                if (isSeries && plan.subCovers) return `${bal} · сначала спишутся часы абонемента`;
-                                return bal;
-                            })()}
-                            disabled={!isSelectable('balance', plan, isSeries)}
-                            active={payMethod === 'balance'}
-                            onClick={() => pickPay('balance')}
-                        />
-                    </div>
-                </Section>
-                </div>
-
-                {/* Price summary */}
-                <div style={{ padding: '0 16px' }}>
-                    <div style={{
-                        background: COLOR.sunken,
-                        borderRadius: 14,
-                        padding: 16,
-                        display: 'flex', flexDirection: 'column', gap: 8,
-                    }}>
-                        <Row label="База" value={formatGel(priced.items.reduce((s, i) => s + i.price.basePrice, 0), { fraction: 0 })} />
-                        {/* Пик (09–10, 20–22) уже внутри «Базы» — раньше клиент видел
-                            на карточке кабинета «20 ₾/ч», а здесь 25 ₾ без объяснения. */}
+                        ))}
                         {priced.items.some(i => (i.price.peakSurcharge ?? 0) > 0) && (
                             <Row
                                 label="в т.ч. пиковые часы"
                                 value={`+${formatGel(priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0), { fraction: 0 })}`}
+                                muted
                             />
                         )}
                         {priced.items.some(i => i.price.extrasPrice > 0) && (
@@ -1110,41 +721,238 @@ export function MobileCheckout() {
                                 tone="ok"
                             />
                         )}
-                        <div style={{ height: 1, background: COLOR.ink08, margin: '4px 0' }} />
-                        <Row
-                            label="Итого"
-                            value={isSeries || payMethod === 'balance'
-                                ? formatGel(priced.total, { fraction: 0 })
-                                : payMethod === 'bonus'
-                                    ? formatGel(0)
-                                    : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney, { fraction: 0 })}` : ''}`}
-                            bold
+                        <div style={{ borderTop: `1px solid ${COLOR.ink10}`, paddingTop: 8 }}>
+                            <Row
+                                label="Итого"
+                                value={isSeries || payMethod === 'balance'
+                                    ? formatGel(priced.total, { fraction: 0 })
+                                    : payMethod === 'bonus'
+                                        ? formatGel(0)
+                                        : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney, { fraction: 0 })}` : ''}`}
+                                bold
+                            />
+                        </div>
+                    </div>
+                </Section>
+
+                {/* Чем платите — одна строка; три способа — в шторке. */}
+                {!needsApplication && (
+                    <div style={pad} id="m-checkout-pay">
+                        <button
+                            type="button"
+                            onClick={() => setPayOpen(true)}
+                            className="press"
+                            style={{
+                                width: '100%', minHeight: 60,
+                                background: COLOR.accentSoft, color: COLOR.ink,
+                                border: 'none', borderRadius: 12,
+                                padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                                fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer',
+                            }}
+                        >
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ display: 'block', fontSize: TEXT.caption, color: COLOR.ink60 }}>Чем платите</span>
+                                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>{payTitle}</span>
+                            </span>
+                            <span style={{ fontSize: TEXT.small, fontWeight: 600, color: COLOR.accentInk }}>
+                                {payChoices > 1 ? 'Изменить' : 'Подробнее'}
+                            </span>
+                        </button>
+                    </div>
+                )}
+
+                {/* Допуслуги и повтор — свёрнутыми строками (нужны редко). */}
+                <div style={pad}>
+                    <div style={{ ...card, overflow: 'hidden' }}>
+                        {availableExtras.length > 0 && (
+                            <>
+                                <FoldRow
+                                    label="Допуслуги"
+                                    value={state.extras.length === 0 ? 'Нет · Добавить' : extrasSummary}
+                                    open={extrasOpen}
+                                    onToggle={() => setExtrasOpen(o => !o)}
+                                />
+                                {extrasOpen && (
+                                    <div style={{ padding: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        {availableExtras.map(e => {
+                                            const active = state.extras.includes(e.id);
+                                            return (
+                                                <button
+                                                    key={e.id}
+                                                    role="checkbox"
+                                                    aria-checked={active}
+                                                    onClick={() => state.toggleExtra(e.id)}
+                                                    style={{
+                                                        minHeight: 48,
+                                                        background: active ? COLOR.accentSoft : COLOR.card,
+                                                        border: `1px solid ${active ? COLOR.accent : COLOR.ink10}`,
+                                                        borderRadius: RADIUS.control,
+                                                        padding: '8px 12px',
+                                                        display: 'flex', alignItems: 'center', gap: 12,
+                                                        cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: COLOR.ink,
+                                                    }}
+                                                >
+                                                    <span aria-hidden="true" style={{
+                                                        width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                                                        background: active ? COLOR.accent : 'transparent',
+                                                        border: `1.5px solid ${active ? COLOR.accent : COLOR.ink40}`,
+                                                        display: 'grid', placeItems: 'center', color: COLOR.onAccent,
+                                                    }}>
+                                                        {active && <Check size={14} />}
+                                                    </span>
+                                                    <span style={{ flex: 1, fontSize: TEXT.small, fontWeight: 600 }}>{e.name}</span>
+                                                    <span className="num" style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                                                        {e.price > 0 ? `+${formatGel(e.price)}` : 'бесплатно'}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                        <FoldRow
+                            label="Повторять"
+                            value={recurSummary}
+                            open={recurOpen}
+                            onToggle={() => setRecurOpen(o => !o)}
+                            divider={availableExtras.length > 0}
                         />
+                        {recurOpen && (
+                            <div style={{ padding: '0 16px 14px' }}>
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                    {(['once', 'weekly', 'biweekly', 'monthly'] as Array<'once' | 'weekly' | 'biweekly' | 'monthly'>).map(id => {
+                                        const active = recurPattern === id;
+                                        return (
+                                            <button
+                                                key={id}
+                                                aria-pressed={active}
+                                                onClick={() => setRecurPattern(id)}
+                                                style={{ ...choiceBtn(active), padding: '0 12px' }}
+                                            >
+                                                {id === 'once' ? 'Разово' : RECUR_LABEL[id]}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {recurPattern !== 'once' && (
+                                    <div style={{ marginTop: 10 }}>
+                                        {/* Mode toggle: N раз / до даты */}
+                                        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                                            {([
+                                                ['count', 'Сколько раз'],
+                                                ['until', 'До даты'],
+                                            ] as Array<['count' | 'until', string]>).map(([id, label]) => {
+                                                const active = recurMode === id;
+                                                return (
+                                                    <button
+                                                        key={id}
+                                                        aria-pressed={active}
+                                                        onClick={() => setRecurMode(id)}
+                                                        style={{ ...choiceBtn(active), flex: 1, padding: '0 10px' }}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {recurMode === 'count' ? (
+                                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                {[4, 8, 12, 16, 24].map(n => {
+                                                    const active = recurOccurrences === n;
+                                                    return (
+                                                        <button
+                                                            key={n}
+                                                            aria-pressed={active}
+                                                            onClick={() => setRecurOccurrences(n)}
+                                                            className="num"
+                                                            style={{ ...choiceBtn(active), minWidth: 44, padding: '0 14px' }}
+                                                        >
+                                                            {n}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <FormField label="Повторять до">
+                                                <Input
+                                                    kind="date"
+                                                    value={recurUntil}
+                                                    min={fmtDate(state.date, 'yyyy-MM-dd')}
+                                                    onChange={e => setRecurUntil(e.target.value)}
+                                                />
+                                            </FormField>
+                                        )}
+
+                                        {recurDates.length > 0 && (
+                                            <div style={{
+                                                marginTop: 10,
+                                                background: COLOR.sunken,
+                                                borderRadius: RADIUS.control,
+                                                padding: '10px 12px',
+                                                fontSize: TEXT.small,
+                                                color: COLOR.ink80,
+                                                lineHeight: 1.5,
+                                            }}>
+                                                <b>Создадим {recurDates.length} {ruPlural(recurDates.length, ['бронь', 'брони', 'броней'])}:</b>{' '}
+                                                {recurDates
+                                                    .slice(0, 4)
+                                                    .map(d => formatDayMonthShort(d))
+                                                    .join(', ')}
+                                                {recurDates.length > 4 && (
+                                                    <>, …, <b>{formatDayMonthShort(recurDates[recurDates.length - 1])}</b></>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Что произойдёт: одобрение, когда и что спишем, до какого момента
+                    отмена бесплатная. Тексты списания — те же, что были под итогом. */}
+                {!needsApplication && (
+                <Section title="Что произойдёт">
+                    <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 8, fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink }}>
+                        {isHotBooking ? (
+                            <li>
+                                <Hourglass size={14} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4, color: STATUS.pending.fg }} />
+                                <b>{(() => {
+                                    const f = priced.items[0];
+                                    if (!f) return 'Скоро старт';
+                                    const d = f.start.getDay();
+                                    return (d === 0 || d === 6) ? 'Меньше 24 ч до начала (выходной)' : 'Меньше 12 ч до начала';
+                                })()}</b> — бронь уйдёт администратору на одобрение.
+                                {' '}Слот закрепится за вами после подтверждения — пришлём уведомление.
+                            </li>
+                        ) : (
+                            <li>Бронь сразу ваша — подтверждать не нужно.</li>
+                        )}
+
                         {!isSeries && payMethod === 'subscription' && (() => {
-                            const firstStart = priced.items[0]?.start;
                             const deferred = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
                             return (
-                                <>
-                                    <div style={{ fontSize: 12, color: COLOR.ink60 }}>
-                                        Спишется {fmtHours(totalDurationHours)} абонемента{subMoneyNote}
-                                        {deferred && firstStart ? ` — ${formatChargeAt(firstStart)}, за сутки до начала.` : '.'}
-                                    </div>
+                                <li>
+                                    Спишется {fmtHours(totalDurationHours)} абонемента{subMoneyNote}
+                                    {deferred && firstStart ? ` — ${formatChargeAt(firstStart)}, за сутки до начала.` : '.'}
                                     {/* Часть остатка уже обещана будущим броням: честно
                                         говорим, что при нехватке часов крон за сутки до
                                         встречи возьмёт деньги (billing_defer). */}
                                     {!plan.subFreeCovers && (
-                                        <div style={{ fontSize: 12, color: STATUS.danger.fg }}>
+                                        <span style={{ display: 'block', color: STATUS.danger.fg }}>
                                             Свободно только {fmtHours(subHours.free)}: {fmtHours(subHours.reserved)} уже в других бронях.
                                             {' '}Если к списанию часов не хватит, одна из броней спишется с баланса по обычной цене.
-                                        </div>
+                                        </span>
                                     )}
-                                </>
+                                </li>
                             );
                         })()}
                         {!isSeries && payMethod === 'bonus' && (
-                            <div style={{ fontSize: 12, color: COLOR.ink60 }}>
-                                Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}
-                            </div>
+                            <li>Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}.</li>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
                             честно предупреждаем про уход в долг — раньше клиент
@@ -1156,51 +964,58 @@ export function MobileCheckout() {
                             // Списание отложенное: бронь дальше 24 ч спишется за сутки
                             // до начала (как на сервере). Раньше текст звучал так, будто
                             // деньги уходят прямо сейчас, и остаток «после» был неверным.
-                            const firstStart = priced.items[0]?.start;
                             const deferred = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
                             if (deferred) {
                                 return (
-                                    <div style={{ fontSize: 12, color: debt > 0 ? STATUS.danger.fg : COLOR.ink60 }}>
+                                    <li style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink }}>
                                         Спишется с баланса {formatChargeAt(firstStart)} (за сутки до начала): {formatGel(priced.total, { fraction: 0 })}.
                                         {' '}Сейчас на балансе {formatGel(bal, { fraction: 0 })}
                                         {debt > 0 ? ` — не хватает ${formatGel(debt, { fraction: 0 })}, уйдёт в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })}), если не пополнить.` : '.'}
-                                    </div>
+                                    </li>
                                 );
                             }
                             return (
-                                <div style={{ fontSize: 12, color: debt > 0 ? STATUS.danger.fg : COLOR.ink60 }}>
+                                <li style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink }}>
                                     {debt > 0
                                         ? `Спишется сразу ${formatGel(priced.total, { fraction: 0 })}, из них ${formatGel(debt, { fraction: 0 })} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })})`
                                         : `Спишется сразу ${formatGel(priced.total, { fraction: 0 })} с баланса, останется ${formatGel(after, { fraction: 0 })}`}
-                                </div>
+                                </li>
                             );
                         })()}
                         {recurPattern !== 'once' && effectiveOccurrences > 1 && (
                             seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? (
-                                <>
-                                    <div style={{ fontSize: 12, color: COLOR.ink60 }}>
-                                        Серия из {seriesQuote.occurrences}: точно {formatGel(seriesQuote.totalMoney, { fraction: 0 })}
-                                        {seriesQuote.totalHours > 0 ? ` + ${fmtHours(seriesQuote.totalHours)} с абонемента` : ''}
-                                        {(seriesQuote.totalBonusHours ?? 0) > 0 ? ` + ${fmtHours(seriesQuote.totalBonusHours ?? 0)} из бонусов` : ''}
-                                    </div>
+                                <li>
+                                    Серия из {seriesQuote.occurrences}: точно {formatGel(seriesQuote.totalMoney, { fraction: 0 })}
+                                    {seriesQuote.totalHours > 0 ? ` + ${fmtHours(seriesQuote.totalHours)} с абонемента` : ''}
+                                    {(seriesQuote.totalBonusHours ?? 0) > 0 ? ` + ${fmtHours(seriesQuote.totalBonusHours ?? 0)} из бонусов` : ''}
+                                    {'. '}Каждая бронь спишется за сутки до своего начала.
                                     {(seriesQuote.subscriptionShortDates?.length ?? 0) > 0 && (
-                                        <div style={{ fontSize: 12, color: STATUS.danger.fg }}>
+                                        <span style={{ display: 'block', color: STATUS.danger.fg }}>
                                             Абонемента хватит не на все даты ({seriesQuote.subscriptionShortDates.length} из {seriesQuote.occurrences} — мимо).
                                             Выберите оплату балансом или уменьшите число повторов, иначе серия не создастся.
-                                        </div>
+                                        </span>
                                     )}
-                                </>
+                                </li>
                             ) : (
-                                <div style={{ fontSize: 12, color: COLOR.ink60 }}>
+                                <li style={{ color: COLOR.ink60 }}>
                                     Сумма серии ориентировочная — уточняем расчёт по каждой дате…
-                                </div>
+                                </li>
                             )
                         )}
-                    </div>
-                </div>
+
+                        {/* Отмена: сервер даёт клиенту отменить бронь не позже чем за
+                            сутки до начала (routes.py → 400), потом — только пересдача. */}
+                        {moreThanDay && firstStart ? (
+                            <li>Бесплатная отмена — до {formatChargeAt(firstStart)}, потом только «Пересдать».</li>
+                        ) : (
+                            <li>До начала меньше суток — отменить бронь будет нельзя{isHotBooking ? '. Если планы изменятся, напишите администратору.' : ', только «Пересдать».'}</li>
+                        )}
+                    </ul>
+                </Section>
+                )}
             </div>
 
-            {/* Sticky CTA */}
+            {/* Закреплённая кнопка над нижним меню. */}
             <div style={{
                 position: 'fixed',
                 bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
@@ -1208,69 +1023,20 @@ export function MobileCheckout() {
                 transform: 'translateX(-50%)',
                 width: '100%',
                 maxWidth: 480,
-                padding: '8px 16px',
-                background: `linear-gradient(to bottom, ${COLOR.card}00 0%, ${COLOR.card} 30%)`,
+                padding: '12px 16px',
+                background: COLOR.card,
+                borderTop: `1px solid ${COLOR.ink10}`,
                 zIndex: Z.sticky,
-                pointerEvents: 'none',
             }}>
-                {/* Способ оплаты виден у кнопки — сам блок «Оплата» ниже первого
-                    экрана, и раньше клиент жал кнопку, не видя, откуда спишется. */}
-                {!confirmed && !isSeries && !needsApplication && (
-                    <div style={{
-                        pointerEvents: 'auto',
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                        background: COLOR.card, border: `1px solid ${COLOR.ink08}`, borderRadius: 10,
-                        padding: '6px 10px', marginBottom: 6, fontSize: 12, color: COLOR.ink80,
-                    }}>
-                        <span>Оплата: <b style={{ color: COLOR.ink }}>{payName}</b></span>
-                        {payChoices > 1 && (
-                            <button
-                                onClick={() => document.getElementById('m-checkout-pay')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                                style={{
-                                    background: 'none', border: 'none', cursor: 'pointer',
-                                    // Цель 44 px; отрицательный отступ — плашка не растёт.
-                                    minHeight: 44, padding: '0 6px', margin: '-12px -6px',
-                                    fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-                                    color: COLOR.ink, textDecoration: 'underline',
-                                }}
-                            >
-                                Изменить
-                            </button>
-                        )}
-                    </div>
-                )}
-                <button
-                    // Не специалист: вместо заведомого отказа — к анкете.
-                    onClick={needsApplication ? () => navigate(SPECIALIST_APPLICATION_PATH) : submit}
+                <Button
+                    block
+                    size="touch"
+                    // Не специалист: вместо заведомого отказа — к анкете (внутри /m).
+                    onClick={needsApplication ? () => navigate(catalogPath(SPECIALIST_APPLICATION_PATH, true)) : submit}
                     disabled={submitting || confirmed}
-                    className="press"
-                    style={{
-                        pointerEvents: 'auto',
-                        width: '100%',
-                        background: COLOR.ink,
-                        color: COLOR.onInk,
-                        border: 'none',
-                        borderRadius: 12,
-                        padding: '16px 18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 10,
-                        cursor: submitting ? 'wait' : 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: 16,
-                        fontWeight: 600,
-                        boxShadow: `0 4px 16px ${COLOR.ink20}`,
-                        opacity: submitting ? 0.7 : 1,
-                        // Asymmetric: пока submitting текст слегка размыт, на
-                        // финальный «Готово» резко в фокусе. Маскирует
-                        // crossfade — Emil pattern (filter: blur). Press scale
-                        // даёт инстантный тактильный feedback на тап.
-                        filter: submitting ? 'blur(0.8px)' : 'none',
-                        transition: 'transform 160ms cubic-bezier(0.23,1,0.32,1), filter 200ms ease, opacity 200ms ease',
-                    }}
+                    loading={submitting}
+                    style={{ minHeight: 52, fontSize: TEXT.body }}
                 >
-                    {submitting && <Loader2 size={18} className="animate-spin-fast" />}
                     {confirmed
                         ? 'Готово'
                         : needsApplication
@@ -1279,13 +1045,133 @@ export function MobileCheckout() {
                             ? (recurPattern !== 'once' ? 'Создаём серию…' : 'Бронируем…')
                             : recurPattern !== 'once'
                                 ? (effectiveOccurrences > 0
-                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['сессию', 'сессии', 'сессий'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences, { fraction: 0 })}`
+                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences, { fraction: 0 })}`
                                     : 'Выберите число повторов или дату')
                                 : isHotBooking
                                     ? `Отправить на одобрение · ${payLabel}`
                                     : `Забронировать · ${payLabel}`}
-                </button>
+                </Button>
             </div>
+
+            {/* Время и кабинет — правка без ухода со страницы. */}
+            <Sheet
+                open={timeOpen}
+                onClose={() => setTimeOpen(false)}
+                title="Время брони"
+                description={`${formatDateLabel(state.date, { capitalize: true })} · ${resource?.name ?? ''}`}
+                footer={
+                    <>
+                        <Button block onClick={() => setTimeOpen(false)}>Готово</Button>
+                        <Button variant="secondary" block onClick={() => { setTimeOpen(false); navigate(-1); }}>
+                            Другой день или кабинет
+                        </Button>
+                    </>
+                }
+            >
+                {editSlot && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                        <div>
+                            <div style={fieldLabel}>Начало</div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                <button
+                                    onClick={() => applyTime(curStartMin - 30, curDurMin)}
+                                    disabled={!isFree(curStartMin - 30, curDurMin)}
+                                    aria-label="Начать на 30 минут раньше"
+                                    style={{ ...choiceBtn(false), width: 104, opacity: isFree(curStartMin - 30, curDurMin) ? 1 : 0.45 }}
+                                >← Раньше</button>
+                                <div className="num" style={{ fontSize: TEXT.title, fontWeight: 600, textAlign: 'center' }}>
+                                    {mmToHHMM(curStartMin)}–{mmToHHMM(curStartMin + curDurMin)}
+                                </div>
+                                <button
+                                    onClick={() => applyTime(curStartMin + 30, curDurMin)}
+                                    disabled={!isFree(curStartMin + 30, curDurMin)}
+                                    aria-label="Начать на 30 минут позже"
+                                    style={{ ...choiceBtn(false), width: 104, opacity: isFree(curStartMin + 30, curDurMin) ? 1 : 0.45 }}
+                                >Позже →</button>
+                            </div>
+                        </div>
+                        <div>
+                            <div style={fieldLabel}>Сколько</div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                {[60, 90, 120, 180].map(d => {
+                                    const ok = isFree(curStartMin, d);
+                                    const active = curDurMin === d;
+                                    return (
+                                        <button
+                                            key={d}
+                                            onClick={() => ok && applyTime(curStartMin, d)}
+                                            disabled={!ok}
+                                            aria-pressed={active}
+                                            style={{ ...choiceBtn(active), flex: 1, opacity: ok ? 1 : 0.45, cursor: ok ? 'pointer' : 'default' }}
+                                        >
+                                            {formatBookingDuration(d)}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                            Неактивно — время уже занято или выходит за 09:00–22:00.
+                        </div>
+                    </div>
+                )}
+            </Sheet>
+
+            {/* Три способа оплаты — в порядке сервера: бонус → абонемент → баланс;
+                у недоступного — причина. */}
+            <Sheet
+                open={payOpen}
+                onClose={() => setPayOpen(false)}
+                title="Чем платите"
+                description={`Сейчас выбрано: ${payName}. Порядок как на сервере: бонусные часы → абонемент → баланс.`}
+                footer={<Button block onClick={() => setPayOpen(false)}>Готово</Button>}
+            >
+                <div role="radiogroup" aria-label="Способ оплаты" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {totalBonusHours > 0 && !isSeries && !plan.free && (
+                        <PaymentRow
+                            label="Бонусные часы"
+                            sub={plan.bonusCovers
+                                ? `${fmtHours(totalBonusHours)} бесплатно`
+                                : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}`}
+                            disabled={!plan.bonusCovers}
+                            active={payMethod === 'bonus'}
+                            onClick={() => pickPay('bonus')}
+                        />
+                    )}
+                    {effectiveUser?.subscription && (
+                        <PaymentRow
+                            label="Абонемент"
+                            sub={!subHours.ok
+                                ? subHours.reason
+                                : plan.subCovers
+                                    ? subscriptionHoursLabel(subHours)
+                                    : `${subscriptionHoursLabel(subHours)}, нужно ${fmtHours(totalDurationHours)}`}
+                            disabled={!plan.subCovers}
+                            active={payMethod === 'subscription'}
+                            onClick={() => pickPay('subscription')}
+                        />
+                    )}
+                    <PaymentRow
+                        label="Баланс"
+                        // Показываем баланс того, ЗА КОГО бронь (админ-прокси
+                        // бронирует за клиента — списание идёт с клиента, не
+                        // с админа; аудит 30.08). Пока бронь покрывают бонусы
+                        // или абонемент, сервер деньги не возьмёт — вариант
+                        // недоступен, и мы говорим почему.
+                        sub={(() => {
+                            const bal = effectiveUser ? formatGel(effectiveUser.balance ?? 0, { fraction: 0 }) : '';
+                            if (!isSelectable('balance', plan, isSeries)) {
+                                return `${bal} · ${balanceLockedReason(plan).toLowerCase()}`;
+                            }
+                            if (isSeries && plan.subCovers) return `${bal} · сначала спишутся часы абонемента`;
+                            return bal;
+                        })()}
+                        disabled={!isSelectable('balance', plan, isSeries)}
+                        active={payMethod === 'balance'}
+                        onClick={() => pickPay('balance')}
+                    />
+                </div>
+            </Sheet>
 
             {/* Конфликты серии: показываем занятые даты и даём создать остальные,
                 вместо того чтобы валить всю пачку одним тостом. */}
@@ -1312,16 +1198,16 @@ export function MobileCheckout() {
             >
                 {seriesConflicts && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ fontSize: 14, color: COLOR.ink80, lineHeight: 1.5 }}>
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink80, lineHeight: 1.5 }}>
                             Занято {seriesConflicts.length} из {effectiveOccurrences}:
                         </div>
                         <div style={{ maxHeight: 160, overflowY: 'auto', background: COLOR.sunken, borderRadius: 12,
-                                      padding: '10px 12px', fontSize: 13, lineHeight: 1.7 }}>
+                                      padding: '10px 12px', fontSize: TEXT.small, lineHeight: 1.7 }}>
                             {seriesConflicts.map(c => (
                                 <div key={c.date}>{formatDateLabel(c.date, { capitalize: true })}</div>
                             ))}
                         </div>
-                        <div style={{ fontSize: 13, color: COLOR.ink60 }}>
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
                             Можно создать серию без этих дат — остальные встречи забронируются.
                         </div>
                     </div>
@@ -1331,29 +1217,110 @@ export function MobileCheckout() {
     );
 }
 
+const RECUR_LABEL: Record<'weekly' | 'biweekly' | 'monthly', string> = {
+    weekly: 'Каждую неделю',
+    biweekly: 'Раз в 2 недели',
+    monthly: 'Раз в 4 недели',
+};
+
+const pad: React.CSSProperties = { padding: '0 16px' };
+
+const card: React.CSSProperties = {
+    background: COLOR.card,
+    border: `1px solid ${COLOR.ink10}`,
+    borderRadius: RADIUS.sheet,
+};
+
+const linkBtn: React.CSSProperties = {
+    background: 'none', border: 'none', cursor: 'pointer',
+    minHeight: 44, padding: '0 4px', margin: '-10px -4px 0 0',
+    fontFamily: 'inherit', fontSize: TEXT.small, fontWeight: 600,
+    color: COLOR.accentInk, flexShrink: 0,
+};
+
+const fieldLabel: React.CSSProperties = {
+    fontSize: TEXT.small, fontWeight: 600, color: COLOR.ink80, marginBottom: 8,
+};
+
+/** Кнопка выбора (формат, повтор, длительность): 44 px, выбранная — бирюзой. */
+function choiceBtn(active: boolean): React.CSSProperties {
+    return {
+        minHeight: 44,
+        borderRadius: RADIUS.control,
+        border: `1px solid ${active ? COLOR.accent : COLOR.ink20}`,
+        background: active ? COLOR.accentSoft : COLOR.card,
+        color: active ? COLOR.accentInk : COLOR.ink,
+        fontFamily: 'inherit',
+        fontSize: TEXT.small,
+        fontWeight: 600,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+    };
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
     return (
-        <div style={{ padding: '0 16px' }}>
-            <div style={{
-                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+        <section style={pad}>
+            <h2 style={{
+                fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em',
                 textTransform: 'uppercase', color: COLOR.ink60,
-                marginBottom: 8,
-            }}>{title}</div>
+                margin: '0 0 8px',
+            }}>{title}</h2>
             {children}
+        </section>
+    );
+}
+
+function Row({ label, value, bold, tone, muted }: { label: string; value: string; bold?: boolean; tone?: 'ok'; muted?: boolean }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+            <span style={{
+                fontSize: bold ? TEXT.body : TEXT.small,
+                fontWeight: bold ? 600 : 400,
+                color: muted ? COLOR.ink60 : COLOR.ink,
+                paddingLeft: muted ? 12 : 0,
+            }}>{label}</span>
+            <span className="num" style={{
+                fontSize: bold ? TEXT.title : TEXT.small,
+                fontWeight: bold ? 600 : 500,
+                whiteSpace: 'nowrap',
+                color: tone === 'ok' ? STATUS.ok.fg : muted ? COLOR.ink60 : COLOR.ink,
+            }}>{value}</span>
         </div>
     );
 }
 
-function Row({ label, value, bold, tone }: { label: string; value: string; bold?: boolean; tone?: 'ok' }) {
+/** Свёрнутая строка: «Допуслуги — Нет · Добавить». */
+function FoldRow({ label, value, open, onToggle, divider }: {
+    label: string; value: string; open: boolean; onToggle: () => void; divider?: boolean;
+}) {
     return (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ fontSize: bold ? 15 : 13, fontWeight: bold ? 600 : 500, color: COLOR.ink80 }}>{label}</span>
-            <span style={{
-                fontSize: bold ? 18 : 14,
-                fontWeight: 600,
-                color: tone === 'ok' ? STATUS.ok.fg : COLOR.ink,
-            }}>{value}</span>
-        </div>
+        <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            style={{
+                width: '100%', minHeight: 48,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                padding: '0 16px',
+                background: 'transparent', border: 'none',
+                borderTop: divider ? `1px solid ${COLOR.ink10}` : 'none',
+                fontFamily: 'inherit', textAlign: 'left', color: COLOR.ink, cursor: 'pointer',
+                fontSize: TEXT.small,
+            }}
+        >
+            <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {label === 'Повторять' && <Repeat size={16} aria-hidden="true" />}
+                {label}
+            </span>
+            <span style={{ color: COLOR.ink60, display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+                <ChevronDown size={16} aria-hidden="true" style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+            </span>
+        </button>
     );
 }
 
@@ -1364,39 +1331,84 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
     disabled?: boolean;
     onClick: () => void;
 }) {
+    const on = active && !disabled;
     return (
         <button
             onClick={onClick}
             disabled={disabled}
             role="radio"
-            aria-checked={active && !disabled}
+            aria-checked={on}
             style={{
-                background: COLOR.card,
-                border: `1px solid ${active && !disabled ? COLOR.ink : COLOR.ink10}`,
+                minHeight: 60,
+                background: on ? COLOR.accentSoft : COLOR.card,
+                border: `1px solid ${on ? COLOR.accent : COLOR.ink10}`,
                 borderRadius: 12,
-                padding: '12px 14px',
+                padding: '10px 14px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 12,
                 cursor: disabled ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit',
                 textAlign: 'left',
-                opacity: disabled ? 0.5 : 1,
             }}
         >
-            <div style={{
+            <div aria-hidden="true" style={{
                 width: 20, height: 20, borderRadius: 999,
-                border: `2px solid ${active && !disabled ? COLOR.ink : COLOR.ink20}`,
+                border: `2px solid ${on ? COLOR.accent : disabled ? COLOR.ink20 : COLOR.ink40}`,
                 display: 'grid', placeItems: 'center',
                 flexShrink: 0,
             }}>
-                {active && !disabled && <div style={{ width: 10, height: 10, borderRadius: 999, background: COLOR.ink }} />}
+                {on && <div style={{ width: 10, height: 10, borderRadius: 999, background: COLOR.accent }} />}
             </div>
             <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: COLOR.ink }}>{label}</div>
-                {sub && <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
+                <div style={{ fontSize: TEXT.small, fontWeight: 600, color: disabled ? COLOR.ink60 : COLOR.ink }}>{label}</div>
+                {sub && <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
             </div>
         </button>
+    );
+}
+
+/** Экран после брони (решение владельца): бронь на одобрении —
+ *  «Ждём подтверждения администратора», обычная — «Бронь ваша». */
+function DoneScreen({ pending, summary, onBookings, onHome }: {
+    pending: boolean;
+    summary: { day: string; time: string; place: string; more: number } | null;
+    onBookings: () => void;
+    onHome: () => void;
+}) {
+    return (
+        <div style={{ padding: '48px 16px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, textAlign: 'center' }}>
+            <div aria-hidden="true" style={{
+                width: 64, height: 64, borderRadius: 999,
+                background: pending ? STATUS.pending.bg : STATUS.ok.bg,
+                color: pending ? STATUS.pending.fg : STATUS.ok.fg,
+                display: 'grid', placeItems: 'center',
+            }}>
+                {pending ? <Hourglass size={28} /> : <Check size={30} strokeWidth={2.5} />}
+            </div>
+            <h1 role="status" style={{ margin: 0, fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2 }}>
+                {pending ? 'Ждём подтверждения администратора' : 'Бронь ваша'}
+            </h1>
+            <p style={{ margin: 0, fontSize: TEXT.body, color: COLOR.ink80, lineHeight: 1.5, maxWidth: 340 }}>
+                {pending
+                    ? 'Слот закрепится за вами после подтверждения. Пришлём уведомление, как только администратор ответит.'
+                    : 'Всё готово — бронь уже в «Моих бронях».'}
+            </p>
+            {summary && (
+                <div style={{ ...card, width: '100%', padding: 16, textAlign: 'left' }}>
+                    <div style={{ fontSize: TEXT.body, fontWeight: 600 }}>{summary.day}</div>
+                    <div className="num" style={{ fontSize: TEXT.title, fontWeight: 600, margin: '2px 0' }}>{summary.time}</div>
+                    <div style={{ fontSize: TEXT.small, color: COLOR.ink60 }}>
+                        {summary.place}
+                        {summary.more > 0 ? ` · и ещё ${summary.more} ${ruPlural(summary.more, ['бронь', 'брони', 'броней'])}` : ''}
+                    </div>
+                </div>
+            )}
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                <Button block size="touch" onClick={onBookings}>Мои брони</Button>
+                <Button block size="touch" variant="secondary" onClick={onHome}>На главную</Button>
+            </div>
+        </div>
     );
 }
 
