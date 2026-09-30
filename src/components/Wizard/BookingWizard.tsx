@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { MinimalLayout } from '../MinimalLayout';
 import { Summary } from '../Summary';
 // Wizard Steps
@@ -9,26 +9,43 @@ import { ConfirmationStep } from './ConfirmationStep';
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
 import { canBookCabinets } from '../../utils/permissions';
+import { getMyBookingsPath } from '../../utils/userPaths';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard } from '../SpecialistGate';
 import { GH, GH_SANS } from '../../hooks/useDesignFlag';
+import { STATUS } from '../../design/tokens';
 
 /**
- * Мастер брони на компьютере (/checkout). Вынесен из App.tsx как есть
- * (волна 2, шаг 0) — логика не менялась, дальше файл принадлежит пакету D.
+ * Мастер брони на компьютере (/checkout). Шаги: 2 — сетка времени,
+ * 3/4 — подтверждение и оплата (4 — старый адрес того же шага).
+ *
+ * Волна 2, пакет D:
+ *  - шага 1 больше нет: прямой /checkout открывает сетку, а не главную (G3-11, X2-15);
+ *  - одна «Назад» на шаг — в шапке: с сетки туда, откуда пришли, с оплаты — на сетку;
+ *  - шапка одной ширины на всех шагах — стрелка не прыгает (G3-22);
+ *  - карточки Grid House: тонкая линия, без скруглений и «стекла».
  */
-// Booking Flow Wrapper
 export function BookingWizard() {
-  const { step, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
+  const { step, setStep, editBookingId, bookingForUser, setBookingForUser, reset } = useBookingStore();
+  const setHighlightedResourceId = useBookingStore(s => s.setHighlightedResourceId);
   const wizardMode = useBookingStore(s => s.mode);
   const selectedSlots = useBookingStore(s => s.selectedSlots);
   const users = useUserStore(s => s.users);
+  const navigate = useNavigate();
   // Вошедший, но ещё не специалист (роль user): сервер откажет в брони на
   // «Оплатить». Говорим об этом сразу, до выбора времени и оплаты.
   // Перенос/правка своей брони (editBookingId) — не новая бронь, её не трогаем.
   const currentUser = useUserStore(s => s.currentUser);
   const needsApplication = !!currentUser && !canBookCabinets(currentUser) && !editBookingId;
   const applicationStatus = useSpecialistApplicationStatus(currentUser, needsApplication);
+
+  // Шаг 1 (выбор центра) давно убран. Раньше он был редиректом на главную —
+  // прямая ссылка /checkout и «Назад» с сетки выкидывали на лендинг.
+  // Теперь шаг 1 = сетка времени (без центра она показывает все центры).
+  useEffect(() => {
+    if (step < 2) setStep(2);
+  }, [step, setStep]);
+  const shownStep = step < 2 ? 2 : step;
 
   // Excel #73 — warn before leaving an in-progress booking.
   // Browser-native confirm via beforeunload covers: tab close, page reload,
@@ -51,22 +68,39 @@ export function BookingWizard() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [selectedSlots.length, step, editBookingId, needsApplication]);
 
+  // «Назад» в шапке — одна на шаг. С оплаты — к сетке (выбор сохраняется).
+  // С сетки — туда, откуда пришли (страница кабинета, «Мои брони»); если
+  // истории нет (открыли по ссылке) — в свои брони, гостя — на главную.
+  const handleBack = () => {
+    if (shownStep >= 3) { setStep(2); return; }
+    setHighlightedResourceId(null);
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate(currentUser ? getMyBookingsPath(currentUser) : '/', { replace: true });
+  };
+
   // Resolve friendly name for the "booking-for" admin-proxy banner
   const proxyUser = bookingForUser
     ? users.find(u => u.email === bookingForUser || u.id === bookingForUser)
     : null;
 
-  /* GH card style */
+  /* Grid House: тонкая линия, без скругления и тени */
   const ghCard: React.CSSProperties = {
-    background: '#fff',
-    border: `1px solid ${GH.ink8}`,
-    borderRadius: 12,
+    background: GH.card,
+    border: `1px solid ${GH.ink10}`,
+    borderRadius: 0,
     overflow: 'hidden',
+  };
+
+  const bannerWrap = `${shownStep === 2 ? 'max-w-[1920px] px-6 md:px-12' : 'max-w-6xl px-4 md:px-8'} mx-auto mb-4`;
+  const bannerLink: React.CSSProperties = {
+    minHeight: 44, padding: '0 4px', fontSize: 14, fontWeight: 600, textDecoration: 'underline',
+    background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: GH_SANS,
   };
 
   if (needsApplication) {
     return (
-      <MinimalLayout glassMode noPadding>
+      <MinimalLayout glassMode fullWidth noPadding>
         <div className="max-w-3xl mx-auto px-4 md:px-8 py-8">
           <SpecialistGateCard variant="desktop" status={applicationStatus} />
         </div>
@@ -75,7 +109,8 @@ export function BookingWizard() {
   }
 
   return (
-    <MinimalLayout glassMode fullWidth={step === 2} noPadding>
+    <MinimalLayout glassMode fullWidth noPadding onBack={handleBack}
+      backLabel={shownStep >= 3 ? 'К выбору времени' : 'Назад'}>
 
       {/* The reschedule dup-creation bug was fixed & verified
           (CLAUDE.md → "Решённые баги": фикс 2026-05-23, проверка 2026-05-26 —
@@ -84,20 +119,19 @@ export function BookingWizard() {
           reschedule. The neutral edit banner below still covers reschedule via
           its `editBookingId` condition. */}
       {editBookingId && (
-        <div className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}>
+        <div className={bannerWrap}>
           <div style={{
-            background: '#FEF3C7', border: `1px solid ${GH.ink10}`, color: '#92400E',
-            padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            fontFamily: GH_SANS, fontSize: 14,
+            background: STATUS.pending.bg, border: `1px solid ${GH.ink10}`, color: STATUS.pending.fg,
+            padding: '4px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            fontFamily: GH_SANS, fontSize: 14, flexWrap: 'wrap',
           }}>
             <span style={{ fontWeight: 500 }}>
               {wizardMode === 'reschedule'
-                ? 'Вы переносите существующее бронирование'
-                : 'Вы редактируете существующее бронирование'}
+                ? 'Вы переносите существующую бронь'
+                : 'Вы меняете существующую бронь'}
             </span>
-            <button onClick={() => reset()}
-              style={{ fontSize: 13, fontWeight: 700, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}>
-              {wizardMode === 'reschedule' ? 'Отменить перенос' : 'Отменить редактирование'}
+            <button type="button" onClick={() => reset()} style={bannerLink}>
+              {wizardMode === 'reschedule' ? 'Не переносить' : 'Не менять'}
             </button>
           </div>
         </div>
@@ -105,55 +139,42 @@ export function BookingWizard() {
 
       {/* Admin-proxy booking banner — visible on every step so the admin
           can't forget whose booking they're creating. Click "Сбросить" to
-          clear target and book for themselves. */}
+          clear target and book for themselves. Без фиолетового и тени:
+          цвет — только для статуса. */}
       {bookingForUser && (
-        <div
-          className={`${step === 2 ? 'max-w-[1920px] px-8' : 'max-w-6xl px-4'} mx-auto mb-4`}
-          style={{ position: 'sticky', top: 8, zIndex: 20 }}
-        >
+        <div className={bannerWrap} style={{ position: 'sticky', top: 72, zIndex: 20 }}>
           <div style={{
-            background: '#EDE9FE',
+            background: GH.card,
             border: `1px solid ${GH.ink10}`,
-            color: '#5B21B6',
-            padding: '12px 16px',
-            borderRadius: 8,
+            borderLeft: `3px solid ${GH.ink}`,
+            color: GH.ink,
+            padding: '4px 16px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 12,
             fontFamily: GH_SANS,
             fontSize: 14,
-            boxShadow: '0 4px 12px rgba(91,33,182,0.08)',
+            flexWrap: 'wrap',
           }}>
             <span>
-              <strong style={{ fontWeight: 700 }}>
+              <strong style={{ fontWeight: 600 }}>
                 Бронь для клиента: {proxyUser?.name || bookingForUser}
               </strong>
               {proxyUser?.email && proxyUser.email !== proxyUser.name && (
-                <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 13 }}>
+                <span style={{ marginLeft: 8, color: GH.ink60 }}>
                   {proxyUser.email}
                 </span>
               )}
             </span>
-            <button
-              onClick={() => setBookingForUser(null)}
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                textDecoration: 'underline',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: '#5B21B6',
-              }}
-            >
-              Сбросить → бронь для себя
+            <button type="button" onClick={() => setBookingForUser(null)} style={bannerLink}>
+              Бронировать для себя
             </button>
           </div>
         </div>
       )}
 
-      {step === 2 ? (
+      {shownStep === 2 ? (
         /* ── Step 2: Full-width chessboard ── */
         <div className="max-w-[1920px] mx-auto px-6 md:px-12">
           <div style={ghCard}>
@@ -165,19 +186,18 @@ export function BookingWizard() {
         <div className="max-w-6xl mx-auto px-4 md:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8">
-              {step === 1 && <Navigate to="/" replace />}
               {/* Owner 2026-05-27: merged Options step into Confirmation —
                   Format is already pickable on the chessboard, Extras are
                   only 4 items, the gap step felt redundant. Render
                   ConfirmationStep for both step==3 and step==4 so every
                   caller that still navigates to step:3 keeps working. */}
-              {(step === 3 || step === 4) && (
+              {(shownStep === 3 || shownStep === 4) && (
                 <div style={{ ...ghCard, padding: 32 }}>
                   <ConfirmationStep />
                 </div>
               )}
             </div>
-            {step < 5 && (
+            {shownStep < 5 && (
               <div className="lg:col-span-4 hidden lg:block">
                 <div style={{ ...ghCard, position: 'sticky' as const, top: 80 }}>
                   <Summary />

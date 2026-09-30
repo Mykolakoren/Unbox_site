@@ -81,7 +81,12 @@ def test_next_blocked_while_overlap_dialog_open():
     assert "setNextPending(true)" in body and "finally" in body and "setNextPending(false)" in body, \
         "handleNext не блокирует повторный тап, пока открыт вопрос"
     assert "disabled={selectedSlots.length === 0}" not in src, "кнопка «Далее» не учитывает открытый вопрос"
-    assert src.count("disabled={nextDisabled}") >= 4, "не все кнопки «Далее» блокируются на время вопроса"
+    # Волна 2, пакет D: мёртвые ветки `isGH ? … : <LegacyButton>` вырезаны —
+    # кнопок «Далее» стало две (телефон и компьютер). Суть та же: КАЖДАЯ кнопка,
+    # что зовёт handleNext, заблокирована на время вопроса.
+    n_next = src.count("onClick={handleNext}")
+    assert n_next >= 2, "кнопок «Далее» меньше двух — сторож смотрит не туда"
+    assert src.count("disabled={nextDisabled}") >= n_next, "не все кнопки «Далее» блокируются на время вопроса"
 
 
 # ── 7 ────────────────────────────────────────────────────────────────────

@@ -90,8 +90,13 @@ def test_booking_wizard_extracted():
     assert "export function BookingWizard()" in wiz
     # Логика не потерялась при переносе.
     for needle in ("if (needsApplication)", "beforeunload", "<ChessboardStep />", "<ConfirmationStep />",
-                   "<Summary />", "{step === 1 && <Navigate to=\"/\" replace />}", "setBookingForUser(null)"):
+                   "<Summary />", "setBookingForUser(null)"):
         assert needle in wiz, f"BookingWizard.tsx: при переносе пропало {needle!r}"
+    # Шаг 1 по-прежнему обработан — но теперь (волна 2, пакет D, G3-11/X2-15)
+    # не редиректом на главную, а сеткой времени: прямой /checkout и «Назад»
+    # с сетки больше не выкидывают клиента на лендинг.
+    assert "if (step < 2) setStep(2);" in wiz, "шаг 1 мастера снова ничем не обработан"
+    assert '<Navigate to="/" replace />' not in wiz, "шаг 1 мастера снова уводит на главную"
 
 
 def test_become_specialist_inside_mobile_shell():
