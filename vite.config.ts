@@ -17,9 +17,10 @@ export default defineConfig({
         // (recharts alone is 388 kB of charts nobody has asked for yet).
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          // ExplorePage is the "/" route and renders the map, so Leaflet is
-          // eager by definition — but as its own chunk it caches separately.
-          'vendor-leaflet': ['leaflet', 'react-leaflet'],
+          // Волна 2 (G1-25, X5-10): vendor-leaflet убран. Карты на «/» давно
+          // нет, а именованный чанк заставлял браузер качать Leaflet
+          // (modulepreload, ~43 КБ gz) на каждой странице. Если карта снова
+          // понадобится — импортировать её лениво на своей странице.
           'vendor-motion': ['framer-motion'],
           'vendor-sentry': ['@sentry/react'],
         },

@@ -63,7 +63,22 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Волна 2 (X5-05): заглушка до загрузки приложения — вместо пустого
+         белого экрана на медленной сети. React заменит её при первом рендере.
+         Цвета — токены: бумага #FAFAF7 на сайте, #F4F4F2 в приложении /m. -->
+    <style>
+      .boot { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+              background: #FAFAF7; color: #0F0F10; font: 600 20px/1.2 'IBM Plex Sans', sans-serif; letter-spacing: -0.01em; }
+      html[data-boot="shell"] .boot { background: #F4F4F2; }
+      .boot span { display: block; width: 48px; height: 2px; margin: 12px auto 0; background: #0F0F10; opacity: .2;
+                   animation: boot-pulse 1.2s ease-in-out infinite; }
+      @keyframes boot-pulse { 50% { opacity: .6; } }
+      @media (prefers-reduced-motion: reduce) { .boot span { animation: none; } }
+    </style>
+    <script>
+      try { if (/^\/m(\/|$)/.test(location.pathname)) document.documentElement.setAttribute('data-boot', 'shell'); } catch (e) {}
+    </script>
+    <div id="root"><div class="boot" role="status" aria-label="Загружаем Unbox"><div>Unbox<span></span></div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
