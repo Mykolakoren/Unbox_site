@@ -292,7 +292,10 @@ def test_subscription_freeze_via_telegram():
     assert "https://t.me/${ADMIN_TG}?text=" in src and "UnboxCenter" in src
     assert "Хочу оформить абонемент «${sub.name}»" in src
     assert "Попросить заморозку" in src
-    assert "MAX_FREEZES - used" in src, "счётчик заморозок снова показывает использованные как оставшиеся"
+    # 01.10 (владелец): заморозка по тарифу — бюджет дней (freezeDaysLeft), а не
+    # «1 раз, 7 дней». Суть та же: показываем, сколько ОСТАЛОСЬ.
+    assert "const freeze = freezeBudget(sub);" in src and "freeze.left > 0" in src, \
+        "счётчик заморозок снова не от оставшихся дней по тарифу"
     assert "Свободно для брони" in src
 
 

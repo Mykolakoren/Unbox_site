@@ -225,7 +225,7 @@ export interface UserSlice {
     fetchUsers: () => Promise<void>;
     updateUser: (updates: Partial<User>) => Promise<void>;
     updateUserById: (userId: string, updates: Partial<User>) => Promise<void>;
-    toggleSubscriptionFreeze: (userId: string) => Promise<void>;
+    toggleSubscriptionFreeze: (userId: string, days?: number) => Promise<void>;
     updatePersonalDiscount: (userId: string, percent: number, reason: string) => Promise<void>; // New action
     runWeeklyReconciliation: () => { amount: number, totalHours: number, discountPercent: number } | null;
 

@@ -214,7 +214,10 @@ def test_subscription_freeze_via_telegram():
     src = _code("src/components/SubscriptionCard.tsx")
     assert "toggle-freeze" not in src, "карточка снова зовёт /subscriptions/toggle-freeze"
     assert "https://t.me/UnboxCenter" in src and "?text=" in src and "Попросить заморозку" in src
-    assert "FREEZE_LIMIT - freezesUsed" in src, "счётчик пауз снова показывает использованные как оставшиеся"
+    # 01.10 (владелец): заморозка по тарифу — бюджет дней (freezeDaysLeft), а не
+    # «1 пауза на 7 дней». Суть та же: показываем, сколько ОСТАЛОСЬ.
+    assert "const freeze = freezeBudget(sub);" in src and "осталось ${fmtFreezeDays(freeze.left)}" in src, \
+        "счётчик пауз снова не от оставшихся дней по тарифу"
     assert "viewerIsAdmin ?" in src
 
 

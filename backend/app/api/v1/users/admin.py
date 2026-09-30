@@ -222,53 +222,54 @@ def update_user(
 def toggle_subscription_freeze(
     *,
     user_id: str,
+    payload: Optional[dict] = Body(None),
     session: Session = Depends(get_session),
     current_user: User = Depends(deps.require_admin),
 ) -> Any:
-    """Toggle subscription freeze status."""
+    """Поставить / снять паузу абонемента (заморозка по тарифу, владелец 01.10).
+
+    Бюджет дней паузы — по тарифу «как на сайте»: Регулярный 7, Профи+ 30,
+    остальные 0; делится на несколько пауз. Без `days` пауза ставится на весь
+    остаток бюджета. Снятие: срок абонемента +min(факт, выдано на эту паузу).
+    payload (необязательно): {"days": N} — владелец / старший администратор
+    могут дать паузу сверх бюджета (и при бюджете 0); админ — не больше остатка.
+    Правила — services/subscription_perks.py (там же автоснятие по сроку).
+    """
+    from app.services import subscription_perks
+
     user = _resolve_user(session, user_id)
+    # Строка клиента под замком: не столкнуться с автоснятием паузы кроном.
+    user = session.exec(
+        select(User).where(User.id == user.id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).one()
 
     if not user.subscription:
         raise HTTPException(status_code=400, detail="У клиента нет активного абонемента")
 
-    from datetime import timedelta
-
     # Both dialects again: the freeze flag was written snake-only, while the UI
     # reads isFrozen — so a frozen subscription still rendered as active.
     is_frozen = bool(subscription_pool.get(user.subscription, "is_frozen", False))
-    freeze_count = int(subscription_pool.get_float(user.subscription, "freeze_count"))
+    days = (payload or {}).get("days")
+    days = None if days in (None, "") else days
+    override = current_user.role in ("owner", "senior_admin")
 
-    now = datetime.now()
-    if not is_frozen:
-        if freeze_count >= 1:
-            raise HTTPException(
-                status_code=400,
-                detail="Абонемент уже замораживался — по правилам пауза одна на абонемент. "
-                       "Повторную может разрешить владелец.",
-            )
-        # frozen_at — момент старта паузы: на разморозке по нему продлеваем срок
-        # ровно на проведённое в паузе время, чтобы пауза не съедала срок.
-        new_sub = subscription_pool.update(
-            user.subscription,
-            is_frozen=True,
-            freeze_count=freeze_count + 1,
-            frozen_at=now.isoformat(),
-            frozen_until=(now + timedelta(days=7)).isoformat(),
-        )
-    else:
-        # Разморозка: срок действия сдвигается вперёд на длительность паузы.
-        # Без этого истечение считалось бы так, будто клиент паузой не
-        # пользовался, и абонемент завершался бы раньше оплаченного.
-        fields = dict(is_frozen=False, frozen_until=None, frozen_at=None)
-        frozen_at = subscription_pool._parse_dt(
-            subscription_pool.get(user.subscription, "frozen_at")
-        )
-        expiry = subscription_pool._parse_dt(
-            subscription_pool.get(user.subscription, "expiry_date")
-        )
-        if frozen_at and expiry:
-            fields["expiry_date"] = (expiry + (now - frozen_at)).isoformat()
-        new_sub = subscription_pool.update(user.subscription, **fields)
+    now = datetime.utcnow()
+    meta: dict = {"previous_state_frozen": is_frozen}
+    try:
+        if not is_frozen:
+            new_sub = subscription_perks.start_freeze(user.subscription, now, days=days, override=override)
+            meta.update(granted_days=subscription_pool.get(new_sub, "frozen_days_granted"),
+                        frozen_until=subscription_pool.get(new_sub, "frozen_until"),
+                        override=bool(days is not None and override))
+        else:
+            new_sub, fact, extend = subscription_perks.end_freeze(user.subscription, now)
+            meta.update(fact_days=fact, extended_days=extend,
+                        expiry_date=subscription_pool.get(new_sub, "expiry_date"))
+    except subscription_perks.FreezeError as e:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    meta["freeze_days_left"] = subscription_pool.get(new_sub, "freeze_days_left")
 
     user.subscription = new_sub
     session.add(user)
@@ -279,6 +280,7 @@ def toggle_subscription_freeze(
     from app.services.timeline import timeline_service
 
     action = "Freezing" if not is_frozen else "Unfreezing"
+    meta["action"] = action
     timeline_service.log_event(
         session=session,
         actor_id=current_user.id,
@@ -287,7 +289,7 @@ def toggle_subscription_freeze(
         target_type="user",
         event_type="subscription_freeze",
         description=f"{action} subscription",
-        metadata={"action": action, "previous_state_frozen": is_frozen},
+        metadata=meta,
     )
 
     return user

@@ -377,6 +377,195 @@ def test_reschedules_migration_script():
     assert "subscription_pool.update(" in src and "with_for_update()" in src
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Шаг 3. Заморозка по тарифу — бюджет дней
+# ─────────────────────────────────────────────────────────────────────────
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat()
+
+
+def test_plans_freeze_days_match_owner_decision_and_site():
+    import re
+    from app.services.subscription_sale import PLANS, build_subscription
+    want = {"TRIAL": 0, "WARM_START": 0, "REGULAR_PRACTITIONER": 7, "PRO_PLUS": 30, "GROUP_MASTER": 0}
+    assert {k: v["freeze_days"] for k, v in PLANS.items()} == want
+    data = _read("src/utils/data.ts")
+    block = data[data.index("export let SUBSCRIPTION_PLANS"):data.index("\n];", data.index("export let SUBSCRIPTION_PLANS"))]
+    front = {m.group(1): int(m.group(2)) for m in re.finditer(r"id:\s*'(\w+)'.*?freezeDays:\s*(\d+)", block, re.S)}
+    assert front == want, f"заморозка на сайте ≠ сервер: {front}"
+    sub = build_subscription("PRO_PLUS", datetime.utcnow())
+    assert sub["freeze_days_total"] == sub["freezeDaysTotal"] == 30
+    assert sub["freeze_days_left"] == sub["freezeDaysLeft"] == 30 and sub["freezeDaysUsed"] == 0
+
+
+def test_freeze_budget_rules():
+    from app.services import subscription_perks as perks
+    now = datetime.utcnow()
+    # Регулярный: пауза на весь остаток — 7 дней.
+    reg = perks.start_freeze(_active_sub("REGULAR_PRACTITIONER"), now)
+    assert reg["isFrozen"] is True and reg["frozenDaysGranted"] == 7
+    assert subscription_pool._parse_dt(reg["frozen_until"]) == now + timedelta(days=7)
+    # Тёплый: заморозки в тарифе нет — понятный отказ; владелец может дать дни.
+    try:
+        perks.start_freeze(_active_sub("WARM_START"), now)
+        raise AssertionError("Тёплому дали паузу без бюджета")
+    except perks.FreezeError as e:
+        assert "не входит в тариф" in str(e)
+    assert perks.start_freeze(_active_sub("WARM_START"), now, days=5, override=True)["frozenDaysGranted"] == 5
+    # Админ без права обхода — не больше остатка.
+    try:
+        perks.start_freeze(_active_sub("REGULAR_PRACTITIONER"), now, days=10)
+        raise AssertionError("админ дал паузу сверх бюджета")
+    except perks.FreezeError:
+        pass
+    assert perks.start_freeze(_active_sub("REGULAR_PRACTITIONER"), now, days=3)["frozenDaysGranted"] == 3
+
+
+def test_freeze_budget_is_shared_and_extension_capped():
+    """Профи+ 30 дней: пауза 10 дн. → срок +10, осталось 20; вторая пауза на 20,
+    снята поздно (25 дн.) → срок +20 (не 25), осталось 0; третьей нет."""
+    from app.services import subscription_perks as perks
+    t0 = datetime.utcnow()
+    sub = _active_sub("PRO_PLUS")
+    exp0 = subscription_pool._parse_dt(sub["expiry_date"])
+    sub = perks.start_freeze(sub, t0)
+    sub, fact, ext = perks.end_freeze(sub, t0 + timedelta(days=10))
+    assert (fact, ext) == (10.0, 10.0) and sub["freezeDaysLeft"] == 20 and sub["freezeDaysUsed"] == 10
+    assert subscription_pool._parse_dt(sub["expiry_date"]) == exp0 + timedelta(days=10)
+    t1 = t0 + timedelta(days=11)
+    sub = perks.start_freeze(sub, t1)
+    assert sub["frozenDaysGranted"] == 20
+    sub, fact, ext = perks.end_freeze(sub, t1 + timedelta(days=25))
+    assert ext == 20.0 and sub["freezeDaysLeft"] == 0, (fact, ext, sub["freezeDaysLeft"])
+    assert subscription_pool._parse_dt(sub["expiry_date"]) == exp0 + timedelta(days=30)
+    assert sub["isFrozen"] is False and sub["frozenAt"] is None and sub["frozenDaysGranted"] is None
+    try:
+        perks.start_freeze(sub, t1 + timedelta(days=26))
+        raise AssertionError("бюджет израсходован, а пауза дана")
+    except perks.FreezeError as e:
+        assert "закончились" in str(e)
+
+
+def test_freeze_legacy_pools():
+    """Старые пулы без полей: пауза уже была → израсходовано 7; идущая старая
+    пауза на 7 дней у Тёплого (бюджет 0) — продлевается на выданные 7."""
+    from app.services import subscription_perks as perks
+    now = datetime.utcnow()
+    old = {k: v for k, v in _active_sub("PRO_PLUS", freeze_count=1).items() if "freeze_days" not in k
+           and "freezeDays" not in k}
+    assert perks.freeze_days_used(old) == 7 and perks.freeze_days_left(old) == 23
+    reg = {k: v for k, v in _active_sub("REGULAR_PRACTITIONER", freeze_count=1).items()
+           if "freeze_days" not in k and "freezeDays" not in k}
+    assert perks.freeze_days_left(reg) == 0
+    at = now - timedelta(days=10)
+    warm = {k: v for k, v in _active_sub("WARM_START", is_frozen=True, freeze_count=1,
+                                          frozen_at=_iso(at), frozen_until=_iso(at + timedelta(days=7))).items()
+            if "freeze_days" not in k and "freezeDays" not in k}
+    exp0 = subscription_pool._parse_dt(warm["expiry_date"])
+    new, fact, ext = perks.end_freeze(warm, now)
+    assert ext == 7.0 and subscription_pool._parse_dt(new["expiry_date"]) == exp0 + timedelta(days=7)
+
+
+def test_freeze_endpoint_budget_and_override():
+    from fastapi import HTTPException
+    from app.api.v1.users.admin import toggle_subscription_freeze as toggle
+    s = _db()
+    u = _user(s, sub=_active_sub("WARM_START"))
+    admin, owner = _staff(s, "admin"), _staff(s, "owner")
+    try:
+        toggle(user_id=str(u.id), payload=None, session=s, current_user=admin)
+        raise AssertionError("Тёплый заморожен без бюджета")
+    except HTTPException as e:
+        assert e.status_code == 400 and "не входит в тариф" in e.detail
+    try:
+        toggle(user_id=str(u.id), payload={"days": 5}, session=s, current_user=admin)
+        raise AssertionError("админ обошёл бюджет")
+    except HTTPException as e:
+        assert e.status_code == 400
+    out = toggle(user_id=str(u.id), payload={"days": 5}, session=s, current_user=owner)
+    assert out.subscription["isFrozen"] is True and out.subscription["frozenDaysGranted"] == 5
+    out = toggle(user_id=str(u.id), payload=None, session=s, current_user=admin)
+    assert out.subscription["isFrozen"] is False and "freezeDaysLeft" in out.subscription
+    # Регулярный: обычный админ, весь бюджет.
+    r = _user(s, sub=_active_sub("REGULAR_PRACTITIONER"))
+    out = toggle(user_id=str(r.id), payload=None, session=s, current_user=admin)
+    assert out.subscription["frozenDaysGranted"] == 7 and out.subscription["freezeDaysLeft"] == 7
+
+
+def test_auto_unfreeze_in_charge_due_extends_by_budget():
+    from app.api.v1 import billing
+    s = _db()
+    at = datetime.utcnow() - timedelta(days=9)
+    sub = _active_sub("REGULAR_PRACTITIONER")
+    exp0 = subscription_pool._parse_dt(sub["expiry_date"])
+    from app.services import subscription_perks as perks
+    u = _user(s, sub=perks.start_freeze(sub, at))
+    live = _user(s, sub=perks.start_freeze(_active_sub("PRO_PLUS"), datetime.utcnow()))
+    out = billing._sweep_due_bookings(s)
+    assert out["ok"] and out["unfrozen"] == 1, out
+    pool = _pool(s, u)
+    assert pool["isFrozen"] is False and pool["freezeDaysLeft"] == 0
+    assert subscription_pool._parse_dt(pool["expiry_date"]) == exp0 + timedelta(days=7), "срок не ровно на бюджет"
+    assert _pool(s, live)["isFrozen"] is True, "сняли паузу, срок которой не вышел"
+
+
+def test_auto_unfreeze_failure_does_not_break_charging():
+    from app.api.v1 import billing
+    import app.services.subscription_perks as perks
+    s = _db()
+    saved = perks.auto_unfreeze_expired
+
+    def boom(*a, **kw):
+        raise RuntimeError("сбой автоснятия")
+    perks.auto_unfreeze_expired = boom
+    try:
+        out = billing._sweep_due_bookings(s)
+    finally:
+        perks.auto_unfreeze_expired = saved
+    assert out["ok"] and out["unfrozen"] == 0
+    src = _read("backend/app/api/v1/billing.py")
+    step = src[src.index("def _auto_unfreeze_step"):src.index("def _sweep_due_bookings")]
+    assert "except Exception" in step and "session.rollback()" in step and "session.commit()" in step
+
+
+def test_freeze_migration_script():
+    mod = _script("tariffs_freeze_2026_10.py")
+    now = datetime.utcnow()
+
+    def legacy(plan, **over):
+        return {k: v for k, v in _active_sub(plan, **over).items() if "freeze_days" not in k and "freezeDays" not in k}
+    f, note = mod.plan_changes(legacy("PRO_PLUS", freeze_count=1), now)
+    assert f == {"freeze_days_total": 30.0, "freeze_days_used": 7.0, "freeze_days_left": 23.0}, f
+    f, _ = mod.plan_changes(legacy("REGULAR_PRACTITIONER"), now)
+    assert f["freeze_days_left"] == 7.0
+    at = now - timedelta(days=2)
+    f, note = mod.plan_changes(legacy("PRO_PLUS", is_frozen=True, freeze_count=1, frozen_at=_iso(at),
+                                      frozen_until=_iso(at + timedelta(days=7))), now)
+    assert f["frozen_days_granted"] == 30.0 and f["frozen_until"] == _iso(at + timedelta(days=30)), f
+    f, note = mod.plan_changes(legacy("WARM_START", is_frozen=True, freeze_count=1, frozen_at=_iso(at),
+                                      frozen_until=_iso(at + timedelta(days=7))), now)
+    assert f["frozen_days_granted"] == 7.0 and "оставлено выданное ранее" in note, (f, note)
+    expired = legacy("PRO_PLUS", expiry_date=_iso(now - timedelta(days=1)))
+    assert mod.plan_changes(expired, now) is None
+    fixed = subscription_pool.update(legacy("PRO_PLUS", freeze_count=1),
+                                     **mod.plan_changes(legacy("PRO_PLUS", freeze_count=1), now)[0])
+    assert mod.plan_changes(fixed, now) is None, "скрипт не идемпотентен"
+    assert mod.plan_changes(_active_sub("PRO_PLUS"), now) is None, "новый пул не должен меняться"
+
+
+def test_frontend_freeze_from_budget():
+    util = _read("src/utils/subscription.ts")
+    assert "export function freezeBudget(" in util and "num(sub.freezeDaysLeft)" in util
+    for rel in ("src/components/SubscriptionCard.tsx", "src/pages/admin/UserDetails.tsx",
+                "src/pages/mobile/MobileSubscription.tsx"):
+        src = _read(rel)
+        assert "freezeBudget(sub)" in src, f"{rel}: заморозка не от бюджета дней"
+        assert "7 дней" not in src and "(7 дней, один раз)" not in src, f"{rel}: снова «7 дней» для всех"
+    assert "осталось ${fmtFreezeDays(freeze.left)}" in _read("src/components/SubscriptionCard.tsx")
+    assert "по тарифу осталось ${fmtFreezeDays(freeze.left)}" in _read("src/pages/mobile/MobileSubscription.tsx")
+
+
 def test_late_cancel_still_refused():
     """Отмена позже суток по-прежнему 400 — абонемент её не открывает."""
     src = _read("backend/app/api/v1/bookings/routes.py")

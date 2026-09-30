@@ -117,8 +117,31 @@ def charge_due_bookings(
         return _sweep_due_bookings(session)
 
 
+def _auto_unfreeze_step(session: Session) -> list[dict]:
+    """Снять паузы абонементов, чей срок вышел (владелец 01.10: «автоснятие
+    по сроку», срок абонемента продлевается ровно на выданные дни).
+
+    Отдельный шаг со своими коммитами и в try/except: сбой здесь НЕ должен
+    ломать списание за брони ниже."""
+    from datetime import datetime as _dt
+    try:
+        from app.services.subscription_perks import auto_unfreeze_expired
+        done = auto_unfreeze_expired(session, _dt.utcnow())
+        session.commit()
+        if done:
+            logger.info("[billing] auto-unfreeze: %s", [d["email"] for d in done])
+        return done
+    except Exception:
+        session.rollback()
+        logger.exception("[billing] auto-unfreeze failed — списание продолжается")
+        return []
+
+
 def _sweep_due_bookings(session: Session) -> dict[str, Any]:
     """The actual sweep. Only ever called while the advisory lock is held."""
+    # Сначала снимаем истёкшие паузы: бронь, списываемая следом, должна видеть
+    # уже действующий абонемент.
+    unfrozen = _auto_unfreeze_step(session)
     due = find_due_pending(session, lookahead_hours=24.0)
     settled = 0
     failures: list[dict] = []
@@ -264,6 +287,7 @@ def _sweep_due_bookings(session: Session) -> dict[str, Any]:
         "candidates": len(due),
         "settled": settled,
         "failures": failures[:20],  # cap to keep response small
+        "unfrozen": len(unfrozen),
     }
 
 

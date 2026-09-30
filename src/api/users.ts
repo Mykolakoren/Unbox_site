@@ -82,8 +82,10 @@ export const usersApi = {
         return response.data;
     },
 
-    toggleSubscriptionFreeze: async (id: string) => {
-        const response = await api.post<User>(`/users/${id}/subscription/freeze`);
+    /** days — только владелец / старший админ сверх бюджета тарифа (или меньше
+     *  остатка); без days пауза ставится на весь остаток бюджета. */
+    toggleSubscriptionFreeze: async (id: string, days?: number) => {
+        const response = await api.post<User>(`/users/${id}/subscription/freeze`, days ? { days } : undefined);
         return response.data;
     },
 

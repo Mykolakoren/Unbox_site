@@ -40,6 +40,12 @@ _ALIASES: dict[str, str] = {
     # Обещания тарифа (владелец 01.10, services/subscription_perks.py):
     # сколько бесплатных переносов позже суток уже потрачено.
     "free_reschedules_used": "freeReschedulesUsed",
+    # Заморозка по тарифу (владелец 01.10): бюджет дней паузы на абонемент,
+    # израсходовано, осталось (для экрана) и выдано на текущую паузу.
+    "freeze_days_total": "freezeDaysTotal",
+    "freeze_days_used": "freezeDaysUsed",
+    "freeze_days_left": "freezeDaysLeft",
+    "frozen_days_granted": "frozenDaysGranted",
     "included_formats": "includedFormats",
     "discount_percent": "discountPercent",
     # Особые условия клиента: абонемент без ограничения срока (owner-решение,

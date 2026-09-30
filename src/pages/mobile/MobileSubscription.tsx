@@ -6,18 +6,17 @@ import { fmtHours, reservedSubscriptionHours, subscriptionHours } from '../../ut
 import { canBookCabinets } from '../../utils/permissions';
 import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
 import { formatDayMonth } from '../../utils/format';
+import { fmtFreezeDays, freezeBudget } from '../../utils/subscription';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 
 const ADMIN_TG = 'UnboxCenter';
 
-/** Заморозка по правилам (src/config/pricing_policy.yaml → subscriptions.freeze):
- *  один раз за абонемент, до 7 дней. На сервере freeze_count — сколько раз
- *  УЖЕ замораживали (0 у нового абонемента). Раньше экран выводил его как
- *  «Заморозок осталось: 0» и прятал кнопку, когда заморозка была доступна. */
-const MAX_FREEZES = 1;
-const MAX_FREEZE_DAYS = 7;
+/* Заморозка по тарифу (владелец 01.10, «как на сайте»): бюджет ДНЕЙ паузы —
+ * Регулярный 7, Профи+ 30, остальные 0; делится на несколько пауз. Сколько
+ * осталось — freezeDaysLeft с сервера (utils/subscription.freezeBudget).
+ * Раньше экран считал «1 раз, до недели» для любого тарифа. */
 
 function adminTgLink(text: string): string {
     return `https://t.me/${ADMIN_TG}?text=${encodeURIComponent(text)}`;
@@ -88,8 +87,7 @@ export function MobileSubscription() {
                     const usedHours = Number.isFinite(usedRaw) && (sub as any).usedHours != null
                         ? usedRaw
                         : Math.max(0, poolTotal - sub.remainingHours);
-                    const used = Math.min(MAX_FREEZES, Math.max(0, sub.freezeCount || 0));
-                    const freezesLeft = MAX_FREEZES - used;
+                    const freeze = freezeBudget(sub);
                     return (
                         <>
                             {/* Hero: свободно для брони X ч из Y. */}
@@ -151,9 +149,9 @@ export function MobileSubscription() {
                                     label="Заморозка"
                                     value={sub.isFrozen
                                         ? (sub.frozenUntil ? `до ${formatDayMonth(sub.frozenUntil)}` : 'сейчас')
-                                        : freezesLeft > 0
-                                            ? `можно 1 раз, до ${MAX_FREEZE_DAYS} дней`
-                                            : 'уже использована'}
+                                        : freeze.left > 0
+                                            ? `осталось ${fmtFreezeDays(freeze.left)} из ${fmtFreezeDays(freeze.total)}`
+                                            : freeze.total > 0 ? 'дни израсходованы' : 'не входит в тариф'}
                                 />
                             </dl>
 
@@ -184,9 +182,9 @@ export function MobileSubscription() {
                                         href={adminTgLink(`Здравствуйте! Хочу разморозить абонемент «${sub.name}»${who}.`)}
                                         label="Попросить разморозить"
                                     />
-                                ) : freezesLeft > 0 ? (
+                                ) : freeze.left > 0 ? (
                                     <TgButton
-                                        href={adminTgLink(`Здравствуйте! Хочу заморозить абонемент «${sub.name}»${who}. С какого числа и на сколько дней (до ${MAX_FREEZE_DAYS}): `)}
+                                        href={adminTgLink(`Здравствуйте! Хочу заморозить абонемент «${sub.name}»${who}. С какого числа и на сколько дней (по тарифу осталось ${fmtFreezeDays(freeze.left)}): `)}
                                         label="Попросить заморозку"
                                         icon={<Snowflake size={16} aria-hidden="true" />}
                                     />

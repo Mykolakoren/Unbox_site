@@ -11,6 +11,7 @@
 
 import { ruCountWord } from './plural';
 import { parseUTC } from './dateUtils';
+import { SUBSCRIPTION_PLANS } from './data';
 
 export type SubLifecycle = 'active' | 'frozen' | 'completed' | 'none';
 
@@ -75,6 +76,42 @@ export function hoursUntilBookingStart(
   if (isNaN(d.getTime())) return Infinity;
   const startUTC = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h - 4, m, 0, 0);
   return (startUTC - now) / 3600000;
+}
+
+// ── Заморозка по тарифу (владелец 01.10, «как на сайте») ─────────────────
+// Зеркало backend services/subscription_perks.freeze_days_*: бюджет дней
+// паузы — Регулярный 7, Профи+ 30, остальные 0; делится на несколько пауз.
+// Сервер пишет freezeDaysLeft в абонемент; у старого пула без полей считаем
+// так же, как сервер (по тарифу; пауза уже была — израсходовано 7 дней).
+
+interface FreezeLike extends SubLike {
+  planId?: string;
+  freezeCount?: number;
+  freezeDaysTotal?: number | null;
+  freezeDaysUsed?: number | null;
+  freezeDaysLeft?: number | null;
+}
+
+const LEGACY_FREEZE_DAYS = 7;
+const num = (v: unknown): number | null =>
+  v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+
+/** Бюджет заморозки: всего, израсходовано, осталось (дней). */
+export function freezeBudget(sub: FreezeLike | null | undefined): { total: number; used: number; left: number } {
+  if (!sub) return { total: 0, used: 0, left: 0 };
+  const plan = SUBSCRIPTION_PLANS.find(p => p.id === sub.planId) as { freezeDays?: number } | undefined;
+  const total = Math.max(0, num(sub.freezeDaysTotal) ?? plan?.freezeDays ?? 0);
+  const used = Math.max(0, num(sub.freezeDaysUsed)
+    ?? ((sub.freezeCount || 0) >= 1 && !sub.isFrozen ? LEGACY_FREEZE_DAYS : 0));
+  const left = Math.max(0, num(sub.freezeDaysLeft) ?? total - used);
+  return { total, used, left };
+}
+
+/** «7 дней», «2,5 дня» — дни паузы. */
+export function fmtFreezeDays(days: number): string {
+  const d = Math.round((days || 0) * 10) / 10;
+  if (Number.isInteger(d)) return ruCountWord(d, ['день', 'дня', 'дней']);
+  return `${String(d).replace('.', ',')} дня`;
 }
 
 /** Плашка статуса: подпись + tailwind-классы. */

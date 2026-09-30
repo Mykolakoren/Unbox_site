@@ -6,10 +6,8 @@ import { Button } from './ui/Button';
 import { parseISO } from 'date-fns';
 import { formatDayMonth } from '../utils/format';
 import { SUBSCRIPTION_PLANS } from '../utils/data';
+import { fmtFreezeDays, freezeBudget } from '../utils/subscription';
 
-/** Сколько раз можно поставить абонемент на паузу (pricing_policy.yaml →
- *  max_freeze_count_per_subscription; сервер: users/admin.py, freeze_count >= 1 → отказ). */
-const FREEZE_LIMIT = 1;
 const ADMIN_TG = 'https://t.me/UnboxCenter';
 
 const fmtHours = (h: number) =>
@@ -39,19 +37,18 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
     const totalWithBonus = sub.totalHours + (sub.bonusHours || 0);
     const percentRemaining = totalWithBonus > 0 ? Math.min(100, (sub.remainingHours / totalWithBonus) * 100) : 0;
 
-    // freezeCount с сервера — сколько пауз УЖЕ ИСПОЛЬЗОВАНО (users/admin.py
-    // увеличивает его при каждой заморозке), а не сколько осталось. На телефоне
-    // (MobileSubscription) это число показано как «Заморозок осталось» — наоборот.
-    const freezesUsed = Number(sub.freezeCount) || 0;
-    const freezesLeft = Math.max(0, FREEZE_LIMIT - freezesUsed);
-    const canFreeze = !sub.isFrozen && freezesLeft > 0;
+    // Заморозка по тарифу (владелец 01.10): бюджет ДНЕЙ паузы — Регулярный 7,
+    // Профи+ 30, остальные 0; делится на несколько пауз. Показываем, сколько
+    // дней ОСТАЛОСЬ (freezeDaysLeft с сервера), а не сколько использовано.
+    const freeze = freezeBudget(sub);
+    const canFreeze = !sub.isFrozen && freeze.left > 0;
     const frozenUntil = sub.isFrozen && sub.frozenUntil ? parseISO(sub.frozenUntil) : null;
     const pauseOver = !!frozenUntil && frozenUntil.getTime() < Date.now();
     const frozenUntilLabel = frozenUntil ? formatDayMonth(frozenUntil) : '';
 
     const who = [user.name, user.email].filter(Boolean).join(', ');
     const freezeRequestUrl = adminTelegramUrl(
-        `Здравствуйте! Прошу поставить на паузу мой абонемент «${sub.name}» на 7 дней. ${who}`,
+        `Здравствуйте! Прошу поставить на паузу мой абонемент «${sub.name}» (по тарифу осталось ${fmtFreezeDays(freeze.left)}). ${who}. С какого числа и на сколько дней: `,
     );
     const unfreezeRequestUrl = adminTelegramUrl(
         `Здравствуйте! Прошу снять паузу с моего абонемента «${sub.name}». ${who}`,
@@ -125,9 +122,13 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     <dd className="m-0 font-medium">{(Number(sub.freeReschedules) || 0) > 0 ? `осталось ${sub.freeReschedules}` : 'нет'}</dd>
                 </div>
                 <div className={`${cell} flex justify-between gap-3`}>
-                    <dt className="flex items-center gap-2 text-ink-60"><Snowflake size={14} aria-hidden="true" /> Пауза на 7 дней</dt>
+                    <dt className="flex items-center gap-2 text-ink-60"><Snowflake size={14} aria-hidden="true" /> Заморозка</dt>
                     <dd className="m-0 font-medium">
-                        {sub.isFrozen ? 'идёт сейчас' : `осталось ${freezesLeft} из ${FREEZE_LIMIT}`}
+                        {sub.isFrozen
+                            ? 'идёт сейчас'
+                            : freeze.total > 0
+                                ? `осталось ${fmtFreezeDays(freeze.left)} из ${fmtFreezeDays(freeze.total)}`
+                                : 'не входит в тариф'}
                     </dd>
                 </div>
             </dl>
@@ -153,11 +154,11 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                             onClick={() => toggleSubscriptionFreeze(user.email).catch((err: any) =>
                                 toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку'))}
                         >
-                            {sub.isFrozen ? 'Снять паузу' : 'Поставить на паузу на 7 дней'}
+                            {sub.isFrozen ? 'Снять паузу' : `Поставить на паузу на ${fmtFreezeDays(freeze.left)}`}
                         </Button>
                         {!canFreeze && !sub.isFrozen && (
                             <p className="text-caption text-center text-ink-60 m-0">
-                                Пауза по этому абонементу уже использована
+                                {freeze.total > 0 ? 'Дни заморозки по этому абонементу израсходованы' : 'Заморозка не входит в этот тариф'}
                             </p>
                         )}
                     </>
@@ -188,7 +189,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     </>
                 ) : (
                     <p className="text-small text-center text-ink-60 m-0">
-                        Пауза по этому абонементу уже использована
+                        {freeze.total > 0 ? 'Дни заморозки по этому абонементу израсходованы' : 'Заморозка не входит в этот тариф'}
                     </p>
                 )}
             </div>

@@ -8,7 +8,7 @@ import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrection
 import { hasPermission } from '../../utils/permissions';
 import { format } from 'date-fns';
 import { safeFormat } from '../../utils/dateUtils';
-import { subscriptionBadge, subscriptionLifecycle } from '../../utils/subscription';
+import { fmtFreezeDays, freezeBudget, subscriptionBadge, subscriptionLifecycle } from '../../utils/subscription';
 import { bookingsApi } from '../../api/bookings';
 import { usersApi } from '../../api/users';
 import type { BookingHistoryItem } from '../../store/types';
@@ -101,6 +101,8 @@ export function AdminUserDetails() {
     const [isTopupOpen, setIsTopupOpen] = useState(false);
     const [isEditingExpiry, setIsEditingExpiry] = useState(false);
     const [editExpiryDate, setEditExpiryDate] = useState('');
+    // Пауза вручную на N дней (владелец / старший админ — можно сверх тарифа).
+    const [freezeDaysInput, setFreezeDaysInput] = useState('');
     // Excel #84 — inline display-name editing. Used when the backend-derived
     // name ("Галина") is too short to tell clients apart in schedules, and
     // admins want to extend it ("Галина Иващенко").
@@ -297,13 +299,14 @@ export function AdminUserDetails() {
 
 
 
-    const toggleFreeze = async () => {
+    const toggleFreeze = async (days?: number) => {
         if (!user.subscription) return;
         // Тост — только ПОСЛЕ ответа сервера. Раньше «Абонемент заморожен»
         // показывался мгновенно, даже когда сервер отвечал отказом
         // (повторная заморозка), — админ не понимал, почему ничего не меняется.
         try {
-            await useUserStore.getState().toggleSubscriptionFreeze(user.email);
+            await useUserStore.getState().toggleSubscriptionFreeze(user.email, days);
+            setFreezeDaysInput('');
             toast.success(user.subscription.isFrozen ? 'Абонемент разморожен' : 'Абонемент заморожен');
         } catch (err: any) {
             toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку');
@@ -1261,7 +1264,11 @@ export function AdminUserDetails() {
                                                         const sub = user.subscription!;
                                                         const until = sub.isFrozen && sub.frozenUntil ? new Date(sub.frozenUntil) : null;
                                                         const over = !!until && until.getTime() < Date.now();
-                                                        const used = !sub.isFrozen && (sub.freezeCount || 0) >= 1;
+                                                        // Заморозка по тарифу (владелец 01.10): бюджет дней
+                                                        // (freezeDaysLeft с сервера) — Регулярный 7, Профи+ 30.
+                                                        const freeze = freezeBudget(sub);
+                                                        const used = !sub.isFrozen && freeze.left <= 0;
+                                                        const canOverride = currentUser?.role === 'owner' || currentUser?.role === 'senior_admin';
                                                         return (
                                                             <div className="mt-2 space-y-1">
                                                                 {sub.isFrozen && (
@@ -1273,14 +1280,40 @@ export function AdminUserDetails() {
                                                                     </div>
                                                                 )}
                                                                 {used ? (
-                                                                    <div className="text-xs text-ink-60">Пауза по этому абонементу уже использована</div>
+                                                                    <div className="text-xs text-ink-60">
+                                                                        {freeze.total > 0
+                                                                            ? `Дни заморозки израсходованы (${fmtFreezeDays(freeze.used)} из ${fmtFreezeDays(freeze.total)})`
+                                                                            : 'Заморозка не входит в тариф'}
+                                                                    </div>
                                                                 ) : (
                                                                     <button
-                                                                        onClick={toggleFreeze}
+                                                                        onClick={() => toggleFreeze()}
                                                                         className={clsx('text-xs underline hover:text-ink', over ? 'text-[color:var(--status-pending-fg)] font-semibold' : 'text-ink-80')}
                                                                     >
-                                                                        {sub.isFrozen ? 'Снять паузу' : 'Поставить на паузу (7 дней, один раз)'}
+                                                                        {sub.isFrozen ? 'Снять паузу' : `Поставить на паузу (осталось ${fmtFreezeDays(freeze.left)} из ${fmtFreezeDays(freeze.total)})`}
                                                                     </button>
+                                                                )}
+                                                                {!sub.isFrozen && canOverride && (
+                                                                    <div className="flex items-center gap-1.5 text-xs text-ink-60">
+                                                                        <input
+                                                                            type="number"
+                                                                            min={1}
+                                                                            max={90}
+                                                                            inputMode="numeric"
+                                                                            aria-label="Дней паузы"
+                                                                            value={freezeDaysInput}
+                                                                            onChange={(e) => setFreezeDaysInput(e.target.value)}
+                                                                            placeholder="дн."
+                                                                            className="w-14 border border-ink-10 rounded px-1.5 py-0.5 bg-card text-ink"
+                                                                        />
+                                                                        <button
+                                                                            disabled={!(Number(freezeDaysInput) > 0)}
+                                                                            onClick={() => toggleFreeze(Number(freezeDaysInput))}
+                                                                            className="underline hover:text-ink disabled:opacity-40 disabled:no-underline"
+                                                                        >
+                                                                            пауза на N дней (можно сверх тарифа)
+                                                                        </button>
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         );

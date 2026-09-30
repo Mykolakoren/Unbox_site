@@ -35,19 +35,21 @@ from app.services import subscription_pool, wallet
 # free_reschedules — бесплатные переносы позже суток (не позже чем за 3 ч),
 # решение владельца 01.10: Тёплый 1, Регулярный 2, Профи+ 3, Пробный и
 # Групповой 0. Тратит reschedule_booking (services/subscription_perks.py).
+# freeze_days — бюджет дней заморозки «как на сайте» (владелец 01.10):
+# Регулярный 7, Профи+ 30, остальные 0. Бюджет делится на несколько пауз.
 PLANS: dict[str, dict] = {
     "TRIAL": dict(name="Пробный", hours=4, bonus_hours=0, price=70, duration_days=14,
-                  discount_percent=0, formats=["individual"], free_reschedules=0),
+                  discount_percent=0, formats=["individual"], free_reschedules=0, freeze_days=0),
     "WARM_START": dict(name="Тёплый старт", hours=10, bonus_hours=0, price=180, duration_days=30,
-                       discount_percent=10, formats=["individual"], free_reschedules=1),
+                       discount_percent=10, formats=["individual"], free_reschedules=1, freeze_days=0),
     "REGULAR_PRACTITIONER": dict(name="Регулярный практик", hours=20, bonus_hours=0, price=350,
                                  duration_days=30, discount_percent=15, formats=["individual"],
-                                 free_reschedules=2),
+                                 free_reschedules=2, freeze_days=7),
     "PRO_PLUS": dict(name="Профи+", hours=40, bonus_hours=2, price=650, duration_days=45,
                      discount_percent=20, formats=["individual", "group", "intervision"],
-                     free_reschedules=3),
+                     free_reschedules=3, freeze_days=30),
     "GROUP_MASTER": dict(name="Групповой мастер", hours=20, bonus_hours=0, price=450, duration_days=45,
-                         discount_percent=25, formats=["group"], free_reschedules=0),
+                         discount_percent=25, formats=["group"], free_reschedules=0, freeze_days=0),
 }
 
 CASH_METHODS = {"cash": "наличные", "card_tbc": "карта TBC", "card_bog": "карта BOG"}
@@ -81,6 +83,8 @@ def build_subscription(plan_id: str, now: datetime, carry_hours: float = 0.0) ->
         "free_reschedules": p["free_reschedules"], "free_reschedules_used": 0,
         "expiry_date": (now + timedelta(days=p["duration_days"])).isoformat(),
         "is_frozen": False, "freeze_count": 0, "discount_percent": p["discount_percent"],
+        "freeze_days_total": float(p["freeze_days"]), "freeze_days_used": 0.0,
+        "freeze_days_left": float(p["freeze_days"]),
         "included_formats": list(p["formats"]), "status": "active",
     })
 
