@@ -21,6 +21,8 @@ export interface Specialist {
     basePriceGel: number;
     sessionDurationMin?: number;
     badges?: string[];
+    /** Категория каталога: psychology | psychiatry | narcology | coaching | education. */
+    category?: string | null;
 }
 
 interface SpecialistCardProps {
