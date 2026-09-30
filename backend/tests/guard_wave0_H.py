@@ -237,16 +237,23 @@ def test_desktop_chessboard_series_goes_through_gate():
 
 
 def test_approve_application_grants_booking_role():
-    """Решение владельца 30.09: «Одобрить» анкету = человек сразу может
-    бронировать. Роль user → specialist (только обычному клиенту; админов и
-    владельца не трогаем), смена роли пишется в журнал role_change."""
+    """Решения владельца 30.09: «Одобрить» анкету = человек сразу может
+    бронировать (user → specialist, админов/владельца не трогаем), но только с
+    правом specialists.verify; смена роли пишется в журнал role_change.
+    «Отклонить» после одобрения снимает роль, если её выдало одобрение."""
     src = open(os.path.join(os.path.dirname(__file__), "..", "app/api/v1/specialists.py"),
                encoding="utf-8").read()
     i = src.find("def approve_specialist_application")
-    body = src[i:src.find("@router.post(\"/admin/{specialist_id}/reject\"", i)]
-    assert 'owner_user.role = "specialist"' in body, "одобрение снова не даёт права бронировать"
-    assert '== "user"' in body, "одобрение может понизить админа/владельца до специалиста"
-    assert 'event_type="role_change"' in body, "выдача роли при одобрении не пишется в журнал"
+    j = src.find("def reject_specialist_application")
+    approve, reject = src[i:j], src[j:j + 4000]
+    assert 'owner_user.role = "specialist"' in approve, "одобрение снова не даёт права бронировать"
+    assert '== "user"' in approve, "одобрение может понизить админа/владельца до специалиста"
+    assert 'event_type="role_change"' in approve, "выдача роли при одобрении не пишется в журнал"
+    assert 'has_permission(_admin, "specialists.verify")' in approve, "одобрение без права «Проверка специалистов»"
+    assert 'has_permission(_admin, "specialists.verify")' in reject, "отклонение без права «Проверка специалистов»"
+    assert '"specialist_approve"' in reject and 'owner_user.role = "user"' in reject, \
+        "«Отклонить» после «Одобрить» больше не снимает выданную роль"
+
 
 
 if __name__ == "__main__":

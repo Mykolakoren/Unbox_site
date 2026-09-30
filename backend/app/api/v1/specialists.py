@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field as PField
 
 from app.db.session import get_session
 from app.models.specialist import Specialist, SpecialistRead, SpecialistCreate, SpecialistUpdate
-from app.api.deps import require_admin, require_specialist, get_current_user
+from app.api.deps import require_admin, require_specialist, get_current_user, has_permission
 from app.models.user import User
 from app.services.telegram import telegram_service
 
@@ -390,6 +390,10 @@ def approve_specialist_application(
     """Admin: approve a pending application — flip is_verified=True so the
     profile shows up publicly. Status moves to "approved" for audit; future
     edits don't touch this field unless the admin re-rejects."""
+    # Одобрение теперь выдаёт роль specialist (право бронировать), поэтому
+    # требуем то же право, что стоит в матрице для проверки специалистов.
+    if not has_permission(_admin, "specialists.verify"):
+        raise HTTPException(status_code=403, detail="Нет права «Проверка специалистов»")
     specialist = session.get(Specialist, specialist_id)
     if not specialist:
         raise HTTPException(status_code=404, detail="Specialist not found")
@@ -436,14 +440,49 @@ def reject_specialist_application(
     """Admin: reject application. We keep the row (is_verified stays False,
     status="rejected") so the user sees the decision in their profile and
     can resubmit if asked to revise — no silent deletion."""
+    if not has_permission(_admin, "specialists.verify"):
+        raise HTTPException(status_code=403, detail="Нет права «Проверка специалистов»")
     specialist = session.get(Specialist, specialist_id)
     if not specialist:
         raise HTTPException(status_code=404, detail="Specialist not found")
     specialist.is_verified = False
     specialist.application_status = "rejected"
     session.add(specialist)
+
+    # «Отклонить» после «Одобрить» снимает право бронировать — но только если
+    # роль выдало именно одобрение (последняя смена роли via=specialist_approve).
+    # Роль, выставленную админом вручную, не трогаем.
+    from app.models.timeline import TimelineEvent
+    owner_user = session.get(User, specialist.user_id) if specialist.user_id else None
+    revoked = False
+    if owner_user and owner_user.role == "specialist":
+        last_change = session.exec(
+            select(TimelineEvent)
+            .where(TimelineEvent.target_id == str(owner_user.id))
+            .where(TimelineEvent.event_type == "role_change")
+            .order_by(TimelineEvent.timestamp.desc())  # type: ignore[union-attr]
+        ).first()
+        if last_change and (last_change.metadata_dump or {}).get("via") == "specialist_approve":
+            owner_user.role = "user"
+            owner_user.is_admin = False
+            session.add(owner_user)
+            revoked = True
+
     session.commit()
     session.refresh(specialist)
+
+    if revoked:
+        from app.services.timeline import timeline_service
+        timeline_service.log_event(
+            session=session,
+            actor_id=_admin.id,
+            actor_role=_admin.role,
+            target_id=str(owner_user.id),
+            target_type="user",
+            event_type="role_change",
+            description="Changed role from specialist to user (анкета отклонена)",
+            metadata={"old_role": "specialist", "new_role": "user", "via": "specialist_reject"},
+        )
     return specialist
 
 
