@@ -219,6 +219,31 @@ def test_loading_is_not_empty():
             assert old not in _read(ROOT / "src/pages/crm" / name), f"{name}: текст «Загрузка…» вместо скелетона"
 
 
+def test_sessions_grid_fits_content():
+    """Ревью 1b0e075: сетка сессий 694 px + клиент не влезала в контент на окнах
+    960–1200 (сайдбар 260 px). Минимум сетки ≤ порога перехода на карточки,
+    у клиента есть минимальная ширина, порог меряется по контейнеру."""
+    src = _read(ROOT / "src/pages/crm/CrmSessions.tsx")
+    m = re.search(r"GH_ROW_COLUMNS = '([^']+)'", src)
+    assert m, "нет GH_ROW_COLUMNS"
+    cols = m.group(1)
+    assert re.search(r"minmax\(\s*1[2-9]\d px|minmax\(1[2-9]\dpx", cols.replace("px", " px").replace("  ", " ")) or "minmax(140px" in cols, \
+        f"у колонки «Клиент» нет минимальной ширины: {cols}"
+    fixed = sum(int(x) for x in re.findall(r"(?<![\w(])(\d+)px", cols))
+    client_min = int(re.search(r"minmax\((\d+)px", cols).group(1))
+    gap = int(re.search(r"GH_ROW_GAP = (\d+)", src).group(1))
+    threshold = int(re.search(r"GH_TABLE_MIN = (\d+)", src).group(1))
+    total = fixed + client_min + gap * (len(cols.split()) - 2)
+    assert total <= threshold, f"минимум сетки {total} px шире порога карточек {threshold} px"
+    # На 1024: контент = 1024 − 260 (сайдбар) − 80 (поля main) − 64 (поля списка) = 620.
+    assert threshold > 620, "на окне 1024 таблица сессий должна складываться в карточки"
+    assert "ResizeObserver" in src and "listW < GH_TABLE_MIN" in src, \
+        "порог таблицы сессий должен считаться по ширине контейнера (ResizeObserver)"
+    detail = _read(ROOT / "src/pages/crm/CrmClientDetail.tsx")
+    assert "historyW < HISTORY_TABLE_MIN" in detail and "minmax(140px" in detail, \
+        "история сессий в карточке клиента: нужен минимум даты и переход в одну колонку по ширине контейнера"
+
+
 def test_delete_session_modal_on_sheet():
     src = _read(ROOT / "src/components/crm/DeleteSessionModal.tsx")
     assert "from '../ui/Sheet'" in src and 'variant="danger"' in src, \
