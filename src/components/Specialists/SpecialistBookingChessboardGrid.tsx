@@ -306,7 +306,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, specialistName, 
             // Ключи в camelCase — интерцептор запроса сам переведёт их
             // в client_name / start_time / location_id для бэкенда.
             // Telegram отдельного поля не имеет — уходит в заметку к записи
-            // (её видит специалист в уведомлении и в CRM).
+            // (её видит специалист в Telegram-уведомлении и в CRM → «Расписание», список записей).
             const data: AppointmentCreate = {
                 clientName: name,
                 clientPhone: phone || undefined,

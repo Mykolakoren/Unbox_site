@@ -773,6 +773,18 @@ function GridHouseCrmSchedule({
                                             {appt.clientPhone}
                                         </div>
                                     )}
+                                    {/* Контакт записи с сайта: e-mail и Telegram (он приходит в заметке
+                                        «Telegram: @…», если клиент не оставил телефон). */}
+                                    {appt.clientEmail && (
+                                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2, overflowWrap: 'anywhere' }}>
+                                            {appt.clientEmail}
+                                        </div>
+                                    )}
+                                    {appt.notes && (
+                                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2, overflowWrap: 'anywhere' }}>
+                                            {appt.notes}
+                                        </div>
+                                    )}
                                 </div>
                                 <div
                                     style={{

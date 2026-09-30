@@ -189,7 +189,8 @@ function App() {
         // G3-23 / X2-02: профиль из бота (/profile → /dashboard/profile) на
         // телефоне — мобильный «Я», а не компьютерный кабинет.
         [/^\/dashboard\/profile\/?$/, '/m/me'],
-        [/^\/subscriptions\/?$/, '/m/subscription'],
+        // /subscriptions — витрина тарифов (как catalogPath), не «мой абонемент».
+        [/^\/subscriptions\/?$/, '/m/tariffs'],
         [/^\/booking-rules\/?$/, '/m/booking-rules'],
         [/^\/admin\/?$/, '/m/admin'],
         // Точные двойники мобильной админки (X2-02) — раньше всё сворачивалось
@@ -252,7 +253,8 @@ function App() {
       <Routes>
         {DevUiPage && <Route path="/dev/ui" element={<DevUiPage />} />}
         {/* Public Booking Flow */}
-        <Route path="/" element={<ExplorePage />} />
+        {/* Лендинг теперь ленивый: при устаревшем чанке после деплоя — автоперезагрузка из ModuleErrorBoundary. */}
+        <Route path="/" element={<ModuleErrorBoundary moduleName="Главная"><ExplorePage /></ModuleErrorBoundary>} />
         <Route path="/explore" element={<Navigate to="/" replace />} />
         <Route path="/location/:locationId" element={<LocationDetailsPage />} />
         <Route path="/cabinet/:resourceId" element={<CabinetPage />} />
