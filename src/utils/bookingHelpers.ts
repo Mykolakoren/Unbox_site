@@ -119,14 +119,14 @@ export function isPastBooking(booking: BookingHistoryItem): boolean {
 /** Человекочитаемая длительность.
  *  - `<60` мин → «N мин»
  *  - точное кол-во часов → «N ч»
- *  - с половиной часа → «N.5 ч»
+ *  - с половиной часа → «N,5 ч» (десятичная запятая)
  *  - иначе → «N ч M мин» */
 export function formatBookingDuration(min: number): string {
     if (min < 60) return `${min} мин`;
     const h = Math.floor(min / 60);
     const m = min % 60;
     if (m === 0) return `${h} ч`;
-    if (m === 30) return `${h}.5 ч`;
+    if (m === 30) return `${h},5 ч`;
     return `${h} ч ${m} мин`;
 }
 

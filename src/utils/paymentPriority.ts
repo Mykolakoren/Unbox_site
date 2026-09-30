@@ -19,9 +19,9 @@ import { subscriptionLifecycle } from './subscription';
 
 export type PayMethod = 'balance' | 'subscription' | 'bonus';
 
-/** «1 ч», «1.5 ч» — без хвоста «.0». */
+/** «1 ч», «1,5 ч» — без хвоста «,0», десятичная запятая. */
 export function fmtHours(h: number): string {
-    return `${Number((h || 0).toFixed(1))} ч`;
+    return `${String(Number((h || 0).toFixed(1))).replace('.', ',')} ч`;
 }
 
 /** Бонусные часы, которые сервер реально потратит: активные и не истёкшие
