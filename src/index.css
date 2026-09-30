@@ -285,6 +285,9 @@ html [data-sonner-toast] [data-button] {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
+  /* В моноширинном шрифте пробел шириной с цифру: «5 148 ₾» выглядело
+   * как «5  148  ₾». Сужаем пробелы (в т.ч. неразрывные) до тонких. */
+  word-spacing: -0.3em;
 }
 
 /* Touch-target minimum для mobile chip-buttons.
