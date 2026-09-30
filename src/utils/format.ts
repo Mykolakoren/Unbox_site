@@ -199,7 +199,10 @@ export function formatTime(d: DateLike, opts: DateOptions = {}): string {
     return s === null ? (opts.fallback ?? '—') : s;
 }
 
-/** «15:00–16:00» — интервал через короткое тире без пробелов. */
+/** «15:00–16:00» — интервал через короткое тире без пробелов.
+ *  Нет конца (или он битый) — только начало «15:00», без «15:00–—». */
 export function formatTimeRange(start: DateLike, end: DateLike, opts: DateOptions = {}): string {
-    return `${formatTime(start, opts)}–${formatTime(end, opts)}`;
+    const from = formatTime(start, opts);
+    const to = formatTime(end, { ...opts, fallback: '' });
+    return to ? `${from}–${to}` : from;
 }

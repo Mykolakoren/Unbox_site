@@ -16,6 +16,14 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { STATUS } from '../design/tokens';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDayMonth, formatGel, formatMoney, formatTimeRange } from '../utils/format';
+import { timeToMin } from '../utils/bookingHelpers';
+
+/** Конец брони из начала и длительности (мин): у броней из истории нет endTime. */
+function endFromDuration(start: string | null | undefined, durationMin: number | null | undefined): string | null {
+    if (!start || !durationMin) return null;
+    const end = timeToMin(start) + durationMin;
+    return `${String(Math.floor(end / 60) % 24).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+}
 import {
     DndContext,
     closestCenter,
@@ -535,7 +543,7 @@ function GridHouseDashboardOverview({
                                             <StatusBadge kind="booking" status={b.status} className="shrink-0" />
                                         </div>
                                         <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>
-                                            {formatBookingDate(b.date)} · {formatTimeRange(b.startTime, b.endTime)}
+                                            {formatBookingDate(b.date)} · {formatTimeRange(b.startTime, (b as { endTime?: string }).endTime ?? endFromDuration(b.startTime, b.duration))}
                                         </div>
                                     </div>
                                 );
