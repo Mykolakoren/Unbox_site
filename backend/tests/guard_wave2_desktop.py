@@ -259,6 +259,17 @@ def test_rules_in_d_files():
     assert not bad, "; ".join(bad)
 
 
+_REPO_ROOT_FOR_VIEW = str(pathlib.Path(__file__).resolve().parents[2])
+
+def test_view_grid_reacts_to_navigation_on_same_page():
+    """Ревью 30.09: «Забронировать кабинет» (?view=grid) с уже открытых «Моих
+    броней» ничего не делал — viewMode читался только при первом рендере."""
+    src = (pathlib.Path(_REPO_ROOT_FOR_VIEW) / "src/pages/MyBookingsPage.tsx").read_text(encoding="utf-8")
+    i = src.index("}, [location.key]);")
+    block = src[max(0, i - 400):i]
+    assert "get('view')" in block and "setViewMode(v)" in block, \
+        "MyBookingsPage: ?view=grid снова читается только при первом рендере"
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

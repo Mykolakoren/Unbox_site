@@ -2223,6 +2223,15 @@ export function MyBookingsPage() {
     // "Продлить" + "ОК, не продлевать" buttons (the latter calls
     // dismissSeriesEndReminder so no more pings fire).
     const [searchParams, setSearchParams] = useSearchParams();
+    // ?view=grid при переходе, когда страница уже открыта (меню «Забронировать
+    // кабинет» с «Моих броней»): маршрут тот же, компонент не пересоздаётся,
+    // поэтому реагируем на каждую навигацию (location.key меняется даже при
+    // том же адресе), а не только на первый рендер.
+    useEffect(() => {
+        const v = new URLSearchParams(location.search).get('view');
+        if (v === 'grid' || v === 'series') setViewMode(v);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.key]);
     const highlightedSeriesId = searchParams.get('series');
     const clearHighlightedSeries = useCallback(() => {
         const next = new URLSearchParams(searchParams);
