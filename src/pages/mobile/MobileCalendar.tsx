@@ -12,6 +12,8 @@ import type { BookingHistoryItem } from '../../store/types';
 import { COLOR } from '../../design/tokens';
 import { formatDateLabel, formatDayMonth } from '../../utils/format';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 
 // Compact enough that 09:00–22:00 (13h) fits within 2 phone-screens worth of
 // scroll while still leaving each row tappable. Earlier 56px wasted vertical
@@ -32,6 +34,11 @@ const DAY_END = 22;
  *                  across all rooms. Browse-only, "what's happening today".
  *
  * Replaces the desktop /dashboard/bookings chessboard for the mobile flow.
+ *
+ * Волна 2, пакет B: шапка со стрелкой «Назад» (G4-client-mobile-M4 — в
+ * установленном приложении браузерной «Назад» нет; без истории — в «Свободно»),
+ * подсказка над сеткой и «+ Свободно» в полностью свободных часах (G4-22),
+ * чипы кабинетов 44 px.
  */
 export function MobileCalendar() {
     const navigate = useNavigate();
@@ -47,12 +54,15 @@ export function MobileCalendar() {
 
     // Default the active room to the user's favourite, falling back to the
     // first cabinet of Unbox Uni (the bigger site, more action there).
-    const fav = getFavoriteCabinet(currentUser?.id);
+    // Любимый кабинет — только если он ещё сдаётся (кабинет 9 закрыт).
+    const favRaw = getFavoriteCabinet(currentUser?.id);
+    const fav = favRaw && RESOURCES.some(r => r.id === favRaw && r.isActive !== false) ? favRaw : null;
     const [activeResId, setActiveResId] = useState<string>(
         fav || RESOURCES.find(r => r.locationId === 'unbox_uni' && r.type === 'cabinet')?.id || RESOURCES[0]?.id
     );
 
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
+    useDocumentTitle('Календарь');
 
     const targetDate = useMemo(() => {
         const d = addDays(new Date(), dayOffset);
@@ -115,17 +125,12 @@ export function MobileCalendar() {
 
     return (
         <>
-            <div style={{
-                paddingTop: 12,
-                paddingBottom: 'calc(96px + env(safe-area-inset-bottom, 0px))',
-                display: 'flex', flexDirection: 'column', gap: 14,
-            }}>
-                <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, flex: 1 }}>
-                        Календарь
-                    </h1>
-                    {/* Mode toggle: room timeline vs schedule list */}
-                    <div style={{
+            <MobilePageHeader
+                title="Календарь"
+                fallbackTo="/m/find"
+                action={
+                    /* Режим: один кабинет по часам или лента всех броней дня */
+                    <div role="group" aria-label="Вид календаря" style={{
                         display: 'flex',
                         background: COLOR.sunken,
                         borderRadius: 10,
@@ -133,23 +138,28 @@ export function MobileCalendar() {
                     }}>
                         <button
                             onClick={() => setMode('room')}
-                            aria-label="Кабинет"
+                            aria-label="Кабинет по часам"
                             aria-pressed={mode === 'room'}
                             style={modeBtn(mode === 'room')}
                         >
-                            <LayoutGrid size={16} />
+                            <LayoutGrid size={16} aria-hidden="true" />
                         </button>
                         <button
                             onClick={() => setMode('schedule')}
-                            aria-label="Лента"
+                            aria-label="Лента броней"
                             aria-pressed={mode === 'schedule'}
                             style={modeBtn(mode === 'schedule')}
                         >
-                            <List size={16} />
+                            <List size={16} aria-hidden="true" />
                         </button>
                     </div>
-                </div>
-
+                }
+            />
+            <div style={{
+                paddingTop: 12,
+                paddingBottom: 'calc(96px + env(safe-area-inset-bottom, 0px))',
+                display: 'flex', flexDirection: 'column', gap: 14,
+            }}>
                 {/* Day picker — arrows + label */}
                 <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
@@ -199,15 +209,16 @@ export function MobileCalendar() {
                                             color: active ? COLOR.onInk : COLOR.ink,
                                             border: 'none',
                                             borderRadius: 10,
-                                            padding: '8px 12px',
+                                            padding: '6px 12px',
+                                            minHeight: 44,
                                             cursor: 'pointer',
                                             fontFamily: 'inherit',
                                             flex: '0 0 auto',
                                             textAlign: 'left',
                                         }}
                                     >
-                                        <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</div>
-                                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 1 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 600 }}>{r.name}</div>
+                                        <div style={{ fontSize: 12, marginTop: 1 }}>
                                             {loc?.name?.replace('Unbox ', '')}
                                         </div>
                                     </button>
@@ -217,6 +228,9 @@ export function MobileCalendar() {
 
                         {/* Vertical timeline */}
                         <div style={{ padding: '0 16px' }}>
+                            <p style={{ fontSize: 14, color: COLOR.ink60, margin: '0 0 8px' }}>
+                                Нажмите на свободный час, чтобы забронировать.
+                            </p>
                             <Timeline
                                 bookings={roomBookings}
                                 isOwnBooking={isOwnBooking}
@@ -313,6 +327,9 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
             {/* Hour rows — clickable for quick-book */}
             {Array.from({ length: totalHours }).map((_, i) => {
                 const hour = DAY_START + i;
+                // «+ Свободно» — только если весь час свободен: при брони
+                // с :30 подпись вводила бы в заблуждение.
+                const free = !bookings.some(x => x.startMin < (hour + 1) * 60 && x.endMin > hour * 60);
                 return (
                     <button
                         key={hour}
@@ -327,17 +344,17 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
                             border: 'none',
                             borderTop: i === 0 ? 'none' : `1px solid ${COLOR.ink05}`,
                             display: 'flex',
-                            alignItems: 'flex-start',
+                            alignItems: 'center',
                             cursor: 'pointer',
                             fontFamily: 'inherit',
                             padding: `6px 12px 6px ${TIME_RAIL_PX + 8}px`,
                             textAlign: 'left',
-                            color: 'transparent',
+                            color: COLOR.ink60,
+                            fontSize: 12,
                         }}
                         aria-label={`Забронировать на ${hour}:00`}
                     >
-                        {/* Hover-only "+ Забронировать" prompt would be too noisy on
-                            mobile — skip; the hour label on left is the only label. */}
+                        {free && <span aria-hidden="true">+ Свободно</span>}
                     </button>
                 );
             })}
