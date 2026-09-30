@@ -48,10 +48,15 @@ def test_series_cancel_plural_is_genitive():
 
 def test_detail_sheet_esc_ignored_while_trimming():
     src = _read("src/pages/mobile/BookingDetailSheet.tsx")
+    # Волна 2: шторка брони на общем Sheet — Esc обрабатывает он. Суть та же:
+    # пока открыто окно «Сократить бронь», Esc/свайп карточку не закрывают.
     m = re.search(r"const onKey = \(e: KeyboardEvent\) => \{(.*?)\};", src, re.S)
-    assert m, "не нашли обработчик Esc в BookingDetailSheet"
-    assert "trimming" in m.group(1), \
-        "Esc снова закрывает карточку под окном «Сократить бронь» (нужна проверка trimming)"
+    if m:
+        assert "trimming" in m.group(1), \
+            "Esc снова закрывает карточку под окном «Сократить бронь» (нужна проверка trimming)"
+    else:
+        assert "<Sheet" in src and "dismissible={!trimming}" in src, \
+            "Esc снова закрывает карточку под окном «Сократить бронь» (нужно dismissible={!trimming})"
 
 
 # ── 5 ────────────────────────────────────────────────────────────────────

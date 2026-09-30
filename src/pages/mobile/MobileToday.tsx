@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, ArrowUpRight, Briefcase, Check, CheckSquare, ChevronDown, Clock, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ArrowUpRight, Briefcase, Check, CheckSquare, ChevronDown, ChevronRight, Gift, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { RESOURCES, LOCATIONS } from '../../utils/data';
+import { RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { usePullToRefresh } from './usePullToRefresh';
 import { PullIndicator } from './PullIndicator';
@@ -11,6 +11,7 @@ import { prepareRepeat } from './repeatBooking';
 import { priceLabel } from './priceLabel';
 import { NotificationsBell } from './NotificationsBell';
 import { adminTasksApi, type AdminTask } from '../../api/adminTasks';
+import { bonusesApi } from '../../api/bonuses';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { getRecurrence, withRecurrence, nextDeadline } from './admin/taskRecurrence';
 import { toast } from 'sonner';
@@ -18,12 +19,30 @@ import type { BookingHistoryItem } from '../../store/types';
 import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard } from '../../components/SpecialistGate';
-import { COLOR, STATUS, Z } from '../../design/tokens';
-import { formatDateLabel, formatDayMonth, formatGel } from '../../utils/format';
+import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
+import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatWeekdayShort } from '../../utils/format';
+import { fmtHours } from '../../utils/paymentPriority';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { Button } from '../../components/ui/Button';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { canUsePsyCrm } from './crmAccess';
+import {
+    bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, isLiveBooking, mapsUrl, paymentLine,
+} from './bookingView';
 
 const sectionPad: React.CSSProperties = { padding: '0 16px' };
 
+/**
+ * /m/today — «Сегодня», вариант V1 «Карточка встречи» (решение владельца 30.09).
+ *
+ * Сверху — тёмная карточка ближайшей встречи (в том числе брони, которая
+ * ждёт одобрения администратора): относительный день и «через 3 ч», время,
+ * кабинет и адрес, строка оплаты, «Маршрут» и «Детали». Ниже одна главная
+ * кнопка «Забронировать кабинет», затем «Дальше» — три следующие брони.
+ * Остальное (анкета, кредит, постоянный слот, задачи, связь с админом) —
+ * ниже и спокойнее. Закреплённая внизу кнопка поиска убрана: она
+ * дублировала кнопку и вкладку «Свободно» (X2-17).
+ */
 export function MobileToday() {
     const navigate = useNavigate();
     // Селективные селекторы вместо whole-store: ре-рендер только при
@@ -98,11 +117,13 @@ export function MobileToday() {
         } catch { toast.error('Не получилось'); }
     };
 
+    // Свои брони. Волна 2 (G3-02): вместе с подтверждёнными — и те, что ждут
+    // одобрения администратора, иначе «горячая» бронь пропадала с главной.
     const myBookings = useMemo(() => {
         if (!currentUser) return [];
         return bookings.filter(b =>
             (b.userId === currentUser.email || (!!currentUser.id && (b as any).userUuid === currentUser.id))
-            && b.status === 'confirmed'
+            && isLiveBooking(b)
         );
     }, [bookings, currentUser]);
 
@@ -114,8 +135,9 @@ export function MobileToday() {
             .sort((a, b) => (a.dt!.getTime() - b.dt!.getTime()));
     }, [myBookings, now]);
 
-    const active = sortedFuture.find(x => x.dt!.getTime() <= now.getTime() && x.dt!.getTime() + (x.b.duration ?? 60) * 60000 > now.getTime());
-    const upcoming = sortedFuture.filter(x => x !== active).slice(0, 6);
+    // Карточка встречи — идущая сейчас или ближайшая; «Дальше» — три следующие.
+    const hero = sortedFuture[0] ?? null;
+    const nextRows = sortedFuture.slice(1, 4);
 
     /** Detect the user's REGULAR slot — the (resource + weekday + time)
      *  triple they've booked ≥3 times in the last 60 days. Returns the
@@ -195,6 +217,26 @@ export function MobileToday() {
         return out;
     }, [myBookings, now]);
 
+    // G4-12: новичку без броней — про приветственный час, но только если он
+    // правда есть; дата «до …» — из самого бонуса.
+    const nothingBooked = bookingsLoadedAt != null && sortedFuture.length === 0;
+    const [welcome, setWelcome] = useState<{ hours: number; until?: string } | null>(null);
+    useEffect(() => {
+        if (!nothingBooked || !currentUser?.id) return;
+        let cancelled = false;
+        bonusesApi.getMyBonuses()
+            .then(list => {
+                const active = list
+                    .filter(b => b.status === 'active' && (b.type === 'free_hour' || b.type === 'freeHour'))
+                    .filter(b => !(b.expiresAt && new Date(b.expiresAt).getTime() < Date.now()))
+                    .sort((a, b) => (a.expiresAt ?? '9').localeCompare(b.expiresAt ?? '9'));
+                const hours = active.reduce((s, b) => s + (b.quantity || 0), 0);
+                if (!cancelled) setWelcome(hours > 0 ? { hours, until: active[0]?.expiresAt } : null);
+            })
+            .catch(() => { if (!cancelled) setWelcome(null); });
+        return () => { cancelled = true; };
+    }, [nothingBooked, currentUser?.id]);
+
     // Бронировать сервер даёт только специалистам и админам. Новичку (роль
     // user) вместо кнопок брони — карточка с анкетой: раньше он проходил весь
     // мастер и получал отказ на последней кнопке.
@@ -205,13 +247,13 @@ export function MobileToday() {
 
     const goToFind = () => navigate('/m/find');
 
-    // Workspace shortcuts in the header. Visible to specialists/admins so they
-    // can pop into CRM or Admin panel without going into the Profile tab.
+    // Вход в рабочие места. CRM — по правилу сервера (X2-ia-navigation-M3):
+    // обычный админ без права psy_crm.access кнопку «CRM» больше не видит.
     const isAdmin = currentUser.role === 'owner'
         || currentUser.role === 'senior_admin'
         || currentUser.role === 'admin'
         || currentUser.isAdmin;
-    const isSpecialist = currentUser.role === 'specialist' || isAdmin;
+    const showCrm = canUsePsyCrm(currentUser);
 
     // Credit-line traffic light: same logic as backend billing_defer.py — if
     // user is over the credit limit (> 100% utilisation) we show red, > 80%
@@ -235,53 +277,30 @@ export function MobileToday() {
         if (prepareRepeat(booking)) navigate('/m/checkout');
     };
 
+    const loading = bookingsLoadedAt == null && bookingsStatus !== 'error';
+    const failed = bookingsLoadedAt == null && bookingsStatus === 'error';
+
     return (
         <>
             <div style={{
-                paddingTop: 8,
-                // Bottom padding leaves room for sticky CTA above tab bar.
-                paddingBottom: 'calc(120px + env(safe-area-inset-bottom, 0px))',
+                paddingTop: 16,
+                paddingBottom: 24,
                 display: 'flex', flexDirection: 'column', gap: 20,
             }}>
                 <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
 
-                {/* Header */}
-                <div style={{ ...sectionPad, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+                {/* Шапка: «Сегодня» и дата, справа колокольчик. */}
+                <div style={{ ...sectionPad, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: COLOR.ink60, fontWeight: 500 }}>
-                            Привет, {currentUser.name?.split(' ')[0]}
-                        </div>
-                        <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: '4px 0 0' }}>
+                        <h1 style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1.2, margin: 0 }}>
                             Сегодня
                         </h1>
+                        <div style={{ fontSize: TEXT.small, color: COLOR.ink60, marginTop: 4 }}>
+                            {formatDateLabel(now, { capitalize: true })}
+                        </div>
                     </div>
                     <NotificationsBell />
                 </div>
-
-                {/* Workspace shortcut row — quick jump into CRM / Admin without
-                    going through Profile. Hidden for plain clients. */}
-                {(isSpecialist || isAdmin) && (
-                    <div style={sectionPad}>
-                        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
-                            {isSpecialist && (
-                                <button
-                                    onClick={() => navigate('/m/crm')}
-                                    style={workspaceChip}
-                                >
-                                    <Briefcase size={14} /> CRM
-                                </button>
-                            )}
-                            {isAdmin && (
-                                <button
-                                    onClick={() => navigate('/m/admin')}
-                                    style={workspaceChip}
-                                >
-                                    <ShieldCheck size={14} /> Админка
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                )}
 
                 {/* Ещё не специалист — сначала анкета (или её статус). */}
                 {!canBook && (
@@ -290,23 +309,143 @@ export function MobileToday() {
                     </div>
                 )}
 
-                {/* Credit-line warning */}
+                {/* Ближайшая встреча. Пока брони грузятся — заглушка, при
+                    сбое — ошибка с «Повторить» (раньше в обоих случаях писали
+                    «нет», и клиент думал, что бронь слетела). */}
+                <div style={sectionPad}>
+                    <StaleBar status={bookingsStatus} loadedAt={bookingsLoadedAt} onRetry={() => { fetchBookings(); }} />
+                    {bookingsLoadedAt == null && bookingsStatus !== 'error' ? (
+                        <SkeletonRows count={1} height={236} />
+                    ) : bookingsLoadedAt == null ? (
+                        <LoadErrorCard
+                            title="Не удалось загрузить брони"
+                            text="Они никуда не делись — просто сейчас не загрузились."
+                            onRetry={() => { fetchBookings(); }}
+                        />
+                    ) : hero ? (
+                        <NextMeetingCard booking={hero.b} dt={hero.dt!} onDetails={() => setOpenBooking(hero.b)} />
+                    ) : (
+                        <EmptyState
+                            compact
+                            title="Пока ничего не забронировано"
+                            hint={welcome
+                                ? `У вас ${fmtHours(welcome.hours)} бесплатно${welcome.until ? ` — до ${formatDayMonth(welcome.until)}` : ''}. Хороший повод для первой брони.`
+                                : canBook ? 'Свободное время — на вкладке «Свободно».' : undefined}
+                        />
+                    )}
+                </div>
+
+                {/* Одна главная кнопка — только тем, кому бронь откроется (иначе 403 в конце). */}
+                {canBook && (
+                    <div style={sectionPad}>
+                        <Button block size="touch" icon={<Plus size={20} aria-hidden="true" />} onClick={goToFind} style={{ minHeight: 52 }}>
+                            Забронировать кабинет
+                        </Button>
+                    </div>
+                )}
+
+                {/* «Дальше» — три следующие брони строками. */}
+                {!loading && !failed && nextRows.length > 0 && (
+                    <div style={sectionPad}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <SectionTitle>Дальше</SectionTitle>
+                            <button type="button" onClick={() => navigate('/m/bookings')} style={linkBtn}>
+                                Все брони
+                            </button>
+                        </div>
+                        <div style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet, overflow: 'hidden' }}>
+                            {nextRows.map(({ b, dt }, i) => (
+                                <NextRow key={b.id} booking={b} dt={dt!} first={i === 0} onOpen={() => setOpenBooking(b)} />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* ── Ниже — спокойнее: предупреждения, привычный слот, задачи, связь. */}
+
+                {/* Credit-line warning — статус, поэтому цветом. */}
                 {creditWarn && (
                     <div style={sectionPad}>
-                        <div style={{
+                        <div role="status" style={{
                             background: creditWarn.tone === 'urgent' ? STATUS.danger.bg : STATUS.pending.bg,
-                            border: `1px solid ${creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg}33`,
                             color: creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg,
                             borderRadius: 12,
-                            padding: '10px 12px',
+                            padding: '12px 14px',
                             display: 'flex',
                             gap: 10,
                             alignItems: 'flex-start',
-                            fontSize: 13,
-                            lineHeight: 1.4,
+                            fontSize: TEXT.small,
+                            lineHeight: 1.45,
                         }}>
-                            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                            <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
                             <span>{creditWarn.text}</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Regular-slot CTA — Egor 2026-05-27. If the user has a
+                    weekly pattern (e.g. Tue 17:00 Cabinet 5) and hasn't yet
+                    booked the next occurrence, surface a 1-tap shortcut. */}
+                {canBook && regularSlot && (
+                    <div style={sectionPad}>
+                        <button
+                            onClick={() => repeatBooking(regularSlot.booking)}
+                            className="press"
+                            style={quietCard}
+                        >
+                            <Repeat size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: TEXT.small, fontWeight: 600, lineHeight: 1.3 }}>
+                                    Ваш постоянный слот: {(RESOURCES.find(r => r.id === regularSlot.booking.resourceId)?.name) || regularSlot.booking.resourceId}
+                                    {' · '}
+                                    <span className="num">{regularSlot.booking.startTime}</span>
+                                </div>
+                                <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>
+                                    Забронировать на {formatDateLabel(regularSlot.nextDate)} · {regularSlot.count}× за 2 мес.
+                                </div>
+                            </div>
+                            <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" />
+                        </button>
+                    </div>
+                )}
+
+                {/* Повторить из последних — свёрнуто. */}
+                {canBook && lastFive.length > 0 && (
+                    <div style={sectionPad}>
+                        <div style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}`, borderRadius: RADIUS.sheet, overflow: 'hidden' }}>
+                            <button
+                                onClick={() => setRepeatOpen(o => !o)}
+                                aria-expanded={repeatOpen}
+                                style={{
+                                    width: '100%',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    minHeight: 48,
+                                    padding: '0 16px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                    fontSize: TEXT.small,
+                                    fontWeight: 600,
+                                    color: COLOR.ink,
+                                }}
+                            >
+                                Повторить из последних
+                                <ChevronDown
+                                    size={16}
+                                    aria-hidden="true"
+                                    color={COLOR.ink60}
+                                    style={{
+                                        transition: 'transform 0.15s',
+                                        transform: repeatOpen ? 'rotate(180deg)' : 'none',
+                                    }}
+                                />
+                            </button>
+                            {repeatOpen && lastFive.map(({ b, dt }) => (
+                                <RepeatRow key={b.id} booking={b} dt={dt} onPick={() => repeatBooking(b)} />
+                            ))}
                         </div>
                     </div>
                 )}
@@ -317,31 +456,16 @@ export function MobileToday() {
                     <div style={sectionPad}>
                         <div style={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            marginBottom: 6,
+                            marginBottom: 8,
                         }}>
                             <SectionTitle>
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                    <CheckSquare size={11} /> Скоро · {myTasks.length}
+                                    <CheckSquare size={14} aria-hidden="true" /> Задачи на днях · {myTasks.length}
                                 </span>
                             </SectionTitle>
                             {isAdmin && (
-                                <button
-                                    onClick={() => navigate('/m/admin/tasks')}
-                                    style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        color: COLOR.ink60,
-                                        fontSize: 12,
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        // Цель касания 44 px; отрицательный отступ — чтобы строка не выросла.
-                                        minHeight: 44,
-                                        padding: '0 8px',
-                                        margin: '-12px -8px -12px 0',
-                                        fontFamily: 'inherit',
-                                    }}
-                                >
-                                    Все →
+                                <button type="button" onClick={() => navigate('/m/admin/tasks')} style={linkBtn}>
+                                    Все задачи
                                 </button>
                             )}
                         </div>
@@ -361,7 +485,7 @@ export function MobileToday() {
                                     }}>
                                         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
                                             <div style={{
-                                                fontSize: 12,
+                                                fontSize: TEXT.small,
                                                 fontWeight: 600,
                                                 lineHeight: 1.25,
                                                 overflow: 'hidden',
@@ -377,7 +501,7 @@ export function MobileToday() {
                                             </div>
                                             {t.deadline && (
                                                 <span style={{
-                                                    fontSize: 12,
+                                                    fontSize: TEXT.caption,
                                                     color: overdue ? STATUS.danger.fg : COLOR.ink60,
                                                     fontWeight: overdue ? 600 : 500,
                                                     flexShrink: 0,
@@ -421,266 +545,45 @@ export function MobileToday() {
                                 );
                             })}
                             {myTasks.length > 3 && isAdmin && (
-                                <button
-                                    onClick={() => navigate('/m/admin/tasks')}
-                                    style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        color: COLOR.ink60,
-                                        fontSize: 12,
-                                        cursor: 'pointer',
-                                        minHeight: 44,
-                                        padding: 0,
-                                        textAlign: 'center',
-                                        fontFamily: 'inherit',
-                                    }}
-                                >
-                                    Ещё {myTasks.length - 3} →
+                                <button type="button" onClick={() => navigate('/m/admin/tasks')} style={{ ...linkBtn, alignSelf: 'center' }}>
+                                    Ещё {myTasks.length - 3}
                                 </button>
                             )}
                         </div>
                     </div>
                 )}
 
-                {/* Active session */}
-                {active && (
-                    <div style={sectionPad}>
-                        <SectionTitle>Сейчас идёт</SectionTitle>
-                        <ActiveCard booking={active.b} dt={active.dt!} onOpen={() => setOpenBooking(active.b)} />
+                {/* Рабочие места — тихие кнопки внизу, не над встречей. */}
+                {(showCrm || isAdmin) && (
+                    <div style={{ ...sectionPad, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {showCrm && (
+                            <Button variant="secondary" icon={<Briefcase size={16} aria-hidden="true" />} onClick={() => navigate('/m/crm')}>
+                                CRM
+                            </Button>
+                        )}
+                        {isAdmin && (
+                            <Button variant="secondary" icon={<ShieldCheck size={16} aria-hidden="true" />} onClick={() => navigate('/m/admin')}>
+                                Админка
+                            </Button>
+                        )}
                     </div>
                 )}
 
-                {/* Regular-slot CTA — Egor 2026-05-27. If the user has a
-                    weekly pattern (e.g. Tue 17:00 Cabinet 5) and hasn't yet
-                    booked the next occurrence, surface a 1-tap shortcut. */}
-                {canBook && regularSlot && (
-                    <div style={sectionPad}>
-                        <button
-                            onClick={() => repeatBooking(regularSlot.booking)}
-                            style={{
-                                width: '100%',
-                                // Wave 1: ровная карточка вместо зелёного градиента —
-                                // цвет только для статуса.
-                                background: COLOR.card,
-                                color: COLOR.ink,
-                                border: `1px solid ${COLOR.ink10}`,
-                                borderRadius: 14,
-                                padding: '14px 16px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 12,
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                textAlign: 'left',
-                            }}
-                        >
-                            <div style={{
-                                width: 38, height: 38, borderRadius: 10,
-                                background: COLOR.sunken,
-                                display: 'grid', placeItems: 'center',
-                                flexShrink: 0,
-                            }}>
-                                <Repeat size={18} aria-hidden="true" />
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, color: COLOR.ink60, fontWeight: 600, marginBottom: 2 }}>
-                                    Ваш постоянный слот · {regularSlot.count}× за 2 мес.
-                                </div>
-                                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25 }}>
-                                    {(RESOURCES.find(r => r.id === regularSlot.booking.resourceId)?.name) || regularSlot.booking.resourceId}
-                                    {' · '}
-                                    {regularSlot.booking.startTime}
-                                </div>
-                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
-                                    Забронировать на {formatDateLabel(regularSlot.nextDate)}
-                                </div>
-                            </div>
-                            <ArrowRight size={18} />
-                        </button>
-                    </div>
-                )}
-
-                {/* Quick actions — только тем, кому бронь откроется (иначе 403 в конце). */}
-                {canBook && (
-                <div style={sectionPad}>
-                    <SectionTitle>Быстро</SectionTitle>
-                    <button
-                        onClick={goToFind}
-                        style={{
-                            width: '100%',
-                            background: COLOR.ink,
-                            color: COLOR.onInk,
-                            border: 'none',
-                            borderRadius: 14,
-                            padding: '18px 20px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                            cursor: 'pointer',
-                            fontFamily: 'inherit',
-                            textAlign: 'left',
-                            fontSize: 17,
-                            fontWeight: 600,
-                        }}
-                    >
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <Plus size={20} />
-                            Забронировать
-                        </span>
-                        <ArrowRight size={18} />
-                    </button>
-
-                    {lastFive.length > 0 && (
-                        <div style={{
-                            marginTop: 8,
-                            background: COLOR.sunken,
-                            borderRadius: 12,
-                            overflow: 'hidden',
-                        }}>
-                            <button
-                                onClick={() => setRepeatOpen(o => !o)}
-                                style={{
-                                    width: '100%',
-                                    background: 'transparent',
-                                    border: 'none',
-                                    padding: '12px 14px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                    fontSize: 14,
-                                    fontWeight: 600,
-                                    color: COLOR.ink,
-                                }}
-                            >
-                                Повторить из последних
-                                <ChevronDown
-                                    size={16}
-                                    style={{
-                                        transition: 'transform 0.15s',
-                                        transform: repeatOpen ? 'rotate(180deg)' : 'none',
-                                        opacity: 0.6,
-                                    }}
-                                />
-                            </button>
-                            {repeatOpen && (
-                                <div style={{ borderTop: `1px solid ${COLOR.ink05}` }}>
-                                    {lastFive.map(({ b, dt }) => (
-                                        <RepeatRow key={b.id} booking={b} dt={dt} onPick={() => repeatBooking(b)} />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-                )}
-
-                {/* Admin contact — always visible so users can ping support
-                    when something's off without digging into the Profile tab.
-                    Wave 1: тихая строка на карточке вместо голубой плашки
-                    Telegram (белое на #229ED9 — 2.9:1, и цвет не статус). */}
+                {/* Связь с администратором — тихая строка. */}
                 <div style={sectionPad}>
                     <a
                         href="https://t.me/UnboxCenter"
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '12px 14px',
-                            minHeight: 44,
-                            background: COLOR.card,
-                            color: COLOR.ink,
-                            border: `1px solid ${COLOR.ink10}`,
-                            borderRadius: 12,
-                            textDecoration: 'none',
-                            fontFamily: 'inherit',
-                            fontSize: 14,
-                            fontWeight: 600,
-                        }}
+                        className="press"
+                        style={{ ...quietCard, textDecoration: 'none' }}
                     >
-                        <MessageCircle size={16} aria-hidden="true" />
-                        <span style={{ flex: 1 }}>Связь с администратором</span>
+                        <MessageCircle size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: TEXT.small, fontWeight: 600 }}>Написать администратору</span>
                         <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
                     </a>
                 </div>
-
-                {/* Upcoming. «Ближайших броней нет» — только когда брони
-                    реально пришли с сервера. Пока грузятся — заглушки, при
-                    сбое — ошибка с «Повторить» (раньше в обоих случаях
-                    писали «нет», и клиент думал, что бронь слетела). */}
-                <div style={sectionPad}>
-                    <SectionTitle>Ближайшие</SectionTitle>
-                    <StaleBar status={bookingsStatus} loadedAt={bookingsLoadedAt} onRetry={() => { fetchBookings(); }} />
-                    {bookingsLoadedAt == null && bookingsStatus !== 'error' ? (
-                        <SkeletonRows />
-                    ) : bookingsLoadedAt == null ? (
-                        <LoadErrorCard
-                            title="Не удалось загрузить брони"
-                            text="Они никуда не делись — просто сейчас не загрузились."
-                            onRetry={() => { fetchBookings(); }}
-                        />
-                    ) : upcoming.length === 0 ? (
-                        <EmptyState
-                            compact
-                            title="Ближайших броней нет"
-                            hint={canBook ? 'Свободное время — на вкладке «Свободно».' : undefined}
-                        />
-                    ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {upcoming.map(({ b, dt }) => (
-                                <CompactRow key={b.id} booking={b} dt={dt!} onOpen={() => setOpenBooking(b)} />
-                            ))}
-                        </div>
-                    )}
-                </div>
             </div>
-
-            {/* Sticky CTA above tab bar — не специалисту бронь недоступна,
-                дорога к анкете уже в карточке наверху. */}
-            {canBook && (
-            <div style={{
-                position: 'fixed',
-                bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                width: '100%',
-                maxWidth: 480,
-                padding: '8px 16px',
-                // Плавный переход от ленты к кнопке — тем же цветом карточки.
-                background: `linear-gradient(to bottom, ${COLOR.card}00 0%, ${COLOR.card} 30%)`,
-                zIndex: Z.sticky,
-                pointerEvents: 'none',
-            }}>
-                <button
-                    onClick={goToFind}
-                    style={{
-                        pointerEvents: 'auto',
-                        width: '100%',
-                        background: COLOR.card,
-                        color: COLOR.ink,
-                        border: `1px solid ${COLOR.ink}`,
-                        borderRadius: 12,
-                        padding: '14px 18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: 15,
-                        fontWeight: 600,
-                        boxShadow: `0 4px 16px ${COLOR.ink08}`,
-                    }}
-                >
-                    Найти свободный кабинет
-                    <ArrowRight size={18} />
-                </button>
-            </div>
-            )}
 
             {openBooking && (
                 <BookingDetailSheet
@@ -694,97 +597,122 @@ export function MobileToday() {
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return (
-        <div style={{
-            fontSize: 12,
+        <h2 style={{
+            fontSize: TEXT.caption,
             fontWeight: 600,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',
             color: COLOR.ink60,
-            marginBottom: 8,
+            margin: 0,
         }}>
             {children}
-        </div>
+        </h2>
     );
 }
 
-/** Big inverted card for the currently-running session. */
-function ActiveCard({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: Date; onOpen: () => void }) {
-    const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const location = LOCATIONS.find(l => l.id === resource?.locationId);
-    const endStr = formatHHMM(new Date(dt.getTime() + (booking.duration ?? 60) * 60000));
+/** Тёмная карточка ближайшей встречи (макет V1). */
+function NextMeetingCard({ booking, dt, onDetails }: { booking: BookingHistoryItem; dt: Date; onDetails: () => void }) {
+    const place = bookingPlace(booking);
+    const end = bookingEndDate(booking, dt);
+    const route = mapsUrl(place.location);
+    const soft = `${COLOR.onInk}B3`;   // 70 % — вторичный текст на тёмном (≈11:1)
+    const line = `${COLOR.onInk}26`;
     return (
-        <button
-            onClick={onOpen}
+        <section
+            aria-label="Ближайшая встреча"
             style={{
-                width: '100%',
                 background: COLOR.ink,
                 color: COLOR.onInk,
-                border: 'none',
-                borderRadius: 14,
-                padding: '14px 16px',
+                borderRadius: RADIUS.sheet,
+                padding: 20,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 6,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
+                gap: 14,
             }}
         >
-            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                Идёт сейчас
+            <div style={{ fontSize: TEXT.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: soft }}>
+                {formatRelativeDay(dt)} · {formatStartsIn(dt, { end })}
             </div>
-            <div style={{ fontSize: 18, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Clock size={16} /> {booking.startTime}–{endStr}
+            <div className="num" style={{ fontSize: TEXT.heading, fontWeight: 600, lineHeight: 1 }}>
+                {bookingTimeRange(booking, dt)}
             </div>
-            <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, opacity: 0.85 }}>
-                <MapPin size={14} /> {resource?.name ?? booking.resourceId}
-                {location && <span style={{ opacity: 0.6 }}>· {location.name}</span>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ fontSize: TEXT.body, fontWeight: 600 }}>{place.title}</div>
+                {place.address && <div style={{ fontSize: TEXT.small, color: soft }}>{place.address}</div>}
             </div>
-        </button>
+            <div style={{
+                borderTop: `1px solid ${line}`, paddingTop: 12,
+                fontSize: TEXT.small, color: COLOR.onInk,
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            }}>
+                <span>{paymentLine(booking, dt)}</span>
+                {booking.isReRentListed && <StatusBadge kind="booking" status="re-rent-listed" />}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+                {route && (
+                    <a
+                        href={route}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="press"
+                        style={{
+                            flex: 1, minHeight: 44, borderRadius: RADIUS.control,
+                            border: `1px solid ${COLOR.onInk}4D`, color: COLOR.onInk, textDecoration: 'none',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                            fontSize: TEXT.body, fontWeight: 600,
+                        }}
+                    >
+                        <MapPin size={18} aria-hidden="true" /> Маршрут
+                    </a>
+                )}
+                <button
+                    type="button"
+                    onClick={onDetails}
+                    className="press"
+                    style={{
+                        flex: 1, minHeight: 44, borderRadius: RADIUS.control,
+                        border: 'none', background: COLOR.onInk, color: COLOR.ink,
+                        fontFamily: 'inherit', fontSize: TEXT.body, fontWeight: 600, cursor: 'pointer',
+                    }}
+                >
+                    Детали
+                </button>
+            </div>
+        </section>
     );
 }
 
-/** Compact 2-line row for upcoming sessions. */
-function CompactRow({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: Date; onOpen: () => void }) {
-    const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const location = LOCATIONS.find(l => l.id === resource?.locationId);
-    // «Вт, 29 сентября» — общий форматтер дат (было «29.09, ВТ»).
-    const dateStr = formatDateLabel(dt, { capitalize: true });
-
+/** Строка «Дальше»: «Завтра · 09:00–10:00», ниже кабинет · центр, справа статус или сумма. */
+function NextRow({ booking, dt, first, onOpen }: { booking: BookingHistoryItem; dt: Date; first: boolean; onOpen: () => void }) {
+    const place = bookingPlace(booking);
+    const right = booking.status === 'pending_approval'
+        ? <StatusBadge kind="booking" status="pending_approval" />
+        : booking.isReRentListed
+            ? <StatusBadge kind="booking" status="re-rent-listed" />
+            : booking.paymentStatus === 'paid'
+                ? <StatusBadge kind="payment" status="paid" />
+                : <span className="num" style={{ fontSize: TEXT.small, fontWeight: 600, whiteSpace: 'nowrap' }}>{priceLabel(booking)}</span>;
     return (
         <button
+            type="button"
             onClick={onOpen}
+            className="press"
             style={{
-                width: '100%',
-                background: COLOR.card,
-                border: `1px solid ${COLOR.ink08}`,
-                borderRadius: 12,
-                padding: '12px 14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                color: COLOR.ink,
+                width: '100%', minHeight: 64,
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '12px 16px',
+                background: 'transparent', border: 'none',
+                borderTop: first ? 'none' : `1px solid ${COLOR.ink10}`,
+                fontFamily: 'inherit', textAlign: 'left', color: COLOR.ink, cursor: 'pointer',
             }}
         >
-            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25 }}>
-                {dateStr} · {booking.startTime} · {resource?.name ?? booking.resourceId}
-                {booking.isReRentListed && (
-                    <span style={{
-                        marginLeft: 6,
-                        background: STATUS.pending.bg, color: STATUS.pending.fg,
-                        fontSize: 12, fontWeight: 600,
-                        padding: '2px 6px', borderRadius: 999,
-                        verticalAlign: 'middle',
-                    }}>На пересдаче</span>
-                )}
-            </div>
-            <div style={{ fontSize: 12, color: COLOR.ink60, lineHeight: 1.3 }}>
-                {location?.address ?? '—'}
-                {' · '}{priceLabel(booking)}
-            </div>
+            <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>
+                    {formatRelativeDay(dt, { capitalize: true })} · <span className="num">{bookingTimeRange(booking, dt)}</span>
+                </span>
+                <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60 }}>{place.title}</span>
+            </span>
+            {right}
         </button>
     );
 }
@@ -792,7 +720,6 @@ function CompactRow({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: 
 /** Row inside the "Повторить из последних" dropdown. */
 function RepeatRow({ booking, dt, onPick }: { booking: BookingHistoryItem; dt: Date; onPick: () => void }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const weekday = dt.toLocaleDateString('ru-RU', { weekday: 'short' }).toUpperCase().replace('.', '');
     return (
         <button
             onClick={onPick}
@@ -800,62 +727,58 @@ function RepeatRow({ booking, dt, onPick }: { booking: BookingHistoryItem; dt: D
                 width: '100%',
                 background: 'transparent',
                 border: 'none',
-                borderTop: `1px solid ${COLOR.ink05}`,
-                padding: '12px 14px',
+                borderTop: `1px solid ${COLOR.ink10}`,
+                minHeight: 56,
+                padding: '8px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 12,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
-                fontSize: 13,
                 color: COLOR.ink,
                 textAlign: 'left',
             }}
         >
             <div>
-                <div style={{ fontWeight: 600 }}>
-                    {weekday}, {booking.startTime}
+                <div style={{ fontSize: TEXT.small, fontWeight: 600 }}>
+                    {formatWeekdayShort(dt)}, <span className="num">{booking.startTime}</span>
                 </div>
-                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
+                <div style={{ fontSize: TEXT.caption, color: COLOR.ink60, marginTop: 2 }}>
                     {resource?.name ?? booking.resourceId} · {formatBookingDuration(booking.duration ?? 60)}
                 </div>
             </div>
-            <ArrowRight size={16} color={COLOR.ink60} />
+            <ArrowRight size={16} color={COLOR.ink60} aria-hidden="true" />
         </button>
     );
 }
 
-function bookingStartDate(b: BookingHistoryItem): Date | null {
-    try {
-        const d = b.date instanceof Date ? b.date : new Date(b.date as any);
-        if (isNaN(d.getTime()) || !b.startTime) return null;
-        const [h, m] = b.startTime.split(':').map(Number);
-        const out = new Date(d);
-        out.setHours(h, m, 0, 0);
-        return out;
-    } catch {
-        return null;
-    }
-}
+const quietCard: React.CSSProperties = {
+    width: '100%',
+    minHeight: 48,
+    background: COLOR.card,
+    color: COLOR.ink,
+    border: `1px solid ${COLOR.ink10}`,
+    borderRadius: RADIUS.sheet,
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    textAlign: 'left',
+};
 
-function formatHHMM(d: Date) {
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
-
-const workspaceChip: React.CSSProperties = {
-    background: COLOR.ink,
-    color: COLOR.onInk,
+const linkBtn: React.CSSProperties = {
+    background: 'none',
     border: 'none',
-    borderRadius: 999,
-    minHeight: 44,
-    padding: '0 16px',
-    fontSize: 12,
+    color: COLOR.accentInk,
+    fontSize: TEXT.small,
     fontWeight: 600,
     cursor: 'pointer',
     fontFamily: 'inherit',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    flex: '0 0 auto',
+    // Цель касания 44 px; отрицательный отступ — чтобы строка не выросла.
+    minHeight: 44,
+    padding: '0 8px',
+    margin: '-12px -8px',
 };

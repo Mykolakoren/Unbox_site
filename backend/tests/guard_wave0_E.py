@@ -71,10 +71,15 @@ def test_today_empty_only_after_load():
     """/m/today: «Ближайших сессий нет» — только после загрузки; до неё
     заглушки, при сбое — ошибка с «Повторить»."""
     src = _read("pages/mobile/MobileToday.tsx")
-    i = src.find("<SectionTitle>Ближайшие</SectionTitle>")
-    assert i != -1, "не нашли блок «Ближайшие»"
-    block = src[i:src.find("Ближайших сессий нет", i)]
-    assert "bookingsLoadedAt == null" in block, "«Ближайших сессий нет» снова показывается до загрузки"
+    # Волна 2: «Сегодня» по варианту V1 — вместо списка «Ближайшие» карточка
+    # ближайшей встречи; пустое состояние — «Пока ничего не забронировано».
+    # Суть та же: «ничего нет» — только после загрузки.
+    j = src.find('title="Пока ничего не забронировано"')
+    assert j != -1, "не нашли пустое состояние «Пока ничего не забронировано»"
+    i = src.rfind("<StaleBar", 0, j)
+    assert i != -1, "не нашли блок ближайшей встречи (StaleBar перед пустым состоянием)"
+    block = src[i:j]
+    assert "bookingsLoadedAt == null" in block, "«ничего не забронировано» снова показывается до загрузки"
     assert "<SkeletonRows" in block and "<LoadErrorCard" in block and "<StaleBar" in block, \
         "пропали заглушки / ошибка с «Повторить» / плашка «данные на HH:MM»"
 
