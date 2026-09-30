@@ -9,6 +9,7 @@ import { SkeletonList } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Segmented } from '../../components/ui/Chip';
+import { hasOnlineFormat, hasOfflineFormat, specializationLabels } from '../../utils/specialistFormat';
 
 /**
  * Mobile catalog of specialists.
@@ -35,10 +36,13 @@ export function MobileSpecialists() {
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         return (items || []).filter(s => {
-            if (format !== 'all' && !s.formats.includes(format)) return false;
+            // Волна 2: «Кабинет» — любой OFFLINE-код (в базе их десяток),
+            // раньше точное совпадение с OFFLINE_ROOM теряло большинство очных.
+            if (format === 'ONLINE' && !hasOnlineFormat(s.formats)) return false;
+            if (format === 'OFFLINE_ROOM' && !hasOfflineFormat(s.formats)) return false;
             if (!q) return true;
             const full = `${s.firstName} ${s.lastName}`.toLowerCase();
-            const spec = (s.specializations || []).join(' ').toLowerCase();
+            const spec = specializationLabels(s.specializations).join(' ').toLowerCase();
             return full.includes(q) || spec.includes(q) || (s.tagline || '').toLowerCase().includes(q);
         });
     }, [items, query, format]);
@@ -126,7 +130,7 @@ export function MobileSpecialists() {
                                 display: 'grid', placeItems: 'center',
                                 fontSize: 18, fontWeight: 600, color: COLOR.ink60,
                             }}>
-                                {!s.photoUrl && (s.firstName?.[0] || '?').toUpperCase()}
+                                {!s.photoUrl && `${s.firstName?.[0] ?? ''}${s.lastName?.[0] ?? ''}`.toUpperCase()}
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2 }}>
