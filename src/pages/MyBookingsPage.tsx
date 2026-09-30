@@ -62,6 +62,14 @@ function ReRentListedBadge({ className }: { className?: string }) {
     );
 }
 
+/** «30 мин», «1 ч», «1,5 ч» — длительность брони коротко (было «0.5ч»). */
+const formatDurationShort = (min: number): string => {
+    if (!Number.isFinite(min) || min <= 0) return '—';
+    if (min < 60) return `${Math.round(min)}\u00A0мин`;
+    const h = Math.round((min / 60) * 10) / 10;
+    return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(h)}\u00A0ч`;
+};
+
 const timeToMins = (t: string) => {
     const [h, m] = t.split(':').map(Number);
     return h * 60 + m;
@@ -1281,7 +1289,7 @@ function BookingsChessboard({
                                         {activeBooking.crmClientId && clientMap.get(activeBooking.crmClientId)?.name || usersMap?.get(activeBooking.userId) || activeBooking.userId}
                                     </div>
                                     <div className="text-xs text-ink-60">
-                                        {activeBooking.startTime} · {activeBooking.duration / 60}ч · {resources.find(r => r.id === activeBooking.resourceId)?.name}
+                                        {activeBooking.startTime} · {formatDurationShort(activeBooking.duration)} · {resources.find(r => r.id === activeBooking.resourceId)?.name}
                                     </div>
                                 </div>
                                 <button onClick={() => setActiveBooking(null)} className="p-1"><X size={16} /></button>
@@ -1345,7 +1353,7 @@ function BookingsChessboard({
                                             onClick={() => setActiveBooking(null)}
                                             className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl border border-dashed border-unbox-green text-unbox-green"
                                         >
-                                            <Plus size={12} /> Разбить по клиентам ({activeBooking.duration / 60}ч → сессии)
+                                            <Plus size={12} /> Разбить по клиентам ({formatDurationShort(activeBooking.duration)} → сессии)
                                         </Link>
                                     )}
                                 </div>
@@ -1560,7 +1568,7 @@ function BookingsChessboard({
                                             <div
                                                 onPointerDown={canMod ? (e) => handleDragStart(myB, r.id, time, e) : undefined}
                                                 className={clsx(
-                                                    "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5 transition-all shadow-sm group touch-none select-none",
+                                                    "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5 transition-all shadow-sm group touch-none select-none overflow-hidden min-w-0",
                                                     isCompleted
                                                         ? "bg-gray-200/80 text-gray-500"
                                                         : isReRent
@@ -1570,28 +1578,29 @@ function BookingsChessboard({
                                                                 : "bg-unbox-dark hover:bg-unbox-dark/90 text-white"
                                                 )}
                                             >
-                                                <span className="text-caption font-bold leading-none opacity-90 flex items-center gap-1">
+                                                <span className="text-caption font-bold leading-none opacity-90 flex items-center gap-1 max-w-full min-w-0 whitespace-nowrap">
                                                     {/* Recurring marker — иконка «Серия» (раньше звёздочка-эмодзи).
                                                         Visible to both owner and admin. */}
                                                     {myB.recurringGroupId && <Repeat size={10} aria-label="Серия" className="shrink-0" />}
-                                                    {myB.startTime} · {myB.duration / 60}ч
+                                                    {/* Бронь на 30 мин — узкая клетка: строка обрезается, а не вылезает. */}
+                                                    <span className="truncate min-w-0">{myB.startTime} · {formatDurationShort(myB.duration)}</span>
                                                     {isCompleted && <Check size={10} aria-label="Прошла" className="shrink-0" />}
                                                 </span>
                                                 {clientInfo ? (
-                                                    <span className="text-caption opacity-80 leading-none flex items-center gap-0.5 truncate max-w-full">
+                                                    <span className="text-caption opacity-80 leading-none flex items-center gap-0.5 max-w-full min-w-0 overflow-hidden">
                                                         <UserIcon size={8} className="shrink-0" />
-                                                        <span className="truncate">
+                                                        <span className="truncate min-w-0">
                                                             {clientInfo.aliasCode ? `${clientInfo.aliasCode} · ${clientInfo.name}` : clientInfo.name}
                                                         </span>
                                                     </span>
                                                 ) : (
-                                                    <span className="text-caption opacity-70 leading-none flex items-center gap-0.5 truncate max-w-full">
+                                                    <span className="text-caption opacity-70 leading-none flex items-center gap-0.5 max-w-full min-w-0 overflow-hidden">
                                                         <UserIcon size={8} className="shrink-0" />
-                                                        <span className="truncate">{usersMap?.get(myB.userId) || myB.userId}</span>
+                                                        <span className="truncate min-w-0">{usersMap?.get(myB.userId) || myB.userId}</span>
                                                     </span>
                                                 )}
-                                                {isReRent && <span className="text-caption opacity-80 leading-none">на пересдаче</span>}
-                                                {!isCompleted && !isReRent && !canMod && <span className="text-caption opacity-60 leading-none">≤24ч</span>}
+                                                {isReRent && <span className="text-caption opacity-80 leading-none truncate max-w-full">на пересдаче</span>}
+                                                {!isCompleted && !isReRent && !canMod && <span className="text-caption opacity-60 leading-none truncate max-w-full">≤24ч</span>}
                                                 {canMod && <GripVertical size={10} className="absolute right-5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-30 transition-opacity" />}
                                                 {/* Edit button */}
                                                 <button
@@ -1648,7 +1657,7 @@ function BookingsChessboard({
                                             >
                                                 <div
                                                     className={clsx(
-                                                        "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5 cursor-pointer transition-colors group",
+                                                        "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5 cursor-pointer transition-colors group overflow-hidden min-w-0",
                                                         isReRentAvailable
                                                             ? "bg-[var(--status-pending-bg)] border border-dashed border-amber-400 text-[var(--status-pending-fg)] hover:bg-[var(--status-pending-bg)]"
                                                             : "bg-gray-300/90 text-gray-600 hover:bg-gray-400/90"
@@ -1658,13 +1667,13 @@ function BookingsChessboard({
                                                         : 'Нажмите чтобы получить уведомление, когда слот освободится'}
                                                     onClick={handleWaitlistClick}
                                                 >
-                                                    <span className="text-caption font-bold leading-none">
-                                                        {pubB.startTime} · {pubB.duration / 60}ч
+                                                    <span className="text-caption font-bold leading-none truncate max-w-full">
+                                                        {pubB.startTime} · {formatDurationShort(pubB.duration)}
                                                     </span>
-                                                    <span className="text-caption opacity-80 leading-none">
+                                                    <span className="text-caption opacity-80 leading-none truncate max-w-full">
                                                         Занято
                                                     </span>
-                                                    {isReRentAvailable && <span className="text-caption font-medium leading-none">на пересдаче</span>}
+                                                    {isReRentAvailable && <span className="text-caption font-medium leading-none truncate max-w-full">на пересдаче</span>}
                                                     {!isReRentAvailable && (
                                                         <span className="text-caption opacity-0 group-hover:opacity-90 leading-none transition-opacity">
                                                             <Bell size={10} className="inline" aria-hidden="true" /> подписаться
@@ -1954,7 +1963,7 @@ function BookingsChessboard({
                                 {RESOURCES.find(r => r.id === activeBooking.resourceId)?.name || 'Кабинет'}
                             </div>
                             <div className="text-xs text-ink-60 mt-0.5">
-                                {format(parseUTC(activeBooking.date), 'd MMMM', { locale: ru })} · {activeBooking.startTime} – {minsToTime(timeToMins(activeBooking.startTime!) + activeBooking.duration)} · {activeBooking.duration / 60}ч
+                                {format(parseUTC(activeBooking.date), 'd MMMM', { locale: ru })} · {activeBooking.startTime} – {minsToTime(timeToMins(activeBooking.startTime!) + activeBooking.duration)} · {formatDurationShort(activeBooking.duration)}
                             </div>
                             <div className="text-xs font-semibold mt-1">
                                 {activeBooking.paymentSource === 'credit' ? (
@@ -2005,7 +2014,7 @@ function BookingsChessboard({
                                             onClick={() => setActiveBooking(null)}
                                             className="mt-2 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
                                         >
-                                            <Plus size={12} /> Разбить по клиентам ({activeBooking.duration / 60}ч → сессии)
+                                            <Plus size={12} /> Разбить по клиентам ({formatDurationShort(activeBooking.duration)} → сессии)
                                         </Link>
                                     )}
                                 </>
@@ -2913,7 +2922,7 @@ function BookingCard({
                         самой брони. */}
                     <div className="text-base sm:text-lg font-bold flex items-center gap-1.5 text-unbox-dark mb-1">
                         <Clock size={16} />
-                        {safeFormat(booking.date, 'd MMMM', { locale: ru })}, {booking.startTime} ({booking.duration / 60}ч)
+                        {safeFormat(booking.date, 'd MMMM', { locale: ru })}, {booking.startTime} ({formatDurationShort(booking.duration)})
                     </div>
                     <h3 className="text-sm sm:text-base font-semibold text-unbox-dark mb-0.5">
                         {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}
@@ -3814,7 +3823,7 @@ function GridHouseMyBookings({
                             </button>
                             {!isStaffOrSpecialist && (
                                 <button onClick={() => navigate('/become-specialist')} style={baseBtn}>
-                                    <UserCheck size={14} aria-hidden="true" /> {isMobile ? 'Специалистам' : 'Стать специалистом Unbox'}
+                                    <UserCheck size={14} aria-hidden="true" /> {isMobile ? 'Подать заявку' : 'Стать специалистом Unbox'}
                                 </button>
                             )}
                         </>;

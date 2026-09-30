@@ -51,6 +51,20 @@ export function PostListPage({ type }: { type: PostType }) {
             .finally(() => setLoading(false));
     };
 
+    // Узкий экран (телефон): подпись раздела в шапке прячем — она дублирует
+    // активную ссылку меню и слипалась с ней («новостиНОВОСТИ»); меню
+    // переносится на вторую строку, ссылки — по 44 px в высоту.
+    const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+    useEffect(() => {
+        const h = () => setNarrow(window.innerWidth < 640);
+        window.addEventListener('resize', h);
+        return () => window.removeEventListener('resize', h);
+    }, []);
+    const navLink: React.CSSProperties = {
+        ...ghMono, textDecoration: 'none',
+        ...(narrow ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
+    };
+
     useEffect(() => {
         document.title = `${copy.title} · Unbox`;
         load();
@@ -61,15 +75,15 @@ export function PostListPage({ type }: { type: PostType }) {
         <div style={{ minHeight: '100vh', background: GH.paper, fontFamily: GH_SANS, color: GH.ink, overflowX: 'hidden' }}>
             {/* Masthead */}
             <header style={{ borderBottom: `1px solid ${GH.ink10}`, background: GH.paper, position: 'sticky', top: 0, zIndex: 40 }}>
-                <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ maxWidth: 1100, margin: '0 auto', padding: narrow ? '8px 16px' : '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
                         <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
-                        <span style={{ ...ghMono, color: GH.label, fontSize: 12 }}>{copy.label}</span>
+                        {!narrow && <span style={{ ...ghMono, color: GH.label, fontSize: 12 }}>{copy.label}</span>}
                     </div>
-                    <nav style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <Link to="/news" style={{ ...ghMono, color: type === 'news' ? GH.ink : GH.label, textDecoration: 'none' }}>Новости</Link>
-                        <Link to="/articles" style={{ ...ghMono, color: type === 'article' ? GH.ink : GH.label, textDecoration: 'none' }}>Статьи</Link>
-                        <Link to="/specialists" style={{ ...ghMono, color: GH.label, textDecoration: 'none' }}>Специалисты</Link>
+                    <nav style={{ display: 'flex', alignItems: 'center', gap: narrow ? 12 : 16, flexWrap: 'wrap' }}>
+                        <Link to="/news" aria-current={type === 'news' ? 'page' : undefined} style={{ ...navLink, color: type === 'news' ? GH.ink : GH.label }}>Новости</Link>
+                        <Link to="/articles" aria-current={type === 'article' ? 'page' : undefined} style={{ ...navLink, color: type === 'article' ? GH.ink : GH.label }}>Статьи</Link>
+                        <Link to="/specialists" style={{ ...navLink, color: GH.label }}>Специалисты</Link>
                     </nav>
                 </div>
             </header>

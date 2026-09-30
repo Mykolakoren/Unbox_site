@@ -72,12 +72,14 @@ const ghtpMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, lette
 const ghtpHairline = `1px solid ${GH.ink10}`;
 
 // Цвет результата — только статус-токены (зелёный «всё хорошо», янтарный
-// «стоит обратить внимание», красный «нужна помощь»), без своих оттенков.
-const GH_RESULT_MAP: Record<string, { fg: string; bg: string }> = {
-    green:  { fg: STATUS.ok.fg,      bg: STATUS.ok.bg },
-    yellow: { fg: STATUS.pending.fg, bg: STATUS.pending.bg },
-    orange: { fg: STATUS.danger.fg,  bg: STATUS.pending.bg },
-    red:    { fg: STATUS.danger.fg,  bg: STATUS.danger.bg },
+// «стоит обратить внимание», оранжевый warn «заметно», красный «нужна
+// помощь»), без своих оттенков. У каждой пары свои fg и bg — не смешиваем.
+// warn есть только в CSS (--status-warn-*), в tokens.ts его нет — берём var().
+const GH_RESULT_MAP: Record<string, { fg: string; bg: string; border: string }> = {
+    green:  { fg: STATUS.ok.fg,      bg: STATUS.ok.bg,      border: `${STATUS.ok.fg}30` },
+    yellow: { fg: STATUS.pending.fg, bg: STATUS.pending.bg, border: `${STATUS.pending.fg}30` },
+    orange: { fg: 'var(--status-warn-fg)', bg: 'var(--status-warn-bg)', border: 'color-mix(in srgb, var(--status-warn-fg) 19%, transparent)' },
+    red:    { fg: STATUS.danger.fg,  bg: STATUS.danger.bg,  border: `${STATUS.danger.fg}30` },
 };
 
 interface GridHouseTestPageProps {
@@ -169,7 +171,7 @@ function GridHouseTestPage({
                             style={{ paddingTop: 32 }}
                         >
                             {/* Score card */}
-                            <div style={{ padding: 32, border: `1px solid ${rc.fg}30`, background: rc.bg, textAlign: 'center', marginBottom: 24 }}>
+                            <div style={{ padding: 32, border: `1px solid ${rc.border}`, background: rc.bg, textAlign: 'center', marginBottom: 24 }}>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(48px, 6vw, 72px)', fontWeight: 700, color: rc.fg, lineHeight: 1 }}>
                                     {score}
                                 </div>

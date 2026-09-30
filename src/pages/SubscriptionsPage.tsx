@@ -2,12 +2,24 @@ import { Clock, Snowflake, Percent, Check, Gift, MessageCircle } from 'lucide-re
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
-import { SUBSCRIPTION_PLANS } from '../utils/data';
+import { SUBSCRIPTION_PLANS, RESOURCES } from '../utils/data';
 import { formatGel } from '../utils/format';
 
 // ── Standard Prices ──────────────────────────────────────────────────────────
+// Какие кабинеты индивидуальные — из тех же данных, что и шахматка: кабинеты
+// вместимостью меньше 20 (1, 2, 5, 6, 9). Раньше было «Кабинеты 1–8», но 7 и 8 —
+// групповые (35 ₾/час), а 3 и 4 нет вовсе. Флаг isActive здесь не смотрим:
+// в статичном data.ts он отстаёт (Кабинет 9 открыт 24.09, а там ещё false),
+// а строка про цену, не про сегодняшнюю доступность.
+const INDIVIDUAL_ROOMS = RESOURCES
+    .filter(r => r.type === 'cabinet' && (r.capacity ?? 0) < 20)
+    .map(r => r.name.replace(/^Кабинет\s*/, ''));
+const INDIVIDUAL_DESC = INDIVIDUAL_ROOMS.length > 0
+    ? `Кабинеты ${INDIVIDUAL_ROOMS.join(', ')}`
+    : 'Индивидуальные кабинеты';
+
 const STANDARD_PRICES = [
-    { label: 'Индивидуальный кабинет', price: 20, unit: '₾/час', icon: 'cabinet', desc: 'Кабинеты 1–8' },
+    { label: 'Индивидуальный кабинет', price: 20, unit: '₾/час', icon: 'cabinet', desc: INDIVIDUAL_DESC },
     { label: 'Групповой кабинет', price: 35, unit: '₾/час', icon: 'group', desc: 'До 20 человек' },
     { label: 'Капсула', price: 10, unit: '₾/час', icon: 'capsule', desc: 'Приватное пространство' },
 ];

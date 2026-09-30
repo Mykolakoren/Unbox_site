@@ -353,7 +353,7 @@ function Masthead({
                     <NavDivider hideOnNarrow={narrow} />
                     {currentUser ? (
                         <>
-                            <NavLink to={getHomePath(currentUser)} label={currentUser.name ?? 'Кабинет'} touch={narrow} />
+                            <NavLink to={getHomePath(currentUser)} label={currentUser.name ?? 'Кабинет'} touch={narrow} truncate={narrow} />
                             <NavDivider />
                             <button
                                 type="button"
@@ -389,6 +389,7 @@ function NavLink({
     accent,
     hideOnNarrow,
     touch,
+    truncate,
 }: {
     to: string;
     label: string;
@@ -396,6 +397,8 @@ function NavLink({
     hideOnNarrow?: boolean;
     /** На телефоне — высота 44 px, чтобы палец попадал. */
     touch?: boolean;
+    /** Обрезать длинную подпись многоточием (имя пользователя). */
+    truncate?: boolean;
 }) {
     if (hideOnNarrow) return null;
     const isHash = to.startsWith('#') || to.includes('#');
@@ -408,6 +411,8 @@ function NavLink({
         whiteSpace: 'nowrap',
         cursor: 'pointer',
         ...(touch ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
+        // Длинное имя пользователя не выталкивает «Выйти» за экран.
+        ...(truncate ? { maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', display: touch ? 'inline-block' : undefined, lineHeight: touch ? '36px' : undefined } : {}),
     };
     if (isHash) {
         const handleClick = (e: React.MouseEvent) => {

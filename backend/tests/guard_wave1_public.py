@@ -181,6 +181,60 @@ def test_waitlist_error_is_not_empty():
     assert "SkeletonList" in src, "MyWaitlistPage: пока грузится — снова спиннер вместо силуэтов"
 
 
+def test_post_list_header_fits_narrow_screen():
+    """Ревью 30.09: на 375–390 px подпись раздела в шапке /news и /articles
+    слипалась со ссылкой меню («новостиНОВОСТИ»). На узком экране подпись
+    прячется, меню переносится, ссылки — 44 px в высоту."""
+    src = (ROOT / "src/pages/content/PostListPage.tsx").read_text(encoding="utf-8")
+    i, j = src.find("<header"), src.find("</header>")
+    assert i != -1 and j > i, "PostListPage: шапка не найдена"
+    header = src[i:j]
+    assert re.search(r"useState\(\(\) => typeof window !== 'undefined' && window\.innerWidth < \d+\)", src), \
+        "PostListPage: нет признака узкого экрана (narrow)"
+    assert re.search(r"\{!narrow && <span[^>]*>\{copy\.label\}</span>\}", header), \
+        "PostListPage: подпись раздела снова видна на телефоне рядом со ссылкой меню"
+    assert header.count("flexWrap: 'wrap'") >= 2, "PostListPage: шапка/меню не переносятся на узком экране"
+    assert "minHeight: 44" in src, "PostListPage: ссылки меню на телефоне ниже 44 px"
+
+
+def _data_cabinets():
+    """{номер кабинета: (вместимость, активен)} из src/utils/data.ts."""
+    data = (ROOT / "src/utils/data.ts").read_text(encoding="utf-8")
+    out = {}
+    for m in re.finditer(r"\{\s*id: '[^']+',\s*name: 'Кабинет (\d+)',(.*?)\n    \},", data, re.S):
+        body = m.group(2)
+        cap = re.search(r"capacity:\s*(\d+)", body)
+        out[int(m.group(1))] = (int(cap.group(1)) if cap else 0, "isActive: false" not in body)
+    return out
+
+
+def test_individual_cabinets_list_matches_data():
+    """«Индивидуальный кабинет — Кабинеты 1–8» было неправдой: 7 и 8 —
+    групповые (35 ₾/час), 3 и 4 нет. Список берётся из RESOURCES."""
+    src = _strip_comments((ROOT / "src/pages/SubscriptionsPage.tsx").read_text(encoding="utf-8"))
+    assert "Кабинеты 1–8" not in src and "Кабинеты 1-8" not in src, "SubscriptionsPage: снова «Кабинеты 1–8»"
+    assert re.search(r"RESOURCES\s*\n?\s*\.filter\(r => r\.type === 'cabinet' && \(r\.capacity \?\? 0\) < 20\)", src), \
+        "SubscriptionsPage: список индивидуальных кабинетов не из данных"
+    cabs = _data_cabinets()
+    assert cabs, "не разобрал кабинеты в data.ts"
+    for group_room in (7, 8):
+        assert group_room in cabs and cabs[group_room][0] >= 20, \
+            f"data.ts: кабинет {group_room} больше не групповой — пересмотрите фильтр «вместимость < 20»"
+    individual = sorted(n for n, (cap, _active) in cabs.items() if cap < 20)
+    assert individual == [1, 2, 5, 6, 9], f"индивидуальные кабинеты по data.ts: {individual} (ждали 1, 2, 5, 6, 9)"
+
+
+def test_phq_orange_result_uses_warn_pair():
+    """Ревью 30.09: «оранжевый» результат теста был красным текстом на
+    янтарном фоне. Вся карточка — пара warn (--status-warn-fg/bg)."""
+    src = (ROOT / "src/pages/TestPage.tsx").read_text(encoding="utf-8")
+    m = re.search(r"^\s*orange:\s*\{(.*)\},\s*$", src, re.M)
+    assert m, "TestPage: нет цвета для «orange»"
+    line = m.group(1)
+    assert "--status-warn-fg" in line and "--status-warn-bg" in line, "TestPage: «orange» не на паре warn"
+    assert "STATUS.danger" not in line and "STATUS.pending" not in line, "TestPage: «orange» смешивает пары цветов"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
