@@ -708,7 +708,7 @@ function NextRow({ booking, dt, first, onOpen }: { booking: BookingHistoryItem; 
         >
             <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: TEXT.body, fontWeight: 600 }}>
-                    {formatRelativeDay(dt, { capitalize: true })} · <span className="num">{bookingTimeRange(booking, dt)}</span>
+                    {formatRelativeDay(dt, { capitalize: true })} · <span className="num" style={{ whiteSpace: 'nowrap' }}>{bookingTimeRange(booking, dt)}</span>
                 </span>
                 <span style={{ display: 'block', fontSize: TEXT.small, color: COLOR.ink60 }}>{place.title}</span>
             </span>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Calendar, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors } from 'lucide-react';
+import { MapPin, Wallet, CalendarClock, Plus, AlertTriangle, Repeat, BellOff, Users, ArrowUpRight, MessageCircle, Scissors } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import { TrimBookingModal } from '../../components/TrimBookingModal';
@@ -339,8 +339,8 @@ export function BookingDetailSheet({ booking, onClose }: {
                     </Field>
 
                     {/* Цена */}
-                    <Field icon={<Calendar size={16} aria-hidden="true" />} label="Оплата">
-                        <span className="num" style={{ fontSize: TEXT.body, fontWeight: 600 }}>{priceLabel(booking)}</span>
+                    <Field icon={<Wallet size={16} aria-hidden="true" />} label="Оплата">
+                        <span style={{ fontSize: TEXT.body, fontWeight: 600 }}>{priceLabel(booking)}</span>
                         {booking.paymentMethod === 'balance' && booking.finalPrice != null && (
                             <span style={{ color: COLOR.ink60, marginLeft: 8 }}>с баланса</span>
                         )}
