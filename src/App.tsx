@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 // Мастер брони (/checkout) — в своём файле (волна 2, шаг 0).
 import { BookingWizard } from './components/Wizard/BookingWizard';
 // Store
@@ -71,6 +71,7 @@ const MobileToday = lazy(() => import('./pages/mobile/MobileToday').then(m => ({
 const MobileMyBookings = lazy(() => import('./pages/mobile/MobileMyBookings').then(m => ({ default: m.MobileMyBookings })));
 const MobileFind = lazy(() => import('./pages/mobile/MobileFind').then(m => ({ default: m.MobileFind })));
 const MobileProfile = lazy(() => import('./pages/mobile/MobileProfile').then(m => ({ default: m.MobileProfile })));
+const MobileProfileEdit = lazy(() => import('./pages/mobile/MobileProfileEdit').then(m => ({ default: m.MobileProfileEdit })));
 const MobileCheckout = lazy(() => import('./pages/mobile/MobileCheckout').then(m => ({ default: m.MobileCheckout })));
 const MobileCalendar = lazy(() => import('./pages/mobile/MobileCalendar').then(m => ({ default: m.MobileCalendar })));
 const MobileCrmLayout = lazy(() => import('./pages/mobile/crm/MobileCrmLayout').then(m => ({ default: m.MobileCrmLayout })));
@@ -111,6 +112,10 @@ import { FONT, Z } from './design/tokens';
 const DevUiPage = import.meta.env.DEV
   ? lazy(() => import('./dev/DevUiPage').then(m => ({ default: m.DevUiPage })))
   : null;
+
+// ?forceDesktop=1 однажды в этой вкладке — больше не переадресуем на /m
+// до её закрытия (отладка админами). В памяти, не в sessionStorage.
+let forceDesktopThisTab = false;
 
 function App() {
   const { fetchBookings, fetchCurrentUser, fetchWaitlist } = useUserStore();
@@ -155,14 +160,22 @@ function App() {
   // and qualify, replace the URL — using replaceState keeps the back-stack
   // clean.
   const currentUser = useUserStore(s => s.currentUser);
+  // Волна 2 (X2-02): проверяем адрес не один раз при загрузке пользователя,
+  // а при КАЖДОЙ смене адреса — иначе ссылка из колокольчика или из бота,
+  // открытая уже внутри приложения (/crm/clients/5, /profile), оставалась
+  // компьютерной страницей на телефоне.
+  const { pathname } = useLocation();
   useEffect(() => {
     if (!currentUser) return;
+    if (new URLSearchParams(window.location.search).get('forceDesktop') === '1') forceDesktopThisTab = true;
+    if (forceDesktopThisTab) return;
     // 2026-06-02 owner: убрали canBook-гейт и forceDesktop-эскейп.
     // /m теперь ЕДИНСТВЕННЫЙ мобильный интерфейс — старая «десктоп-в-
     // мобиле» больше не доступна юзерам, чтобы они не путались между
     // двумя версиями. Эскейп остался ТОЛЬКО через явный URL-параметр
     // ?forceDesktop=1 (для админов на момент отладки), без UI-кнопки.
-    if (new URLSearchParams(window.location.search).get('forceDesktop') === '1') return;
+    // Волна 2: флаг помним до закрытия вкладки (forceDesktopThisTab) —
+    // проверка теперь идёт на каждом переходе, а параметр в адресе теряется.
     try {
       const inStandalone = window.matchMedia?.('(display-mode: standalone)').matches
         || (window.navigator as any).standalone === true;
@@ -173,15 +186,27 @@ function App() {
         [/^\/dashboard\/bookings\/?$/, '/m/bookings'],
         [/^\/dashboard\/waitlist\/?$/, '/m/waitlist'],
         [/^\/dashboard\/bonuses\/?$/, '/m/bonuses'],
+        // G3-23 / X2-02: профиль из бота (/profile → /dashboard/profile) на
+        // телефоне — мобильный «Я», а не компьютерный кабинет.
+        [/^\/dashboard\/profile\/?$/, '/m/me'],
         [/^\/subscriptions\/?$/, '/m/subscription'],
         [/^\/booking-rules\/?$/, '/m/booking-rules'],
         [/^\/admin\/?$/, '/m/admin'],
-        [/^\/admin\/bookings\/?$/, '/m/admin/bookings'],
-        [/^\/admin\/[^/]+\/?$/, '/m/admin'],  // /admin/finance, /admin/users, etc.
+        // Точные двойники мобильной админки (X2-02) — раньше всё сворачивалось
+        // в /m/admin/dashboard, и заявку/пользователя приходилось искать.
+        [/^\/admin\/users\/([^/]+)\/?$/, '/m/admin/users/$1'],
+        [/^\/admin\/knowledge-base\/?$/, '/m/admin/kb'],
+        [/^\/admin\/(bookings|users|finance|tasks|specialists|crm|cabinets|team|waitlist|access-rights)\/?$/, '/m/admin/$1'],
+        [/^\/admin\/[^/]+\/?$/, '/m/admin'],  // остальные разделы админки
         [/^\/crm\/?$/, '/m/crm'],
         // Расписание — до общего правила ниже, иначе ссылка «Расписание»
         // с телефона молча открывала «Сегодня».
         [/^\/crm\/schedule\/?$/, '/m/crm/schedule'],
+        // Точные двойники мобильной CRM (X2-02): карточка клиента из
+        // уведомления открывается карточкой, а не «Сегодня».
+        [/^\/crm\/clients\/([^/]+)\/?$/, '/m/crm/clients/$1'],
+        [/^\/crm\/finances\/?$/, '/m/crm/finance'],
+        [/^\/crm\/(clients|sessions|notes|profile)\/?$/, '/m/crm/$1'],
         [/^\/crm\/[^/]+\/?$/, '/m/crm'],
         [/^\/profile\/?$/, '/m/me'],
         [/^\/explore\/?$/, '/m/find'],
@@ -208,7 +233,7 @@ function App() {
         }
       }
     } catch { /* matchMedia unavailable in some embedded webviews — ignore */ }
-  }, [currentUser]);
+  }, [currentUser, pathname]);
 
   const lazyFallback = (
     <div className="flex items-center justify-center min-h-screen">
@@ -333,6 +358,8 @@ function App() {
           <Route path="bookings" element={<MobileMyBookings />} />
           <Route path="find" element={<MobileFind />} />
           <Route path="me" element={<MobileProfile />} />
+          {/* Имя и телефон с телефона — тот же PATCH /users/me, что на компьютере. */}
+          <Route path="profile" element={<MobileProfileEdit />} />
           <Route path="subscription" element={<MobileSubscription />} />
           <Route path="bonuses" element={<MobileBonuses />} />
           <Route path="checkout" element={<MobileCheckout />} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { notificationsApi, type AppNotification } from '../../api/notifications';
 import { COLOR, STATUS } from '../../design/tokens';
@@ -18,7 +19,9 @@ import { EmptyState } from '../../components/ui/EmptyState';
  *
  * Polls unread count every 60 seconds (cheap one-shot endpoint). Tap opens
  * a bottom-sheet with the latest 20 items. Tapping an item with a `link`
- * marks it read and hard-navigates — same UX as the desktop bell.
+ * marks it read and opens the link inside the app (волна 2, X2-02: раньше
+ * window.location — полная перезагрузка; компьютерный адрес вроде
+ * /crm/clients/5 на телефоне App.tsx сам переводит в /m/crm/clients/5).
  *
  * Why polling and not websockets: the existing notifications service is
  * synchronous, no broadcast channel yet. Sixty-second cadence is fine for
@@ -31,6 +34,7 @@ export function NotificationsBell({ color = COLOR.ink }: { color?: string } = {}
     const [items, setItems] = useState<AppNotification[]>([]);
     const [loading, setLoading] = useState(false);
     const [loadFailed, setLoadFailed] = useState(false);
+    const navigate = useNavigate();
 
     useEffect(() => {
         let cancelled = false;
@@ -66,7 +70,10 @@ export function NotificationsBell({ color = COLOR.ink }: { color?: string } = {}
             try { await notificationsApi.markRead(n.id); } catch { /* ignore */ }
         }
         if (n.link) {
-            window.location.href = n.link;
+            setOpen(false);
+            setUnread(c => (n.isRead ? c : Math.max(0, c - 1)));
+            if (n.link.startsWith('/')) navigate(n.link);
+            else window.open(n.link, '_blank', 'noopener,noreferrer');
         } else {
             // Refresh count and item state in place
             setItems(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x));

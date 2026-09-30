@@ -9,6 +9,7 @@ import { MobileCrmTour, CRM_TOUR_PREFIX } from './MobileCrmTour';
 import { NotificationsBell } from '../NotificationsBell';
 import { loginPathWithRedirect } from '../../../utils/loginRedirect';
 import { forceUnlockScroll } from '../useScrollLock';
+import { canUsePsyCrm, isBookingAdmin } from '../crmAccess';
 // Wave 1: шрифт IBM Plex и общие токены, как в клиентской оболочке /m.
 import { COLOR, FONT, TEXT, Z } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
@@ -21,8 +22,8 @@ import { useTouchDensity } from '../../../hooks/useTouchDensity';
  * specialist's daily-CRM toolbox: list of today's clients, quick payment /
  * note actions, fast lookup.
  *
- * Access gate: any role with specialist powers (specialist / admin / owner).
- * Plain `client` users hit /dashboard.
+ * Access gate: как на сервере — specialist / owner / senior_admin или право
+ * psy_crm.access (см. ../crmAccess.ts). Админ без CRM → /m/admin, остальные → /m.
  */
 export function MobileCrmLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
@@ -65,13 +66,10 @@ export function MobileCrmLayout() {
     // Если что-то закрылось — поднимаем crmDataVersion, экраны перечитают данные.
     const [crmDataVersion, setCrmDataVersion] = useState(0);
     const lastAutoCompleteAt = useRef(0);
-    const canUseCrm = !!currentUser && (
-        currentUser.role === 'specialist'
-        || currentUser.role === 'owner'
-        || currentUser.role === 'senior_admin'
-        || currentUser.role === 'admin'
-        || !!currentUser.isAdmin
-    );
+    // Волна 2 (X2-ia-navigation-M3): вход в CRM — по тому же правилу, что на
+    // сервере (require_specialist). Раньше пускали любого админа, а сервер
+    // отвечал ему 403: пустая «Сегодня» без клиентов и сессий.
+    const canUseCrm = canUsePsyCrm(currentUser);
     useEffect(() => {
         if (!canUseCrm) return;
         const run = () => {
@@ -100,7 +98,8 @@ export function MobileCrmLayout() {
         // 2026-06-02: bounce to /m (mobile home) instead of /dashboard
         // (десктоп-в-мобиле) — последовательно с тем, что /m теперь основной
         // на телефоне для всех ролей.
-        navigate('/m', { replace: true });
+        // Админ без Psy-CRM — в свою мобильную админку, остальные — на /m.
+        navigate(isBookingAdmin(currentUser) ? '/m/admin' : '/m', { replace: true });
         return null;
     }
 
