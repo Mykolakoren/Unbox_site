@@ -223,6 +223,19 @@ def test_own_application_readable_by_new_user():
         "после отправки анкеты экраны брони не узнают, что она на проверке"
 
 
+def test_desktop_chessboard_series_goes_through_gate():
+    """Ревью 30.09: на /dashboard/bookings вкладка «Шахматка» открыта и для
+    не-специалиста, а «Серия · N» создавала серию прямо через API — 403 на
+    последнем шаге. Для не-специалиста серия идёт через /checkout с карточкой."""
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    src = open(os.path.join(root, "src/pages/MyBookingsPage.tsx"), encoding="utf-8").read()
+    i = src.find("const handleRecurringBooking")
+    body = src[i:src.find("createRecurringBooking(", i)]
+    assert "if (!canCreate)" in body and "proceedToCheckout()" in body, \
+        "серия из шахматки снова минует карточку анкеты"
+    assert "canCreate={canBook}" in src, "шахматке не передаётся, может ли человек бронировать"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

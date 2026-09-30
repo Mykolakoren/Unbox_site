@@ -66,6 +66,7 @@ function BookingsChessboard({
     onCrmBooked,
     usersMap,
     mobileLocFilter: mobileLocFilterProp,
+    canCreate = true,
 }: {
     userBookings: BookingHistoryItem[];
     allBookings: BookingHistoryItem[];
@@ -81,6 +82,8 @@ function BookingsChessboard({
     onCrmBooked?: () => void;
     usersMap?: Map<string, string>;
     mobileLocFilter?: string;
+    /** Ещё не специалист: новые брони только через /checkout, где карточка анкеты. */
+    canCreate?: boolean;
 }) {
     const { updateSession } = useCrmStore();
     const navigate = useNavigate();
@@ -637,6 +640,12 @@ function BookingsChessboard({
 
     const handleRecurringBooking = async () => {
         if (newSlots.length === 0 || !recurringPattern) return;
+        // Ещё не специалист: серия ушла бы прямо в API и упала 403 на последнем
+        // шаге. Ведём через /checkout — там карточка «заполните анкету».
+        if (!canCreate) {
+            proceedToCheckout();
+            return;
+        }
         const block = selectedNewBlocks[0];
         if (!block) return;
 
@@ -3881,6 +3890,7 @@ function GridHouseMyBookings({
                         </div>
                     )}
                     <BookingsChessboard
+                        canCreate={canBook}
                         userBookings={userBookings}
                         allBookings={bookings}
                         publicBookings={publicBookings}
