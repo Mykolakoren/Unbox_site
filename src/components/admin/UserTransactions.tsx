@@ -2,9 +2,12 @@ import { useEffect } from 'react';
 import { Receipt, CreditCard, Banknote, Landmark } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { useCashboxStore } from '../../store/cashboxStore';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { parseUTC, formatBatumi } from '../../utils/dateUtils';
+import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
+import { formatDayMonth, formatMoney, formatTime } from '../../utils/format';
+import { ruCountWord } from '../../utils/plural';
+import { StatusBadge } from '../ui/StatusBadge';
+import { SkeletonList } from '../ui/Skeleton';
+import { EmptyState } from '../ui/EmptyState';
 
 interface UserTransactionsProps {
     email: string;
@@ -22,7 +25,7 @@ interface UserTransactionsProps {
  */
 export function UserTransactions({ email }: UserTransactionsProps) {
     const { users, getTransactionsByUser } = useUserStore();
-    const { transactions: cashboxTxs, fetchTransactions } = useCashboxStore();
+    const { transactions: cashboxTxs, fetchTransactions, isLoading } = useCashboxStore();
 
     const user = users.find(u => u.email === email);
     const userUuid = user?.id;
@@ -72,12 +75,13 @@ export function UserTransactions({ email }: UserTransactionsProps) {
         return (
             <div className="bg-white p-6 rounded-2xl border border-gray-200">
                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                    <Receipt size={20} className="text-gray-400" />
+                    <Receipt size={20} className="text-ink-60" aria-hidden="true" />
                     История платежей
                 </h3>
-                <div className="text-center py-8 bg-gray-50 rounded-xl text-gray-500 text-sm">
-                    Операций по счету не найдено
-                </div>
+                {/* Пока касса грузится — силуэты, а не «операций нет» (wave 1). */}
+                {isLoading
+                    ? <SkeletonList count={3} cardHeight={56} label="Загружаем платежи" />
+                    : <EmptyState compact title="Платежей по клиенту пока нет" hint="Здесь появятся пополнения и оплаты из кассы." />}
             </div>
         );
     }
@@ -85,11 +89,11 @@ export function UserTransactions({ email }: UserTransactionsProps) {
     const getPaymentIcon = (method: string) => {
         switch (method) {
             case 'cash': return <Banknote size={14} />;
-            case 'tbc': return <div className="text-[10px] font-bold text-blue-600">TBC</div>;
-            case 'bog': return <div className="text-[10px] font-bold text-orange-600">BOG</div>;
+            case 'tbc': return <div className="text-xs font-bold text-ink-60">TBC</div>;
+            case 'bog': return <div className="text-xs font-bold text-ink-60">BOG</div>;
             case 'card': return <CreditCard size={14} />;
             case 'transfer': return <Landmark size={14} />;
-            case 'balance': return <div className="text-[10px] font-bold">BAL</div>;
+            case 'balance': return <div className="text-xs font-bold">BAL</div>;
             default: return <CreditCard size={14} />;
         }
     };
@@ -102,7 +106,8 @@ export function UserTransactions({ email }: UserTransactionsProps) {
             case 'card': return 'Карта';
             case 'transfer': return 'Перевод';
             case 'balance': return 'С баланса';
-            default: return method;
+            case 'adjustment': return 'Корректировка (не деньги)';
+            default: return method ? `Прочее (${method})` : '—';
         }
     };
 
@@ -123,42 +128,29 @@ export function UserTransactions({ email }: UserTransactionsProps) {
         }
     };
 
+    // Статус платежа — слова и цвет из общего словаря (src/design/statuses.ts).
+    const PAYMENT_CODE: Record<string, string> = {
+        completed: 'paid', pending: 'pending', failed: 'unpaid', refunded: 'refunded',
+    };
     const getStatusBadge = (status?: string) => {
         const s = status || 'completed';
-        const styles = {
-            completed: 'bg-green-100 text-green-700',
-            pending: 'bg-yellow-100 text-yellow-700',
-            failed: 'bg-red-100 text-red-700',
-            refunded: 'bg-gray-100 text-gray-600 line-through'
-        };
-        const labels = {
-            completed: 'Оплачен',
-            pending: 'Ожидает',
-            failed: 'Ошибка',
-            refunded: 'Возврат'
-        };
-
-        return (
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${styles[s as keyof typeof styles] || styles.completed}`}>
-                {labels[s as keyof typeof labels] || s}
-            </span>
-        );
+        return <StatusBadge kind="payment" status={PAYMENT_CODE[s] ?? s} audience="staff" variant="dot" />;
     };
 
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2">
-                <Receipt size={20} className="text-gray-400" />
+                <Receipt size={20} className="text-ink-60" aria-hidden="true" />
                 История платежей и операций
-                <span className="text-xs font-normal text-gray-400 ml-2">
-                    {transactions.length} {transactions.length === 1 ? 'запись' : 'записей'}
+                <span className="text-xs font-normal text-ink-60 ml-2">
+                    {ruCountWord(transactions.length, ['запись', 'записи', 'записей'])}
                 </span>
             </h3>
 
             <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                     <thead>
-                        <tr className="text-xs text-gray-400 border-b border-gray-100">
+                        <tr className="text-xs text-ink-60 border-b border-gray-100">
                             <th className="font-medium py-3 pl-2">Дата</th>
                             <th className="font-medium py-3">Сумма</th>
                             <th className="font-medium py-3">Способ</th>
@@ -170,8 +162,8 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                     <tbody className="text-sm">
                         {transactions.map((txn: any) => {
                             const d = parseUTC(txn.date);
-                            const formattedDate = formatBatumi(d, 'd MMM yyyy', ru);
-                            const formattedTime = formatBatumi(d, 'HH:mm');
+                            const formattedDate = formatDayMonth(d, { timeZone: BATUMI_TZ, withYear: 'auto' });
+                            const formattedTime = formatTime(d, { timeZone: BATUMI_TZ });
                             const amountNum = Number(txn.amount);
                             const isNegative = amountNum < 0;
 
@@ -179,11 +171,11 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                                 <tr key={txn.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
                                     <td className="py-3 pl-2 align-top">
                                         <div className="font-medium text-gray-900">{formattedDate}</div>
-                                        <div className="text-xs text-gray-400">{formattedTime}</div>
+                                        <div className="text-xs text-ink-60">{formattedTime}</div>
                                     </td>
                                     <td className="py-3 align-top">
-                                        <div className={`font-bold ${isNegative ? 'text-red-600' : 'text-green-700'}`}>
-                                            {isNegative ? '' : '+'}{amountNum} {txn.currency === 'USD' ? '$' : txn.currency === 'EUR' ? '€' : '₾'}
+                                        <div className={`font-bold num ${isNegative ? 'text-[var(--status-danger-fg)]' : 'text-[var(--status-ok-fg)]'}`}>
+                                            {formatMoney(amountNum, { currency: txn.currency || 'GEL', sign: true })}
                                         </div>
                                     </td>
                                     <td className="py-3 align-top">
@@ -197,7 +189,7 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                                     <td className="py-3 align-top">
                                         <div className="text-gray-900">{getPurposeLabel(txn)}</div>
                                         {txn.description && txn.description !== getPurposeLabel(txn) && (
-                                            <div className="text-xs text-gray-400 truncate max-w-[200px]">{txn.description}</div>
+                                            <div className="text-xs text-ink-60 truncate max-w-[200px]">{txn.description}</div>
                                         )}
                                     </td>
                                     <td className="py-3 align-top">
@@ -205,8 +197,8 @@ export function UserTransactions({ email }: UserTransactionsProps) {
                                     </td>
                                     <td className="py-3 pr-2 align-top text-right">
                                         {txn.adminName && (
-                                            <div className="text-[10px] text-gray-400">
-                                                by {txn.adminName}
+                                            <div className="text-xs text-ink-60">
+                                                Провёл: {txn.adminName}
                                             </div>
                                         )}
                                     </td>
@@ -218,7 +210,7 @@ export function UserTransactions({ email }: UserTransactionsProps) {
             </div>
 
             <div className="mt-4 pt-4 border-t border-gray-50 text-right">
-                <div className="text-xs text-gray-400">
+                <div className="text-xs text-ink-60">
                     * Платёж может покрывать несколько бронирований. Минусовые суммы — возвраты или списания.
                 </div>
             </div>

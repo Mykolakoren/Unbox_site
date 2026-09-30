@@ -82,7 +82,7 @@ export function MorningChecklistModal({ adminEmail }: Props) {
                 {/* Header */}
                 <div className="flex items-start justify-between p-5 border-b border-gray-100">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
+                        <div className="w-10 h-10 rounded-full bg-sunken flex items-center justify-center text-ink-60">
                             <Sun size={20} />
                         </div>
                         <div>
@@ -92,8 +92,9 @@ export function MorningChecklistModal({ adminEmail }: Props) {
                     </div>
                     <button
                         onClick={handleDismiss}
-                        className="text-gray-400 hover:text-gray-700"
+                        className="text-ink-60 hover:text-gray-700"
                         title="Позже"
+                        aria-label="Закрыть — напомнить позже"
                     >
                         <X size={20} />
                     </button>
@@ -111,19 +112,19 @@ export function MorningChecklistModal({ adminEmail }: Props) {
                                 className={
                                     'w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ' +
                                     (isDone
-                                        ? 'border-emerald-300 bg-emerald-50'
+                                        ? 'border-[var(--status-ok-fg)]/30 bg-[var(--status-ok-bg)]'
                                         : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50')
                                 }
                             >
                                 <div
                                     className={
                                         'w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors ' +
-                                        (isDone ? 'bg-emerald-500 text-white' : 'border-2 border-gray-300 bg-white')
+                                        (isDone ? 'bg-[var(--status-ok-fg)] text-white' : 'border-2 border-gray-300 bg-white')
                                     }
                                 >
                                     {isDone && <Check size={14} strokeWidth={3} />}
                                 </div>
-                                <span className={'text-sm ' + (isDone ? 'text-emerald-800 font-medium' : 'text-gray-900')}>
+                                <span className={'text-sm ' + (isDone ? 'text-[var(--status-ok-fg)] font-medium' : 'text-gray-900')}>
                                     {item.label}
                                 </span>
                             </button>

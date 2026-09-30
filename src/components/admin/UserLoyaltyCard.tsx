@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { Crown, Percent, History, TrendingUp, Info, Pencil } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { safeFormat } from '../../utils/dateUtils';
 import clsx from 'clsx';
+import { formatDayMonth } from '../../utils/format';
 import type { BookingHistoryItem } from '../../store/types';
 
 
@@ -46,9 +44,10 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
     const progress = level === 'vip' ? 100 : (totalHours / nextLevelHours) * 100;
 
     const LEVEL_CONFIG = {
+        // Уровень различаем значком и словом, не синим/фиолетовым (wave 1).
         basic: { label: 'Базовый', color: 'text-gray-600', bg: 'bg-gray-100', icon: Info },
-        loyal: { label: 'Лояльный', color: 'text-blue-600', bg: 'bg-blue-100', icon: TrendingUp },
-        vip: { label: 'VIP', color: 'text-purple-600', bg: 'bg-purple-100', icon: Crown },
+        loyal: { label: 'Лояльный', color: 'text-ink', bg: 'bg-sunken', icon: TrendingUp },
+        vip: { label: 'VIP', color: 'text-accent-ink', bg: 'bg-accent-soft', icon: Crown },
     };
 
     const LevelIcon = LEVEL_CONFIG[level].icon;
@@ -61,7 +60,7 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200 space-y-6">
             <h3 className="font-bold text-lg flex items-center gap-2">
-                <Crown size={20} className="text-gray-400" />
+                <Crown size={20} className="text-ink-60" />
                 Лояльность и Скидки
             </h3>
 
@@ -77,7 +76,7 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                     </div>
                     <div className="text-right">
                         <div className="text-2xl font-bold">{totalHours.toFixed(1)}</div>
-                        <div className="text-xs text-gray-400">часов накоплено</div>
+                        <div className="text-xs text-ink-60">часов накоплено</div>
                     </div>
                 </div>
 
@@ -86,7 +85,7 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                         <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
                             <div
                                 className={clsx("h-full rounded-full transition-all duration-500",
-                                    level === 'loyal' ? 'bg-blue-500' : 'bg-gray-500'
+                                    level === 'loyal' ? 'bg-accent' : 'bg-gray-500'
                                 )}
                                 style={{ width: `${Math.min(progress, 100)}%` }}
                             />
@@ -103,7 +102,7 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                 <div className="text-sm font-bold text-gray-800 mb-3 flex items-center justify-between">
                     <span>Активные скидки</span>
                     {user.personalDiscountPercent ? (
-                        <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-bold">
+                        <span className="text-xs px-2 py-0.5 bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] rounded-full font-bold">
                             Да
                         </span>
                     ) : null}
@@ -113,12 +112,12 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                     {/* Fixed Personal Discount */}
                     <div className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg hover:border-gray-200 transition-colors">
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                            <div className="w-8 h-8 rounded-full bg-sunken flex items-center justify-center text-ink-60">
                                 <Percent size={14} />
                             </div>
                             <div>
                                 <div className="text-sm font-medium">Персональная</div>
-                                <div className="text-xs text-gray-400">Постоянная скидка</div>
+                                <div className="text-xs text-ink-60">Постоянная скидка</div>
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -130,24 +129,26 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                                                 type="number"
                                                 value={newDiscount}
                                                 onChange={(e) => setNewDiscount(Number(e.target.value))}
+                                                aria-label="Персональная скидка, %"
                                                 className="w-16 px-2 py-1 text-sm border border-unbox-green rounded focus:outline-none focus:ring-1 focus:ring-unbox-green"
                                                 autoFocus
                                             />
-                                            <span className="absolute right-1 top-1 text-xs text-gray-400 font-bold">%</span>
+                                            <span className="absolute right-1 top-1 text-xs text-ink-60 font-bold">%</span>
                                         </div>
                                         <input
                                             type="text"
                                             value={discountReason}
                                             onChange={(e) => setDiscountReason(e.target.value)}
                                             placeholder="Причина"
+                                            aria-label="Причина изменения скидки"
                                             className="w-32 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-unbox-green"
                                         />
-                                        <button onClick={handleUpdateDiscount} className="text-xs bg-unbox-green text-white px-2 py-1 rounded hover:bg-unbox-dark transition-colors">Ok</button>
-                                        <button onClick={() => setIsEditDiscount(false)} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 transition-colors">X</button>
+                                        <button onClick={handleUpdateDiscount} className="text-xs bg-unbox-green text-white px-2 py-1 rounded hover:bg-unbox-dark transition-colors">Сохранить</button>
+                                        <button onClick={() => setIsEditDiscount(false)} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 transition-colors">Отмена</button>
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-3">
-                                        <span className={clsx("font-bold text-lg", user.personalDiscountPercent ? "text-unbox-green" : "text-gray-400")}>
+                                        <span className={clsx("font-bold text-lg", user.personalDiscountPercent ? "text-unbox-green" : "text-ink-60")}>
                                             {user.personalDiscountPercent || 0}%
                                         </span>
                                         <button
@@ -155,8 +156,9 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                                                 setNewDiscount(user.personalDiscountPercent || 0);
                                                 setIsEditDiscount(true);
                                             }}
-                                            className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-unbox-dark transition-colors"
+                                            className="p-1.5 rounded-full hover:bg-gray-100 text-ink-60 hover:text-unbox-dark transition-colors"
                                             title="Изменить скидку"
+                                            aria-label="Изменить скидку"
                                         >
                                             <Pencil size={14} />
                                         </button>
@@ -167,30 +169,30 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
                     </div>
 
                     {/* Automated Discounts Info */}
-                    <div className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg opacity-80">
+                    <div className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg">
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center text-orange-600">
+                            <div className="w-8 h-8 rounded-full bg-sunken flex items-center justify-center text-ink-60">
                                 <TrendingUp size={14} />
                             </div>
                             <div>
                                 <div className="text-sm font-medium">За объём</div>
-                                <div className="text-xs text-gray-400">5+ часов: 10% | 11+ часов: 25%</div>
+                                <div className="text-xs text-ink-60">5+ часов: 10% | 11+ часов: 25%</div>
                             </div>
                         </div>
-                        <div className="text-xs text-gray-400 font-medium">Авто</div>
+                        <div className="text-xs text-ink-60 font-medium">Авто</div>
                     </div>
 
-                    <div className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg opacity-80">
+                    <div className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg">
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
+                            <div className="w-8 h-8 rounded-full bg-sunken flex items-center justify-center text-ink-60">
                                 <Crown size={14} />
                             </div>
                             <div>
                                 <div className="text-sm font-medium">VIP Спецпредложение</div>
-                                <div className="text-xs text-gray-400">Индивидуальные условия</div>
+                                <div className="text-xs text-ink-60">Индивидуальные условия</div>
                             </div>
                         </div>
-                        <div className="text-xs text-gray-400 font-medium">По запросу</div>
+                        <div className="text-xs text-ink-60 font-medium">По запросу</div>
                     </div>
                 </div>
             </div>
@@ -198,23 +200,23 @@ export function UserLoyaltyCard({ email, bookings: clientBookings }: UserLoyalty
             {/* Discount History Log */}
             <div>
                 <div className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <History size={16} className="text-gray-400" />
+                    <History size={16} className="text-ink-60" />
                     История изменений
                 </div>
 
                 <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2">
                     {(!user.discountHistory || user.discountHistory.length === 0) && (
-                        <div className="text-center text-xs text-gray-400 py-4">История изменений пуста</div>
+                        <div className="text-center text-xs text-ink-60 py-4">История изменений пуста</div>
                     )}
                     {user.discountHistory?.map(log => (
                         <div key={log.id} className="text-sm border-l-2 border-gray-200 pl-3 py-1 relative">
                             <div className="absolute -left-[5px] top-2 w-2 h-2 rounded-full bg-gray-300"></div>
                             <div className="flex justify-between">
                                 <span className="font-medium text-gray-900">{log.oldValue}% → {log.newValue}%</span>
-                                <span className="text-xs text-gray-400">{safeFormat(log.date, 'd MMM yyyy', ru, '—')}</span>
+                                <span className="text-xs text-ink-60">{formatDayMonth(log.date, { withYear: 'auto' })}</span>
                             </div>
                             <div className="text-xs text-gray-500 mt-1">{log.reason}</div>
-                            <div className="text-[10px] text-gray-400 mt-0.5">by {log.adminName}</div>
+                            <div className="text-xs text-ink-60 mt-0.5">Изменил: {log.adminName}</div>
                         </div>
                     ))}
                 </div>

@@ -65,7 +65,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
             const detail = e?.response?.data?.detail;
             let msg = 'Не удалось открыть смену';
             if (status === 403) {
-                msg = 'Нет прав на открытие смены — обратись к старшему админу';
+                msg = 'Нет прав на открытие смены — обратитесь к старшему админу';
             } else if (status && typeof detail === 'string') {
                 msg = `Ошибка ${status}: ${detail}`;
             } else if (typeof detail === 'string') {
@@ -116,7 +116,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
                     <Sun size={22} />
-                    <div style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                         Старт смены
                     </div>
                 </div>
@@ -169,7 +169,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
                         Отмена
                     </button>
                     <button onClick={handleSubmit} disabled={saving} style={inkBtn}>
-                        {saving ? 'Сохранение...' : 'Открыть смену'}
+                        {saving ? 'Открываем…' : 'Открыть смену'}
                     </button>
                 </div>
             </div>
@@ -180,7 +180,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpened, branch = '' }: Props
 
 const labelStyle: React.CSSProperties = {
     display: 'block',
-    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em',
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
     textTransform: 'uppercase', color: GH.ink60, marginBottom: 6,
 };
 
@@ -200,8 +200,8 @@ const inkBtn: React.CSSProperties = {
     color: GH.paper,
     border: `1px solid ${GH.ink}`,
     fontFamily: GH_MONO,
-    fontSize: 11,
-    letterSpacing: '0.14em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     cursor: 'pointer',
 };
@@ -212,8 +212,8 @@ const outlineBtn: React.CSSProperties = {
     color: GH.ink,
     border: `1px solid ${GH.ink}`,
     fontFamily: GH_MONO,
-    fontSize: 11,
-    letterSpacing: '0.14em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     cursor: 'pointer',
 };

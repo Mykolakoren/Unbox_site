@@ -7,12 +7,14 @@ interface UserTagsProps {
     tags: string[];
 }
 
+// Цвет тега — по смыслу, только статусные токены (wave 1): «опасно» —
+// проблемный/должник, «ок» — новичок, VIP — нейтрально-выделенный.
 const PRESET_TAGS = [
-    { name: 'VIP', color: 'bg-yellow-100 text-yellow-700' },
-    { name: 'Проблемный', color: 'bg-red-100 text-red-700' },
-    { name: 'Новичок', color: 'bg-green-100 text-green-700' },
-    { name: 'Должник', color: 'bg-orange-100 text-orange-700' },
-    { name: 'Удаленщик', color: 'bg-blue-100 text-blue-700' },
+    { name: 'VIP', color: 'bg-accent-soft text-accent-ink' },
+    { name: 'Проблемный', color: 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]' },
+    { name: 'Новичок', color: 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]' },
+    { name: 'Должник', color: 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]' },
+    { name: 'Удаленщик', color: 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)]' },
 ];
 
 export function UserTags({ email, tags }: UserTagsProps) {
@@ -30,13 +32,13 @@ export function UserTags({ email, tags }: UserTagsProps) {
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <Tag size={20} className="text-gray-400" />
+                <Tag size={20} className="text-ink-60" />
                 Теги клиента
             </h3>
 
             <div className="flex flex-wrap gap-2 mb-4">
                 {tags.length === 0 && !isAdding && (
-                    <span className="text-gray-400 text-sm italic">Нет тегов</span>
+                    <span className="text-ink-60 text-sm italic">Нет тегов</span>
                 )}
 
                 {tags.map(tag => {
@@ -47,6 +49,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
                             {tag}
                             <button
                                 onClick={() => removeUserTag(email, tag)}
+                                aria-label={`Убрать тег «${tag}»`}
                                 className="hover:opacity-60"
                             >
                                 <X size={12} />
@@ -70,6 +73,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
                             autoFocus
                             className="px-3 py-1 rounded-full border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green w-32"
                             placeholder="Название..."
+                            aria-label="Новый тег"
                             value={newTag}
                             onChange={(e) => setNewTag(e.target.value)}
                             onKeyDown={(e) => {
@@ -88,7 +92,7 @@ export function UserTags({ email, tags }: UserTagsProps) {
             {/* Quick Presets */}
             {isAdding && (
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-50">
-                    <span className="text-xs text-gray-400 w-full">Быстрый выбор:</span>
+                    <span className="text-xs text-ink-60 w-full">Быстрый выбор:</span>
                     {PRESET_TAGS.filter(p => !tags.includes(p.name)).map(preset => (
                         <button
                             key={preset.name}

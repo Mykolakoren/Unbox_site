@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, User as UserIcon, Calendar, MapPin, BookOpen, Wallet, ArrowRight } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { FONT } from '../../design/tokens';
+import { COLOR, FONT, SHADOW } from '../../design/tokens';
 import { useCrmStore } from '../../store/crmStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
+import { formatDayMonth, formatGel, formatMoney } from '../../utils/format';
 
 /**
  * Cmd+K / Ctrl+K universal search. Owner 2026-05-27: admins used to
@@ -75,7 +76,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                     id: `user-${u.id}`,
                     kind: 'user',
                     title: u.name || u.email,
-                    sub: `${u.email}${u.phone ? ' · ' + u.phone : ''} · баланс ${(u.balance ?? 0).toFixed(0)} ₾`,
+                    sub: `${u.email}${u.phone ? ' · ' + u.phone : ''} · баланс ${formatGel(u.balance ?? 0, { fraction: 0 })}`,
                     href: `/admin/users/${u.id}`,
                     score: s,
                 });
@@ -91,7 +92,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                     id: `client-${c.id}`,
                     kind: 'crm_client',
                     title: c.aliasCode ? `${c.aliasCode} · ${c.name}` : c.name,
-                    sub: `CRM-клиент${c.basePrice ? ' · ' + c.basePrice + ' ' + (c.currency || '₾') : ''}`,
+                    sub: `CRM-клиент${c.basePrice ? ' · ' + formatMoney(c.basePrice, { currency: c.currency || 'GEL' }) : ''}`,
                     href: `/crm/clients/${c.id}`,
                     score: s + 5,  // CRM admins query clients more often
                 });
@@ -107,7 +108,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                     id: `cab-${r.id}`,
                     kind: 'cabinet',
                     title: r.name,
-                    sub: `${loc?.name || r.locationId} · ${r.hourlyRate}₾/ч · до ${r.capacity}`,
+                    sub: `${loc?.name || r.locationId} · ${formatGel(r.hourlyRate)}/ч · до ${r.capacity}`,
                     href: `/admin/cabinets`,
                     score: s,
                 });
@@ -139,13 +140,13 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
             if (s > 0) {
                 const d = new Date(b.date as any);
                 const dayLabel = isFinite(d.getTime())
-                    ? d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+                    ? formatDayMonth(d)
                     : '';
                 out.push({
                     id: `bk-${b.id}`,
                     kind: 'booking',
                     title: `${resName} · ${b.startTime}`,
-                    sub: `${dayLabel} · ${b.userId} · ${(b.finalPrice ?? 0).toFixed(0)} ₾`,
+                    sub: `${dayLabel} · ${b.userId} · ${formatGel(b.finalPrice ?? 0, { fraction: 0 })}`,
                     href: `/admin/bookings?focus=${b.id}`,
                     score: s - 10,  // bookings are noisier — small penalty
                 });
@@ -190,9 +191,9 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 onClick={e => e.stopPropagation()}
                 style={{
                     width: '100%', maxWidth: 560,
-                    background: '#fff', borderRadius: 14,
+                    background: COLOR.card, borderRadius: 14,
                     overflow: 'hidden',
-                    boxShadow: '0 20px 60px rgba(0,0,0,0.30)',
+                    boxShadow: SHADOW.pop,
                     display: 'flex', flexDirection: 'column',
                     maxHeight: '70vh',
                 }}
@@ -203,7 +204,7 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                     padding: '14px 16px',
                     borderBottom: '1px solid rgba(0,0,0,0.08)',
                 }}>
-                    <Search size={18} style={{ color: '#888', flexShrink: 0 }} />
+                    <Search size={18} style={{ color: COLOR.ink60, flexShrink: 0 }} aria-hidden="true" />
                     <input
                         ref={inputRef}
                         type="text"
@@ -214,15 +215,16 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                             if (e.key === 'Enter' && results[0]) go(results[0].href);
                         }}
                         placeholder="Имя, email, кабинет, бронь… (Esc — закрыть)"
+                        aria-label="Поиск по админке"
                         style={{
                             flex: 1, border: 'none', outline: 'none',
                             fontSize: 15, fontFamily: 'inherit',
-                            color: '#0E0E0E', background: 'transparent',
+                            color: COLOR.ink, background: 'transparent',
                         }}
                     />
                     <button
                         onClick={onClose}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 4 }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLOR.ink60, padding: 4 }}
                         aria-label="Закрыть"
                     >
                         <X size={18} />
@@ -232,11 +234,11 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 {/* Results */}
                 <div style={{ overflowY: 'auto', flex: 1 }}>
                     {q.trim().length < 2 ? (
-                        <div style={{ padding: 24, textAlign: 'center', color: '#888', fontSize: 13 }}>
-                            Начни вводить — найду юзеров, клиентов, кабинеты, брони.
+                        <div style={{ padding: 24, textAlign: 'center', color: COLOR.ink60, fontSize: 14 }}>
+                            Начните вводить — найдём юзеров, клиентов, кабинеты, брони.
                         </div>
                     ) : results.length === 0 ? (
-                        <div style={{ padding: 24, textAlign: 'center', color: '#888', fontSize: 13 }}>
+                        <div style={{ padding: 24, textAlign: 'center', color: COLOR.ink60, fontSize: 14 }}>
                             Ничего не найдено по запросу «{q}»
                         </div>
                     ) : (
@@ -253,26 +255,26 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                                     fontFamily: 'inherit',
                                     borderBottom: '1px solid rgba(0,0,0,0.04)',
                                 }}
-                                onMouseEnter={e => (e.currentTarget.style.background = '#F4F4F2')}
+                                onMouseEnter={e => (e.currentTarget.style.background = COLOR.sunken)}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                             >
                                 <div style={{
                                     width: 30, height: 30, borderRadius: 7,
-                                    background: 'rgba(0,0,0,0.05)',
-                                    color: '#0E0E0E',
+                                    background: COLOR.ink05,
+                                    color: COLOR.ink,
                                     display: 'grid', placeItems: 'center', flexShrink: 0,
                                 }}>
                                     {iconFor(r.kind)}
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{
-                                        fontWeight: 600, fontSize: 14, color: '#0E0E0E',
+                                        fontWeight: 600, fontSize: 14, color: COLOR.ink,
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                     }}>
                                         {r.title}
                                     </div>
                                     <div style={{
-                                        fontSize: 11, color: '#888',
+                                        fontSize: 12, color: COLOR.ink60,
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                         marginTop: 1,
                                     }}>
@@ -280,12 +282,12 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                                     </div>
                                 </div>
                                 <span style={{
-                                    fontSize: 9, fontWeight: 700, letterSpacing: '0.05em',
-                                    textTransform: 'uppercase', color: '#888',
-                                    background: 'rgba(0,0,0,0.05)',
+                                    fontSize: 12, fontWeight: 600, letterSpacing: '0.05em',
+                                    textTransform: 'uppercase', color: COLOR.ink60,
+                                    background: COLOR.ink05,
                                     padding: '2px 6px', borderRadius: 4, flexShrink: 0,
                                 }}>{labelFor(r.kind)}</span>
-                                <ArrowRight size={14} style={{ color: '#bbb', flexShrink: 0 }} />
+                                <ArrowRight size={14} style={{ color: COLOR.ink40, flexShrink: 0 }} aria-hidden="true" />
                             </button>
                         ))
                     )}
@@ -295,9 +297,9 @@ export function CmdKSearch({ open, onClose }: { open: boolean; onClose: () => vo
                 <div style={{
                     padding: '8px 16px',
                     borderTop: '1px solid rgba(0,0,0,0.04)',
-                    fontSize: 11, color: '#999',
+                    fontSize: 12, color: COLOR.ink60,
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    background: '#FAFAF7',
+                    background: COLOR.paper,
                 }}>
                     <span>↵ открыть · Esc закрыть</span>
                     <span>⌘K / Ctrl+K</span>

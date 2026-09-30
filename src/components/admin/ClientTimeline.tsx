@@ -4,8 +4,7 @@ import type {
     Transaction,
     BookingHistoryItem
 } from '../../store/types';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { formatDayMonth, formatGel, formatTime } from '../../utils/format';
 import {
     Calendar,
     CreditCard,
@@ -22,6 +21,10 @@ import {
 import clsx from 'clsx';
 import { RESOURCES } from '../../utils/data';
 
+// Цвета событий — только статусные токены (wave 1). Точка узла строится
+// заменой text- → bg-, поэтому классы точек перечислены здесь, чтобы
+// Tailwind их собрал: bg-[var(--status-ok-fg)] bg-[var(--status-pending-fg)]
+// bg-[var(--status-danger-fg)]
 interface ClientTimelineProps {
     user: User;
     transactions: Transaction[];
@@ -76,7 +79,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                 title: 'Клиент создан',
                 description: `Регистрация в системе`,
                 icon: UserPlus,
-                color: 'text-unbox-grey',
+                color: 'text-ink-60',
                 bg: 'bg-gray-100'
             });
         }
@@ -91,7 +94,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                 date: createdDate,
                 type: 'booking_created',
                 title: 'Создана бронь',
-                description: `${RESOURCES.find(r => r.id === b.resourceId)?.name || 'Кабинет'} · ${b.date} ${b.startTime}`,
+                description: `${RESOURCES.find(r => r.id === b.resourceId)?.name || 'Кабинет'} · ${formatDayMonth(typeof (b.date as unknown) === 'string' ? String(b.date).split('T')[0].split(' ')[0] : b.date)} ${b.startTime ?? ''}`.trim(),
                 icon: Clock,
                 color: 'text-unbox-green', // Was blue
                 bg: 'bg-unbox-light'
@@ -132,9 +135,9 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                     date: cancelDate,
                     type: 'booking_cancelled',
                     title: 'Отмена брони',
-                    description: `${RESOURCES.find(r => r.id === b.resourceId)?.name || 'Кабинет'} · ${format(visitDate, 'd MMM, HH:mm', { locale: ru })} ${b.cancellationReason ? `(${b.cancellationReason})` : ''} ${b.cancelledBy ? `[${b.cancelledBy}]` : ''}`.trim(),
+                    description: `${RESOURCES.find(r => r.id === b.resourceId)?.name || 'Кабинет'} · ${formatDayMonth(visitDate)}, ${formatTime(visitDate)} ${b.cancellationReason ? `(${b.cancellationReason})` : ''} ${b.cancelledBy ? `[${b.cancelledBy}]` : ''}`.trim(),
                     icon: XCircle,
-                    color: 'text-unbox-grey', // Was red (Strict palette forbids aggressive red)
+                    color: 'text-ink-60', // Was red (Strict palette forbids aggressive red)
                     bg: 'bg-gray-100' // Was red-50
                 });
             }
@@ -144,7 +147,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
         transactions.forEach(t => {
             let title = 'Транзакция';
             let icon = Coins;
-            let color = 'text-unbox-grey';
+            let color = 'text-ink-60';
             let bg = 'bg-gray-100';
 
             if (t.type === 'deposit') {
@@ -174,7 +177,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                 date: getSafeDate(t.date),
                 type: 'transaction',
                 title: title,
-                description: t.description || `${t.amount} ₾`,
+                description: t.description || formatGel(t.amount),
                 amount: t.amount,
                 icon: icon,
                 color: color,
@@ -206,8 +209,8 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                     title: 'Запрос на CRM',
                     description: c.text,
                     icon: KeyRound,
-                    color: 'text-blue-600',
-                    bg: 'bg-blue-50 border border-blue-200'
+                    color: 'text-[var(--status-pending-fg)]',
+                    bg: 'bg-[var(--status-pending-bg)]'
                 });
             } else if (c.type === 'crm_access_approved') {
                 list.push({
@@ -217,8 +220,8 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                     title: 'CRM доступ одобрен',
                     description: `${c.adminName}: ${c.text}`,
                     icon: KeyRound,
-                    color: 'text-green-700',
-                    bg: 'bg-green-50 border border-green-200'
+                    color: 'text-[var(--status-ok-fg)]',
+                    bg: 'bg-[var(--status-ok-bg)]'
                 });
             } else if (c.type === 'crm_access_rejected') {
                 list.push({
@@ -228,8 +231,8 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                     title: 'CRM запрос отклонён',
                     description: `${c.adminName}: ${c.text}`,
                     icon: KeyRound,
-                    color: 'text-red-600',
-                    bg: 'bg-red-50 border border-red-200'
+                    color: 'text-[var(--status-danger-fg)]',
+                    bg: 'bg-[var(--status-danger-bg)]'
                 });
             } else {
                 list.push({
@@ -250,7 +253,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
     }, [user, transactions, bookings]);
 
     if (events.length === 0) {
-        return <div className="p-8 text-center text-gray-400">История событий пуста</div>;
+        return <div className="p-8 text-center text-ink-60">Событий по клиенту пока нет</div>;
     }
 
     return (
@@ -267,7 +270,7 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                             {isNewDay && (
                                 <div className="absolute -left-[21px] -top-8 flex items-center mb-4 mt-2">
                                     <div className="bg-gray-100 text-gray-500 text-xs font-bold px-2 py-1 rounded-md border border-gray-200 uppercase tracking-wider">
-                                        {format(event.date, 'd MMMM yyyy', { locale: ru })}
+                                        {formatDayMonth(event.date, { withYear: 'auto' })}
                                     </div>
                                 </div>
                             )}
@@ -289,8 +292,8 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                                         </div>
                                         <span className="font-bold text-gray-900">{event.title}</span>
                                     </div>
-                                    <span className="text-xs text-gray-400 font-mono">
-                                        {format(event.date, 'HH:mm')}
+                                    <span className="text-xs text-ink-60 num">
+                                        {formatTime(event.date)}
                                     </span>
                                 </div>
 
@@ -298,14 +301,14 @@ export function ClientTimeline({ user, transactions, bookings }: ClientTimelineP
                                     {event.description}
                                     {event.type === 'transaction' && event.amount && (
                                         <span className="font-bold ml-1 text-gray-900">
-                                            {event.amount > 0 ? '+' : ''}{event.amount} ₾
+                                            {formatGel(event.amount, { sign: true })}
                                         </span>
                                     )}
                                 </div>
 
                                 {/* Custom renderer for comments to show full text nicely */}
                                 {event.type === 'comment' && (
-                                    <div className="mt-2 ml-[38px] p-2 bg-yellow-50/50 rounded-lg text-sm text-gray-700 italic border border-yellow-100/50">
+                                    <div className="mt-2 ml-[38px] p-2 bg-sunken rounded-lg text-sm text-gray-700 italic border border-ink-10">
                                         "{event.description}"
                                     </div>
                                 )}

@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { X, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Loader2, Lock } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import { cashboxApi } from '../../../api/cashbox';
+import { STATUS } from '../../../design/tokens';
+import { formatGel } from '../../../utils/format';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One'] as const;
 
@@ -119,23 +121,24 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
             if (Math.abs(disc) < 0.01) {
                 toast.success('Смена закрыта — расхождений нет');
             } else {
-                toast.warning(`Смена закрыта — расхождение: ${disc > 0 ? '+' : ''}${disc.toFixed(2)} ₾`);
+                toast.warning(`Смена закрыта — расхождение: ${formatGel(disc, { sign: true })}`);
             }
             // Excel #75 — final lock-up reminder AFTER cash reconciliation.
             // Casa is now sealed in the report; admin can safely lock up and leave.
             // Long duration so admins walking out of the centre actually see it.
-            toast('🔒 Не забудьте: запереть двери, закрыть окна, активировать сигнализацию', {
+            toast('Не забудьте: запереть двери, закрыть окна, активировать сигнализацию', {
                 duration: 15000,
+                icon: <Lock size={16} aria-hidden="true" />,
                 style: {
-                    background: '#fef3c7',
-                    border: '1px solid #fbbf24',
-                    color: '#92400e',
+                    background: STATUS.pending.bg,
+                    border: `1px solid ${STATUS.pending.fg}40`,
+                    color: STATUS.pending.fg,
                     fontWeight: 500,
                 },
             });
             onClose();
         } catch {
-            toast.error('Ошибка закрытия смены');
+            toast.error('Не удалось закрыть смену. Проверьте интернет и попробуйте ещё раз.');
         } finally {
             setSaving(false);
         }
@@ -150,14 +153,15 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
             <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                    aria-label="Закрыть"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-gray-600 transition-colors"
                 >
                     <X size={20} />
                 </button>
 
                 <h3 className="text-lg font-bold text-unbox-dark mb-1">Закрытие смены</h3>
                 {checklistSkipReason && (
-                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-xs text-amber-800">
+                    <div className="mb-3 px-3 py-2 bg-[var(--status-pending-bg)] rounded-lg flex items-start gap-2 text-xs text-[var(--status-pending-fg)]">
                         <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                         <div>
                             <div className="font-semibold mb-0.5">Чек-лист пропущен</div>
@@ -165,7 +169,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         </div>
                     </div>
                 )}
-                <p className="text-sm text-unbox-grey mb-3">
+                <p className="text-sm text-ink-60 mb-3">
                     Выберите филиал — кассу которого вы закрываете. От этого зависит «ожидаемый остаток».
                 </p>
 
@@ -175,7 +179,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                     the active branch is unambiguous. */}
                 <div className="mb-4">
                     <div className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
-                        Филиал <span className="text-red-500">*</span>
+                        Филиал <span className="text-[var(--status-danger-fg)]">*</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         {BRANCHES.map(b => {
@@ -197,7 +201,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         })}
                     </div>
                     {!selectedBranch && (
-                        <div className="mt-2 text-xs text-amber-700 flex items-start gap-1.5">
+                        <div className="mt-2 text-xs text-[var(--status-pending-fg)] flex items-start gap-1.5">
                             <AlertTriangle size={12} className="shrink-0 mt-0.5" />
                             <span>Закрытие без указания филиала отключено — выберите выше.</span>
                         </div>
@@ -213,14 +217,14 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                         admins then typed verbatim → phantom discrepancy. */}
                     <div className="bg-gray-50 rounded-xl px-4 py-3">
                         <div className="text-xs text-gray-500 mb-0.5">
-                            Ожидаемый остаток наличных {selectedBranch && <span className="text-unbox-grey/70">· {selectedBranch}</span>}
+                            Ожидаемый остаток наличных {selectedBranch && <span className="text-ink-60">· {selectedBranch}</span>}
                         </div>
                         <div className="text-xl font-bold text-unbox-dark flex items-center gap-2">
                             {!selectedBranch
-                                ? <span className="text-gray-400 text-base font-medium">Выберите филиал ↑</span>
+                                ? <span className="text-ink-60 text-base font-medium">Выберите филиал ↑</span>
                                 : loadingBranchCash || !preview
-                                    ? <><Loader2 size={18} className="animate-spin" /> <span className="text-gray-400 text-base">загрузка...</span></>
-                                    : `${expectedBalance.toFixed(2)} ₾`}
+                                    ? <><Loader2 size={18} className="animate-spin" /> <span className="text-ink-60 text-base">Загружаем…</span></>
+                                    : <span className="num">{formatGel(expectedBalance)}</span>}
                         </div>
                         {/* Drift warning: if total cash flow ever ≠ algorithm's
                             running expected, surface it so the admin knows
@@ -228,8 +232,9 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                             number while history says another. Past
                             un-reconciled discrepancies live here. */}
                         {preview && Math.abs(drift) >= 0.01 && (
-                            <div className="mt-1 text-[11px] text-amber-700 leading-snug">
-                                ⚠ Сумма по истории ({lifetimeBalance.toFixed(2)} ₾) расходится с ожидаемой на {drift > 0 ? '+' : ''}{drift.toFixed(2)} ₾ — накопилось из прошлых незакрытых расхождений.
+                            <div className="mt-1 text-xs text-[var(--status-pending-fg)] leading-snug flex items-start gap-1.5">
+                                <AlertTriangle size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+                                <span>Сумма по истории ({formatGel(lifetimeBalance)}) расходится с ожидаемой на {formatGel(drift, { sign: true })} — накопилось из прошлых незакрытых расхождений.</span>
                             </div>
                         )}
                         {/* Excel #13 — backend breakdown so the admin can audit
@@ -240,24 +245,24 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                             so we read `startingBalance`, not `starting_balance`
                             (root cause of the Safari crash admins reported). */}
                         {preview && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500 leading-relaxed">
+                            <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-500 leading-relaxed">
                                 <div className="flex justify-between">
                                     <span>Остаток с прошлой смены</span>
-                                    <span className="font-mono">{Number(preview.startingBalance ?? 0).toFixed(2)} ₾</span>
+                                    <span className="num">{formatGel(Number(preview.startingBalance ?? 0))}</span>
                                 </div>
-                                <div className="flex justify-between text-emerald-700">
+                                <div className="flex justify-between text-[var(--status-ok-fg)]">
                                     <span>+ Приход за смену</span>
-                                    <span className="font-mono">{Number(preview.cashIn ?? 0).toFixed(2)} ₾</span>
+                                    <span className="num">{formatGel(Number(preview.cashIn ?? 0))}</span>
                                 </div>
-                                <div className="flex justify-between text-red-700">
+                                <div className="flex justify-between text-[var(--status-danger-fg)]">
                                     <span>− Расход за смену</span>
-                                    <span className="font-mono">{Number(preview.cashOut ?? 0).toFixed(2)} ₾</span>
+                                    <span className="num">{formatGel(Number(preview.cashOut ?? 0))}</span>
                                 </div>
                                 <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100">
                                     <span>= Ожидается</span>
-                                    <span className="font-mono">{Number(preview.expected ?? 0).toFixed(2)} ₾</span>
+                                    <span className="num">{formatGel(Number(preview.expected ?? 0))}</span>
                                 </div>
-                                <div className="text-gray-400 mt-1">
+                                <div className="text-ink-60 mt-1">
                                     Движений за период: {preview.txCount ?? 0}
                                 </div>
                             </div>
@@ -284,15 +289,15 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                     {discrepancy !== null && (
                         <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium ${
                             Math.abs(discrepancy) < 0.01
-                                ? 'bg-green-50 text-green-700'
-                                : 'bg-amber-50 text-amber-700'
+                                ? 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]'
+                                : 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]'
                         }`}>
                             {Math.abs(discrepancy) < 0.01
                                 ? <CheckCircle size={16} />
                                 : <AlertTriangle size={16} />}
                             {Math.abs(discrepancy) < 0.01
                                 ? 'Расхождений нет'
-                                : `Расхождение: ${discrepancy > 0 ? '+' : ''}${discrepancy.toFixed(2)} ₾`}
+                                : `Расхождение: ${formatGel(discrepancy, { sign: true })}`}
                         </div>
                     )}
 
@@ -322,7 +327,7 @@ export function EndShiftModal({ isOpen, onClose, branch, checklistSkipReason }: 
                             disabled={saving || !hasAmount || !selectedBranch}
                             className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors disabled:opacity-60"
                         >
-                            {saving ? 'Сохранение...' : 'Закрыть смену'}
+                            {saving ? 'Закрываем…' : 'Закрыть смену'}
                         </button>
                     </div>
                 </form>

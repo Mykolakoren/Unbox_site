@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { MessageSquare, Send, User } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { ru } from 'date-fns/locale';
-import { safeFormat } from '../../utils/dateUtils';
+import { formatDayMonth, formatTime } from '../../utils/format';
 import clsx from 'clsx';
 
 interface UserCommentsProps {
@@ -42,32 +41,36 @@ export function UserComments({ email }: UserCommentsProps) {
             <div className="flex-1 overflow-y-auto space-y-4 mb-4 min-h-[200px] max-h-[400px] pr-2">
                 {/* Legacy Note Support */}
                 {user.notes && (
-                    <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-sm">
-                        <div className="text-xs text-yellow-600 font-bold mb-1 uppercase">Старая заметка</div>
+                    <div className="bg-sunken p-3 rounded-lg border border-ink-10 text-sm">
+                        <div className="text-xs text-ink-60 font-bold mb-1 uppercase">Старая заметка</div>
                         <div className="text-gray-700 whitespace-pre-wrap">{user.notes}</div>
                     </div>
                 )}
 
                 {comments.length === 0 && !user.notes && (
-                    <div className="text-center text-gray-400 text-sm py-8">
+                    <div className="text-center text-ink-60 text-sm py-8">
                         Нет комментариев
                     </div>
                 )}
 
                 {comments.map((comment) => (
                     <div key={comment.id} className="flex gap-3 group">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-ink-60">
                             <User size={14} />
                         </div>
                         <div className="flex-1">
                             <div className="flex items-baseline justify-between mb-1">
                                 <span className="text-sm font-bold text-gray-900">{comment.adminName}</span>
-                                <span className="text-xs text-gray-400">
+                                <span className="text-xs text-ink-60">
                                     {/* Merged-user comments arrive with `created_at`
                                         instead of `date`; safeFormat returns a
                                         fallback for missing/invalid dates so one
                                         bad row no longer crashes the whole page. */}
-                                    {safeFormat(comment.date || (comment as any).created_at, 'd MMM HH:mm', ru, '—')}
+                                    {(() => {
+                                        const raw = comment.date || (comment as any).created_at;
+                                        const day = formatDayMonth(raw, { fallback: '' });
+                                        return day ? `${day}, ${formatTime(raw)}` : '—';
+                                    })()}
                                 </span>
                             </div>
                             <div className="bg-gray-50 rounded-r-xl rounded-bl-xl p-3 text-sm text-gray-700 whitespace-pre-wrap border border-gray-100 group-hover:bg-gray-100 transition-colors">
@@ -95,13 +98,13 @@ export function UserComments({ email }: UserCommentsProps) {
                         "absolute right-2 bottom-2 p-1.5 rounded-lg transition-colors",
                         newComment.trim()
                             ? "bg-unbox-green text-white hover:bg-unbox-dark"
-                            : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                            : "bg-gray-200 text-ink-60 cursor-not-allowed"
                     )}
                 >
                     <Send size={16} />
                 </button>
             </div>
-            <div className="text-[10px] text-gray-400 mt-1 pl-1">
+            <div className="text-xs text-ink-60 mt-1 pl-1">
                 Enter для отправки, Shift+Enter для переноса
             </div>
         </div>

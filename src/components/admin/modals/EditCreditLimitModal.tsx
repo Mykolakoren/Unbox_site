@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LegacyButton as Button } from '../../ui/LegacyButton';
 import { X, Shield } from 'lucide-react';
+import { formatGel } from '../../../utils/format';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
@@ -43,7 +44,8 @@ export function EditCreditLimitModal({ isOpen, onClose, currentLimit, onConfirm 
             <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                    aria-label="Закрыть"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-gray-600 transition-colors"
                 >
                     <X size={20} />
                 </button>
@@ -61,7 +63,7 @@ export function EditCreditLimitModal({ isOpen, onClose, currentLimit, onConfirm 
                 <form onSubmit={handleSubmit}>
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Лимит (GEL)
+                            Лимит, ₾
                         </label>
                         <input
                             type="number"
@@ -71,8 +73,8 @@ export function EditCreditLimitModal({ isOpen, onClose, currentLimit, onConfirm 
                             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-unbox-green transition-shadow text-lg font-medium"
                             autoFocus
                         />
-                        <p className="text-xs text-gray-400 mt-2">
-                            Клиент сможет создавать бронирования при балансе до -{limit || 0} ₾
+                        <p className="text-xs text-ink-60 mt-2">
+                            Клиент сможет создавать бронирования при балансе до {formatGel(-Number(limit || 0))}
                         </p>
                     </div>
 

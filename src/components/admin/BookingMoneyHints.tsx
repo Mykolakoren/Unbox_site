@@ -7,6 +7,7 @@ import { useUserStore } from '../../store/userStore';
 import type { BookingHistoryItem } from '../../store/types';
 import { dueLabel, type DueInfo } from '../../utils/dueAmounts';
 import { AddFundsModal } from './modals/AddFundsModal';
+import { formatDayMonth, formatGel } from '../../utils/format';
 
 type Estimate = Awaited<ReturnType<typeof bookingsApi.getWeeklyEstimate>>;
 
@@ -43,9 +44,9 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
     const price = booking.finalPrice ?? 0;
     const suggested = debt > 0 ? debt : (booking.paymentStatus === 'pending' ? price : 0);
     const suggestedHint = debt > 0
-        ? `Подставлен долг клиента: ${fmt(debt)} ₾`
+        ? `Подставлен долг клиента: ${formatGel(debt)}`
         : booking.paymentStatus === 'pending' && price > 0
-            ? `Подставлена цена брони: ${fmt(price)} ₾ (спишется с баланса за сутки до начала)`
+            ? `Подставлена цена брони: ${formatGel(price)} (спишется с баланса за сутки до начала)`
             : undefined;
 
     const handleConfirm = async (amount: number, method: 'cash' | 'tbc' | 'bog', branch?: string) => {
@@ -63,7 +64,7 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
                 credit_user_balance: true,
             } as any);
             await fetchUsers();
-            toast.success(`Оплата принята: ${fmt(amount)} ₾ на баланс ${client.name}`);
+            toast.success(`Оплата принята: ${formatGel(amount)} на баланс ${client.name}`);
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось принять оплату (нужен доступ к кассе)');
         }
@@ -72,8 +73,8 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
     let weeklyLine: string | null = null;
     if (est && est.applies) {
         if (est.tierPercent > 0 && est.bookingRebate > 0) {
-            weeklyLine = `≈ ${fmt(est.bookingNetEstimate)} ₾ после недельной скидки ${est.tierPercent}% `
-                + `(вернётся ${fmt(est.bookingRebate)} ₾ в понедельник; за неделю ${fmt(est.totalHours)} ч)`;
+            weeklyLine = `≈ ${formatGel(est.bookingNetEstimate)} после недельной скидки ${est.tierPercent}% `
+                + `(вернётся ${formatGel(est.bookingRebate)} в понедельник; за неделю ${fmt(est.totalHours)} ч)`;
         } else if (est.tierPercent > 0) {
             weeklyLine = `Неделя ${fmt(est.totalHours)} ч — скидка ${est.tierPercent}%, по этой брони уже учтена`;
         } else if (est.nextTierPercent) {
@@ -86,27 +87,27 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
     }
 
     const rebateLine = est?.lastRebate && est.lastRebate.amount > 0
-        ? `в т.ч. недельная скидка +${fmt(est.lastRebate.amount)} ₾ от ${est.lastRebate.date} — уже на балансе`
+        ? `в т.ч. недельная скидка +${formatGel(est.lastRebate.amount)} от ${formatDayMonth(est.lastRebate.date)} — уже на балансе`
         : null;
 
     return (
         <>
             {due && (
                 <div className="flex justify-between gap-3">
-                    <span className="text-unbox-grey shrink-0">К оплате</span>
-                    <span className={`font-semibold text-right ${due.due > 0 ? 'text-unbox-dark' : 'text-emerald-700'}`}
+                    <span className="text-ink-60 shrink-0">К оплате</span>
+                    <span className={`font-semibold text-right ${due.due > 0 ? 'text-unbox-dark' : 'text-[var(--status-ok-fg)]'}`}
                         title="Считается из баланса клиента: долг — за самые свежие списанные брони, плюс на балансе (недельная скидка, предоплата) покрывает ближайшие брони.">
-                        {due.due > 0 ? `${fmt(due.due)} ₾` : dueLabel(due)}
+                        {due.due > 0 ? `${formatGel(due.due)}` : dueLabel(due)}
                         {due.due > 0 && due.due < due.price && (
-                            <span className="block text-[11px] font-normal text-unbox-grey">из {fmt(due.price)} ₾ — часть уже на балансе</span>
+                            <span className="block text-xs font-normal text-ink-60">из {formatGel(due.price)} — часть уже на балансе</span>
                         )}
-                        {rebateLine && <span className="block text-[11px] font-normal text-emerald-700">{rebateLine}</span>}
+                        {rebateLine && <span className="block text-xs font-normal text-[var(--status-ok-fg)]">{rebateLine}</span>}
                     </span>
                 </div>
             )}
             {weeklyLine && (
                 <div className="flex justify-between gap-3">
-                    <span className="text-unbox-grey shrink-0">С недельной</span>
+                    <span className="text-ink-60 shrink-0">С недельной</span>
                     <span className="font-medium text-unbox-dark text-right" title="Недельная скидка за объём начисляется кредитом на баланс в понедельник за прошлую неделю. Здесь — ориентир по уже записанным часам недели.">
                         {weeklyLine}
                     </span>
@@ -114,9 +115,9 @@ export function BookingMoneyHints({ booking, due }: { booking: BookingHistoryIte
             )}
             {client && balance !== null && (
                 <div className="flex justify-between items-center gap-3">
-                    <span className="text-unbox-grey shrink-0">Баланс</span>
+                    <span className="text-ink-60 shrink-0">Баланс</span>
                     <span className="flex items-center gap-2">
-                        <span className={`font-medium ${balance < 0 ? 'text-red-600' : 'text-unbox-dark'}`}>{fmt(balance)} ₾</span>
+                        <span className={`font-medium ${balance < 0 ? 'text-[var(--status-danger-fg)]' : 'text-unbox-dark'}`}>{formatGel(balance)}</span>
                         <button
                             onClick={() => setPayOpen(true)}
                             className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-unbox-green/15 text-unbox-dark hover:bg-unbox-green/25 transition-colors"

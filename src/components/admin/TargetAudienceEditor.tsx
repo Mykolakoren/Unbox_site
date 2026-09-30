@@ -95,7 +95,7 @@ export function TargetAudienceEditor({ value = [], onChange }: TargetAudienceEdi
                     </div>
                 )}
             </div>
-            <ChevronDown size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
+            <ChevronDown size={14} className="text-ink-60 opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
         </div>
     );
 }

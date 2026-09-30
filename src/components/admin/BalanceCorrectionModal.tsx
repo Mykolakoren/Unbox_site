@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { X, Loader2, Wallet } from 'lucide-react';
-import { FONT } from '../../design/tokens';
+import { COLOR, FONT, SHADOW, STATUS } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 import { usersApi } from '../../api/users';
 
 interface Props {
@@ -50,7 +51,7 @@ export function BalanceCorrectionModal({
         setSaving(true);
         try {
             const updated = await usersApi.correctBalance(userId, parsed, reason.trim());
-            toast.success(`Баланс обновлён: ${updated.balance.toFixed(2)} ₾`);
+            toast.success(`Баланс обновлён: ${formatGel(updated.balance)}`);
             onSaved(updated.balance);
             onClose();
         } catch (e: any) {
@@ -73,21 +74,21 @@ export function BalanceCorrectionModal({
             <div
                 onClick={e => e.stopPropagation()}
                 style={{
-                    background: '#fff',
+                    background: COLOR.card,
                     borderRadius: 16,
                     width: '100%', maxWidth: 420,
                     padding: 22,
                     position: 'relative',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
+                    boxShadow: SHADOW.pop,
                     fontFamily: FONT.sans,
-                    color: '#0E0E0E',
+                    color: COLOR.ink,
                 }}
             >
                 <button
                     onClick={onClose}
                     style={{
                         position: 'absolute', top: 14, right: 14,
-                        background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 4,
+                        background: 'none', border: 'none', cursor: 'pointer', color: COLOR.ink60, padding: 4,
                     }}
                     aria-label="Закрыть"
                 >
@@ -97,30 +98,30 @@ export function BalanceCorrectionModal({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                     <div style={{
                         width: 36, height: 36, borderRadius: 9,
-                        background: 'rgba(76,138,107,0.10)',
-                        color: '#1B7430',
+                        background: STATUS.ok.bg,
+                        color: STATUS.ok.fg,
                         display: 'grid', placeItems: 'center',
                     }}>
                         <Wallet size={18} />
                     </div>
                     <div>
                         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Скорректировать баланс</h3>
-                        <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{userName}</div>
+                        <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>{userName}</div>
                     </div>
                 </div>
 
                 <div style={{
-                    background: '#F6F6F4', borderRadius: 10, padding: '10px 12px',
+                    background: COLOR.sunken, borderRadius: 10, padding: '10px 12px',
                     fontSize: 13, marginBottom: 14, display: 'flex', justifyContent: 'space-between',
                 }}>
-                    <span style={{ color: '#666' }}>Текущий баланс</span>
+                    <span style={{ color: COLOR.ink60 }}>Текущий баланс</span>
                     <span style={{ fontWeight: 700, fontFamily: 'ui-monospace, "SF Mono", monospace' }}>
-                        {currentBalance.toFixed(2)} ₾
+                        {formatGel(currentBalance)}
                     </span>
                 </div>
 
                 <label style={{ display: 'block', marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.ink60, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5 }}>
                         Новое значение (₾)
                     </div>
                     <input
@@ -143,21 +144,21 @@ export function BalanceCorrectionModal({
 
                 {isNumber && delta !== 0 && (
                     <div style={{
-                        background: delta > 0 ? 'rgba(76,138,107,0.10)' : 'rgba(179,38,30,0.08)',
-                        color: delta > 0 ? '#1B7430' : '#B3261E',
+                        background: delta > 0 ? STATUS.ok.bg : STATUS.danger.bg,
+                        color: delta > 0 ? STATUS.ok.fg : STATUS.danger.fg,
                         padding: '8px 12px', borderRadius: 8,
                         fontSize: 12, fontWeight: 600,
                         marginBottom: 12,
                     }}>
-                        Изменение: {delta > 0 ? '+' : ''}{delta.toFixed(2)} ₾
+                        Изменение: {formatGel(delta, { sign: true })}
                         {' · '}
                         {delta > 0 ? 'кредит юзеру' : 'списание'}
                     </div>
                 )}
 
                 <label style={{ display: 'block', marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5 }}>
-                        Причина <span style={{ color: '#B3261E' }}>*</span>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.ink60, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5 }}>
+                        Причина <span style={{ color: STATUS.danger.fg }}>*</span>
                     </div>
                     <textarea
                         value={reason}
@@ -183,7 +184,7 @@ export function BalanceCorrectionModal({
                         style={{
                             flex: 1, padding: '11px 0',
                             background: 'rgba(0,0,0,0.05)',
-                            color: '#0E0E0E',
+                            color: COLOR.ink,
                             border: 'none', borderRadius: 10,
                             fontSize: 14, fontWeight: 600,
                             cursor: 'pointer',
@@ -197,8 +198,8 @@ export function BalanceCorrectionModal({
                         disabled={!canSave || saving}
                         style={{
                             flex: 1, padding: '11px 0',
-                            background: !canSave ? 'rgba(0,0,0,0.15)' : '#0E0E0E',
-                            color: '#fff',
+                            background: !canSave ? COLOR.ink20 : COLOR.ink,
+                            color: COLOR.onInk,
                             border: 'none', borderRadius: 10,
                             fontSize: 14, fontWeight: 700,
                             cursor: !canSave || saving ? 'not-allowed' : 'pointer',

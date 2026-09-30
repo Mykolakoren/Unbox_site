@@ -53,12 +53,12 @@ export function ReconciliationExport() {
                 onClick={download}
                 disabled={busy}
                 style={{
-                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                     padding: '10px 14px', border: 'none', borderLeft: `1px solid ${GH.ink}`,
                     background: 'transparent', color: GH.ink, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1,
                 }}
             >
-                {busy ? 'Готовлю…' : 'Выгрузка для сверки'}
+                {busy ? 'Готовим…' : 'Выгрузка для сверки'}
             </button>
         </div>
     );

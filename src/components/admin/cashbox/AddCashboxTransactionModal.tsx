@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SUBSCRIPTION_PLANS } from '../../../utils/data';
-import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from 'lucide-react';
+import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Banknote, CreditCard, Landmark, AlertTriangle } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import type { ExpenseCategory } from '../../../api/cashbox';
 import { formatBatumi } from '../../../utils/dateUtils';
+import { formatGel } from '../../../utils/format';
+import { useConfirmDialog } from '../../ui/ConfirmDialogProvider';
 
 interface Props {
     isOpen: boolean;
@@ -18,19 +20,19 @@ const PAYMENT_METHODS = [
     {
         id: 'cash',
         label: 'Наличные',
-        icon: '💵',
+        icon: Banknote,
         hint: 'Кэш в кассу. Бумажные деньги на руках у админа.',
     },
     {
         id: 'card_tbc',
         label: 'Карта TBC',
-        icon: '💳',
+        icon: CreditCard,
         hint: 'Терминал TBC. Оплата банковской картой на месте — зачисляется на счёт TBC.',
     },
     {
         id: 'card_bog',
         label: 'Карта BOG',
-        icon: '🏛️',
+        icon: Landmark,
         hint: 'Терминал Bank of Georgia. Оплата картой на месте — зачисляется на счёт BOG.',
     },
 ] as const;
@@ -69,6 +71,7 @@ const ACCOUNTS = [
 
 export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
     const { createTransaction, categories } = useCashboxStore();
+    const { confirm } = useConfirmDialog();
     const [type, setType] = useState<'income' | 'expense' | 'transfer'>('income');
     const [amount, setAmount] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -142,12 +145,14 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
         // причина расхождений. (Приход С клиентом теперь зачисляется всегда,
         // отключить это нельзя — см. комментарий у поля клиента.)
         if (type === 'income' && !clientId) {
-            if (!window.confirm(
-                `Клиент не выбран.\n\n` +
-                `Деньги попадут только в кассу и НЕ зачислятся ни на чей баланс. ` +
-                `Если это оплата клиента — закрой окно и выбери клиента, тогда сумма пойдёт на его баланс.\n\n` +
-                `Всё равно записать без клиента?`
-            )) return;
+            const ok = await confirm({
+                title: 'Записать приход без клиента?',
+                body: 'Деньги попадут только в кассу и не зачислятся ни на чей баланс. '
+                    + 'Если это оплата клиента — выберите его в поле «Клиент», тогда сумма пойдёт на его баланс.',
+                confirmLabel: 'Записать без клиента',
+                cancelLabel: 'Выбрать клиента',
+            });
+            if (!ok) return;
         }
 
         // Продажа абонемента: касса сразу включает абонемент клиенту (29.09).
@@ -160,9 +165,15 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             if (!selectedPlan) { toast.error('Выберите тариф абонемента'); return; }
             if (!clientId) { toast.error('Выберите клиента — без клиента абонемент не включится'); return; }
             const plan = SUBSCRIPTION_PLANS.find(pl => pl.id === selectedPlan);
-            if (plan && value !== plan.price && !window.confirm(
-                `Сумма ${value} ₾ отличается от цены тарифа «${plan.name}» (${plan.price} ₾). Продать за ${value} ₾?`
-            )) return;
+            if (plan && value !== plan.price) {
+                const ok = await confirm({
+                    title: 'Сумма не совпадает с ценой тарифа',
+                    body: `Тариф «${plan.name}» стоит ${formatGel(plan.price)}, а в поле «Сумма» — ${formatGel(value)}.`,
+                    confirmLabel: `Продать за ${formatGel(value)}`,
+                    cancelLabel: 'Исправить сумму',
+                });
+                if (!ok) return;
+            }
             setSaving(true);
             try {
                 const { usersApi } = await import('../../../api/users');
@@ -236,7 +247,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             resetForm();
             onClose();
         } catch {
-            toast.error('Ошибка при сохранении');
+            toast.error('Не удалось записать операцию. Проверьте интернет и нажмите «Записать» ещё раз.');
         } finally {
             setSaving(false);
         }
@@ -251,7 +262,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
             <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md p-5 sm:p-6 animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                    aria-label="Закрыть"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-gray-600 transition-colors"
                 >
                     <X size={20} />
                 </button>
@@ -266,7 +278,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             onClick={() => { setType('income'); setCategoryId(''); }}
                             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'income'
-                                    ? 'bg-green-100 text-green-800 border-2 border-green-300'
+                                    ? 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] border-2 border-[var(--status-ok-fg)]/40'
                                     : 'bg-gray-50 text-gray-500 border-2 border-transparent hover:bg-gray-100'
                             }`}
                         >
@@ -278,7 +290,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             onClick={() => { setType('expense'); setCategoryId(''); }}
                             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'expense'
-                                    ? 'bg-red-100 text-red-800 border-2 border-red-300'
+                                    ? 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-2 border-[var(--status-danger-fg)]/40'
                                     : 'bg-gray-50 text-gray-500 border-2 border-transparent hover:bg-gray-100'
                             }`}
                         >
@@ -290,7 +302,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             onClick={() => { setType('transfer'); setCategoryId(''); }}
                             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                 type === 'transfer'
-                                    ? 'bg-blue-100 text-blue-800 border-2 border-blue-300'
+                                    ? 'bg-accent-soft text-accent-ink border-2 border-accent'
                                     : 'bg-gray-50 text-gray-500 border-2 border-transparent hover:bg-gray-100'
                             }`}
                         >
@@ -301,7 +313,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
 
                     {/* Amount */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Сумма (GEL)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Сумма, ₾</label>
                         <input
                             type="number"
                             step="0.01"
@@ -342,12 +354,12 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                             : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                     }`}
                                 >
-                                    <span className="text-lg">{pm.icon}</span>
+                                    <pm.icon size={20} aria-hidden="true" />
                                     {pm.label}
                                 </button>
                             ))}
                         </div>
-                        <p className="mt-2 text-[11px] text-gray-400 leading-snug">
+                        <p className="mt-2 text-xs text-ink-60 leading-snug">
                             Наличные — кэш в кассу. TBC / BOG — оплата картой на терминале.
                         </p>
                     </div>
@@ -365,14 +377,14 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                         title={pm.hint}
                                         className={`p-2 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
                                             transferTo === pm.id
-                                                ? 'border-blue-400 bg-blue-50 text-blue-800 font-medium'
+                                                ? 'border-accent bg-accent-soft text-accent-ink font-medium'
                                                 : pm.id === paymentMethod
                                                     ? 'border-gray-100 text-gray-300 cursor-not-allowed'
                                                     : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                         }`}
                                         disabled={pm.id === paymentMethod}
                                     >
-                                        <span className="text-lg">{pm.icon}</span>
+                                        <pm.icon size={20} aria-hidden="true" />
                                         {pm.label}
                                     </button>
                                 ))}
@@ -427,7 +439,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                             }`}
                                         >
                                             <span>{plan.name}</span>
-                                            <span className="font-bold">{plan.price} ₾</span>
+                                            <span className="font-bold num">{formatGel(plan.price)}</span>
                                         </button>
                                     ))}
                                 </div>
@@ -466,7 +478,8 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                     <button
                                         type="button"
                                         onClick={() => { setClientId(''); setClientSearch(''); }}
-                                        className="absolute right-3 top-[38px] text-gray-400 hover:text-gray-600"
+                                        aria-label="Убрать клиента"
+                                        className="absolute right-3 top-[38px] text-ink-60 hover:text-gray-600"
                                     >
                                         <X size={14} />
                                     </button>
@@ -477,14 +490,15 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                     галочку была лишним шагом и главным источником
                                     расхождений — платёж вносили, копилка не пополнялась. */}
                                 {type === 'income' && clientId && (
-                                    <div className="mt-2 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-2 py-1.5">
+                                    <div className="mt-2 text-xs text-[var(--status-ok-fg)] bg-[var(--status-ok-bg)] rounded-lg px-2 py-1.5">
                                         Сумма зачислится на баланс клиента (копилку).
                                     </div>
                                 )}
                                 {/* Подсказка: приход без клиента не попадёт ни на чей баланс */}
                                 {type === 'income' && !clientId && (
-                                    <div className="mt-2 text-xs text-amber-800 bg-amber-50 ring-1 ring-amber-300 rounded-lg px-2 py-1.5">
-                                        ⚠️ Клиент не выбран — деньги пойдут только в кассу, на баланс никому не зачислятся. Для оплаты клиента выбери его выше.
+                                    <div className="mt-2 text-xs text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)] rounded-lg px-2 py-1.5 flex gap-1.5">
+                                        <AlertTriangle size={14} aria-hidden="true" className="shrink-0 mt-px" />
+                                        <span>Клиент не выбран — деньги пойдут только в кассу, на баланс никому не зачислятся. Для оплаты клиента выберите его выше.</span>
                                     </div>
                                 )}
                                 {showClientDropdown && !clientId && (
@@ -492,7 +506,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                         <button
                                             type="button"
                                             onClick={() => { setClientId(''); setClientSearch(''); setShowClientDropdown(false); }}
-                                            className="w-full text-left px-4 py-2 text-sm text-gray-400 hover:bg-gray-50"
+                                            className="w-full text-left px-4 py-2 text-sm text-ink-60 hover:bg-gray-50"
                                         >
                                             — Без привязки к клиенту —
                                         </button>
@@ -508,11 +522,11 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                                                 className="w-full text-left px-4 py-2 text-sm hover:bg-unbox-light/50 transition-colors"
                                             >
                                                 <span className="font-medium">{c.name}</span>
-                                                <span className="text-gray-400 ml-1.5">({c.email})</span>
+                                                <span className="text-ink-60 ml-1.5">({c.email})</span>
                                             </button>
                                         ))}
                                         {filtered.length === 0 && (
-                                            <div className="px-4 py-2 text-sm text-gray-400">Не найдено</div>
+                                            <div className="px-4 py-2 text-sm text-ink-60">Не найдено</div>
                                         )}
                                     </div>
                                 )}
@@ -543,7 +557,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             ))}
                         </div>
                         {!branch && (
-                            <p className="mt-2 text-[11px] text-amber-700 leading-snug">
+                            <p className="mt-2 text-xs text-[var(--status-pending-fg)] leading-snug">
                                 Филиал не выбран — операция не попадёт в остаток ни Uni, ни One.
                             </p>
                         )}
@@ -575,7 +589,7 @@ export function AddCashboxTransactionModal({ isOpen, onClose }: Props) {
                             disabled={saving}
                             className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 transition-colors disabled:opacity-60"
                         >
-                            {saving ? 'Сохранение...' : 'Записать'}
+                            {saving ? 'Записываем…' : 'Записать'}
                         </button>
                     </div>
                 </form>

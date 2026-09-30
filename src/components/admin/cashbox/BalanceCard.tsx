@@ -3,6 +3,7 @@ import { useCashboxStore } from '../../../store/cashboxStore';
 import { useMemo } from 'react';
 import type { CashboxTransaction } from '../../../api/cashbox';
 import clsx from 'clsx';
+import { formatGel } from '../../../utils/format';
 
 interface Props {
     /** Операции выбранного периода и филиала (без фильтра типа журнала). */
@@ -35,14 +36,15 @@ export function BalanceCard({ filteredTransactions, periodLabel, truncated }: Pr
 
     const b: any = balances || {};
     const accounts = [
-        { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote, color: 'text-green-700', bg: 'bg-green-50' },
-        { key: 'tbc', label: 'Карта TBC', value: b.cardTbc ?? b.card_tbc ?? 0, icon: CreditCard, color: 'text-blue-700', bg: 'bg-blue-50' },
-        { key: 'bog', label: 'Карта BOG', value: b.cardBog ?? b.card_bog ?? 0, icon: Landmark, color: 'text-purple-700', bg: 'bg-purple-50' },
+        // Счета различаем значком, не цветом (wave 1: без зелёного/синего/фиолетового «для красоты»).
+        { key: 'cash', label: 'Наличные', value: b.cash ?? 0, icon: Banknote, color: 'text-ink-60', bg: 'bg-sunken' },
+        { key: 'tbc', label: 'Карта TBC', value: b.cardTbc ?? b.card_tbc ?? 0, icon: CreditCard, color: 'text-ink-60', bg: 'bg-sunken' },
+        { key: 'bog', label: 'Карта BOG', value: b.cardBog ?? b.card_bog ?? 0, icon: Landmark, color: 'text-ink-60', bg: 'bg-sunken' },
     ];
 
     const allAccounts = [
         ...accounts,
-        { key: 'total', label: 'Итого', value: b.balance ?? 0, icon: Wallet, color: 'text-unbox-green', bg: 'bg-unbox-green/10' },
+        { key: 'total', label: 'Итого', value: b.balance ?? 0, icon: Wallet, color: 'text-ink', bg: 'bg-sunken' },
     ];
 
     return (
@@ -52,15 +54,15 @@ export function BalanceCard({ filteredTransactions, periodLabel, truncated }: Pr
                 {allAccounts.map(acc => (
                     <div key={acc.key} className="bg-white rounded-2xl border border-unbox-light/50 shadow-sm p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3">
                         <div className={clsx("w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-lg sm:rounded-xl flex items-center justify-center", acc.bg)}>
-                            <acc.icon size={16} className={acc.color} />
+                            <acc.icon size={16} className={acc.color} aria-hidden="true" />
                         </div>
                         <div className="min-w-0 flex-1">
-                            <div className="text-[10px] sm:text-[11px] text-unbox-grey font-medium">{acc.label}</div>
+                            <div className="text-xs sm:text-xs text-ink-60 font-medium">{acc.label}</div>
                             <div className={clsx(
                                 "text-sm sm:text-lg font-bold tabular-nums leading-tight",
-                                acc.value < 0 ? "text-red-600" : "text-unbox-dark"
+                                acc.value < 0 ? "text-[var(--status-danger-fg)]" : "text-unbox-dark"
                             )}>
-                                {Number(acc.value ?? 0).toFixed(2)}<span className="text-[10px] sm:text-xs font-normal text-unbox-grey ml-0.5">₾</span>
+                                <span className="num">{formatGel(Number(acc.value ?? 0))}</span>
                             </div>
                         </div>
                     </div>
@@ -68,44 +70,45 @@ export function BalanceCard({ filteredTransactions, periodLabel, truncated }: Pr
             </div>
 
             {/* Period stats row */}
-            <div className="text-[11px] text-unbox-grey">
+            <div className="text-xs text-ink-60">
                 За период: <span className="font-medium text-unbox-dark">{periodLabel}</span> · без корректировок баланса
                 {truncated && (
-                    <span className="block text-orange-600 font-medium mt-0.5">
+                    <span className="block text-[var(--status-pending-fg)] font-medium mt-0.5">
                         Операций больше, чем загрузилось, — итог неполный. Выберите период короче.
                     </span>
                 )}
             </div>
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <div className="bg-white rounded-xl sm:rounded-2xl border border-unbox-light/50 shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-green-50 flex items-center justify-center">
-                        <TrendingUp size={14} className="text-green-600" />
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-[var(--status-ok-bg)] flex items-center justify-center">
+                        <TrendingUp size={14} className="text-[var(--status-ok-fg)]" aria-hidden="true" />
                     </div>
                     <div className="min-w-0 text-center sm:text-left">
-                        <div className="text-[9px] sm:text-[11px] text-unbox-grey font-medium leading-tight">Приход</div>
-                        <div className="text-xs sm:text-base font-bold text-green-700 tabular-nums leading-tight">+{stats.income.toFixed(0)}<span className="text-[9px] sm:text-xs font-normal text-unbox-grey ml-0.5">₾</span></div>
+                        <div className="text-xs sm:text-xs text-ink-60 font-medium leading-tight">Приход</div>
+                        <div className="text-xs sm:text-base font-bold text-[var(--status-ok-fg)] num leading-tight">{formatGel(stats.income, { sign: true, fraction: 0 })}</div>
                     </div>
                 </div>
                 <div className="bg-white rounded-xl sm:rounded-2xl border border-unbox-light/50 shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-red-50 flex items-center justify-center">
-                        <TrendingDown size={14} className="text-red-500" />
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg bg-[var(--status-danger-bg)] flex items-center justify-center">
+                        <TrendingDown size={14} className="text-[var(--status-danger-fg)]" aria-hidden="true" />
                     </div>
                     <div className="min-w-0 text-center sm:text-left">
-                        <div className="text-[9px] sm:text-[11px] text-unbox-grey font-medium leading-tight">Расход</div>
-                        <div className="text-xs sm:text-base font-bold text-red-600 tabular-nums leading-tight">-{stats.expense.toFixed(0)}<span className="text-[9px] sm:text-xs font-normal text-unbox-grey ml-0.5">₾</span></div>
+                        <div className="text-xs sm:text-xs text-ink-60 font-medium leading-tight">Расход</div>
+                        <div className="text-xs sm:text-base font-bold text-[var(--status-danger-fg)] num leading-tight">{formatGel(-stats.expense, { fraction: 0 })}</div>
                     </div>
                 </div>
                 <div className={clsx(
                     "bg-white rounded-xl sm:rounded-2xl border shadow-sm p-2.5 sm:p-4 flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3",
-                    stats.net >= 0 ? "border-blue-100" : "border-orange-100"
+                    "border-unbox-light/50"
                 )}>
-                    <div className={clsx("w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg flex items-center justify-center", stats.net >= 0 ? 'bg-blue-50' : 'bg-orange-50')}>
-                        <Wallet size={14} className={stats.net >= 0 ? 'text-blue-500' : 'text-orange-500'} />
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-lg flex items-center justify-center bg-sunken">
+                        <Wallet size={14} className="text-ink-60" aria-hidden="true" />
                     </div>
                     <div className="min-w-0 text-center sm:text-left">
-                        <div className="text-[9px] sm:text-[11px] text-unbox-grey font-medium leading-tight">Итог</div>
-                        <div className={clsx("text-xs sm:text-base font-bold tabular-nums leading-tight", stats.net >= 0 ? 'text-blue-600' : 'text-orange-600')}>
-                            {stats.net >= 0 ? '+' : ''}{stats.net.toFixed(0)}<span className="text-[9px] sm:text-xs font-normal text-unbox-grey ml-0.5">₾</span>
+                        {/* «Разница» за период — не путать с «Итого» по всем счетам выше. */}
+                        <div className="text-xs sm:text-xs text-ink-60 font-medium leading-tight">Разница</div>
+                        <div className="text-xs sm:text-base font-bold num leading-tight text-unbox-dark">
+                            {formatGel(stats.net, { sign: true, fraction: 0 })}
                         </div>
                     </div>
                 </div>

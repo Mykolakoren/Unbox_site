@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { STATUS } from '../../design/tokens';
 import type { BookingHistoryItem } from '../../store/types';
 import { ruCountWord } from '../../utils/plural';
 
@@ -198,7 +199,7 @@ export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLab
                         selected={option === 'none'}
                         onSelect={() => setOption('none')}
                         title="Полный штраф · возврат 0%"
-                        desc="Ничего не возвращается. Для no-show и злоупотреблений."
+                        desc="Ничего не возвращается. Для неявки и злоупотреблений."
                         destructive
                     />
                 </div>
@@ -221,7 +222,7 @@ export function AdminCancelBookingModal({ isOpen, onClose, onConfirm, bookingLab
                             }}
                         />
                         {!reasonIsValid && (
-                            <div style={{ fontSize: 11, color: GH.danger, marginTop: 4 }}>
+                            <div style={{ fontSize: 12, color: GH.danger, marginTop: 4 }}>
                                 Минимум 3 символа
                             </div>
                         )}
@@ -261,7 +262,7 @@ function OptionRow({
             type="button"
             style={{
                 textAlign: 'left', padding: '12px 14px', cursor: 'pointer',
-                background: selected ? (destructive ? 'rgba(184,74,47,0.08)' : GH.ink5) : GH.paper,
+                background: selected ? (destructive ? STATUS.danger.bg : GH.ink5) : GH.paper,
                 border: `1px solid ${selected ? (destructive ? GH.danger : GH.ink) : GH.ink10}`,
                 fontFamily: GH_SANS,
                 transition: 'background 0.12s, border-color 0.12s',
@@ -282,7 +283,7 @@ function OptionRow({
 }
 
 const monoLabel: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em',
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
     textTransform: 'uppercase', color: GH.ink60,
 };
 
@@ -292,8 +293,8 @@ const inkBtn: React.CSSProperties = {
     color: GH.paper,
     border: `1px solid ${GH.ink}`,
     fontFamily: GH_MONO,
-    fontSize: 11,
-    letterSpacing: '0.14em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     cursor: 'pointer',
 };
@@ -304,8 +305,8 @@ const outlineBtn: React.CSSProperties = {
     color: GH.ink,
     border: `1px solid ${GH.ink}`,
     fontFamily: GH_MONO,
-    fontSize: 11,
-    letterSpacing: '0.14em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     cursor: 'pointer',
 };

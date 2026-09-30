@@ -103,7 +103,7 @@ export function ProfessionEditor({ value, onChange }: ProfessionEditorProps) {
             <div className="flex-1 font-medium text-gray-700 text-sm">
                 {value || <span className="text-gray-500 italic font-normal">Не указана</span>}
             </div>
-            <ChevronDown size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <ChevronDown size={14} className="text-ink-60 opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
     );
 }

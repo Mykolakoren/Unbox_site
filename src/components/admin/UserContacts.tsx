@@ -58,13 +58,13 @@ export function UserContacts({ email, contacts }: UserContactsProps) {
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <Globe size={20} className="text-gray-400" />
+                <Globe size={20} className="text-ink-60" />
                 Контакты
             </h3>
 
             <div className="space-y-3 mb-4">
                 {contacts.length === 0 && !isAdding && (
-                    <span className="text-gray-400 text-sm italic">Нет дополнительных контактов</span>
+                    <span className="text-ink-60 text-sm italic">Нет дополнительных контактов</span>
                 )}
 
                 {contacts.map((contact, index) => {
@@ -78,11 +78,11 @@ export function UserContacts({ email, contacts }: UserContactsProps) {
                                     <Icon size={16} />
                                 </div>
                                 <div className="truncate">
-                                    <div className="text-xs text-gray-400 font-medium capitalize">
+                                    <div className="text-xs text-ink-60 font-medium capitalize">
                                         {CONTACT_TYPES.find(t => t.id === contact.type)?.name || contact.type}
                                     </div>
                                     {link ? (
-                                        <a href={link} target="_blank" rel="noopener noreferrer" className="text-sm font-medium hover:text-blue-600 hover:underline truncate block">
+                                        <a href={link} target="_blank" rel="noopener noreferrer" className="text-sm font-medium hover:text-accent-ink hover:underline truncate block">
                                             {contact.value}
                                         </a>
                                     ) : (
@@ -92,7 +92,8 @@ export function UserContacts({ email, contacts }: UserContactsProps) {
                             </div>
                             <button
                                 onClick={() => handleRemove(index)}
-                                className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all p-1"
+                                aria-label="Удалить контакт"
+                                className="text-ink-60 hover:text-[var(--status-danger-fg)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-all p-1"
                             >
                                 <X size={16} />
                             </button>

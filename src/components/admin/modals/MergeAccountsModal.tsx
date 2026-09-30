@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import clsx from 'clsx';
 import { usersApi } from '../../../api/users';
 import { bookingsApi } from '../../../api/bookings';
-import { safeFormat } from '../../../utils/dateUtils';
+import { formatDayMonth, formatGel } from '../../../utils/format';
 import { subscriptionLifecycle } from '../../../utils/subscription';
 import type { User } from '../../../store/types';
 
@@ -19,13 +19,13 @@ function subLabel(u: User): string {
     if (!hasSub(u)) return 'нет';
     const s: any = u.subscription;
     const left = Number(s.remainingHours ?? 0);
-    const until = safeFormat(s.expiryDate, 'd.MM.yyyy', undefined, '');
+    const until = s.expiryDate ? formatDayMonth(s.expiryDate, { withYear: 'auto', fallback: '' }) : '';
     const state = subscriptionLifecycle(s);
     const tail = state === 'completed' ? ' · завершён' : state === 'frozen' ? ' · на паузе' : '';
     return `${s.name || 'Абонемент'} · ${left} ч${until ? ` до ${until}` : ''}${tail}`;
 }
 
-const money = (n: number) => `${Math.round(n * 100) / 100} ₾`;
+const money = (n: number) => formatGel(n);
 
 async function loadCounts(email: string): Promise<Counts> {
     const list = await bookingsApi.getUserBookings(email);
@@ -136,13 +136,13 @@ export function MergeAccountsModal({
                     type="button"
                     onClick={close}
                     aria-label="Закрыть"
-                    className="absolute top-4 right-4 text-unbox-grey hover:text-unbox-dark"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-unbox-dark"
                 >
                     <X size={20} />
                 </button>
 
                 <h3 className="text-xl font-bold text-unbox-dark mb-1">Склеить дубликат с этой карточкой</h3>
-                <p className="text-sm text-unbox-grey mb-4">
+                <p className="text-sm text-ink-60 mb-4">
                     Брони, оплаты и баланс дубликата перейдут к {target.name || target.email}.
                     Дубликат удалится — отменить склейку нельзя.
                 </p>
@@ -150,7 +150,7 @@ export function MergeAccountsModal({
                 {!source ? (
                     <>
                         <label className="relative block">
-                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" />
+                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
                             <input
                                 autoFocus
                                 value={query}
@@ -161,7 +161,7 @@ export function MergeAccountsModal({
                         </label>
                         <div className="mt-2 space-y-1">
                             {query.trim().length >= 2 && matches.length === 0 && (
-                                <div className="text-sm text-unbox-grey px-1 py-2">Никого не нашли</div>
+                                <div className="text-sm text-ink-60 px-1 py-2">Никого не нашли</div>
                             )}
                             {matches.map(u => (
                                 <button
@@ -172,15 +172,15 @@ export function MergeAccountsModal({
                                 >
                                     <span className="min-w-0">
                                         <span className="block text-sm font-medium text-unbox-dark truncate">{u.name || '—'}</span>
-                                        <span className="block text-xs text-unbox-grey truncate">{u.email}{u.phone ? ` · ${u.phone}` : ''}</span>
+                                        <span className="block text-xs text-ink-60 truncate">{u.email}{u.phone ? ` · ${u.phone}` : ''}</span>
                                     </span>
-                                    <span className={clsx('shrink-0 text-xs tabular-nums', Number(u.balance || 0) < 0 ? 'text-red-600' : 'text-unbox-grey')}>
+                                    <span className={clsx('shrink-0 text-xs tabular-nums', Number(u.balance || 0) < 0 ? 'text-[var(--status-danger-fg)]' : 'text-ink-60')}>
                                         {money(Number(u.balance || 0))}
                                     </span>
                                 </button>
                             ))}
                         </div>
-                        <p className="text-xs text-unbox-grey mt-3">
+                        <p className="text-xs text-ink-60 mt-3">
                             Оставить нужно другой аккаунт? Откройте его карточку и склейте оттуда.
                         </p>
                     </>
@@ -194,7 +194,7 @@ export function MergeAccountsModal({
                                 counts={counts?.source}
                                 countsError={countsError}
                             />
-                            <div className="hidden sm:flex items-center text-unbox-grey">
+                            <div className="hidden sm:flex items-center text-ink-60">
                                 <ArrowRight size={20} />
                             </div>
                             <AccountBox
@@ -211,7 +211,7 @@ export function MergeAccountsModal({
                             <div>
                                 Баланс: {money(Number(target.balance || 0) + Number(source.balance || 0))}
                                 {Math.abs(Number(source.balance || 0)) >= 0.01 && (
-                                    <span className="text-unbox-grey"> ({money(Number(target.balance || 0))} {Number(source.balance) < 0 ? '−' : '+'} {money(Math.abs(Number(source.balance || 0)))})</span>
+                                    <span className="text-ink-60"> ({money(Number(target.balance || 0))} {Number(source.balance) < 0 ? '−' : '+'} {money(Math.abs(Number(source.balance || 0)))})</span>
                                 )}
                             </div>
                             <div>
@@ -223,7 +223,7 @@ export function MergeAccountsModal({
                                     : hasSub(source) ? 'переходит абонемент дубликата' : 'нет'}
                             </div>
                             {bothSubs && (
-                                <div className="flex items-start gap-1.5 text-red-600 font-medium pt-1">
+                                <div className="flex items-start gap-1.5 text-[var(--status-danger-fg)] font-medium pt-1">
                                     <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                                     Абонемент дубликата ({subLabel(source)}) пропадёт — часы не суммируются.
                                 </div>
@@ -254,10 +254,10 @@ export function MergeAccountsModal({
                                 onClick={merge}
                                 // Ждём подсчёт броней, но не блокируем склейку, если он не загрузился.
                                 disabled={!agree || saving || (!counts && !countsError)}
-                                className="flex-1 min-w-[140px] py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                className="flex-1 min-w-[140px] py-2.5 rounded-xl bg-[var(--status-danger-solid)] hover:brightness-90 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
                             >
                                 {saving && <Loader2 size={14} className="animate-spin" />}
-                                Склеить
+                                Склеить аккаунты
                             </button>
                         </div>
                     </>
@@ -281,15 +281,15 @@ function AccountBox({
     return (
         <div className={clsx(
             'rounded-xl border p-3 text-sm min-w-0',
-            tone === 'danger' ? 'border-red-200 bg-red-50/50' : 'border-unbox-green/40 bg-unbox-green/5',
+            tone === 'danger' ? 'border-[var(--status-danger-fg)]/25 bg-[var(--status-danger-bg)]/50' : 'border-unbox-green/40 bg-unbox-green/5',
         )}>
-            <div className={clsx('text-[11px] font-semibold uppercase tracking-wider mb-2', tone === 'danger' ? 'text-red-600' : 'text-unbox-green')}>
+            <div className={clsx('text-xs font-semibold uppercase tracking-wider mb-2', tone === 'danger' ? 'text-[var(--status-danger-fg)]' : 'text-accent-ink')}>
                 {title}
             </div>
             <div className="font-semibold text-unbox-dark truncate">{user.name || '—'}</div>
-            <div className="text-xs text-unbox-grey truncate mb-2">{user.email}</div>
+            <div className="text-xs text-ink-60 truncate mb-2">{user.email}</div>
             <dl className="space-y-1 text-xs">
-                <Row label="Баланс" value={<span className={balance < 0 ? 'text-red-600 font-semibold' : 'font-semibold'}>{money(balance)}</span>} />
+                <Row label="Баланс" value={<span className={balance < 0 ? 'text-[var(--status-danger-fg)] font-semibold num' : 'font-semibold num'}>{money(balance)}</span>} />
                 <Row label="Абонемент" value={subLabel(user)} />
                 <Row
                     label="Броней"
@@ -305,7 +305,7 @@ function AccountBox({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
     return (
         <div className="flex justify-between gap-2">
-            <dt className="text-unbox-grey shrink-0">{label}</dt>
+            <dt className="text-ink-60 shrink-0">{label}</dt>
             <dd className="text-unbox-dark text-right min-w-0 break-words">{value}</dd>
         </div>
     );

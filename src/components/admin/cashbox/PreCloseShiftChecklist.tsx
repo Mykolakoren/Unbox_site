@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ClipboardCheck, Check } from 'lucide-react';
+import { Sheet } from '../../ui/Sheet';
+import { Button } from '../../ui/Button';
+import { Field, TextArea } from '../../ui/Field';
 
 interface Props {
     isOpen: boolean;
@@ -36,7 +39,7 @@ const ITEMS: Item[] = [
         label: 'Все брони за день проверены',
         // Excel #74 — rewrite for clarity. "Переведены в соответствующий статус"
         // was opaque; spell out what the two groups are.
-        sub: 'Пришедшие клиенты отмечены как посетившие. Неявки помечены "No-show". Истёкшие без отметки — закрыты.',
+        sub: 'Пришедшие клиенты отмечены как посетившие. Неявки помечены «Неявка». Истёкшие без отметки — закрыты.',
     },
     {
         key: 'transactions',
@@ -60,6 +63,10 @@ const ITEMS: Item[] = [
 
 export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
     const [checked, setChecked] = useState<Record<string, boolean>>({});
+    // «Пропустить с обоснованием» — шторка с полем вместо prompt()/alert().
+    const [skipOpen, setSkipOpen] = useState(false);
+    const [skipReason, setSkipReason] = useState('');
+    const [skipError, setSkipError] = useState('');
 
     if (!isOpen) return null;
 
@@ -85,23 +92,49 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
     // just broke out and you haven't counted the cash yet). Soft bypass with
     // a required reason — still gates the cash step, still audited.
     const handleSkipWithReason = () => {
-        const reason = window.prompt(
-            'Пропустить чек-лист с обоснованием?\n\n' +
-            'Причина попадёт в журнал закрытия смены. Используйте только в нестандартных ситуациях.\n\n' +
-            'Укажите причину:',
-            '',
-        );
-        if (reason === null) return; // cancelled
-        const trimmed = reason.trim();
+        setSkipReason('');
+        setSkipError('');
+        setSkipOpen(true);
+    };
+    const submitSkip = () => {
+        const trimmed = skipReason.trim();
         if (trimmed.length < 5) {
-            window.alert('Слишком короткая причина (минимум 5 символов).');
+            setSkipError('Напишите причину подробнее — хотя бы 5 символов');
             return;
         }
+        setSkipOpen(false);
         setChecked({});
         onProceed(trimmed);
     };
 
-    return createPortal(
+    // Шторка причины — рядом с окном, а не внутри его подложки: клик в шторке
+    // (портал) всплывает по дереву React и закрыл бы весь чек-лист.
+    const skipSheet = (
+        <Sheet
+            open={skipOpen}
+            onClose={() => setSkipOpen(false)}
+            title="Пропустить чек-лист?"
+            description="Причина попадёт в журнал закрытия смены. Пропускайте только в нестандартной ситуации."
+            width={440}
+            footer={
+                <>
+                    <Button block onClick={submitSkip}>Пропустить и перейти к кассе</Button>
+                    <Button variant="secondary" block onClick={() => setSkipOpen(false)}>Вернуться к чек-листу</Button>
+                </>
+            }
+        >
+            <Field label="Причина" error={skipError || undefined} required>
+                <TextArea
+                    rows={3}
+                    value={skipReason}
+                    onChange={e => { setSkipReason(e.target.value); if (skipError) setSkipError(''); }}
+                    placeholder="Например: срочно закрываем, кассу пересчитаем утром"
+                />
+            </Field>
+        </Sheet>
+    );
+
+    return <>{skipSheet}{createPortal(
         <div
             className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             onClick={handleClose}
@@ -113,7 +146,7 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                 {/* Header */}
                 <div className="flex items-start justify-between p-6 border-b border-gray-100">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
+                        <div className="w-10 h-10 rounded-full bg-sunken flex items-center justify-center text-ink-60">
                             <ClipboardCheck size={20} />
                         </div>
                         <div>
@@ -121,7 +154,7 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                             <p className="text-sm text-gray-500 mt-0.5">Вечерний чек-лист</p>
                         </div>
                     </div>
-                    <button onClick={handleClose} className="text-gray-400 hover:text-gray-700">
+                    <button onClick={handleClose} aria-label="Закрыть" className="text-ink-60 hover:text-gray-700">
                         <X size={20} />
                     </button>
                 </div>
@@ -130,11 +163,15 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                 <div className="px-6 pt-4 pb-2">
                     <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
                         <span>{doneCount} из {ITEMS.length} готово</span>
-                        {allDone && <span className="text-emerald-600 font-semibold">Всё проверено ✓</span>}
+                        {allDone && (
+                            <span className="text-[var(--status-ok-fg)] font-semibold inline-flex items-center gap-1">
+                                Всё проверено <Check size={14} aria-hidden="true" />
+                            </span>
+                        )}
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-emerald-500 transition-all"
+                            className="h-full bg-[var(--status-ok-fg)] transition-all"
                             style={{ width: `${(doneCount / ITEMS.length) * 100}%` }}
                         />
                     </div>
@@ -152,20 +189,20 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                                 className={
                                     'w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ' +
                                     (isDone
-                                        ? 'border-emerald-300 bg-emerald-50'
+                                        ? 'border-[var(--status-ok-fg)]/30 bg-[var(--status-ok-bg)]'
                                         : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50')
                                 }
                             >
                                 <div
                                     className={
                                         'mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors ' +
-                                        (isDone ? 'bg-emerald-500 text-white' : 'border-2 border-gray-300 bg-white')
+                                        (isDone ? 'bg-[var(--status-ok-fg)] text-white' : 'border-2 border-gray-300 bg-white')
                                     }
                                 >
                                     {isDone && <Check size={14} strokeWidth={3} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className={'text-sm font-medium ' + (isDone ? 'text-emerald-800' : 'text-gray-900')}>
+                                    <div className={'text-sm font-medium ' + (isDone ? 'text-[var(--status-ok-fg)]' : 'text-gray-900')}>
                                         {item.label}
                                     </div>
                                     {item.sub && (
@@ -188,7 +225,7 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                             'w-full font-semibold py-3 rounded-xl transition-all ' +
                             (allDone
                                 ? 'bg-unbox-green text-white hover:bg-unbox-dark'
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed')
+                                : 'bg-gray-100 text-ink-60 cursor-not-allowed')
                         }
                     >
                         {allDone ? 'Дальше — сверка кассы' : `Ещё ${ITEMS.length - doneCount} пункт${ITEMS.length - doneCount === 1 ? '' : 'а'}`}
@@ -199,7 +236,7 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
                     {!allDone && (
                         <button
                             onClick={handleSkipWithReason}
-                            className="w-full text-amber-700 hover:text-amber-900 text-xs font-semibold py-2 border border-amber-200 bg-amber-50 hover:bg-amber-100 rounded-xl transition-colors"
+                            className="w-full text-[var(--status-pending-fg)] text-xs font-semibold py-2 border border-[var(--status-pending-fg)]/30 bg-[var(--status-pending-bg)] hover:brightness-95 rounded-xl transition-colors"
                         >
                             Пропустить с обоснованием →
                         </button>
@@ -214,5 +251,5 @@ export function PreCloseShiftChecklist({ isOpen, onClose, onProceed }: Props) {
             </div>
         </div>,
         document.body,
-    );
+    )}</>;
 }

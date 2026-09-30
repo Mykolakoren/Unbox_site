@@ -1,9 +1,17 @@
+import { useState } from 'react';
 import { format, addMinutes, parse } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { XCircle, RefreshCw, Calendar as CalendarIcon, MapPin, Box, User, Users, AlertTriangle, CheckCircle } from 'lucide-react';
+import { XCircle, RefreshCw, Calendar as CalendarIcon, MapPin, Box, User, Users } from 'lucide-react';
 import type { BookingHistoryItem } from '../../store/types';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import clsx from 'clsx';
+import { StatusBadge } from '../ui/StatusBadge';
+import { EmptyState } from '../ui/EmptyState';
+import { Money } from '../ui/Money';
+import { Sheet } from '../ui/Sheet';
+import { Button } from '../ui/Button';
+import { Field, TextArea } from '../ui/Field';
+import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
+import { formatDayMonth, formatTimeRange } from '../../utils/format';
 
 interface UserBookingsTabProps {
     bookings: BookingHistoryItem[];
@@ -25,15 +33,18 @@ export function UserBookingsTab({
     onToSubscription, hasActiveSubscription, convertingId,
 }: UserBookingsTabProps) {
     const { cancelBooking, currentUser } = useUserStore();
+    const { confirm } = useConfirmDialog();
+    // Поздняя отмена (<24 ч) — причина в шторке вместо системного prompt().
+    const [lateCancel, setLateCancel] = useState<{ id: string; label: string } | null>(null);
+    const [lateReason, setLateReason] = useState('');
+    const [lateError, setLateError] = useState('');
 
     // Use internal onCancel if provided, but wrapping logic here for permissions is better 
     // if we want to enforce it at the UI level closest to the button.
     // However, onCancel prop might be used by parent to refresh data.
     // Let's implement logic HERE and then call propOnCancel.
 
-    const handleCancel = (id: string, date: string, startTime?: string) => {
-        if (!confirm('Вы уверены, что хотите отменить это бронирование?')) return;
-
+    const handleCancel = async (id: string, date: string, startTime?: string, label = '') => {
         let bookingTime = new Date(date).getTime();
         if (startTime) {
             const [h, m] = startTime.split(':').map(Number);
@@ -48,45 +59,80 @@ export function UserBookingsTab({
         if (hoursUntilStart < 24) {
             // Permission Check
             if (currentUser?.role === 'admin') {
-                toast.error('Ошибка доступа: У вас нет прав на отмену бронирования менее чем за 24 часа.');
+                toast.error('Отменить бронь меньше чем за 24 часа может только старший админ или владелец.');
                 return;
             }
-
-            const reason = prompt('Отмена менее чем за 24 часа. Укажите причину (обязательно):');
-            if (!reason) {
-                toast.error('Отмена отклонена: причина обязательна для поздних отмен.');
-                return;
-            }
-
-            cancelBooking(id, false, reason, currentUser || undefined);
-            toast.success('Бронирование отменено (с фиксацией причины)');
-        } else {
-            cancelBooking(id);
-            toast.success('Бронирование отменено');
+            // Причина обязательна — шторка с полем; её кнопка и есть подтверждение.
+            setLateReason('');
+            setLateError('');
+            setLateCancel({ id, label });
+            return;
         }
 
+        const ok = await confirm({
+            title: 'Отменить бронь?',
+            body: label ? `Бронь ${label} будет отменена.` : 'Бронь будет отменена.',
+            confirmLabel: 'Отменить бронь',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        cancelBooking(id);
+        toast.success('Бронь отменена');
         if (propOnCancel) propOnCancel(id);
     };
 
+    const submitLateCancel = () => {
+        if (!lateCancel) return;
+        const reason = lateReason.trim();
+        if (!reason) {
+            setLateError('Укажите причину — без неё позднюю отмену не провести');
+            return;
+        }
+        const { id } = lateCancel;
+        cancelBooking(id, false, reason, currentUser || undefined);
+        toast.success('Бронь отменена, причина записана');
+        setLateCancel(null);
+        if (propOnCancel) propOnCancel(id);
+    };
+
+    const lateCancelSheet = (
+        <Sheet
+            open={!!lateCancel}
+            onClose={() => setLateCancel(null)}
+            title="Поздняя отмена"
+            description={lateCancel?.label
+                ? `До начала брони ${lateCancel.label} меньше 24 часов.`
+                : 'До начала брони меньше 24 часов.'}
+            width={440}
+            footer={
+                <>
+                    <Button variant="danger" block onClick={submitLateCancel}>Отменить бронь</Button>
+                    <Button variant="secondary" block onClick={() => setLateCancel(null)}>Оставить</Button>
+                </>
+            }
+        >
+            <Field label="Причина отмены" error={lateError || undefined} required>
+                <TextArea
+                    rows={3}
+                    value={lateReason}
+                    onChange={e => { setLateReason(e.target.value); if (lateError) setLateError(''); }}
+                    placeholder="Например: клиент заболел, предупредил за 3 часа"
+                />
+            </Field>
+        </Sheet>
+    );
+
     if (bookings.length === 0) {
         return (
-            <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-gray-400">
-                История бронирований пуста
-            </div>
+            <EmptyState
+                compact
+                icon={<CalendarIcon size={28} />}
+                title="У клиента пока нет броней"
+                hint="Новую бронь можно создать из шахматки."
+            />
         );
     }
-
-    const getStatusConfig = (status: BookingHistoryItem['status']) => {
-        switch (status) {
-            case 'confirmed': return { label: 'Забронировано', color: 'text-green-600 bg-green-50', icon: CheckCircle };
-            case 'completed': return { label: 'Завершено', color: 'text-gray-600 bg-gray-50', icon: CheckCircle };
-            case 'cancelled': return { label: 'Отменено', color: 'text-red-600 bg-red-50', icon: XCircle };
-            case 'rescheduled': return { label: 'Перенесено', color: 'text-orange-600 bg-orange-50', icon: RefreshCw };
-            case 're-rented': return { label: 'Пересдано', color: 'text-blue-600 bg-blue-50', icon: RefreshCw };
-            case 'no_show': return { label: 'Неявка', color: 'text-red-600 bg-red-100', icon: AlertTriangle };
-            default: return { label: status, color: 'text-gray-600 bg-gray-50', icon: CheckCircle };
-        }
-    };
 
     const getEndTime = (startTime: string | null | undefined, duration: number) => {
         if (!startTime) return '??:??';
@@ -100,14 +146,12 @@ export function UserBookingsTab({
         }
     };
 
+    // «29 сентября» (год — только если не текущий). Календарную дату брони
+    // берём как есть, без сдвига пояса.
     const formatDateSafe = (dateStr: string | Date | undefined) => {
-        if (!dateStr) return 'Неизвестная дата';
-        try {
-            return format(new Date(dateStr), 'd MMMM yyyy', { locale: ru });
-        } catch (e) {
-            console.error('Error formatting date', e);
-            return 'Ошибка даты';
-        }
+        if (!dateStr) return 'Дата не указана';
+        const d = typeof dateStr === 'string' ? dateStr.split('T')[0].split(' ')[0] : dateStr;
+        return formatDayMonth(d, { withYear: 'auto', fallback: 'Дата не указана' });
     };
 
     const getGoogleCalendarLink = (b: BookingHistoryItem) => {
@@ -146,12 +190,10 @@ export function UserBookingsTab({
 
     return (
         <div className="space-y-4">
+            {lateCancelSheet}
             {bookings.map(booking => {
                 const resource = RESOURCES.find(r => r.id === booking.resourceId);
                 const location = LOCATIONS.find(l => l.id === resource?.locationId);
-                const statusConfig = getStatusConfig(booking.status);
-                const StatusIcon = statusConfig.icon;
-
                 const endTime = getEndTime(booking.startTime, booking.duration);
                 const formattedDate = formatDateSafe(booking.date);
 
@@ -189,32 +231,27 @@ export function UserBookingsTab({
                                 <div className="flex items-center gap-3">
                                     <div className="font-bold text-lg flex items-center gap-2">
                                         {formattedDate}
-                                        <span className="text-gray-300">|</span>
-                                        <span className="font-mono">{booking.startTime || '??:??'} - {endTime}</span>
+                                        <span className="text-ink-30" aria-hidden="true">|</span>
+                                        <span className="num">{booking.startTime ? formatTimeRange(booking.startTime, endTime) : '—'}</span>
                                     </div>
-                                    <div className={clsx("px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1", statusConfig.color)}>
-                                        <StatusIcon size={12} />
-                                        {statusConfig.label}
-                                    </div>
+                                    <StatusBadge kind="booking" status={booking.status} audience="staff" />
                                 </div>
 
                                 <div className="flex flex-wrap gap-4 text-sm text-gray-600">
                                     <div className="flex items-center gap-1.5" title="Локация">
-                                        <MapPin size={14} className="text-gray-400" />
+                                        <MapPin size={14} className="text-ink-60" />
                                         {location?.name || '—'}
                                     </div>
                                     <div className="flex items-center gap-1.5" title="Кабинет">
-                                        <Box size={14} className="text-gray-400" />
+                                        <Box size={14} className="text-ink-60" />
                                         {resource?.name || '—'}
                                     </div>
                                     <div className="flex items-center gap-1.5" title="Формат">
-                                        {booking.format === 'individual' ? <User size={14} className="text-gray-400" /> : <Users size={14} className="text-gray-400" />}
+                                        {booking.format === 'individual' ? <User size={14} className="text-ink-60" /> : <Users size={14} className="text-ink-60" />}
                                         {booking.format === 'individual' ? 'Индивидуально' :
                                          booking.format === 'intervision' ? 'Интервизия' : 'Группа'}
                                     </div>
-                                    <div className="font-medium text-black">
-                                        {booking.finalPrice} ₾
-                                    </div>
+                                    <Money value={booking.finalPrice} className="font-medium text-ink" />
                                 </div>
                             </div>
 
@@ -224,8 +261,13 @@ export function UserBookingsTab({
                                 {!isPastBooking && (booking.status === 'confirmed' || booking.status === 'rescheduled') && (
                                     <>
                                         <button
-                                            onClick={() => handleCancel(booking.id, booking.date instanceof Date ? booking.date.toISOString() : booking.date, booking.startTime || undefined)}
-                                            className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                                            onClick={() => handleCancel(
+                                                booking.id,
+                                                booking.date instanceof Date ? booking.date.toISOString() : booking.date,
+                                                booking.startTime || undefined,
+                                                `${formattedDate}${booking.startTime ? `, ${booking.startTime}` : ''}`,
+                                            )}
+                                            className="px-3 py-1.5 bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] rounded-lg text-xs font-medium hover:brightness-95 transition-colors flex items-center gap-1.5"
                                         >
                                             <XCircle size={14} />
                                             Отменить
@@ -250,7 +292,7 @@ export function UserBookingsTab({
                                     <button
                                         onClick={() => onToSubscription(booking.id)}
                                         disabled={convertingId === booking.id}
-                                        className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-100 transition-colors flex items-center gap-1.5 disabled:opacity-60"
+                                        className="px-3 py-1.5 bg-gray-50 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-100 transition-colors flex items-center gap-1.5 disabled:opacity-60"
                                         title="Вернуть деньги на баланс и списать час с абонемента"
                                     >
                                         {convertingId === booking.id ? '…' : 'На абонемент'}

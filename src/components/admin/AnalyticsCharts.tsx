@@ -5,6 +5,8 @@ import {
 } from 'recharts';
 import { format, subDays, startOfDay, isSameDay } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { COLOR, SHADOW } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 
 interface AnalyticsChartsProps {
   bookings: any[];
@@ -62,43 +64,44 @@ export function AnalyticsCharts({ bookings, revenueDaily }: AnalyticsChartsProps
     });
 
     return [
-      { name: 'Индивидуальные', value: formats.individual, color: '#476D6B' }, // unbox-green
-      { name: 'Групповые', value: formats.group, color: '#2C3240' }, // unbox-dark
-      { name: 'Интервизия', value: formats.intervision, color: '#8B9A97' } // lighter green
+      // Монохром + бирюза (wave 1): без отдельных «брендовых» оттенков.
+      { name: 'Индивидуальные', value: formats.individual, color: COLOR.accent },
+      { name: 'Групповые', value: formats.group, color: COLOR.ink },
+      { name: 'Интервизия', value: formats.intervision, color: COLOR.ink60 }
     ];
   }, [bookings]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
       {/* Revenue Area Chart */}
-      <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-unbox-light/50 shadow-sm glass-card">
+      <div className="lg:col-span-2 bg-card p-6 rounded-2xl border border-unbox-light/50">
         <h3 className="font-bold text-lg mb-6 text-unbox-dark">Выручка за последние 7 дней</h3>
         <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={revenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#476D6B" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#476D6B" stopOpacity={0}/>
+                  <stop offset="5%" stopColor={COLOR.accent} stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor={COLOR.accent} stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9CA3AF' }} dy={10} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9CA3AF' }} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={COLOR.ink10} />
+              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: COLOR.ink60 }} dy={10} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: COLOR.ink60 }} />
               <Tooltip
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}
-                formatter={(value: any) => [`${value} ₾`, 'Выручка']}
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: SHADOW.pop }}
+                formatter={(value: any) => [formatGel(value), 'Выручка']}
                 labelFormatter={(label) => `Дата: ${label}`}
-                labelStyle={{ color: '#6B7280', marginBottom: '4px' }}
+                labelStyle={{ color: COLOR.ink60, marginBottom: '4px' }}
               />
               <Area
                 type="monotone"
                 dataKey="revenue"
-                stroke="#476D6B"
+                stroke={COLOR.accent}
                 strokeWidth={3}
                 fillOpacity={1} 
                 fill="url(#colorRevenue)" 
-                activeDot={{ r: 6, strokeWidth: 0, fill: '#476D6B' }}
+                activeDot={{ r: 6, strokeWidth: 0, fill: COLOR.accent }}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -106,7 +109,7 @@ export function AnalyticsCharts({ bookings, revenueDaily }: AnalyticsChartsProps
       </div>
 
       {/* Bookings Format Pie Chart */}
-      <div className="bg-white p-6 rounded-2xl border border-unbox-light/50 shadow-sm glass-card flex flex-col">
+      <div className="bg-card p-6 rounded-2xl border border-unbox-light/50 flex flex-col">
         <h3 className="font-bold text-lg mb-2 text-unbox-dark">Форматы бронирований</h3>
         <p className="text-xs text-gray-500 mb-6">Распределение подтвержденных записей</p>
         <div className="flex-1 min-h-[200px]">
@@ -127,8 +130,8 @@ export function AnalyticsCharts({ bookings, revenueDaily }: AnalyticsChartsProps
                 ))}
               </Pie>
               <Tooltip 
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}
-                itemStyle={{ color: '#1F2937', fontWeight: 500 }}
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: SHADOW.pop }}
+                itemStyle={{ color: COLOR.ink, fontWeight: 500 }}
               />
               <Legend 
                 verticalAlign="bottom" 

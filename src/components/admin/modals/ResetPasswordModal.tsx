@@ -92,7 +92,7 @@ export function ResetPasswordModal({
                     type="button"
                     onClick={close}
                     aria-label="Закрыть"
-                    className="absolute top-4 right-4 text-unbox-grey hover:text-unbox-dark"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-unbox-dark"
                 >
                     <X size={20} />
                 </button>
@@ -100,7 +100,7 @@ export function ResetPasswordModal({
                 {savedPassword ? (
                     <>
                         <h3 className="text-xl font-bold text-unbox-dark mb-1">Пароль изменён</h3>
-                        <p className="text-sm text-unbox-grey mb-4">Новый пароль для {who}:</p>
+                        <p className="text-sm text-ink-60 mb-4">Новый пароль для {who}:</p>
                         <div className="flex items-center gap-2 mb-3">
                             <code className="flex-1 px-3 py-2.5 rounded-xl bg-unbox-light/40 border border-unbox-light font-mono text-lg tracking-wide text-unbox-dark select-all break-all">
                                 {savedPassword}
@@ -114,7 +114,7 @@ export function ResetPasswordModal({
                                 {copied ? 'Скопирован' : 'Скопировать'}
                             </button>
                         </div>
-                        <p className="text-xs text-unbox-grey mb-5">
+                        <p className="text-xs text-ink-60 mb-5">
                             Пароль показан один раз: после закрытия окна его нигде не будет.
                             Передайте клиенту и попросите сменить после входа.
                         </p>
@@ -129,12 +129,12 @@ export function ResetPasswordModal({
                 ) : (
                     <form onSubmit={(e) => { e.preventDefault(); save(); }}>
                         <h3 className="text-xl font-bold text-unbox-dark mb-1">Сбросить пароль</h3>
-                        <p className="text-sm text-unbox-grey mb-4">
+                        <p className="text-sm text-ink-60 mb-4">
                             Новый пароль для {who}. Старый перестанет работать.
                             Действие попадёт в журнал аудита.
                         </p>
 
-                        <label className="block text-xs font-semibold text-unbox-grey mb-1" htmlFor="admin-reset-password">
+                        <label className="block text-xs font-semibold text-ink-60 mb-1" htmlFor="admin-reset-password">
                             Новый пароль
                         </label>
                         <div className="flex gap-2">
@@ -153,7 +153,7 @@ export function ResetPasswordModal({
                                     type="button"
                                     onClick={() => setVisible(v => !v)}
                                     aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-unbox-grey hover:text-unbox-dark"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-ink-60 hover:text-unbox-dark"
                                 >
                                     {visible ? <EyeOff size={16} /> : <Eye size={16} />}
                                 </button>
@@ -166,7 +166,7 @@ export function ResetPasswordModal({
                                 Придумать
                             </button>
                         </div>
-                        <div className="min-h-[20px] mt-1.5 text-xs text-red-600">
+                        <div className="min-h-[20px] mt-1.5 text-xs text-[var(--status-danger-fg)]">
                             {tooShort ? 'Минимум 6 символов' : ''}
                         </div>
 
@@ -182,7 +182,7 @@ export function ResetPasswordModal({
                             <button
                                 type="submit"
                                 disabled={!canSave}
-                                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                className="flex-1 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-on-accent text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
                             >
                                 {saving && <Loader2 size={14} className="animate-spin" />}
                                 Сбросить пароль

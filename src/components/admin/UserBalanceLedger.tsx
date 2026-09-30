@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Wallet, AlertTriangle, Check } from 'lucide-react';
-import { ru } from 'date-fns/locale';
 import { usersApi, type BalanceLedgerResponse } from '../../api/users';
-import { parseUTC, formatBatumi } from '../../utils/dateUtils';
+import { parseUTC, BATUMI_TZ } from '../../utils/dateUtils';
+import { formatDayMonth, formatGel, formatTime } from '../../utils/format';
+import { ruCountWord } from '../../utils/plural';
+import { SkeletonList } from '../ui/Skeleton';
+import { ErrorBar } from '../ui/ErrorBar';
+import { EmptyState } from '../ui/EmptyState';
 
 /**
  * Лента движений баланса клиента.
@@ -34,12 +38,23 @@ const REASON_LABELS: Record<string, string> = {
     subscription_purchase: 'Оплата абонемента',
     booking_to_subscription: 'Бронь переведена на абонемент',
     double_charge_refund: 'Возврат двойного списания',
+    // Причины, которые сервер пишет, а подписи не было — в колонке стоял
+    // английский код (аудит 29.09, X3-10).
+    price_change: 'Изменение цены брони',
+    reschedule_diff: 'Разница при переносе',
+    format_change: 'Смена формата брони',
+    trim_booking: 'Сокращение брони',
+    trim_refund: 'Возврат за сокращение',
+    extras_refund: 'Возврат за допы',
+    topup_adjust: 'Правка пополнения',
+    topup_reversal: 'Отмена пополнения',
 };
 
 export function UserBalanceLedger({ userId }: { userId: string }) {
     const [data, setData] = useState<BalanceLedgerResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [reloadTick, setReloadTick] = useState(0);
 
     useEffect(() => {
         let alive = true;
@@ -49,20 +64,20 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
             .catch(() => { if (alive) setError('Не удалось загрузить ленту'); })
             .finally(() => { if (alive) setLoading(false); });
         return () => { alive = false; };
-    }, [userId]);
+    }, [userId, reloadTick]);
 
     if (loading) {
         return (
-            <div className="bg-white p-6 rounded-2xl border border-gray-200 text-sm text-gray-400">
-                Загружаю движения баланса…
+            <div className="bg-white p-6 rounded-2xl border border-gray-200">
+                <SkeletonList count={3} cardHeight={56} label="Загружаем движения баланса" />
             </div>
         );
     }
 
     if (error || !data) {
         return (
-            <div className="bg-white p-6 rounded-2xl border border-gray-200 text-sm text-gray-500">
-                {error || 'Нет данных'}
+            <div className="bg-white p-6 rounded-2xl border border-gray-200">
+                <ErrorBar message={error || 'Не удалось загрузить ленту'} onRetry={() => setReloadTick(t => t + 1)} />
             </div>
         );
     }
@@ -74,40 +89,38 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
         <div className="bg-white p-6 rounded-2xl border border-gray-200">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-1">
                 <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Wallet size={20} className="text-gray-400" />
+                    <Wallet size={20} className="text-ink-60" aria-hidden="true" />
                     Движения баланса
                 </h3>
-                <span className="text-xs text-gray-400">
-                    {entries.length} {entries.length === 1 ? 'запись' : 'записей'}
+                <span className="text-xs text-ink-60">
+                    {ruCountWord(entries.length, ['запись', 'записи', 'записей'])}
                     {truncated && ' (показаны последние)'}
                 </span>
 
                 {reconciles === true && (
-                    <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-green-100 text-green-700">
-                        <Check size={11} /> Сходится с балансом
+                    <span className="ml-auto ui-badge ui-badge--ok">
+                        <Check size={14} aria-hidden="true" /> Сходится с балансом
                     </span>
                 )}
                 {reconciles === false && (
-                    <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-100 text-red-700">
-                        <AlertTriangle size={11} /> Расхождение {diff > 0 ? '+' : ''}{diff} ₾
+                    <span className="ml-auto ui-badge ui-badge--danger">
+                        <AlertTriangle size={14} aria-hidden="true" /> Расхождение {formatGel(diff, { sign: true })}
                     </span>
                 )}
             </div>
 
-            <p className="text-xs text-gray-400 mb-5">
+            <p className="text-xs text-ink-60 mb-5">
                 Всё, что двигало депозит клиента: списания за брони, возвраты, скидки,
-                пополнения и правки. Баланс сейчас — {balance} ₾.
+                пополнения и правки. Баланс сейчас — <span className="num">{formatGel(balance)}</span>.
             </p>
 
             {entries.length === 0 ? (
-                <div className="text-center py-8 bg-gray-50 rounded-xl text-gray-500 text-sm">
-                    Движений по балансу пока не было
-                </div>
+                <EmptyState compact title="Движений по балансу пока не было" />
             ) : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="text-xs text-gray-400 border-b border-gray-100">
+                            <tr className="text-xs text-ink-60 border-b border-gray-100">
                                 <th className="font-medium py-3 pl-2">Дата</th>
                                 <th className="font-medium py-3 text-right">Сумма</th>
                                 <th className="font-medium py-3 text-right">Стало</th>
@@ -119,7 +132,7 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
                             {entries.map((e) => {
                                 const d = e.date ? parseUTC(e.date) : null;
                                 const isNegative = e.delta < 0;
-                                const label = REASON_LABELS[e.reason] || e.reason;
+                                const label = REASON_LABELS[e.reason] || (e.reason ? `Прочее (${e.reason})` : 'Прочее');
                                 return (
                                     <tr
                                         key={e.id}
@@ -127,27 +140,27 @@ export function UserBalanceLedger({ userId }: { userId: string }) {
                                     >
                                         <td className="py-3 pl-2 align-top whitespace-nowrap">
                                             <div className="font-medium text-gray-900">
-                                                {d ? formatBatumi(d, 'd MMM yyyy', ru) : '—'}
+                                                {d ? formatDayMonth(d, { timeZone: BATUMI_TZ, withYear: 'auto' }) : '—'}
                                             </div>
-                                            <div className="text-xs text-gray-400">
-                                                {d ? formatBatumi(d, 'HH:mm') : ''}
+                                            <div className="text-xs text-ink-60">
+                                                {d ? formatTime(d, { timeZone: BATUMI_TZ }) : ''}
                                             </div>
                                         </td>
-                                        <td className="py-3 align-top text-right whitespace-nowrap tabular-nums">
-                                            <span className={`font-bold ${isNegative ? 'text-red-600' : 'text-green-700'}`}>
-                                                {isNegative ? '' : '+'}{e.delta.toFixed(2)} ₾
+                                        <td className="py-3 align-top text-right whitespace-nowrap num">
+                                            <span className={`font-bold ${isNegative ? 'text-[var(--status-danger-fg)]' : 'text-[var(--status-ok-fg)]'}`}>
+                                                {formatGel(e.delta, { sign: true })}
                                             </span>
                                         </td>
-                                        <td className="py-3 align-top text-right whitespace-nowrap tabular-nums text-gray-500">
-                                            {e.balanceAfter.toFixed(2)} ₾
+                                        <td className="py-3 align-top text-right whitespace-nowrap num text-gray-500">
+                                            {formatGel(e.balanceAfter)}
                                         </td>
                                         <td className="py-3 pl-4 align-top">
                                             <div className="text-gray-900">{label}</div>
                                             {e.description && e.description !== label && (
-                                                <div className="text-xs text-gray-400">{e.description}</div>
+                                                <div className="text-xs text-ink-60">{e.description}</div>
                                             )}
                                         </td>
-                                        <td className="py-3 pr-2 align-top text-right text-xs text-gray-400 whitespace-nowrap">
+                                        <td className="py-3 pr-2 align-top text-right text-xs text-ink-60 whitespace-nowrap">
                                             {e.actorName || '—'}
                                         </td>
                                     </tr>

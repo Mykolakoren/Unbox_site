@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LegacyButton as Button } from '../../ui/LegacyButton';
-import { X, CreditCard } from 'lucide-react';
+import { X, CreditCard, Banknote, Landmark } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
@@ -16,9 +16,10 @@ interface AddFundsModalProps {
 }
 
 const PAYMENT_METHODS = [
-    { id: 'cash', label: 'Наличные', icon: '💵' },
-    { id: 'tbc', label: 'TBC Bank', icon: '🔵' },
-    { id: 'bog', label: 'BOG (Ge)', icon: '🟠' },
+    // Значки Lucide вместо эмодзи-кружков (wave 1).
+    { id: 'cash', label: 'Наличные', icon: Banknote },
+    { id: 'tbc', label: 'TBC Bank', icon: CreditCard },
+    { id: 'bog', label: 'BOG (Ge)', icon: Landmark },
 ] as const;
 
 // Филиалы кассы — только эти два (owner 2026-07-22). Neo School остаётся
@@ -62,7 +63,8 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
             <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                    aria-label="Закрыть"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-gray-600 transition-colors"
                 >
                     <X size={20} />
                 </button>
@@ -73,7 +75,7 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
                     </div>
                     <h3 className="text-xl font-bold text-gray-900">Пополнить баланс</h3>
                     {hint && (
-                        <p className="text-unbox-grey text-xs mt-1">{hint}</p>
+                        <p className="text-ink-60 text-xs mt-1">{hint}</p>
                     )}
                     {userName && (
                         <p className="text-unbox-green text-sm font-medium mt-1">{userName}</p>
@@ -86,7 +88,7 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                            Сумма (GEL)
+                            Сумма, ₾
                         </label>
                         <input
                             type="number"
@@ -113,7 +115,7 @@ export function AddFundsModal({ isOpen, onClose, onConfirm, userName, defaultAmo
                                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                                         }`}
                                 >
-                                    <span className="text-lg">{pm.icon}</span>
+                                    <pm.icon size={20} aria-hidden="true" />
                                     {pm.label}
                                 </button>
                             ))}

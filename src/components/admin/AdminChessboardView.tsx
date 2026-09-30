@@ -9,7 +9,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Check, Loader2, Search, Plus, ArrowRight, Bell, Gift, Repeat, ArrowLeftRight, Ban } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -33,6 +33,14 @@ import { subscriptionLifecycle } from '../../utils/subscription';
 // заменяет локальный parseBookingDate (имя другое, тело идентичное).
 import { TIME_SLOTS, timeToMin } from '../../utils/bookingHelpers';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
+import { StatusBadge } from '../ui/StatusBadge';
+import { Sheet } from '../ui/Sheet';
+import { Button } from '../ui/Button';
+import { Field, TextArea } from '../ui/Field';
+import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
+import { statusLabel } from '../../design/statuses';
+import { formatGel, formatDateLabel, formatDayMonth, formatTime } from '../../utils/format';
+import { BATUMI_TZ } from '../../utils/dateUtils';
 
 const _adminMinToTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -50,6 +58,15 @@ export function AdminChessboardView() {
     const { bookings, users, fetchAllBookings, cancelBooking, listForReRent, setManualPrice } = useUserStore();
     const { resources, fetchResources } = useBookingStore();
     const [searchParams, setSearchParams] = useSearchParams();
+    const { confirm } = useConfirmDialog();
+    // Причина отклонения срочной брони и снятия штрафа — поле в шторке
+    // вместо системного prompt() (wave 1).
+    const [rejectTarget, setRejectTarget] = useState<BookingHistoryItem | null>(null);
+    const [rejectReason, setRejectReason] = useState('');
+    const [waiveTarget, setWaiveTarget] = useState<BookingHistoryItem | null>(null);
+    const [waiveReason, setWaiveReason] = useState('');
+    const [waiveError, setWaiveError] = useState('');
+    const [reasonSaving, setReasonSaving] = useState(false);
 
     const [filterLocation, setFilterLocation] = useState<string>('all');
     const [selectedDate, setSelectedDate] = useState(new Date());
@@ -650,21 +667,20 @@ export function AdminChessboardView() {
     const getBookingStyle = (b: BookingHistoryItem) => {
         // Срочная бронь, ожидающая решения админа — красная рамка-пунктир,
         // чтобы её было видно прямо на сетке без перехода в фильтр «Ожидает».
-        if (b.status === 'pending_approval') return 'bg-red-50 text-red-800 border-red-500 border-dashed';
-        if (b.status === 'completed')  return 'bg-gray-200 text-gray-600 border-gray-300';
-        if (b.status === 're-rented')  return 'bg-orange-200 text-orange-800 border-orange-400';
-        if (b.isReRentListed)          return 'bg-amber-100 text-amber-800 border-amber-400 border-dashed';
-        return 'bg-emerald-100 text-emerald-900 border-emerald-400';
+        if (b.status === 'pending_approval') return 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)] border-dashed';
+        if (b.status === 'completed')  return 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)] border-[var(--status-muted-fg)]/30';
+        if (b.status === 're-rented')  return 'bg-[var(--status-muted-bg)] text-[var(--status-muted-fg)] border-[var(--status-muted-fg)] border-dashed';
+        if (b.isReRentListed)          return 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)] border-dashed';
+        return 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] border-[var(--status-ok-fg)]/40';
     };
 
-    // ── Popup status label ────────────────────────────────────────────────────
-    const statusLabel = (b: BookingHistoryItem) => {
-        if (b.status === 'pending_approval') return '⏳ Ожидает подтверждения';
-        if (b.status === 'confirmed')  return b.isReRentListed ? '📤 На переаренде' : '✅ Активно';
-        if (b.status === 're-rented')  return '🔄 Пересдано';
-        if (b.status === 'completed')  return '☑️ Завершено';
-        return b.status;
-    };
+    // ── Popup status — слова только из общего словаря (src/design/statuses.ts).
+    // «На пересдаче» — не статус брони, а отметка isReRentListed у подтверждённой.
+    const bookingStatusBadge = (b: BookingHistoryItem) => (
+        b.status === 'confirmed' && b.isReRentListed
+            ? <span className="ui-badge ui-badge--pending"><Repeat size={14} aria-hidden="true" />На пересдаче</span>
+            : <StatusBadge kind="booking" status={b.status} audience="staff" />
+    );
 
     // ── Discount label — translates the rule code stored on the booking
     // into something an admin can read at a glance. Useful in the popup so
@@ -725,10 +741,16 @@ export function AdminChessboardView() {
     // «Час в подарок» (15.09, просьба Валентины): раньше админ считал скидку
     // вручную через «Цена», а бонус клиента оставался непогашенным.
     const handleBonusHour = async (b: BookingHistoryItem) => {
-        if (!window.confirm('Применить «час в подарок»? Спишется 1 бесплатный час клиента, цена брони уменьшится на стоимость часа (со скидками).')) return;
+        const ok = await confirm({
+            title: 'Применить «час в подарок»?',
+            body: 'Спишем 1 бесплатный час клиента, цена брони уменьшится на стоимость часа (со скидками).',
+            confirmLabel: 'Применить час в подарок',
+            cancelLabel: 'Не сейчас',
+        });
+        if (!ok) return;
         try {
             const updated = await bookingsApi.applyBonusHour(b.id);
-            toast.success(`Час в подарок применён: ${b.finalPrice}₾ → ${updated.finalPrice}₾`);
+            toast.success(`Час в подарок применён: ${formatGel(b.finalPrice)} → ${formatGel(updated.finalPrice)}`);
             setSelectedBooking(null);
             await fetchAllBookings();
         } catch (e: any) {
@@ -759,8 +781,13 @@ export function AdminChessboardView() {
         return subscriptionLifecycle((client as any)?.subscription) === 'active';
     };
     const handleToSubscription = async (b: BookingHistoryItem) => {
-        if (!window.confirm('Перевести эту бронь на списание с абонемента? '
-            + 'Деньги вернутся на баланс клиента, а часы спишутся с абонемента.')) return;
+        const ok = await confirm({
+            title: 'Перевести бронь на абонемент?',
+            body: 'Деньги вернутся на баланс клиента, а часы спишутся с абонемента.',
+            confirmLabel: 'Перевести на абонемент',
+            cancelLabel: 'Оставить как есть',
+        });
+        if (!ok) return;
         try {
             await bookingsApi.convertToSubscription(b.id);
             toast.success('Бронь переведена на абонемент');
@@ -790,7 +817,13 @@ export function AdminChessboardView() {
      *  here on the chessboard popup. PATCH /bookings/{id}/extend; backend
      *  checks the next slot is free and bills the delta if applicable. */
     const handleExtend = async (b: BookingHistoryItem) => {
-        if (!confirm('Продлить бронь на 30 минут?')) return;
+        const ok = await confirm({
+            title: 'Продлить бронь на 30 минут?',
+            body: 'Следующие 30 минут в кабинете должны быть свободны.',
+            confirmLabel: 'Продлить на 30 минут',
+            cancelLabel: 'Не продлевать',
+        });
+        if (!ok) return;
         try {
             await bookingsApi.extendBooking(b.id, 30);
             toast.success('Бронь продлена на 30 минут');
@@ -875,6 +908,48 @@ export function AdminChessboardView() {
 
     // ─── Render ───────────────────────────────────────────────────────────────
 
+    const submitReject = async () => {
+        const b = rejectTarget;
+        if (!b) return;
+        setReasonSaving(true);
+        try {
+            await bookingsApi.rejectBooking(b.id, rejectReason.trim() || undefined);
+            toast.success('Бронь отклонена, клиент уведомлён');
+            setRejectTarget(null);
+            setSelectedBooking(null);
+            await fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось отклонить бронь. Попробуйте ещё раз.');
+        } finally {
+            setReasonSaving(false);
+        }
+    };
+    const submitWaive = async () => {
+        const b = waiveTarget;
+        if (!b) return;
+        const reason = waiveReason.trim();
+        if (!reason) {
+            setWaiveError('Укажите причину — она попадёт в историю клиента');
+            return;
+        }
+        setReasonSaving(true);
+        try {
+            const res = await bookingsApi.waiveCharge(b.id, reason);
+            toast.success(
+                res.scenario === 'waived_paid_refunded'
+                    ? 'Штраф снят, средства возвращены'
+                    : 'Штраф снят (списание не произойдёт)'
+            );
+            setWaiveTarget(null);
+            setSelectedBooking(null);
+            await fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
+        } finally {
+            setReasonSaving(false);
+        }
+    };
+
     // Окна отмены и цены — одни на обе ветки: кнопки «Удалить» и «Цена» есть
     // в карточке брони и на телефоне, и на десктопе. Если смонтировать их
     // только в десктопной ветке, на экране <768px кнопки молча ничего не делают.
@@ -885,7 +960,7 @@ export function AdminChessboardView() {
                 onClose={() => setCancelTarget(null)}
                 onConfirm={handleCancelConfirm}
                 bookingLabel={cancelTarget
-                    ? `${getUserName(cancelTarget.userId)} · ${cancelTarget.startTime} · ${cancelTarget.finalPrice}₾`
+                    ? `${getUserName(cancelTarget.userId)} · ${cancelTarget.startTime} · ${formatGel(cancelTarget.finalPrice)}`
                     : ''}
                 series={cancelSeries}
             />
@@ -897,6 +972,52 @@ export function AdminChessboardView() {
                     await fetchAllBookings();
                 }}
             />
+            <Sheet
+                open={!!rejectTarget}
+                onClose={() => { if (!reasonSaving) setRejectTarget(null); }}
+                title="Отклонить срочную бронь?"
+                description={rejectTarget ? `${getUserName(rejectTarget.userId)} · ${rejectTarget.startTime}. Клиент получит уведомление.` : undefined}
+                width={440}
+                footer={
+                    <>
+                        <Button variant="danger" block loading={reasonSaving} onClick={submitReject}>Отклонить бронь</Button>
+                        <Button variant="secondary" block disabled={reasonSaving} onClick={() => setRejectTarget(null)}>Не отклонять</Button>
+                    </>
+                }
+            >
+                <Field label="Причина для клиента" optional>
+                    <TextArea
+                        rows={3}
+                        value={rejectReason}
+                        onChange={e => setRejectReason(e.target.value)}
+                        placeholder="Например: кабинет на это время уже занят"
+                    />
+                </Field>
+            </Sheet>
+            <Sheet
+                open={!!waiveTarget}
+                onClose={() => { if (!reasonSaving) setWaiveTarget(null); }}
+                title="Снять штраф?"
+                description={waiveTarget?.paymentStatus === 'paid'
+                    ? 'Списанные деньги вернутся на баланс клиента.'
+                    : 'Списание за эту бронь не произойдёт.'}
+                width={440}
+                footer={
+                    <>
+                        <Button block loading={reasonSaving} onClick={submitWaive}>Снять штраф</Button>
+                        <Button variant="secondary" block disabled={reasonSaving} onClick={() => setWaiveTarget(null)}>Оставить штраф</Button>
+                    </>
+                }
+            >
+                <Field label="Причина" error={waiveError || undefined} required>
+                    <TextArea
+                        rows={3}
+                        value={waiveReason}
+                        onChange={e => { setWaiveReason(e.target.value); if (waiveError) setWaiveError(''); }}
+                        placeholder="Например: клиент заболел, предупредил заранее"
+                    />
+                </Field>
+            </Sheet>
         </>
     );
 
@@ -947,8 +1068,8 @@ export function AdminChessboardView() {
                         )}
                     >
                         <div className="min-w-0">
-                            <div className="text-[10px] font-bold tabular-nums">{slot}–{endTime}</div>
-                            <div className="text-[10px] truncate font-medium">{getUserName(b.userId)}</div>
+                            <div className="text-xs font-bold tabular-nums">{slot}–{endTime}</div>
+                            <div className="text-xs truncate font-medium">{getUserName(b.userId)}</div>
                         </div>
                     </button>
                 );
@@ -999,10 +1120,10 @@ export function AdminChessboardView() {
                             key={loc.id}
                             onClick={() => setFilterLocation(loc.id)}
                             className={clsx(
-                                'shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                                'shrink-0 px-3 py-1.5 min-h-11 rounded-lg text-xs font-medium border transition-colors',
                                 filterLocation === loc.id
                                     ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-white text-unbox-grey border-unbox-light'
+                                    : 'bg-white text-ink-60 border-unbox-light'
                             )}
                         >
                             {loc.name}
@@ -1012,13 +1133,13 @@ export function AdminChessboardView() {
 
                 {/* Week nav */}
                 <div className="flex items-center gap-1">
-                    <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-unbox-light">
+                    <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} aria-label="Предыдущая неделя" className="min-w-11 min-h-11 flex items-center justify-center rounded-lg border border-unbox-light">
                         <ChevronLeft size={16} />
                     </button>
                     <div className="flex-1 text-center text-sm font-medium">
                         {format(weekStart, 'd MMM', { locale: ru })} – {format(endOfWeek(weekStart, { weekStartsOn: 1 }), 'd MMM', { locale: ru })}
                     </div>
-                    <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-unbox-light">
+                    <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} aria-label="Следующая неделя" className="min-w-11 min-h-11 flex items-center justify-center rounded-lg border border-unbox-light">
                         <ChevronRight size={16} />
                     </button>
                 </div>
@@ -1035,10 +1156,10 @@ export function AdminChessboardView() {
                                     ? 'bg-unbox-green text-white shadow-md'
                                     : isToday(day)
                                         ? 'bg-unbox-light text-unbox-green border border-unbox-green/40'
-                                        : 'bg-white text-unbox-grey border border-unbox-light/50'
+                                        : 'bg-white text-ink-60 border border-unbox-light/50'
                             )}
                         >
-                            <span className="text-[9px] font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
+                            <span className="text-xs font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
                             <span className="text-sm font-bold">{format(day, 'd')}</span>
                         </button>
                     ))}
@@ -1058,7 +1179,7 @@ export function AdminChessboardView() {
                             )}
                         >
                             <div className="font-bold whitespace-nowrap">{r.name}</div>
-                            <div className="text-[10px] opacity-70 whitespace-nowrap">
+                            <div className="text-xs whitespace-nowrap">
                                 {LOCATIONS.find(l => l.id === r.locationId)?.name ?? ''}
                             </div>
                         </button>
@@ -1070,11 +1191,12 @@ export function AdminChessboardView() {
                     <div className="flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3">
                         <div>
                             <div className="text-sm font-bold text-unbox-dark">{mobileBlockStartTime} — {mobileBlockEndTime}</div>
-                            <div className="text-xs text-unbox-grey">{mobileBlockDuration} мин · {mobileRes.name}</div>
+                            <div className="text-xs text-ink-60">{mobileBlockDuration} мин · {mobileRes.name}</div>
                         </div>
                         <button
                             onClick={() => setNewSlotRange(mobileRes.id, [])}
-                            className="p-1.5 rounded-lg bg-red-100 text-red-500"
+                            aria-label="Снять выделение"
+                            className="min-w-11 min-h-11 -my-2 flex items-center justify-center rounded-lg bg-sunken text-ink"
                         >
                             <X size={14} />
                         </button>
@@ -1145,15 +1267,15 @@ export function AdminChessboardView() {
                             <div className="flex items-start justify-between mb-3">
                                 <div>
                                     <div className="font-bold text-unbox-dark">{getUserName(selectedBooking.userId)}</div>
-                                    <div className="text-xs text-unbox-grey">{selectedBooking.userId}</div>
+                                    <div className="text-xs text-ink-60">{selectedBooking.userId}</div>
                                 </div>
-                                <button onClick={() => setSelectedBooking(null)} className="p-1 hover:bg-unbox-light rounded-lg">
+                                <button onClick={() => setSelectedBooking(null)} aria-label="Закрыть" className="min-w-11 min-h-11 -m-2 flex items-center justify-center hover:bg-unbox-light rounded-lg">
                                     <X size={16} />
                                 </button>
                             </div>
                             <div className="space-y-2 text-sm mb-4">
                                 <InfoRow label="Ресурс" value={resources.find(r => r.id === selectedBooking.resourceId)?.name ?? ''} />
-                                <InfoRow label="Дата" value={format(parseUTC(selectedBooking.date), 'd MMMM yyyy', { locale: ru })} />
+                                <InfoRow label="Дата" value={formatDateLabel(parseUTC(selectedBooking.date), { withYear: 'auto' })} />
                                 <InfoRow label="Время" value={`${selectedBooking.startTime} · ${(selectedBooking.duration ?? 0) / 60}ч`} />
                                 {/* Цена + Скидка — две строки. Раньше админам приходилось
                                     лазить в /admin/bookings или гадать «почему 18 а не 20»;
@@ -1164,7 +1286,7 @@ export function AdminChessboardView() {
                                     <>
                                         <InfoRow
                                             label="Цена"
-                                            value={`${selectedBooking.finalPrice} ₾  (база ${(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)} ₾ − ${selectedBooking.discountAmount?.toFixed(0) ?? 0} ₾)`}
+                                            value={`${formatGel(selectedBooking.finalPrice)}  (база ${formatGel(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)} − ${formatGel(selectedBooking.discountAmount ?? 0, { fraction: 0 })})`}
                                         />
                                         <InfoRow
                                             label="Скидка"
@@ -1176,12 +1298,12 @@ export function AdminChessboardView() {
                                         label="Цена"
                                         value={
                                             selectedBooking.appliedRule === 'SUBSCRIPTION'
-                                                ? `${selectedBooking.finalPrice ?? 0} ₾  (по абонементу)`
-                                                : `${selectedBooking.finalPrice ?? 0} ₾`
+                                                ? `${formatGel(selectedBooking.finalPrice ?? 0)}  (по абонементу)`
+                                                : formatGel(selectedBooking.finalPrice ?? 0)
                                         }
                                     />
                                 )}
-                                <InfoRow label="Статус" value={statusLabel(selectedBooking)} />
+                                <InfoRow label="Статус" value={bookingStatusBadge(selectedBooking)} />
                                 <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
                                 {/* Deferred-billing payment status — only show if explicitly set
                                     (legacy rows = NULL = silent). Keeps the panel uncluttered for
@@ -1191,12 +1313,12 @@ export function AdminChessboardView() {
                                         label="Оплата"
                                         value={
                                             selectedBooking.paymentStatus === 'pending'
-                                                ? 'Ожидает (списание за 24ч до начала)'
+                                                ? `${statusLabel('payment', 'pending', 'staff')} (за 24 ч до начала)`
                                                 : selectedBooking.paymentStatus === 'waived'
                                                     ? `Штраф снят${selectedBooking.waiverReason ? ` · ${selectedBooking.waiverReason}` : ''}`
                                                     : selectedBooking.chargedAt
-                                                        ? `Оплачено ${format(new Date(selectedBooking.chargedAt), 'd MMM HH:mm', { locale: ru })}`
-                                                        : 'Оплачено'
+                                                        ? `${statusLabel('payment', 'paid', 'staff')} ${formatDayMonth(selectedBooking.chargedAt, { timeZone: BATUMI_TZ })}, ${formatTime(selectedBooking.chargedAt, { timeZone: BATUMI_TZ })}`
+                                                        : statusLabel('payment', 'paid', 'staff')
                                         }
                                     />
                                 )}
@@ -1207,7 +1329,7 @@ export function AdminChessboardView() {
                                 списком. Теперь можно решить прямо из шахматки. */}
                             {selectedBooking.status === 'pending_approval' && (
                                 <div className="space-y-1.5 mb-3">
-                                    <div className="text-[11px] text-red-700 font-medium">Срочная бронь — клиент ждёт решения</div>
+                                    <div className="text-xs text-[var(--status-danger-fg)] font-medium">Срочная бронь — клиент ждёт решения</div>
                                     <div className="grid grid-cols-2 gap-1.5">
                                         <button
                                             onClick={async () => {
@@ -1217,29 +1339,18 @@ export function AdminChessboardView() {
                                                     setSelectedBooking(null);
                                                     await fetchAllBookings();
                                                 } catch (e: any) {
-                                                    toast.error(e?.response?.data?.detail || 'Ошибка');
+                                                    toast.error(e?.response?.data?.detail || 'Не удалось подтвердить бронь. Попробуйте ещё раз.');
                                                 }
                                             }}
-                                            className="py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white"
+                                            className="py-2 min-h-11 text-xs font-bold rounded-lg bg-accent text-on-accent flex items-center justify-center gap-1"
                                         >
-                                            ✓ Подтвердить
+                                            <Check size={14} aria-hidden="true" /> Подтвердить
                                         </button>
                                         <button
-                                            onClick={async () => {
-                                                const reason = window.prompt('Причина отклонения (будет отправлена клиенту):', '');
-                                                if (reason === null) return;
-                                                try {
-                                                    await bookingsApi.rejectBooking(selectedBooking.id, reason.trim() || undefined);
-                                                    toast.success('Бронь отклонена, клиент уведомлён');
-                                                    setSelectedBooking(null);
-                                                    await fetchAllBookings();
-                                                } catch (e: any) {
-                                                    toast.error(e?.response?.data?.detail || 'Ошибка');
-                                                }
-                                            }}
-                                            className="py-2 text-xs font-bold rounded-lg bg-red-50 text-red-700 border border-red-200"
+                                            onClick={() => { setRejectReason(''); setRejectTarget(selectedBooking); }}
+                                            className="py-2 min-h-11 text-xs font-bold rounded-lg bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] flex items-center justify-center gap-1"
                                         >
-                                            ✕ Отклонить
+                                            <X size={14} aria-hidden="true" /> Отклонить
                                         </button>
                                     </div>
                                 </div>
@@ -1256,34 +1367,34 @@ export function AdminChessboardView() {
                                 <div className="space-y-1.5">
                                     <div className="grid grid-cols-2 gap-1.5">
                                         {!bCompleted && (
-                                            <button onClick={() => handleMove(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-blue-50 text-blue-700">Перенести</button>
+                                            <button onClick={() => handleMove(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">Перенести</button>
                                         )}
-                                        <button onClick={() => setExtendModalId(selectedBooking.id)} className={clsx("py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700", bCompleted && "col-span-2")}>Продлить</button>
+                                        <button onClick={() => setExtendModalId(selectedBooking.id)} className={clsx("py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink", bCompleted && "col-span-2")}>Продлить</button>
                                         {splitOptions(selectedBooking.duration || 0).length > 0 && (
-                                            <button onClick={() => setSplitModalBooking(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700 col-span-2">Разделить на сессии</button>
+                                            <button onClick={() => setSplitModalBooking(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink col-span-2">Разделить на сессии</button>
                                         )}
                                         {bookingTodayOrFuture(selectedBooking) && (
-                                            <button onClick={() => setExtrasModalId(selectedBooking.id)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-teal-50 text-teal-700">+ Доп (кофе и т.п.)</button>
+                                            <button onClick={() => setExtrasModalId(selectedBooking.id)} className="col-span-2 py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">+ Доп (кофе и т.п.)</button>
                                         )}
                                         {canToSubscription(selectedBooking) && (
-                                            <button onClick={() => handleToSubscription(selectedBooking)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-purple-50 text-purple-700">На абонемент</button>
+                                            <button onClick={() => handleToSubscription(selectedBooking)} className="col-span-2 py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">На абонемент</button>
                                         )}
                                         {!bCompleted && (selectedBooking.duration || 60) > 60 && (
-                                            <button onClick={() => handleShorten(selectedBooking)} className="col-span-2 py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700">Сократить (— минут)</button>
+                                            <button onClick={() => handleShorten(selectedBooking)} className="col-span-2 py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">Сократить (— минут)</button>
                                         )}
                                     </div>
                                     <div className={clsx("grid gap-1.5", bCompleted ? "grid-cols-1" : "grid-cols-3")}>
-                                        <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
+                                        <button onClick={() => handleEditPrice(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-unbox-light text-unbox-dark">Цена</button>
                                         {!bCompleted && selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60 && (
-                                            <button onClick={() => handleBonusHour(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700">🎁 Час в подарок</button>
+                                            <button onClick={() => handleBonusHour(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink inline-flex items-center justify-center gap-1"><Gift size={14} aria-hidden="true" /> Час в подарок</button>
                                         )}
                                         {!bCompleted && (
-                                            <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700">
+                                            <button onClick={() => handleToggleReRent(selectedBooking)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink">
                                                 {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
                                             </button>
                                         )}
                                         {!bCompleted && (
-                                            <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 text-xs font-medium rounded-lg bg-red-50 text-red-600">Удалить</button>
+                                            <button onClick={() => handleCancel(selectedBooking.id)} className="py-2 min-h-11 text-xs font-medium rounded-lg bg-[var(--status-danger-bg)] hover:brightness-95 text-[var(--status-danger-fg)]">Удалить</button>
                                         )}
                                     </div>
                                     {/* Format change — useful when client picked the wrong rate
@@ -1298,11 +1409,17 @@ export function AdminChessboardView() {
                                         if (!groupCapable) return null;
                                         const target: 'individual' | 'group' =
                                             (selectedBooking.format === 'group') ? 'individual' : 'group';
-                                        const targetLabel = target === 'group' ? 'Групповой' : 'Индивид.';
+                                        const targetLabel = target === 'group' ? 'Групповой' : 'Индивидуальный';
                                         return (
                                             <button
                                                 onClick={async () => {
-                                                    if (!window.confirm(`Сменить формат на «${targetLabel}»? Цена пересчитается, разница спишется/вернётся.`)) return;
+                                                    const ok = await confirm({
+                                                        title: `Сменить формат на «${targetLabel}»?`,
+                                                        body: 'Цена пересчитается: разницу спишем с баланса клиента или вернём на него.',
+                                                        confirmLabel: `Сменить на «${targetLabel}»`,
+                                                        cancelLabel: 'Оставить как есть',
+                                                    });
+                                                    if (!ok) return;
                                                     try {
                                                         await bookingsApi.changeFormat(selectedBooking.id, target);
                                                         toast.success(`Формат изменён на «${targetLabel}»`);
@@ -1312,9 +1429,9 @@ export function AdminChessboardView() {
                                                         toast.error(e?.response?.data?.detail || 'Не удалось сменить формат');
                                                     }
                                                 }}
-                                                className="w-full py-2 text-xs font-medium rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center gap-1.5"
+                                                className="w-full py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink flex items-center justify-center gap-1.5"
                                             >
-                                                🔄 Сменить формат: → {targetLabel}
+                                                <ArrowLeftRight size={14} aria-hidden="true" /> Сменить формат на «{targetLabel}»
                                             </button>
                                         );
                                     })()}
@@ -1322,33 +1439,18 @@ export function AdminChessboardView() {
                                         For `waived` rows the panel above already shows the reason. */}
                                     {!bCompleted && (selectedBooking.paymentStatus === 'pending' || selectedBooking.paymentStatus === 'paid') && (
                                         <button
-                                            onClick={async () => {
-                                                const reason = window.prompt('Причина снятия штрафа (обязательно):', '');
-                                                if (!reason || !reason.trim()) return;
-                                                try {
-                                                    const res = await bookingsApi.waiveCharge(selectedBooking.id, reason.trim());
-                                                    toast.success(
-                                                        res.scenario === 'waived_paid_refunded'
-                                                            ? 'Штраф снят, средства возвращены'
-                                                            : 'Штраф снят (списание не произойдёт)'
-                                                    );
-                                                    setSelectedBooking(null);
-                                                    await fetchAllBookings();
-                                                } catch (e: any) {
-                                                    toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
-                                                }
-                                            }}
-                                            className="w-full py-2 text-xs font-medium rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center gap-1.5"
+                                            onClick={() => { setWaiveReason(''); setWaiveError(''); setWaiveTarget(selectedBooking); }}
+                                            className="w-full py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink flex items-center justify-center gap-1.5"
                                         >
-                                            🩹 Снять штраф (с причиной)
+                                            <Ban size={14} aria-hidden="true" /> Снять штраф (с причиной)
                                         </button>
                                     )}
                                     {!bCompleted && (
                                         <button
                                             onClick={() => { const b = selectedBooking; setSelectedBooking(null); openWaitlistFor(b); }}
-                                            className="w-full py-2 text-xs font-medium rounded-lg bg-orange-50 text-orange-700 flex items-center justify-center gap-1.5"
+                                            className="w-full py-2 min-h-11 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink flex items-center justify-center gap-1.5"
                                         >
-                                            <Bell size={12} /> Следить за слотом
+                                            <Bell size={14} aria-hidden="true" /> Следить за слотом
                                         </button>
                                     )}
                                 </div>
@@ -1406,6 +1508,7 @@ export function AdminChessboardView() {
                 <div className="flex items-center gap-2 shrink-0">
                     <button
                         onClick={() => setWeekStart(subWeeks(weekStart, 1))}
+                        aria-label="Предыдущая неделя"
                         className="p-1.5 rounded-lg border border-unbox-light hover:bg-unbox-light transition-colors"
                     >
                         <ChevronLeft size={16} />
@@ -1417,6 +1520,7 @@ export function AdminChessboardView() {
                     </span>
                     <button
                         onClick={() => setWeekStart(addWeeks(weekStart, 1))}
+                        aria-label="Следующая неделя"
                         className="p-1.5 rounded-lg border border-unbox-light hover:bg-unbox-light transition-colors"
                     >
                         <ChevronRight size={16} />
@@ -1432,7 +1536,7 @@ export function AdminChessboardView() {
                                 'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
                                 filterLocation === loc.id
                                     ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-white text-unbox-grey border-unbox-light hover:bg-unbox-light/50'
+                                    : 'bg-white text-ink-60 border-unbox-light hover:bg-unbox-light/50'
                             )}
                         >
                             {loc.name}
@@ -1458,7 +1562,7 @@ export function AdminChessboardView() {
                         )}
                     >
                         <span className="font-bold text-base leading-tight">{format(day, 'd')}</span>
-                        <span className="text-[11px] capitalize">{format(day, 'EEE', { locale: ru })}</span>
+                        <span className="text-xs capitalize">{format(day, 'EEE', { locale: ru })}</span>
                     </button>
                 ))}
             </div>
@@ -1501,8 +1605,8 @@ export function AdminChessboardView() {
                                     )}
                                 >
                                     {slot.endsWith(':00')
-                                        ? <span className={clsx("font-semibold text-[11px]", isPeakTime(slot) ? "text-amber-600" : "text-unbox-dark")}>{slot.slice(0, 2)}</span>
-                                        : <span className="text-unbox-light/60 text-[10px]">·</span>
+                                        ? <span className={clsx("font-semibold text-xs", isPeakTime(slot) ? "text-[var(--status-pending-fg)]" : "text-unbox-dark")}>{slot.slice(0, 2)}</span>
+                                        : <span className="text-unbox-light/60 text-xs" aria-hidden="true">·</span>
                                     }
                                 </th>
                             ))}
@@ -1521,7 +1625,7 @@ export function AdminChessboardView() {
                                         <div className="font-semibold text-unbox-dark text-[12px] leading-tight truncate">
                                             {resource.name}
                                         </div>
-                                        <div className="text-[10px] text-unbox-grey font-normal mt-0.5">
+                                        <div className="text-xs text-ink-60 font-normal mt-0.5">
                                             {LOCATIONS.find(l => l.id === resource.locationId)?.name ?? ''}
                                         </div>
                                     </td>
@@ -1549,25 +1653,36 @@ export function AdminChessboardView() {
                                                                 ? 'ring-2 ring-unbox-green ring-offset-1 shadow-sm'
                                                                 : 'hover:brightness-95 hover:shadow-sm'
                                                         )}
-                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${b.finalPrice}₾${dueMap.get(b.id) ? ` · ${dueLabel(dueMap.get(b.id))}` : ''} — перетащи, чтобы перенести`}
+                                                        title={`${getUserName(b.userId)} · ${b.startTime} (${(b.duration || 60) / 60}ч) · ${formatGel(b.finalPrice)}${dueMap.get(b.id) ? ` · ${dueLabel(dueMap.get(b.id))}` : ''} — перетащите, чтобы перенести`}
                                                     >
-                                                        <div className="font-semibold truncate text-[10px] leading-tight flex items-center gap-0.5">
-                                                            {/* Recurring marker — orange star for series. */}
-                                                            {b.recurringGroupId && <span className="text-orange-500 shrink-0" title="Постоянная бронь (серия)">⭐</span>}
+                                                        <div className="font-semibold truncate text-xs leading-tight flex items-center gap-0.5">
+                                                            {/* Серия — значок «повтор» (было ⭐); пересданная — тот же значок. */}
+                                                            {(b.recurringGroupId || b.status === 're-rented') && (
+                                                                <Repeat size={12} className="shrink-0" aria-label={b.recurringGroupId ? 'Серия' : 'Пересдана'} />
+                                                            )}
                                                             <span className="truncate">{getUserName(b.userId)}</span>
                                                         </div>
-                                                        {(cell.colspan ?? 1) >= 3 && (
-                                                            <div className="text-[9px] opacity-60 truncate">
-                                                                {b.startTime} · {b.finalPrice}₾
-                                                                {(() => {
-                                                                    const d = dueMap.get(b.id);
-                                                                    if (!d) return null;
-                                                                    if (d.due <= 0) return <span title={dueLabel(d)}> ✓</span>;
-                                                                    if (d.due < d.price) return <span className="font-bold opacity-100"> → {Math.round(d.due * 10) / 10}₾</span>;
-                                                                    return null;
-                                                                })()}
-                                                            </div>
-                                                        )}
+                                                        {/* Сколько взять (вариант В): цена, «✓» — брать нечего,
+                                                            «→ X ₾» — взять меньше. Теперь и на часовой брони
+                                                            (2 клетки): там без времени (оно видно по сетке),
+                                                            а при частичной оплате — только «→ X ₾», чтобы влезло. */}
+                                                        {(cell.colspan ?? 1) >= 2 && (() => {
+                                                            const d = dueMap.get(b.id);
+                                                            const wide = (cell.colspan ?? 1) >= 3;
+                                                            const partial = !!d && d.due > 0 && d.due < d.price;
+                                                            return (
+                                                                <div className="text-xs leading-tight truncate font-normal tabular-nums">
+                                                                    {wide && <>{b.startTime} · </>}
+                                                                    {(wide || !partial) && formatGel(b.finalPrice)}
+                                                                    {d && d.due <= 0 && (
+                                                                        <Check size={12} strokeWidth={3} className="inline ml-0.5 -mt-0.5" aria-label={dueLabel(d)} />
+                                                                    )}
+                                                                    {partial && d && (
+                                                                        <span className="font-bold">{wide ? ' ' : ''}→ {formatGel(Math.round(d.due * 10) / 10)}</span>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </button>
                                                 </td>
                                             );
@@ -1611,7 +1726,7 @@ export function AdminChessboardView() {
                                                     onDragOver={(e) => { if (draggedBooking && !cell.past) e.preventDefault(); }}
                                                     onDrop={(e) => { e.preventDefault(); if (!cell.past) handleDropMove(resource.id, cell.slot); }}
                                                     className={clsx(
-                                                        "w-full h-full flex items-center justify-center text-[9px] relative select-none touch-none transition-colors",
+                                                        "group/cell w-full h-full flex items-center justify-center text-xs relative select-none touch-none transition-colors",
                                                         draggedBooking && !cell.past && "ring-1 ring-inset ring-unbox-green/40 bg-unbox-green/5",
                                                         cell.past
                                                             ? "bg-gray-50/60"
@@ -1640,15 +1755,16 @@ export function AdminChessboardView() {
                                                                 <button
                                                                     onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); setNewSlotRange(resource.id, []); }}
                                                                     onClick={(e) => { e.stopPropagation(); e.preventDefault(); setNewSlotRange(resource.id, []); }}
-                                                                    className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:bg-red-600 hover:scale-110 transition-all z-50"
-                                                                    title="Удалить"
+                                                                    className="absolute top-0.5 right-0.5 bg-[var(--status-danger-solid)] text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:brightness-90 hover:scale-110 transition-all z-50"
+                                                                    title="Снять выделение"
+                                                                    aria-label="Снять выделение"
                                                                 >
                                                                     <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                                                                 </button>
                                                             )}
                                                         </>
                                                     ) : (
-                                                        !cell.past && <span className="text-unbox-dark/30">{cell.slot}</span>
+                                                        !cell.past && <span className="text-ink-60 opacity-0 group-hover/cell:opacity-100 transition-opacity" aria-hidden="true">{cell.slot}</span>
                                                     )}
                                                 </div>
                                             </td>
@@ -1656,11 +1772,11 @@ export function AdminChessboardView() {
                                     })}
 
                                     {/* Sticky right column */}
-                                    <td className="sticky right-0 bg-white border-l border-unbox-light/40 z-10 h-[40px] p-1.5 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]">
+                                    <td className="sticky right-0 bg-white border-l border-unbox-light/40 z-10 h-[40px] p-1 shadow-[-4px_0_8px_rgba(71,109,107,0.05)]">
                                         {getNewBlockForResource(resource.id) ? (
                                             <button
                                                 onClick={handleContinueNewBooking}
-                                                className="flex items-center gap-1 bg-unbox-green text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap animate-in fade-in zoom-in-90 duration-200 h-full"
+                                                className="flex items-center gap-1 bg-unbox-green text-white text-xs font-semibold px-2 py-1.5 rounded-lg shadow-md hover:bg-unbox-dark active:scale-95 transition-all whitespace-nowrap animate-in fade-in zoom-in-90 duration-200 h-full"
                                             >
                                                 <ArrowRight size={12} className="shrink-0" />
                                                 <span>Продолжить</span>
@@ -1675,7 +1791,7 @@ export function AdminChessboardView() {
                             <tr>
                                 <td
                                     colSpan={TIME_SLOTS.length + 2}
-                                    className="p-10 text-center text-unbox-grey"
+                                    className="p-10 text-center text-ink-60"
                                 >
                                     Нет ресурсов для отображения
                                 </td>
@@ -1687,11 +1803,15 @@ export function AdminChessboardView() {
 
             {/* ── Legend ── */}
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-gray-700 pt-2 pb-1 px-2 bg-white/60 rounded-lg backdrop-blur-sm border border-gray-100">
-                <LegendItem color="bg-emerald-200 border-emerald-500" label="Активное бронирование" />
-                <LegendItem color="bg-amber-100 border-amber-500 border-dashed" label="На переаренде" />
-                <LegendItem color="bg-orange-200 border-orange-500" label="Пересдано" />
-                <LegendItem color="bg-gray-200 border-gray-400" label="Завершено" />
+                <LegendItem color="bg-[var(--status-ok-bg)] border-[var(--status-ok-fg)]/40" label={statusLabel('booking', 'confirmed', 'staff')} />
+                <LegendItem color="bg-[var(--status-danger-bg)] border-[var(--status-danger-fg)] border-dashed" label={statusLabel('booking', 'pending_approval', 'staff')} />
+                <LegendItem color="bg-[var(--status-pending-bg)] border-[var(--status-pending-fg)] border-dashed" label="На пересдаче" />
+                <LegendItem color="bg-[var(--status-muted-bg)] border-[var(--status-muted-fg)] border-dashed" label={statusLabel('booking', 're-rented', 'staff')} />
+                <LegendItem color="bg-[var(--status-muted-bg)] border-[var(--status-muted-fg)]/30" label={statusLabel('booking', 'completed', 'staff')} />
                 <LegendItem color="bg-gray-100 border-gray-300" label="Прошедшее время" />
+                <span className="flex items-center gap-1.5"><Repeat size={14} aria-hidden="true" /> серия</span>
+                <span className="flex items-center gap-1.5"><Check size={14} strokeWidth={3} aria-hidden="true" /> брать нечего</span>
+                <span className="flex items-center gap-1.5 num">→ 12 ₾ — взять меньше цены</span>
             </div>
 
             {/* ── Admin Quick Booking Modal ──
@@ -1724,12 +1844,13 @@ export function AdminChessboardView() {
                             <div className="font-bold text-unbox-dark text-sm leading-tight">
                                 {getUserName(selectedBooking.userId)}
                             </div>
-                            <div className="text-[11px] text-unbox-grey truncate">
+                            <div className="text-xs text-ink-60 truncate">
                                 {selectedBooking.userId}
                             </div>
                         </div>
                         <button
                             onClick={() => setSelectedBooking(null)}
+                            aria-label="Закрыть"
                             className="p-1 hover:bg-unbox-light rounded-lg -mt-0.5 -mr-1 flex-shrink-0"
                         >
                             <X size={15} />
@@ -1744,7 +1865,7 @@ export function AdminChessboardView() {
                         />
                         <InfoRow
                             label="Дата"
-                            value={format(parseUTC(selectedBooking.date), 'd MMMM yyyy', { locale: ru })}
+                            value={formatDateLabel(parseUTC(selectedBooking.date), { withYear: 'auto' })}
                         />
                         <InfoRow
                             label="Время"
@@ -1761,7 +1882,7 @@ export function AdminChessboardView() {
                             <>
                                 <InfoRow
                                     label="Цена"
-                                    value={`${selectedBooking.finalPrice} ₾  (база ${selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0} ₾ − ${selectedBooking.discountAmount?.toFixed(0) ?? 0} ₾)`}
+                                    value={`${formatGel(selectedBooking.finalPrice)}  (база ${formatGel(selectedBooking.basePrice ?? selectedBooking.finalPrice ?? 0)} − ${formatGel(selectedBooking.discountAmount ?? 0, { fraction: 0 })})`}
                                 />
                                 <InfoRow
                                     label="Скидка"
@@ -1773,14 +1894,14 @@ export function AdminChessboardView() {
                                 label="Цена"
                                 value={
                                     selectedBooking.appliedRule === 'SUBSCRIPTION'
-                                        ? `${selectedBooking.finalPrice ?? 0} ₾  (по абонементу)`
-                                        : `${selectedBooking.finalPrice ?? 0} ₾`
+                                        ? `${formatGel(selectedBooking.finalPrice ?? 0)}  (по абонементу)`
+                                        : formatGel(selectedBooking.finalPrice ?? 0)
                                 }
                             />
                         )}
                         <InfoRow
                             label="Статус"
-                            value={statusLabel(selectedBooking)}
+                            value={bookingStatusBadge(selectedBooking)}
                         />
                         <BookingMoneyHints booking={selectedBooking} due={dueMap.get(selectedBooking.id)} />
                         {/* Recurring series banner — shows "Постоянная бронь · осталось N
@@ -1805,20 +1926,20 @@ export function AdminChessboardView() {
                             // добить время по факту, дозаказать допы и поправить цену
                             // (в базе статус ещё confirmed — бэкенд эти правки принимает).
                             <div className="px-3 pb-3 space-y-1.5">
-                                <div className="py-1.5 text-xs font-medium rounded-lg bg-gray-50 text-gray-500 text-center border border-gray-200">
-                                    ☑️ Завершено
+                                <div className="py-1.5 text-xs font-medium text-ink-60 text-center">
+                                    Время брони уже прошло
                                 </div>
                                 {bookingIsToday(selectedBooking) && (
                                     <div className="grid grid-cols-3 gap-1.5">
                                         <button
                                             onClick={() => setExtendModalId(selectedBooking.id)}
-                                            className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                         >
                                             Продлить
                                         </button>
                                         <button
                                             onClick={() => setExtrasModalId(selectedBooking.id)}
-                                            className="py-1.5 text-xs font-medium rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 transition-colors"
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                         >
                                             + Доп
                                         </button>
@@ -1833,7 +1954,7 @@ export function AdminChessboardView() {
                                 {canToSubscription(selectedBooking) && (
                                     <button
                                         onClick={() => handleToSubscription(selectedBooking)}
-                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 transition-colors"
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         На абонемент
                                     </button>
@@ -1848,13 +1969,13 @@ export function AdminChessboardView() {
                                 <div className="grid grid-cols-2 gap-1.5">
                                     <button
                                         onClick={() => handleMove(selectedBooking)}
-                                        className="py-1.5 text-xs font-medium rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         Перенести
                                     </button>
                                     <button
                                         onClick={() => setExtendModalId(selectedBooking.id)}
-                                        className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         Продлить
                                     </button>
@@ -1862,7 +1983,7 @@ export function AdminChessboardView() {
                                 {splitOptions(selectedBooking.duration || 0).length > 0 && (
                                     <button
                                         onClick={() => setSplitModalBooking(selectedBooking)}
-                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         Разделить на сессии
                                     </button>
@@ -1870,7 +1991,7 @@ export function AdminChessboardView() {
                                 {bookingTodayOrFuture(selectedBooking) && (
                                     <button
                                         onClick={() => setExtrasModalId(selectedBooking.id)}
-                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 transition-colors"
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         + Доп (кофе и т.п.)
                                     </button>
@@ -1878,7 +1999,7 @@ export function AdminChessboardView() {
                                 {canToSubscription(selectedBooking) && (
                                     <button
                                         onClick={() => handleToSubscription(selectedBooking)}
-                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 transition-colors"
+                                        className="w-full py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         На абонемент
                                     </button>
@@ -1893,29 +2014,29 @@ export function AdminChessboardView() {
                                     {selectedBooking.paymentMethod !== 'subscription' && selectedBooking.paymentMethod !== 'bonus' && (selectedBooking.duration ?? 60) >= 60 && (
                                         <button
                                             onClick={() => handleBonusHour(selectedBooking)}
-                                            className="py-1.5 text-xs font-medium rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                                            className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors inline-flex items-center justify-center gap-1"
                                         >
-                                            🎁 Час в подарок
+                                            <Gift size={14} aria-hidden="true" /> Час в подарок
                                         </button>
                                     )}
                                     <button
                                         onClick={() => handleToggleReRent(selectedBooking)}
-                                        className="py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                                     >
                                         {selectedBooking.isReRentListed ? 'Снять' : 'Пересдать'}
                                     </button>
                                     <button
                                         onClick={() => handleCancel(selectedBooking.id)}
-                                        className="py-1.5 text-xs font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                                        className="py-1.5 text-xs font-medium rounded-lg bg-[var(--status-danger-bg)] hover:brightness-95 text-[var(--status-danger-fg)] transition-colors"
                                     >
                                         Удалить
                                     </button>
                                 </div>
                                 <button
                                     onClick={() => { const b = selectedBooking; setSelectedBooking(null); openWaitlistFor(b); }}
-                                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 flex items-center justify-center gap-1.5 transition-colors"
+                                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink flex items-center justify-center gap-1.5 transition-colors"
                                 >
-                                    <Bell size={12} /> Следить за слотом
+                                    <Bell size={14} aria-hidden="true" /> Следить за слотом
                                 </button>
                             </div>
                         );
@@ -1983,7 +2104,7 @@ export function AdminChessboardView() {
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
-function LegendItem({ color, label }: { color: string; label: string }) {
+function LegendItem({ color, label }: { color: string; label: React.ReactNode }) {
     return (
         <div className="flex items-center gap-2">
             <span className={clsx('w-4 h-4 rounded border-2 inline-block flex-shrink-0', color)} />
@@ -1992,10 +2113,10 @@ function LegendItem({ color, label }: { color: string; label: string }) {
     );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     return (
         <div className="flex justify-between gap-3">
-            <span className="text-unbox-grey shrink-0">{label}</span>
+            <span className="text-ink-60 shrink-0">{label}</span>
             <span className="font-medium text-unbox-dark text-right">{value}</span>
         </div>
     );
@@ -2029,7 +2150,7 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
     const handleExtend = async () => {
         const n = parseInt(extendCount, 10);
         if (!n || n < 1 || n > 52) {
-            toast.error('От 1 до 52');
+            toast.error('Введите число от 1 до 52');
             return;
         }
         setExtending(true);
@@ -2058,23 +2179,23 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
     return (
         <div className="mt-2 pt-2 border-t border-unbox-light/50">
             <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="text-orange-500">⭐</span>
+                <Repeat size={14} className="text-ink-60" aria-hidden="true" />
                 <span className="text-xs font-semibold text-unbox-dark">Постоянная бронь</span>
-                <span className="text-[10px] text-unbox-grey">· {patternLabel}</span>
+                <span className="text-xs text-ink-60">· {patternLabel}</span>
             </div>
-            <div className="text-[11px] text-unbox-grey mb-2">
-                Осталось <span className="font-semibold text-unbox-dark">{groupInfo.futureCount}</span> из {groupInfo.totalCount} сессий
+            <div className="text-xs text-ink-60 mb-2">
+                Осталось <span className="font-semibold text-unbox-dark">{groupInfo.futureCount}</span> из {ruCountWord(groupInfo.totalCount, ['сессии', 'сессий', 'сессий'])}
             </div>
             {groupInfo.futureCount <= 3 && !extendOpen && (
                 <button
                     onClick={() => setExtendOpen(true)}
-                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 transition-colors"
+                    className="w-full py-1.5 text-xs font-medium rounded-lg bg-sunken hover:bg-ink-05 text-ink transition-colors"
                 >
                     Продлить серию
                 </button>
             )}
             {extendOpen && (
-                <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 space-y-2">
+                <div className="rounded-lg border border-ink-10 bg-sunken p-2 space-y-2">
                     <label className="flex items-center gap-2 text-xs text-unbox-dark">
                         Добавить
                         <input
@@ -2084,7 +2205,8 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
                             value={extendCount}
                             onChange={e => setExtendCount(e.target.value)}
                             onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
-                            className="w-14 px-1.5 py-1 rounded border border-orange-200 bg-white text-center tabular-nums"
+                            aria-label="Сколько броней добавить"
+                            className="w-14 px-1.5 py-1 rounded border border-ink-20 bg-white text-center tabular-nums"
                         />
                         {ruPlural(parseInt(extendCount, 10) || 0, ['бронь', 'брони', 'броней'])} в серию
                     </label>
@@ -2092,16 +2214,16 @@ function RecurringSeriesInfo({ groupId, onExtended }: { groupId: string; onExten
                         <button
                             onClick={() => setExtendOpen(false)}
                             disabled={extending}
-                            className="flex-1 py-1.5 text-xs font-medium rounded-lg bg-white border border-orange-200 text-unbox-dark disabled:opacity-60"
+                            className="flex-1 py-1.5 text-xs font-medium rounded-lg bg-white border border-ink-20 text-unbox-dark disabled:opacity-60"
                         >
-                            Отмена
+                            Не продлевать
                         </button>
                         <button
                             onClick={handleExtend}
                             disabled={extending}
-                            className="flex-1 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-60"
+                            className="flex-1 py-1.5 text-xs font-medium rounded-lg bg-accent hover:bg-accent-hover text-on-accent disabled:opacity-60"
                         >
-                            {extending ? '…' : 'Добавить'}
+                            {extending ? 'Добавляем…' : 'Добавить'}
                         </button>
                     </div>
                 </div>
@@ -2229,7 +2351,7 @@ function AdminQuickBookingModal({
                     extras: effectiveExtras.length ? effectiveExtras : undefined,
                 } as any);
                 const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
-                toast.success(`Создано ${result.created} бронирований (${patternLabel}) на ${result.totalCost} ₾`);
+                toast.success(`Создано ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}) на ${formatGel(result.totalCost)}`);
             } else {
                 await bookingsApi.createBooking({
                     resourceId: bookResId,
@@ -2290,32 +2412,33 @@ function AdminQuickBookingModal({
                             <Plus size={18} className="text-unbox-green" />
                             Новое бронирование
                         </h3>
-                        <p className="text-sm text-unbox-grey mt-0.5">от имени пользователя</p>
+                        <p className="text-sm text-ink-60 mt-0.5">от имени пользователя</p>
                     </div>
-                    <button onClick={onClose} className="p-1 hover:bg-unbox-light rounded-lg">
-                        <X className="w-5 h-5 text-unbox-grey" />
+                    <button onClick={onClose} aria-label="Закрыть" className="p-1 hover:bg-unbox-light rounded-lg">
+                        <X className="w-5 h-5 text-ink-60" />
                     </button>
                 </div>
 
                 {/* User search */}
                 <div>
-                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Пользователь</label>
+                    <label className="text-xs font-medium text-ink-60 mb-1.5 block">Пользователь</label>
                     {selectedUser ? (
                         <div className="flex items-center justify-between bg-unbox-light/50 rounded-xl px-3 py-2.5">
                             <div>
                                 <div className="font-medium text-sm">{selectedUser.name}</div>
-                                <div className="text-xs text-unbox-grey">{selectedUser.email}</div>
+                                <div className="text-xs text-ink-60">{selectedUser.email}</div>
                             </div>
                             <button
                                 onClick={() => { setSelectedUser(null); setSearchQuery(''); }}
+                                aria-label="Выбрать другого клиента"
                                 className="p-1 hover:bg-white rounded-lg"
                             >
-                                <X size={14} className="text-unbox-grey" />
+                                <X size={14} className="text-ink-60" />
                             </button>
                         </div>
                     ) : (
                         <div className="relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" />
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
                             <input
                                 type="text"
                                 value={searchQuery}
@@ -2333,7 +2456,7 @@ function AdminQuickBookingModal({
                                             className="w-full text-left px-3 py-2 hover:bg-unbox-light/30 transition-colors text-sm border-b border-unbox-light/30 last:border-0"
                                         >
                                             <div className="font-medium">{u.name}</div>
-                                            <div className="text-xs text-unbox-grey">{u.email}</div>
+                                            <div className="text-xs text-ink-60">{u.email}</div>
                                         </button>
                                     ))}
                                 </div>
@@ -2344,21 +2467,21 @@ function AdminQuickBookingModal({
 
                 <div className="bg-unbox-light/50 rounded-xl p-3 space-y-1.5 text-sm">
                     <div className="flex justify-between">
-                        <span className="text-unbox-grey">Кабинет</span>
+                        <span className="text-ink-60">Кабинет</span>
                         <span className="font-medium">{resource?.name || slot.resId}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span className="text-unbox-grey">Дата</span>
-                        <span className="font-medium">{format(slot.date, 'd MMMM yyyy', { locale: ru })}</span>
+                        <span className="text-ink-60">Дата</span>
+                        <span className="font-medium">{formatDateLabel(slot.date, { withYear: 'auto' })}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span className="text-unbox-grey">Время</span>
+                        <span className="text-ink-60">Время</span>
                         <span className="font-medium">{slot.time} — {endTime}</span>
                     </div>
                 </div>
 
                 <div>
-                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Длительность</label>
+                    <label className="text-xs font-medium text-ink-60 mb-1.5 block">Длительность</label>
                     <div className="flex gap-2">
                         {[60, 90, 120, 180].map(d => (
                             <button
@@ -2367,7 +2490,7 @@ function AdminQuickBookingModal({
                                 className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                                     duration === d
                                         ? 'bg-unbox-green text-white border-unbox-green'
-                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                 }`}
                             >
                                 {d >= 120 ? `${d / 60}ч` : `${d}м`}
@@ -2381,7 +2504,7 @@ function AdminQuickBookingModal({
                     блок скрыт, чтобы не загромождать форму. */}
                 {(resource?.formats?.length ?? 0) > 1 && (
                     <div>
-                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Формат</label>
+                        <label className="text-xs font-medium text-ink-60 mb-1.5 block">Формат</label>
                         <div className="grid grid-cols-3 gap-1.5">
                             {(resource?.formats || []).map(f => {
                                 const labels: Record<string, string> = {
@@ -2397,7 +2520,7 @@ function AdminQuickBookingModal({
                                         className={`py-2 rounded-xl text-xs font-medium border transition-colors ${
                                             bookingFormat === f
                                                 ? 'bg-unbox-green text-white border-unbox-green'
-                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                                : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                         }`}
                                     >
                                         {labels[f] || f}
@@ -2414,7 +2537,7 @@ function AdminQuickBookingModal({
                     не предлагает никаких допов, блок скрывается. */}
                 {availableExtras.length > 0 && (
                     <div>
-                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Допы</label>
+                        <label className="text-xs font-medium text-ink-60 mb-1.5 block">Допы</label>
                         <div className="flex flex-wrap gap-1.5">
                             {availableExtras.map(extra => {
                                 const checked = extras.includes(extra.id);
@@ -2430,11 +2553,11 @@ function AdminQuickBookingModal({
                                         className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
                                             checked
                                                 ? 'bg-unbox-green text-white border-unbox-green'
-                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                                : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                         }`}
                                     >
                                         {extra.name}
-                                        {extra.price > 0 && <span className="opacity-80 ml-1">+{extra.price}₾</span>}
+                                        {extra.price > 0 && <span className="ml-1">+{formatGel(extra.price)}</span>}
                                     </button>
                                 );
                             })}
@@ -2444,7 +2567,7 @@ function AdminQuickBookingModal({
 
                 {/* Recurring pattern */}
                 <div className="space-y-2">
-                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Повторение</label>
+                    <label className="text-xs font-medium text-ink-60 mb-1.5 block">Повторение</label>
                     <div className="grid grid-cols-4 gap-1.5">
                         {([
                             { id: '', label: 'Разово' },
@@ -2459,7 +2582,7 @@ function AdminQuickBookingModal({
                                 className={`py-1.5 rounded-xl text-xs font-medium border transition-colors text-center ${
                                     recurringPattern === p.id
                                         ? 'bg-unbox-green text-white border-unbox-green'
-                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                 }`}
                             >
                                 {p.label}
@@ -2481,10 +2604,10 @@ function AdminQuickBookingModal({
                                         key={m.id}
                                         type="button"
                                         onClick={() => setRecurringMode(m.id)}
-                                        className={`flex-1 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                                        className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
                                             recurringMode === m.id
                                                 ? 'bg-unbox-dark text-white border-unbox-dark'
-                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-dark/50'
+                                                : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-dark/50'
                                         }`}
                                     >
                                         {m.label}
@@ -2504,7 +2627,7 @@ function AdminQuickBookingModal({
                                         max={recurringPattern === 'monthly' ? 24 : 52}
                                         className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                     />
-                                    <span className="text-xs text-unbox-grey">
+                                    <span className="text-xs text-ink-60">
                                         повторений · {recurringPattern === 'monthly'
                                             ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                             : recurringPattern === 'biweekly'
@@ -2521,8 +2644,8 @@ function AdminQuickBookingModal({
                                         onChange={e => setRecurringUntil(e.target.value)}
                                         className="px-2 py-1.5 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                     />
-                                    <span className="text-xs text-unbox-grey">
-                                        ≈ {effectiveOccurrences} {effectiveOccurrences === 1 ? 'бронь' : 'броней'}
+                                    <span className="text-xs text-ink-60">
+                                        ≈ {ruCountWord(effectiveOccurrences, ['бронь', 'брони', 'броней'])}
                                     </span>
                                 </div>
                             )}
@@ -2536,7 +2659,7 @@ function AdminQuickBookingModal({
                     className="w-full py-3 bg-unbox-green text-white font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-60 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    {recurringPattern ? `Создать серию · ${effectiveOccurrences} броней` : 'Забронировать'}
+                    {recurringPattern ? `Создать серию · ${ruCountWord(effectiveOccurrences, ['бронь', 'брони', 'броней'])}` : 'Забронировать'}
                 </button>
             </div>
 

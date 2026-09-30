@@ -4,6 +4,7 @@ import { X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
 import type { BookingHistoryItem } from '../../store/types';
+import { formatDayMonth, formatGel } from '../../utils/format';
 
 /**
  * «22,5» → 22.5. Админы набирают цену с запятой, а parseFloat('22,5') = 22 —
@@ -66,9 +67,9 @@ export function BookingPriceModal({
         } else if (booking.paymentMethod === 'subscription') {
             effect = 'Бронь по абонементу — часы клиента пересчитаются по новой цене.';
         } else if (delta > 0) {
-            effect = `Клиенту вернётся ${money(delta)} ₾ на баланс.`;
+            effect = `Клиенту вернётся ${formatGel(delta)} на баланс.`;
         } else {
-            effect = `С баланса клиента спишется ещё ${money(-delta)} ₾.`;
+            effect = `С баланса клиента спишется ещё ${formatGel(-delta)}.`;
         }
     }
 
@@ -79,7 +80,7 @@ export function BookingPriceModal({
         setSaving(true);
         try {
             await bookingsApi.setPrice(booking.id, parsed, reason.trim() || undefined);
-            toast.success(`Цена изменена: ${money(oldPrice)} ₾ → ${money(parsed)} ₾`);
+            toast.success(`Цена изменена: ${formatGel(oldPrice)} → ${formatGel(parsed)}`);
             onClose();
             await onSaved?.();
         } catch (e: any) {
@@ -93,7 +94,7 @@ export function BookingPriceModal({
     const dateLabel = (() => {
         const raw: any = booking.date;
         const day = typeof raw === 'string' ? raw.split('T')[0].split(' ')[0] : '';
-        return day ? `${day.slice(8, 10)}.${day.slice(5, 7)}` : '';
+        return day ? formatDayMonth(day) : '';
     })();
 
     return createPortal(
@@ -111,17 +112,17 @@ export function BookingPriceModal({
                     onClick={onClose}
                     disabled={saving}
                     aria-label="Закрыть"
-                    className="absolute top-4 right-4 text-unbox-grey hover:text-unbox-dark"
+                    className="absolute top-4 right-4 text-ink-60 hover:text-unbox-dark"
                 >
                     <X size={20} />
                 </button>
 
                 <h3 className="text-xl font-bold text-unbox-dark mb-1">Изменить цену</h3>
-                <p className="text-sm text-unbox-grey mb-4">
-                    {[dateLabel, booking.startTime].filter(Boolean).join(', ')} · сейчас {money(oldPrice)} ₾
+                <p className="text-sm text-ink-60 mb-4">
+                    {[dateLabel, booking.startTime].filter(Boolean).join(', ')} · сейчас {formatGel(oldPrice)}
                 </p>
 
-                <label className="block text-xs font-semibold text-unbox-grey mb-1" htmlFor="booking-new-price">
+                <label className="block text-xs font-semibold text-ink-60 mb-1" htmlFor="booking-new-price">
                     Новая цена, ₾
                 </label>
                 <input
@@ -136,15 +137,15 @@ export function BookingPriceModal({
                 />
                 <div className="min-h-[20px] mt-1.5 text-xs">
                     {error ? (
-                        <span className="text-red-600">{error}</span>
+                        <span className="text-[var(--status-danger-fg)]">{error}</span>
                     ) : same ? (
-                        <span className="text-unbox-grey">Цена та же, что сейчас</span>
+                        <span className="text-ink-60">Цена та же, что сейчас</span>
                     ) : effect ? (
                         <span className="text-unbox-dark font-medium">{effect}</span>
                     ) : null}
                 </div>
 
-                <label className="block text-xs font-semibold text-unbox-grey mt-3 mb-1" htmlFor="booking-price-reason">
+                <label className="block text-xs font-semibold text-ink-60 mt-3 mb-1" htmlFor="booking-price-reason">
                     Причина (необязательно, для истории)
                 </label>
                 <input

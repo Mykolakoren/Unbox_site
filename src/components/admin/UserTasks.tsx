@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { CheckSquare, Plus, Trash2, Calendar } from 'lucide-react';
 import { useUserStore, type Task } from '../../store/userStore';
 import { format } from 'date-fns';
-import { safeFormat } from '../../utils/dateUtils';
-import { ru } from 'date-fns/locale';
+import { formatDayMonth } from '../../utils/format';
 import clsx from 'clsx';
 import { LegacyButton as Button } from '../ui/LegacyButton';
 
@@ -46,7 +45,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
     return (
         <div className="bg-white p-6 rounded-2xl border border-gray-200 h-full flex flex-col">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <CheckSquare size={20} className="text-gray-400" />
+                <CheckSquare size={20} className="text-ink-60" />
                 Задачи и напоминания
             </h3>
 
@@ -73,7 +72,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
 
             <div className="flex-1 overflow-y-auto space-y-2 min-h-[100px]">
                 {sortedTasks.length === 0 && (
-                    <div className="text-center text-gray-400 text-sm py-4 italic">
+                    <div className="text-center text-ink-60 text-sm py-4 italic">
                         Нет активных задач
                     </div>
                 )}
@@ -88,7 +87,7 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                             className={clsx(
                                 "group flex items-start gap-3 p-3 rounded-xl border transition-all",
                                 task.isCompleted ? "bg-gray-50 border-gray-100" : "bg-white border-gray-200 hover:border-gray-300",
-                                isOverdue && "border-red-200 bg-red-50/30"
+                                isOverdue && "border-[var(--status-danger-fg)]/25 bg-[var(--status-danger-bg)]/30"
                             )}
                         >
                             <input
@@ -99,21 +98,21 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
                             />
 
                             <div className="flex-1 min-w-0">
-                                <div className={clsx("text-sm break-words", task.isCompleted && "text-gray-400 line-through")}>
+                                <div className={clsx("text-sm break-words", task.isCompleted && "text-ink-60 line-through")}>
                                     {task.text}
                                 </div>
                                 <div className="flex items-center gap-3 mt-1">
-                                    <div className="text-[10px] text-gray-400 flex items-center gap-1">
+                                    <div className="text-xs text-ink-60 flex items-center gap-1">
                                         <Calendar size={10} />
-                                        {safeFormat(task.createdAt, 'd MMM', ru, '—')}
+                                        {formatDayMonth(task.createdAt)}
                                     </div>
                                     {task.dueDate && (
                                         <div className={clsx(
-                                            "text-[10px] flex items-center gap-1 font-medium",
-                                            isOverdue ? "text-red-500" : isDueToday ? "text-amber-500" : "text-blue-500"
+                                            "text-xs flex items-center gap-1 font-medium",
+                                            isOverdue ? "text-[var(--status-danger-fg)]" : isDueToday ? "text-[var(--status-pending-fg)]" : "text-ink-60"
                                         )}>
                                             <Calendar size={10} />
-                                            До: {safeFormat(task.dueDate, 'd MMM', ru, '—')}
+                                            До: {formatDayMonth(task.dueDate)}
                                         </div>
                                     )}
                                 </div>
@@ -121,7 +120,8 @@ export function UserTasks({ email, tasks }: UserTasksProps) {
 
                             <button
                                 onClick={() => removeUserTask(email, task.id)}
-                                className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                aria-label="Удалить задачу"
+                                className="text-ink-60 hover:text-[var(--status-danger-fg)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
                             >
                                 <Trash2 size={14} />
                             </button>

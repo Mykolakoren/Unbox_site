@@ -1,15 +1,18 @@
-import { ru } from 'date-fns/locale';
 import { useCashboxStore } from '../../../store/cashboxStore';
-import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
+import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
+import { formatDayMonth, formatGel, formatTime } from '../../../utils/format';
+import { EmptyState } from '../../ui/EmptyState';
 
 export function ShiftReportsTable() {
     const { shiftReports } = useCashboxStore();
 
     if (shiftReports.length === 0) {
         return (
-            <div className="text-center py-12 bg-gray-50 rounded-xl text-gray-500 text-sm">
-                Отчётов по сменам пока нет
-            </div>
+            <EmptyState
+                compact
+                title="Отчётов по сменам пока нет"
+                hint="Отчёт появится после первого закрытия смены."
+            />
         );
     }
 
@@ -17,7 +20,7 @@ export function ShiftReportsTable() {
         <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
                 <thead>
-                    <tr className="text-xs text-gray-400 border-b border-gray-100">
+                    <tr className="text-xs text-ink-60 border-b border-gray-100">
                         <th className="font-medium py-3 pl-2">Период</th>
                         <th className="font-medium py-3">Филиал</th>
                         <th className="font-medium py-3">Админ</th>
@@ -40,28 +43,28 @@ export function ShiftReportsTable() {
                         const disc = Number(r.discrepancy ?? 0);
                         const discColor =
                             Math.abs(disc) < 0.01
-                                ? 'text-green-600'
+                                ? 'text-[var(--status-ok-fg)]'
                                 : disc > 0
-                                    ? 'text-amber-600'
-                                    : 'text-red-600';
+                                    ? 'text-[var(--status-pending-fg)]'
+                                    : 'text-[var(--status-danger-fg)]';
 
                         return (
                             <tr key={r.id} className="hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
                                 <td className="py-3 pl-2 align-top">
                                     <div className="font-medium text-gray-900">
-                                        {formatBatumi(end, 'd MMM yyyy', ru)}
+                                        {formatDayMonth(end, { timeZone: BATUMI_TZ, withYear: 'auto' })}
                                     </div>
-                                    <div className="text-xs text-gray-400">
-                                        {formatBatumi(end, 'HH:mm')}
+                                    <div className="text-xs text-ink-60">
+                                        {formatTime(end, { timeZone: BATUMI_TZ })}
                                     </div>
                                 </td>
                                 <td className="py-3 align-top">
                                     {r.branch ? (
-                                        <span className="inline-block text-[10px] uppercase tracking-wider font-semibold text-unbox-green bg-unbox-green/10 rounded-md px-2 py-0.5">
+                                        <span className="inline-block text-xs uppercase tracking-wider font-semibold text-unbox-green bg-unbox-green/10 rounded-md px-2 py-0.5">
                                             {r.branch}
                                         </span>
                                     ) : (
-                                        <span className="inline-block text-[10px] uppercase tracking-wider font-semibold text-gray-500 bg-gray-100 rounded-md px-2 py-0.5">
+                                        <span className="inline-block text-xs uppercase tracking-wider font-semibold text-gray-500 bg-gray-100 rounded-md px-2 py-0.5">
                                             Все
                                         </span>
                                     )}
@@ -69,16 +72,14 @@ export function ShiftReportsTable() {
                                 <td className="py-3 align-top">
                                     <span className="text-gray-700">{r.adminName}</span>
                                 </td>
-                                <td className="py-3 align-top text-right font-medium text-gray-700">
-                                    {expected.toFixed(2)} ₾
+                                <td className="py-3 align-top text-right font-medium text-gray-700 num">
+                                    {formatGel(expected)}
                                 </td>
-                                <td className="py-3 align-top text-right font-medium text-gray-900">
-                                    {actual.toFixed(2)} ₾
+                                <td className="py-3 align-top text-right font-medium text-gray-900 num">
+                                    {formatGel(actual)}
                                 </td>
-                                <td className={`py-3 align-top text-right font-bold ${discColor}`}>
-                                    {Math.abs(disc) < 0.01
-                                        ? '0.00'
-                                        : `${disc > 0 ? '+' : ''}${disc.toFixed(2)}`} ₾
+                                <td className={`py-3 align-top text-right font-bold num ${discColor}`}>
+                                    {Math.abs(disc) < 0.01 ? formatGel(0) : formatGel(disc, { sign: true })}
                                 </td>
                                 <td className="py-3 pr-2 align-top">
                                     <span className="text-gray-500 text-xs truncate max-w-[150px] block">

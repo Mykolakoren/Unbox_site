@@ -135,6 +135,8 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
         <div ref={ref} className="relative">
             <button
                 onClick={handleOpen}
+                aria-label={totalUnread > 0 ? `Уведомления, новых: ${totalUnread}` : 'Уведомления'}
+                aria-expanded={open}
                 className={clsx(
                     "relative p-2 rounded-xl transition-colors",
                     variant === 'light'
@@ -147,7 +149,7 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                     className={variant === 'light' ? "text-black/70" : "text-white/80"}
                 />
                 {totalUnread > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1 shadow-lg animate-in zoom-in-50 duration-200">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-[var(--status-danger-solid)] text-white text-xs font-bold px-1 shadow-lg animate-in zoom-in-50 duration-200">
                         {totalUnread > 99 ? '99+' : totalUnread}
                     </span>
                 )}
@@ -170,7 +172,7 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                                 <button
                                     onClick={handleMarkAll}
                                     disabled={markingAll}
-                                    className="flex items-center gap-1 text-[11px] text-unbox-green hover:text-unbox-dark font-medium transition-colors disabled:opacity-50"
+                                    className="flex items-center gap-1 text-xs text-unbox-green hover:text-unbox-dark font-medium transition-colors disabled:opacity-50"
                                 >
                                     {markingAll ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />}
                                     Прочитать все
@@ -181,13 +183,14 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                         {/* List */}
                         <div className="overflow-y-auto flex-1">
                             {loading ? (
-                                <div className="flex items-center justify-center py-10">
-                                    <Loader2 size={20} className="animate-spin text-unbox-grey" />
+                                <div className="flex items-center justify-center py-10" role="status" aria-busy="true">
+                                    <Loader2 size={20} className="animate-spin text-ink-60" aria-hidden="true" />
+                                    <span className="sr-only">Загружаем уведомления…</span>
                                 </div>
                             ) : allNotifications.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-10 text-unbox-grey">
+                                <div className="flex flex-col items-center justify-center py-10 text-ink-60">
                                     <Bell size={24} className="opacity-30 mb-2" />
-                                    <span className="text-sm">Нет уведомлений</span>
+                                    <span className="text-sm">Новых уведомлений нет</span>
                                 </div>
                             ) : (
                                 allNotifications.map(n => {
@@ -203,11 +206,12 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                                         >
                                             <div className={clsx(
                                                 "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
-                                                n.type === 'crm_access_request' ? "bg-blue-50 text-blue-500" :
-                                                n.type === 'hot_booking_approval' ? "bg-orange-50 text-orange-500" :
-                                                n.type === 'task_deadline' ? "bg-amber-50 text-amber-600" :
-                                                n.type === 'booking_cancelled' ? "bg-red-50 text-red-500" :
-                                                "bg-gray-100 text-gray-500"
+                                                // Цвет — только по смыслу (wave 1): ждёт решения — «ждём»,
+                                                // отмена — «опасно», остальное нейтрально.
+                                                n.type === 'hot_booking_approval' || n.type === 'task_deadline'
+                                                    ? "bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]" :
+                                                n.type === 'booking_cancelled' ? "bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]" :
+                                                "bg-sunken text-ink-60"
                                             )}>
                                                 <IconComp size={16} />
                                             </div>
@@ -216,10 +220,10 @@ export function NotificationBell({ variant = 'dark' }: NotificationBellProps = {
                                                     {n.title}
                                                 </div>
                                                 {n.description && (
-                                                    <div className="text-xs text-gray-400 mt-0.5 truncate">{n.description}</div>
+                                                    <div className="text-xs text-ink-60 mt-0.5 truncate">{n.description}</div>
                                                 )}
                                             </div>
-                                            <span className="text-[10px] text-gray-400 shrink-0 mt-1">{timeAgo(n.createdAt)}</span>
+                                            <span className="text-xs text-ink-60 shrink-0 mt-1">{timeAgo(n.createdAt)}</span>
                                         </button>
                                     );
                                 })

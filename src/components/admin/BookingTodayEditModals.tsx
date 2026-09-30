@@ -5,6 +5,10 @@ import { EXTRAS, RESOURCES, LOCATIONS } from '../../utils/data';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
 import { useUserStore } from '../../store/userStore';
+import { AlertTriangle } from 'lucide-react';
+import { STATUS } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
+import { ruCountWord } from '../../utils/plural';
 
 /**
  * Быстрые правки СЕГОДНЯШНЕЙ брони для админа:
@@ -23,15 +27,15 @@ const card: React.CSSProperties = {
     fontFamily: GH_SANS,
 };
 const title: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
     color: GH.ink60, marginBottom: 16,
 };
 const btnPrimary: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
     padding: '12px 18px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer', fontWeight: 600,
 };
 const btnGhost: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
     padding: '12px 18px', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink}`, cursor: 'pointer',
 };
 
@@ -62,7 +66,7 @@ export function ExtendBookingModal({
             <div style={card} onClick={(e) => e.stopPropagation()}>
                 <div style={title}>Продлить бронь</div>
                 <p style={{ fontSize: 14, color: GH.ink, marginBottom: 20 }}>
-                    На сколько добавить время? Проверю, что кабинет после свободен. Доплата
+                    На сколько добавить время? Проверим, что кабинет после свободен. Доплата
                     за добавленное время спишется с депозита клиента.
                 </p>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
@@ -96,7 +100,7 @@ export function splitOptions(minutes: number): { label: string; parts: number[] 
     };
     if (minutes % 60 === 0 && minutes / 60 >= 2) {
         const n = minutes / 60;
-        push(`По часу — ${n} ${n === 2 ? 'сессии' : 'сессий'}`, Array(n).fill(60));
+        push(`По часу — ${ruCountWord(n, ['сессия', 'сессии', 'сессий'])}`, Array(n).fill(60));
     }
     if (minutes % 2 === 0 && (minutes / 2) % 30 === 0 && minutes / 2 >= 30) {
         push('Пополам', [minutes / 2, minutes / 2]);
@@ -139,7 +143,7 @@ export function SplitBookingModal({
         setBusy(true);
         try {
             const res = await bookingsApi.splitBooking(bookingId, parts);
-            toast.success(`Бронь разделена на ${res.length}`);
+            toast.success(`Бронь разделена на ${ruCountWord(res.length, ['часть', 'части', 'частей'])}`);
             onDone();
             onClose();
         } catch (e: any) {
@@ -178,7 +182,7 @@ export function SplitBookingModal({
                                 }}
                             >
                                 <span>{o.label}</span>
-                                <span style={{ fontSize: 10, opacity: 0.75, letterSpacing: '0.04em' }}>
+                                <span style={{ fontSize: 12, opacity: 0.75, letterSpacing: '0.04em' }}>
                                     {times(o.parts)}
                                 </span>
                             </button>
@@ -229,7 +233,7 @@ export function AddExtrasModal({
         setBusy(true);
         try {
             await bookingsApi.addBookingExtras(bookingId, ids, method);
-            toast.success(`Допы добавлены на ${total} ₾`);
+            toast.success(`Допы добавлены на ${formatGel(total)}`);
             onDone();
             onClose();
         } catch (e: any) {
@@ -262,7 +266,7 @@ export function AddExtrasModal({
                                 border: `1px solid ${count ? GH.ink : GH.ink10}`, padding: '10px 12px',
                             }}>
                                 <span style={{ fontSize: 14, color: GH.ink }}>
-                                    {extra.name} · {extra.price} ₾
+                                    {extra.name} · <span className="num">{formatGel(extra.price)}</span>
                                 </span>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     {count > 0 && (
@@ -285,7 +289,7 @@ export function AddExtrasModal({
                             style={{
                                 flex: 1, minWidth: 90, padding: '10px 8px', border: 'none',
                                 borderRight: `1px solid ${GH.ink10}`, cursor: 'pointer',
-                                fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 background: method === m.value ? GH.ink : 'transparent',
                                 color: method === m.value ? GH.paper : GH.ink,
                             }}>
@@ -300,7 +304,7 @@ export function AddExtrasModal({
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <button style={{ ...btnPrimary, flex: 1, opacity: (!ids.length || busy) ? 0.5 : 1 }}
                         disabled={!ids.length || busy} onClick={submit}>
-                        Добавить {total > 0 ? `· ${total} ₾` : ''}
+                        Добавить {total > 0 ? `· ${formatGel(total)}` : ''}
                     </button>
                     <button style={btnGhost} onClick={onClose} disabled={busy}>Отмена</button>
                 </div>
@@ -442,8 +446,9 @@ export function MoveBookingModal({
                         </span>
                     )}
                     {clash && (
-                        <div style={{ color: '#b3261e', fontWeight: 600, marginTop: 4 }}>
-                            ⚠ {_fmtMin(_newStart)}–{_fmtMin(_newEnd)} пересекается с {_fmtMin(clash.start)}–{_fmtMin(clash.end)} — выберите другое время или кабинет.
+                        <div style={{ color: STATUS.danger.fg, fontWeight: 600, marginTop: 4, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                            <AlertTriangle size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                            <span>{_fmtMin(_newStart)}–{_fmtMin(_newEnd)} пересекается с {_fmtMin(clash.start)}–{_fmtMin(clash.end)} — выберите другое время или кабинет.</span>
                         </div>
                     )}
                 </div>

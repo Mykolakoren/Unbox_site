@@ -23,7 +23,7 @@ export const PERMISSION_GROUPS = [
             { id: 'bookings.cancel_any',     label: 'Отмена бронирований (в рамках 24ч)',   seniorAdmin: true },
             { id: 'bookings.reschedule_any', label: 'Перенос бронирований (в рамках 24ч)',  seniorAdmin: true },
             { id: 'bookings.override_24h',   label: 'Обход правила 24ч (с причиной)',       seniorAdmin: true },
-            { id: 'bookings.manage_rerent',  label: 'Управление переарендой',               seniorAdmin: true },
+            { id: 'bookings.manage_rerent',  label: 'Управление пересдачей',               seniorAdmin: true },
         ],
     },
     {
@@ -210,7 +210,7 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
                 <Shield size={16} className="text-unbox-green" />
                 <span className="text-sm font-semibold text-unbox-dark">Гранулярные права доступа</span>
                 {!isOwner && isSeniorAdmin && (
-                    <span className={`${canEdit ? '' : 'ml-auto'} flex items-center gap-1 text-[11px] text-unbox-grey`}>
+                    <span className={`${canEdit ? '' : 'ml-auto'} flex items-center gap-1 text-xs text-ink-60`}>
                         <Info size={11} />
                         Серые пункты — только для владельца
                     </span>
@@ -219,7 +219,7 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
 
             {PERMISSION_GROUPS.map(group => (
                 <div key={group.group} className="space-y-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-unbox-grey px-1">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-ink-60 px-1">
                         {group.group}
                     </div>
                     <div className="bg-white rounded-xl border border-unbox-light overflow-hidden">
@@ -240,31 +240,31 @@ export function PermissionsEditor({ user, currentUserRole, onUpdate }: Props) {
                                         idx > 0 && 'border-t border-unbox-light',
                                         editable && active && 'bg-unbox-green/5',
                                         editable && !active && 'hover:bg-unbox-light/50',
-                                        isInherited && 'bg-blue-50/60',
+                                        isInherited && 'bg-sunken',
                                         locked && !isInherited && 'opacity-40 cursor-not-allowed',
                                     ].filter(Boolean).join(' ')}
                                 >
                                     {/* Checkbox */}
                                     <div className={[
                                         'w-4.5 h-4.5 rounded flex-shrink-0 border flex items-center justify-center transition-all',
-                                        active && isInherited ? 'bg-blue-400 border-blue-400' :
+                                        active && isInherited ? 'bg-ink-60 border-ink-60' :
                                         active ? 'bg-unbox-green border-unbox-green' :
                                         'border-unbox-light bg-white',
                                     ].join(' ')}>
                                         {active && <Check size={10} strokeWidth={3} className="text-white" />}
                                     </div>
 
-                                    <span className={`text-sm ${active ? 'text-unbox-dark font-medium' : 'text-unbox-grey'}`}>
+                                    <span className={`text-sm ${active ? 'text-unbox-dark font-medium' : 'text-ink-60'}`}>
                                         {perm.label}
                                     </span>
 
                                     {isInherited && (
-                                        <span className="ml-auto text-[10px] text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                                        <span className="ml-auto text-xs text-ink-60 bg-ink-05 px-1.5 py-0.5 rounded flex-shrink-0">
                                             от роли
                                         </span>
                                     )}
                                     {locked && !isInherited && (
-                                        <span className="ml-auto text-[10px] text-unbox-grey/60 flex-shrink-0">
+                                        <span className="ml-auto text-xs text-ink-60 flex-shrink-0">
                                             Только владелец
                                         </span>
                                     )}

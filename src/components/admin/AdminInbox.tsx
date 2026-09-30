@@ -5,6 +5,11 @@ import { bookingsApi } from '../../api/bookings';
 import { api } from '../../api/client';
 import type { BookingHistoryItem, User } from '../../store/types';
 import { GH, GH_MONO, GH_SANS } from '../../hooks/useDesignFlag';
+import { COLOR, STATUS } from '../../design/tokens';
+import { ruCountWord } from '../../utils/plural';
+import { formatGel } from '../../utils/format';
+import { Skeleton } from '../ui/Skeleton';
+import { ErrorBar } from '../ui/ErrorBar';
 
 /**
  * Admin Inbox — single feed of "things that need your attention TODAY".
@@ -44,6 +49,9 @@ export function AdminInbox({ users }: { users: User[] }) {
     const [pending, setPending] = useState<BookingHistoryItem[] | null>(null);
     const [pendingSpecs, setPendingSpecs] = useState<PendingSpec[] | null>(null);
     const [loaded, setLoaded] = useState(false);
+    // Запрос упал — не пишем «всё разобрано»: это была бы неправда (wave 1).
+    const [failed, setFailed] = useState(false);
+    const [reloadTick, setReloadTick] = useState(0);
 
     useEffect(() => {
         Promise.allSettled([
@@ -54,9 +62,10 @@ export function AdminInbox({ users }: { users: User[] }) {
             if (p2.status === 'fulfilled') {
                 setPendingSpecs(p2.value.data.filter(s => s.application_status === 'pending'));
             }
+            setFailed(p1.status === 'rejected' || p2.status === 'rejected');
             setLoaded(true);
         });
-    }, []);
+    }, [reloadTick]);
 
     const items: InboxItem[] = useMemo(() => {
         const out: InboxItem[] = [];
@@ -66,7 +75,7 @@ export function AdminInbox({ users }: { users: User[] }) {
             out.push({
                 id: 'hot',
                 kind: 'hot_booking',
-                title: `${pending.length} hot-${pending.length === 1 ? 'бронь' : 'броней'} ждёт одобрения`,
+                title: `${ruCountWord(pending.length, ['срочная бронь', 'срочные брони', 'срочных броней'])} ${pending.length % 10 === 1 && pending.length % 100 !== 11 ? 'ждёт' : 'ждут'} подтверждения`,
                 sub: 'Клиент пишет «срочно нужно». Вы — последний фильтр.',
                 href: '/admin/bookings?status=pending',
                 severity: 'urgent',
@@ -79,7 +88,7 @@ export function AdminInbox({ users }: { users: User[] }) {
             out.push({
                 id: 'specs',
                 kind: 'pending_specialist',
-                title: `${pendingSpecs.length} заявок специалистов`,
+                title: ruCountWord(pendingSpecs.length, ['заявка специалиста', 'заявки специалистов', 'заявок специалистов']),
                 sub: names + (pendingSpecs.length > 2 ? `, +${pendingSpecs.length - 2}` : ''),
                 href: '/admin/specialists',
                 severity: 'warn',
@@ -99,8 +108,8 @@ export function AdminInbox({ users }: { users: User[] }) {
             out.push({
                 id: 'over',
                 kind: 'credit_over',
-                title: `${overLimit.length} клиентов сверх кредитного лимита`,
-                sub: top.map(u => `${u.name} (${(u.balance ?? 0).toFixed(0)} ₾)`).join(' · '),
+                title: `${ruCountWord(overLimit.length, ['клиент', 'клиента', 'клиентов'])} сверх кредитного лимита`,
+                sub: top.map(u => `${u.name} (${formatGel(u.balance ?? 0, { fraction: 0 })})`).join(' · '),
                 href: '/admin/users?filter=over_limit',
                 severity: 'urgent',
             });
@@ -116,8 +125,8 @@ export function AdminInbox({ users }: { users: User[] }) {
             out.push({
                 id: 'neg_no_credit',
                 kind: 'negative_no_credit',
-                title: `${negNoCredit.length} в минусе без кредит-лимита`,
-                sub: top.map(u => `${u.name} (${(u.balance ?? 0).toFixed(0)} ₾)`).join(' · '),
+                title: `${ruCountWord(negNoCredit.length, ['клиент', 'клиента', 'клиентов'])} в минусе без кредит-лимита`,
+                sub: top.map(u => `${u.name} (${formatGel(u.balance ?? 0, { fraction: 0 })})`).join(' · '),
                 href: '/admin/users?filter=negative_no_credit',
                 severity: 'warn',
             });
@@ -128,13 +137,23 @@ export function AdminInbox({ users }: { users: User[] }) {
 
     if (!loaded) {
         return (
-            <div style={{
-                marginBottom: 24, padding: '14px 16px',
-                border: `1px solid ${GH.ink10}`,
-                color: GH.ink60,
-                fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.04em',
-            }}>
-                INBOX · загрузка…
+            <div
+                role="status"
+                aria-busy="true"
+                style={{ marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+                <span className="sr-only">Загружаем входящие…</span>
+                <Skeleton height={62} radius={10} />
+            </div>
+        );
+    }
+
+    const retry = () => { setLoaded(false); setReloadTick(t => t + 1); };
+
+    if (failed && items.length === 0) {
+        return (
+            <div style={{ marginBottom: 24 }}>
+                <ErrorBar message="Не удалось проверить срочные брони и заявки" onRetry={retry} />
             </div>
         );
     }
@@ -144,14 +163,14 @@ export function AdminInbox({ users }: { users: User[] }) {
             <div style={{
                 marginBottom: 24, padding: '14px 16px',
                 border: `1px solid ${GH.ink10}`,
-                background: 'rgba(76,138,107,0.04)',
+                background: STATUS.ok.bg,
                 color: GH.ink60,
-                fontFamily: GH_SANS, fontSize: 13,
+                fontFamily: GH_SANS, fontSize: 14,
                 display: 'flex', alignItems: 'center', gap: 10,
             }}>
-                <ShieldCheck size={16} style={{ color: '#1B7430' }} />
+                <ShieldCheck size={16} style={{ color: STATUS.ok.fg }} aria-hidden="true" />
                 <span>
-                    <b style={{ color: GH.ink }}>Inbox пуст.</b> Hot-бронь, заявки специалистов, минусовые балансы — всё под контролем.
+                    <b style={{ color: GH.ink, fontWeight: 600 }}>Всё разобрано.</b> Срочные брони, заявки специалистов, минусовые балансы — под контролем.
                 </span>
             </div>
         );
@@ -159,12 +178,17 @@ export function AdminInbox({ users }: { users: User[] }) {
 
     return (
         <div style={{ marginBottom: 24 }}>
+            {failed && (
+                <div style={{ marginBottom: 8 }}>
+                    <ErrorBar message="Часть входящих не загрузилась" onRetry={retry} />
+                </div>
+            )}
             <div style={{
-                fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase',
+                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                 color: GH.ink60, marginBottom: 10,
                 display: 'flex', alignItems: 'center', gap: 6,
             }}>
-                <AlertTriangle size={11} /> Требует внимания · {items.length}
+                <AlertTriangle size={14} aria-hidden="true" /> Требует внимания · {items.length}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {items.map(item => (
@@ -177,9 +201,9 @@ export function AdminInbox({ users }: { users: User[] }) {
 
 function InboxRow({ item }: { item: InboxItem }) {
     const colorFor = (sev: InboxItem['severity']) => {
-        if (sev === 'urgent') return { bg: '#FEF2F2', border: '#FCA5A5', text: '#991B1B', icon: '#B91C1C' };
-        if (sev === 'warn')   return { bg: '#FEF3C7', border: '#FBBF24', text: '#92400E', icon: '#D97706' };
-        return { bg: '#EFF6FF', border: '#93C5FD', text: '#1E3A8A', icon: '#2563EB' };
+        // Только статусные токены: срочно — «опасно», ждёт — «ждём», прочее — «инфо».
+        const t = sev === 'urgent' ? STATUS.danger : sev === 'warn' ? STATUS.pending : STATUS.info;
+        return { bg: t.bg, border: `${t.fg}40`, text: t.fg, icon: t.fg };
     };
     const c = colorFor(item.severity);
 
@@ -207,22 +231,22 @@ function InboxRow({ item }: { item: InboxItem }) {
         >
             <div style={{
                 width: 36, height: 36, borderRadius: 8,
-                background: 'rgba(255,255,255,0.7)',
+                background: COLOR.card,
                 color: c.icon,
                 display: 'grid', placeItems: 'center', flexShrink: 0,
             }}>
                 <Icon size={18} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.25 }}>{item.title}</div>
+                <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.25 }}>{item.title}</div>
                 <div style={{
-                    fontSize: 12, opacity: 0.85, marginTop: 2,
+                    fontSize: 12, marginTop: 2,
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
                     {item.sub}
                 </div>
             </div>
-            <ArrowRight size={16} style={{ opacity: 0.5, flexShrink: 0 }} />
+            <ArrowRight size={16} style={{ flexShrink: 0 }} aria-hidden="true" />
         </Link>
     );
 }

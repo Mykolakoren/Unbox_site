@@ -1,12 +1,14 @@
-import { Banknote, CreditCard, Landmark, Trash2, Loader2, Pencil, X, Check } from 'lucide-react';
-import { ru } from 'date-fns/locale';
+import { Banknote, CreditCard, Landmark, Trash2, Loader2, Pencil, X, Check, Receipt, Scale } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useCashboxStore } from '../../../store/cashboxStore';
 import { useUserStore } from '../../../store/userStore';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import type { CashboxTransaction } from '../../../api/cashbox';
-import { parseUTC, formatBatumi } from '../../../utils/dateUtils';
+import { parseUTC, BATUMI_TZ } from '../../../utils/dateUtils';
+import { formatDayMonth, formatGel, formatTime } from '../../../utils/format';
+import { SkeletonList } from '../../ui/Skeleton';
+import { EmptyState } from '../../ui/EmptyState';
 
 const BRANCHES = ['Unbox Uni', 'Unbox One'];
 
@@ -17,6 +19,7 @@ const getMethodIcon = (m: string) => {
         case 'card_bog': return <Landmark size={14} />;
         case 'card_terminal': return <CreditCard size={14} />;
         case 'bank_transfer': return <Landmark size={14} />;
+        case 'adjustment': return <Scale size={14} />;
         default: return <Banknote size={14} />;
     }
 };
@@ -28,7 +31,9 @@ const getMethodLabel = (m: string) => {
         case 'card_bog': return 'BOG';
         case 'card_terminal': return 'Терм';
         case 'bank_transfer': return 'Перевод';
-        default: return m;
+        // Недельная скидка, ручная правка баланса — не деньги в кассе.
+        case 'adjustment': return 'Корр.';
+        default: return m ? `Прочее (${m})` : '—';
     }
 };
 
@@ -39,7 +44,8 @@ const getMethodLabelFull = (m: string) => {
         case 'card_bog': return 'Карта BOG';
         case 'card_terminal': return 'Терминал';
         case 'bank_transfer': return 'Перевод';
-        default: return m;
+        case 'adjustment': return 'Корректировка (не деньги)';
+        default: return m ? `Прочее (${m})` : '—';
     }
 };
 
@@ -71,19 +77,17 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
     };
 
     if (isLoading) {
-        return (
-            <div className="flex items-center justify-center py-16 text-unbox-grey">
-                <Loader2 size={20} className="animate-spin mr-2" />
-                Загрузка...
-            </div>
-        );
+        return <SkeletonList count={5} cardHeight={56} label="Загружаем операции" />;
     }
 
     if (filteredTransactions.length === 0) {
         return (
-            <div className="text-center py-12 bg-gray-50 rounded-xl text-gray-500 text-sm">
-                Операций не найдено
-            </div>
+            <EmptyState
+                compact
+                icon={<Receipt size={28} />}
+                title="Операций за этот период нет"
+                hint="Выберите другой период или филиал."
+            />
         );
     }
 
@@ -123,7 +127,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                     on narrow viewports. minWidth bumped to match new widths. */}
                 <table className="w-full text-left border-collapse" style={{ minWidth: 1100 }}>
                     <thead>
-                        <tr className="text-xs text-gray-400 border-b border-gray-100">
+                        <tr className="text-xs text-ink-60 border-b border-gray-100">
                             <th className="font-medium py-3 pl-2 pr-3 whitespace-nowrap" style={{ width: 110 }}>Дата</th>
                             <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 110 }}>Сумма</th>
                             <th className="font-medium py-3 px-3 whitespace-nowrap" style={{ width: 130 }}>Способ</th>
@@ -138,8 +142,8 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                     <tbody className="text-sm">
                         {filteredTransactions.map(tx => {
                             const d = parseUTC(tx.date);
-                            const formattedDate = formatBatumi(d, 'd MMM yyyy', ru);
-                            const formattedTime = formatBatumi(d, 'HH:mm');
+                            const formattedDate = formatDayMonth(d, { timeZone: BATUMI_TZ, withYear: 'auto' });
+                            const formattedTime = formatTime(d, { timeZone: BATUMI_TZ });
                             const isIncome = tx.type === 'income';
                             const canEdit = canEditTx(tx);
                             const canDelete = canDeleteTx(tx);
@@ -148,11 +152,11 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                 <tr key={tx.id} className="group hover:bg-gray-50/50 border-b border-gray-50 last:border-0 transition-colors">
                                     <td className="py-3 pl-2 pr-3 align-top whitespace-nowrap">
                                         <div className="font-medium text-gray-900">{formattedDate}</div>
-                                        <div className="text-xs text-gray-400">{formattedTime}</div>
+                                        <div className="text-xs text-ink-60">{formattedTime}</div>
                                     </td>
                                     <td className="py-3 px-3 align-top whitespace-nowrap">
-                                        <div className={`font-bold ${isIncome ? 'text-green-700' : 'text-red-600'}`}>
-                                            {isIncome ? '+' : '-'}{Number(tx.amount ?? 0).toFixed(2)} ₾
+                                        <div className={`font-bold num ${isIncome ? 'text-[var(--status-ok-fg)]' : 'text-[var(--status-danger-fg)]'}`}>
+                                            {formatGel(isIncome ? Number(tx.amount ?? 0) : -Number(tx.amount ?? 0), { sign: true })}
                                         </div>
                                     </td>
                                     <td className="py-3 px-3 align-top whitespace-nowrap">
@@ -183,8 +187,9 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                             {canEdit && (
                                                 <button
                                                     onClick={() => setEditingTx(tx)}
-                                                    className="text-gray-500 hover:text-blue-600 transition-colors p-1"
+                                                    className="text-ink-60 hover:text-ink transition-colors p-1"
                                                     title="Редактировать"
+                                                    aria-label="Редактировать операцию"
                                                 >
                                                     <Pencil size={14} />
                                                 </button>
@@ -193,8 +198,9 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                                 <button
                                                     onClick={() => handleDelete(tx.id)}
                                                     disabled={deletingId === tx.id}
-                                                    className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                                                    className="text-ink-60 hover:text-[var(--status-danger-fg)] transition-colors p-1"
                                                     title="Удалить"
+                                                    aria-label="Удалить операцию"
                                                 >
                                                     {deletingId === tx.id
                                                         ? <Loader2 size={14} className="animate-spin" />
@@ -214,8 +220,8 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
             <div className="md:hidden space-y-2">
                 {filteredTransactions.map(tx => {
                     const d = parseUTC(tx.date);
-                    const formattedDate = formatBatumi(d, 'd MMM', ru);
-                    const formattedTime = formatBatumi(d, 'HH:mm');
+                    const formattedDate = formatDayMonth(d, { timeZone: BATUMI_TZ });
+                    const formattedTime = formatTime(d, { timeZone: BATUMI_TZ });
                     const isIncome = tx.type === 'income';
                     const canEdit = canEditTx(tx);
                     const canDelete = canDeleteTx(tx);
@@ -225,23 +231,24 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                             key={tx.id}
                             className={`rounded-xl p-3 border transition-colors ${
                                 isIncome
-                                    ? 'border-green-100 bg-green-50/30'
-                                    : 'border-red-100 bg-red-50/30'
+                                    ? 'border-[var(--status-ok-fg)]/15 bg-[var(--status-ok-bg)]/30'
+                                    : 'border-[var(--status-danger-fg)]/15 bg-[var(--status-danger-bg)]/30'
                             }`}
                         >
                             {/* Row 1: Amount + Date + Actions */}
                             <div className="flex items-center justify-between mb-1.5">
                                 <div className="flex items-center gap-2">
-                                    <span className={`text-lg font-bold ${isIncome ? 'text-green-700' : 'text-red-600'}`}>
-                                        {isIncome ? '+' : '-'}{Number(tx.amount ?? 0).toFixed(0)} ₾
+                                    <span className={`text-lg font-bold num ${isIncome ? 'text-[var(--status-ok-fg)]' : 'text-[var(--status-danger-fg)]'}`}>
+                                        {formatGel(isIncome ? Number(tx.amount ?? 0) : -Number(tx.amount ?? 0), { sign: true })}
                                     </span>
-                                    <span className="text-xs text-gray-400">{formattedDate}, {formattedTime}</span>
+                                    <span className="text-xs text-ink-60">{formattedDate}, {formattedTime}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5">
                                     {canEdit && (
                                         <button
                                             onClick={() => setEditingTx(tx)}
-                                            className="text-gray-300 active:text-blue-500 p-1.5"
+                                            aria-label="Редактировать операцию"
+                                            className="text-ink-60 active:text-ink min-w-11 min-h-11 -my-2 flex items-center justify-center"
                                         >
                                             <Pencil size={14} />
                                         </button>
@@ -250,7 +257,8 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                         <button
                                             onClick={() => handleDelete(tx.id)}
                                             disabled={deletingId === tx.id}
-                                            className="text-gray-300 active:text-red-500 p-1.5 -mr-1"
+                                            aria-label="Удалить операцию"
+                                            className="text-ink-60 active:text-[var(--status-danger-fg)] min-w-11 min-h-11 -my-2 -mr-2 flex items-center justify-center"
                                         >
                                             {deletingId === tx.id
                                                 ? <Loader2 size={14} className="animate-spin" />
@@ -273,7 +281,7 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                     <span className="text-xs text-gray-700 font-medium">· {tx.clientName}</span>
                                 )}
                                 {tx.branch && (
-                                    <span className="text-xs text-gray-400">· {tx.branch}</span>
+                                    <span className="text-xs text-ink-60">· {tx.branch}</span>
                                 )}
                             </div>
 
@@ -289,8 +297,8 @@ export function CashboxTransactionTable({ filteredTransactions, onRefresh }: Pro
                                 desktop this lives in its own column; on
                                 mobile it's a dedicated row with a label. */}
                             {tx.adminName && (
-                                <div className="text-[11px] text-gray-500 mt-1.5 flex items-center gap-1">
-                                    <span className="text-gray-400">Провёл:</span>
+                                <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-1">
+                                    <span className="text-ink-60">Провёл:</span>
                                     <span className="font-medium text-gray-700">{tx.adminName}</span>
                                 </div>
                             )}
@@ -367,7 +375,7 @@ function EditTransactionModal({
             <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between">
                     <h3 className="text-lg font-bold text-gray-900">Редактирование операции</h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                    <button onClick={onClose} aria-label="Закрыть" className="text-ink-60 hover:text-gray-600"><X size={20} /></button>
                 </div>
 
                 {/* Type */}
@@ -377,7 +385,7 @@ function EditTransactionModal({
                         <button
                             onClick={() => setType('income')}
                             className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all ${
-                                type === 'income' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-white text-gray-500 border-gray-200'
+                                type === 'income' ? 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] border-[var(--status-ok-fg)]/30' : 'bg-white text-gray-500 border-gray-200'
                             }`}
                         >
                             Приход
@@ -385,7 +393,7 @@ function EditTransactionModal({
                         <button
                             onClick={() => setType('expense')}
                             className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all ${
-                                type === 'expense' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-white text-gray-500 border-gray-200'
+                                type === 'expense' ? 'bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] border-[var(--status-danger-fg)]/30' : 'bg-white text-gray-500 border-gray-200'
                             }`}
                         >
                             Расход
@@ -395,7 +403,7 @@ function EditTransactionModal({
 
                 {/* Amount */}
                 <div>
-                    <label className={labelCls}>Сумма (GEL)</label>
+                    <label className={labelCls}>Сумма, ₾</label>
                     <input type="number" value={amount} onChange={e => setAmount(e.target.value)} step="0.01" min="0.01" className={inputCls} />
                 </div>
 
@@ -450,7 +458,7 @@ function EditTransactionModal({
                         className="flex-1 px-4 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-medium hover:bg-unbox-green/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                     >
                         {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                        {saving ? 'Сохранение...' : 'Сохранить'}
+                        {saving ? 'Сохраняем…' : 'Сохранить'}
                     </button>
                 </div>
             </div>

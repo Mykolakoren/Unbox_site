@@ -1,10 +1,31 @@
 import { useState, useEffect } from 'react';
-import { X, Save, Trash, Plus, Upload, Image, Check } from 'lucide-react';
+import {
+    X, Save, Trash, Plus, Upload, Image, Check,
+    Shovel, Sun, VolumeX, Sofa, Droplet, DoorOpen, Coffee, Presentation, Projector, PenLine, Snowflake, Wifi,
+    type LucideIcon,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { LegacyButton as Button } from '../ui/LegacyButton';
 import { resourcesApi } from '../../api/resources';
 import { useBookingStore } from '../../store/bookingStore';
 import { CABINET_SERVICES } from '../../utils/data';
 import type { Resource } from '../../types';
+
+// Значки сервисов кабинета — Lucide вместо эмодзи из справочника (wave 1).
+const SERVICE_ICONS: Record<string, LucideIcon> = {
+    sandbox: Shovel,
+    natural_light: Sun,
+    soundproof: VolumeX,
+    couch: Sofa,
+    washbasin: Droplet,
+    private_entrance: DoorOpen,
+    coffee: Coffee,
+    flipchart: Presentation,
+    projector: Projector,
+    whiteboard: PenLine,
+    climate_control: Snowflake,
+    wifi: Wifi,
+};
 
 interface ResourceModalProps {
     resource: Resource | null;
@@ -40,7 +61,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
             onClose();
         } catch (error) {
             console.error("Failed to update resource", error);
-            alert("Ошибка сохранения. Попробуйте снова.");
+            toast.error('Не удалось сохранить кабинет. Проверьте интернет и нажмите «Сохранить» ещё раз.');
         } finally {
             setIsLoading(false);
         }
@@ -78,7 +99,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                         <h2 className="text-lg font-bold">{resource.name}</h2>
                         <p className="text-xs text-gray-500 mt-0.5">Редактирование кабинета</p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <button onClick={onClose} aria-label="Закрыть" className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                         <X size={18} />
                     </button>
                 </div>
@@ -154,11 +175,11 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                     value={formData.description || ''}
                                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                                 />
-                                <p className="text-xs text-gray-400 mt-1">{(formData.description || '').length} символов — это описание видят клиенты на сайте</p>
+                                <p className="text-xs text-ink-60 mt-1">{(formData.description || '').length} символов — это описание видят клиенты на сайте</p>
                             </div>
 
                             <div className="p-3 bg-gray-50 rounded-xl flex items-center gap-3">
-                                <div className={`w-2.5 h-2.5 rounded-full ${formData.isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                <div className={`w-2.5 h-2.5 rounded-full ${formData.isActive ? 'bg-[var(--status-ok-fg)]' : 'bg-gray-300'}`} aria-hidden="true" />
                                 <span className="text-sm text-gray-600">{formData.isActive ? 'Кабинет активен и виден клиентам' : 'Кабинет скрыт от клиентов'}</span>
                                 <button
                                     onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
@@ -182,20 +203,21 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                             <div key={idx} className="relative group aspect-video bg-gray-100 rounded-xl overflow-hidden border border-gray-200">
                                                 <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                                                 {idx === 0 && (
-                                                    <span className="absolute top-1 left-1 bg-unbox-green text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md">
+                                                    <span className="absolute top-1 left-1 bg-unbox-green text-white text-xs font-bold px-1.5 py-0.5 rounded-md">
                                                         Главное
                                                     </span>
                                                 )}
                                                 <button
                                                     onClick={() => removePhoto(idx)}
-                                                    className="absolute top-1 right-1 bg-white/90 p-1 rounded-full text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                    aria-label="Удалить фото"
+                                                    className="absolute top-1 right-1 bg-white/90 p-1 rounded-full text-[var(--status-danger-fg)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity shadow-sm"
                                                 >
                                                     <Trash size={12} />
                                                 </button>
                                             </div>
                                         ))}
                                     </div>
-                                    <p className="text-xs text-gray-400 mt-2">Первое фото используется как обложка карточки</p>
+                                    <p className="text-xs text-ink-60 mt-2">Первое фото используется как обложка карточки</p>
                                 </div>
                             )}
 
@@ -203,7 +225,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                             <div className="border-2 border-dashed border-gray-200 rounded-xl p-4">
                                 <div className="flex items-center gap-3 mb-3">
                                     <div className="w-8 h-8 bg-unbox-light rounded-lg flex items-center justify-center">
-                                        <Image size={16} className="text-unbox-grey" />
+                                        <Image size={16} className="text-ink-60" />
                                     </div>
                                     <p className="text-sm font-medium text-gray-700">Добавить фото</p>
                                 </div>
@@ -231,7 +253,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                                 const currentPhotos = formData.photos || [];
                                                 setFormData({ ...formData, photos: [...currentPhotos, fullUrl] });
                                             } catch {
-                                                alert("Ошибка загрузки фото");
+                                                toast.error('Не удалось загрузить фото. Попробуйте ещё раз или вставьте ссылку.');
                                             }
                                             e.target.value = '';
                                         }}
@@ -244,7 +266,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                     </label>
                                 </div>
 
-                                <div className="flex items-center gap-2 text-xs text-gray-400 mb-3">
+                                <div className="flex items-center gap-2 text-xs text-ink-60 mb-3">
                                     <span className="flex-1 border-t border-gray-200" />
                                     <span>или вставьте ссылку</span>
                                     <span className="flex-1 border-t border-gray-200" />
@@ -302,7 +324,10 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                                     : 'border-gray-200 hover:border-gray-300 text-gray-600'
                                             }`}
                                         >
-                                            <span className="text-xl leading-none">{service.emoji}</span>
+                                            {(() => {
+                                                const Icon = SERVICE_ICONS[service.id] ?? Check;
+                                                return <Icon size={20} aria-hidden="true" className="shrink-0" />;
+                                            })()}
                                             <span className="text-sm font-medium flex-1">{service.label}</span>
                                             {isSelected && (
                                                 <div className="w-5 h-5 rounded-full bg-unbox-green flex items-center justify-center shrink-0">
@@ -322,7 +347,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                                             const svc = CABINET_SERVICES.find(s => s.id === id);
                                             return svc ? (
                                                 <span key={id} className="inline-flex items-center gap-1 px-2.5 py-1 bg-unbox-green/10 text-unbox-green rounded-full text-xs font-medium">
-                                                    {svc.emoji} {svc.label}
+                                                    {svc.label}
                                                 </span>
                                             ) : null;
                                         })}
@@ -335,7 +360,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
 
                 {/* Footer */}
                 <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-between items-center shrink-0 rounded-b-2xl">
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-ink-60">
                         {activeTab === 'services' && `${selectedServices.length} сервисов выбрано`}
                         {activeTab === 'media' && `${(formData.photos || []).length} фото`}
                     </span>
@@ -344,7 +369,7 @@ export function ResourceModal({ resource, isOpen, onClose }: ResourceModalProps)
                             Отмена
                         </Button>
                         <Button onClick={handleSave} disabled={isLoading}>
-                            {isLoading ? 'Сохранение...' : 'Сохранить'} <Save size={15} className="ml-2" />
+                            {isLoading ? 'Сохраняем…' : 'Сохранить'} <Save size={15} className="ml-2" />
                         </Button>
                     </div>
                 </div>

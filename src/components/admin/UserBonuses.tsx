@@ -3,27 +3,30 @@ import { Gift, Plus, Check, X, Loader2, Clock, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { hasPermission } from '../../utils/permissions';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { safeFormat } from '../../utils/dateUtils';
 import type { User } from '../../store/types';
+import { formatDayMonth } from '../../utils/format';
+import { ErrorBar } from '../ui/ErrorBar';
 
 interface Props {
     user: User;
     currentUser: User;
 }
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-    active: { label: 'Активен', color: 'bg-green-50 text-green-700' },
-    pending: { label: 'Ожидает', color: 'bg-amber-50 text-amber-700' },
-    used: { label: 'Использован', color: 'bg-blue-50 text-blue-700' },
-    expired: { label: 'Истёк', color: 'bg-gray-100 text-gray-500' },
-    rejected: { label: 'Отклонён', color: 'bg-red-50 text-red-600' },
+// Статусы бонус-часа (не брони — в общем словаре их нет). Цвет — только
+// статусные токены через общий бейдж ui-badge (wave 1).
+const STATUS_MAP: Record<string, { label: string; tone: 'ok' | 'pending' | 'muted' | 'danger' }> = {
+    active: { label: 'Активен', tone: 'ok' },
+    pending: { label: 'Ждёт одобрения', tone: 'pending' },
+    used: { label: 'Использован', tone: 'muted' },
+    expired: { label: 'Истёк', tone: 'muted' },
+    rejected: { label: 'Отклонён', tone: 'danger' },
 };
 
 export function UserBonuses({ user, currentUser }: Props) {
     const [bonuses, setBonuses] = useState<Bonus[]>([]);
     const [loading, setLoading] = useState(true);
+    // Не удалось загрузить — не пишем «Бонусов нет» (wave 1).
+    const [loadError, setLoadError] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({
@@ -44,8 +47,9 @@ export function UserBonuses({ user, currentUser }: Props) {
         try {
             const data = await bonusesApi.listBonuses({ userId: user.id });
             setBonuses(data);
+            setLoadError(false);
         } catch {
-            // ignore
+            setLoadError(true);
         } finally {
             setLoading(false);
         }
@@ -80,7 +84,7 @@ export function UserBonuses({ user, currentUser }: Props) {
             setForm({ description: '', quantity: '1', expiresDays: '90' });
             loadBonuses();
         } catch {
-            toast.error('Ошибка при начислении бонуса');
+            toast.error('Не удалось начислить бонус. Попробуйте ещё раз.');
         } finally {
             setSaving(false);
         }
@@ -92,7 +96,7 @@ export function UserBonuses({ user, currentUser }: Props) {
             toast.success('Бонус одобрен');
             loadBonuses();
         } catch {
-            toast.error('Ошибка');
+            toast.error('Не удалось одобрить бонус. Попробуйте ещё раз.');
         }
     };
 
@@ -102,7 +106,7 @@ export function UserBonuses({ user, currentUser }: Props) {
             toast.success('Бонус отклонён');
             loadBonuses();
         } catch {
-            toast.error('Ошибка');
+            toast.error('Не удалось отклонить бонус. Попробуйте ещё раз.');
         }
     };
 
@@ -112,7 +116,7 @@ export function UserBonuses({ user, currentUser }: Props) {
             toast.success('Бонус списан');
             loadBonuses();
         } catch {
-            toast.error('Ошибка');
+            toast.error('Не удалось списать бонус. Попробуйте ещё раз.');
         }
     };
 
@@ -124,10 +128,10 @@ export function UserBonuses({ user, currentUser }: Props) {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <Gift size={16} className="text-amber-500" />
+                    <Gift size={16} className="text-ink-60" aria-hidden="true" />
                     <span className="text-sm font-semibold text-unbox-dark">Бонусы</span>
                     {totalHours > 0 && (
-                        <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                        <span className="text-xs font-semibold text-[var(--status-ok-fg)] bg-[var(--status-ok-bg)] px-2 py-0.5 rounded-full">
                             {totalHours}ч активно
                         </span>
                     )}
@@ -145,8 +149,8 @@ export function UserBonuses({ user, currentUser }: Props) {
 
             {/* Grant form */}
             {showForm && (
-                <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="text-xs font-semibold text-amber-800 mb-1">
+                <div className="bg-sunken border border-ink-10 rounded-xl p-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="text-xs font-semibold text-ink mb-1">
                         {isSeniorOrOwner ? 'Начислить бонус' : 'Запросить начисление бонуса'}
                     </div>
                     <input
@@ -154,33 +158,34 @@ export function UserBonuses({ user, currentUser }: Props) {
                         placeholder="Основание * (напр. компенсация за отмену)"
                         value={form.description}
                         onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                        className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 focus:outline-none focus:border-amber-400 bg-white"
+                        aria-label="Основание начисления"
+                        className="w-full text-sm px-3 py-2 rounded-lg border border-ink-20 focus:outline-none focus:border-accent bg-white"
                     />
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-[11px] text-unbox-grey mb-1 block">Часов</label>
+                            <label className="text-xs text-ink-60 mb-1 block">Часов</label>
                             <input
                                 type="number"
                                 step="0.5"
                                 min="0.5"
                                 value={form.quantity}
                                 onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
-                                className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 focus:outline-none focus:border-amber-400 bg-white"
+                                className="w-full text-sm px-3 py-2 rounded-lg border border-ink-20 focus:outline-none focus:border-accent bg-white"
                             />
                         </div>
                         <div>
-                            <label className="text-[11px] text-unbox-grey mb-1 block">Срок действия (дней)</label>
+                            <label className="text-xs text-ink-60 mb-1 block">Срок действия (дней)</label>
                             <input
                                 type="number"
                                 min="1"
                                 value={form.expiresDays}
                                 onChange={e => setForm(f => ({ ...f, expiresDays: e.target.value }))}
-                                className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 focus:outline-none focus:border-amber-400 bg-white"
+                                className="w-full text-sm px-3 py-2 rounded-lg border border-ink-20 focus:outline-none focus:border-accent bg-white"
                             />
                         </div>
                     </div>
                     {!isSeniorOrOwner && (
-                        <div className="text-[11px] text-amber-700 bg-amber-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                        <div className="text-xs text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)] px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                             <Clock size={12} />
                             Запрос будет отправлен на одобрение старшему администратору
                         </div>
@@ -189,14 +194,15 @@ export function UserBonuses({ user, currentUser }: Props) {
                         <button
                             onClick={handleGrant}
                             disabled={saving}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium transition-colors disabled:opacity-60"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-on-accent text-sm font-medium transition-colors disabled:opacity-60"
                         >
                             {saving ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                             {isSeniorOrOwner ? 'Начислить' : 'Отправить запрос'}
                         </button>
                         <button
                             onClick={() => setShowForm(false)}
-                            className="px-3 py-2 rounded-lg border border-amber-200 text-amber-700 text-sm hover:bg-amber-100 transition-colors"
+                            aria-label="Не начислять"
+                            className="px-3 py-2 rounded-lg border border-ink-20 text-ink text-sm hover:bg-ink-05 transition-colors"
                         >
                             <X size={14} />
                         </button>
@@ -206,42 +212,37 @@ export function UserBonuses({ user, currentUser }: Props) {
 
             {/* Bonus list */}
             {loading ? (
-                <div className="text-center py-3">
-                    <Loader2 size={16} className="animate-spin text-unbox-grey mx-auto" />
+                <div className="text-center py-3" role="status" aria-busy="true">
+                    <Loader2 size={16} className="animate-spin text-ink-60 mx-auto" aria-hidden="true" />
+                    <span className="sr-only">Загружаем бонусы…</span>
                 </div>
+            ) : loadError ? (
+                <ErrorBar message="Не удалось загрузить бонусы" onRetry={loadBonuses} />
             ) : bonuses.length === 0 ? (
-                <div className="text-xs text-unbox-grey text-center py-3">Бонусов нет</div>
+                <div className="text-xs text-ink-60 text-center py-3">Бонусов нет</div>
             ) : (
                 <div className="space-y-1.5">
                     {bonuses.slice(0, 10).map(b => {
-                        const st = STATUS_MAP[b.status] || { label: b.status, color: 'bg-gray-100 text-gray-600' };
+                        const st = STATUS_MAP[b.status] || { label: 'Другой статус', tone: 'muted' as const };
                         return (
                             <div
                                 key={b.id}
-                                className="flex items-center gap-3 py-2.5 px-3 rounded-xl bg-white border border-unbox-light hover:border-amber-200 transition-colors"
+                                className="flex items-center gap-3 py-2.5 px-3 rounded-xl bg-white border border-unbox-light hover:border-ink-20 transition-colors"
                             >
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                    b.status === 'active' ? 'bg-amber-50' :
-                                    b.status === 'pending' ? 'bg-yellow-50' :
-                                    'bg-gray-50'
-                                }`}>
-                                    <Gift size={16} className={
-                                        b.status === 'active' ? 'text-amber-500' :
-                                        b.status === 'pending' ? 'text-yellow-500' :
-                                        'text-gray-400'
-                                    } />
+                                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-sunken">
+                                    <Gift size={16} className={b.status === 'active' ? 'text-ink' : 'text-ink-60'} aria-hidden="true" />
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="text-sm font-medium truncate">
                                         {b.description || 'Бонусный час'} · {b.quantity}ч
                                     </div>
-                                    <div className="text-[11px] text-unbox-grey">
+                                    <div className="text-xs text-ink-60">
                                         {b.grantedByName && `от ${b.grantedByName}`}
-                                        {b.expiresAt && ` · до ${safeFormat(b.expiresAt, 'd MMM yyyy', ru, '—')}`}
+                                        {b.expiresAt && ` · до ${formatDayMonth(b.expiresAt, { withYear: 'auto' })}`}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${st.color}`}>
+                                    <span className={`ui-badge ui-badge--${st.tone}`} title={STATUS_MAP[b.status] ? undefined : b.status}>
                                         {st.label}
                                     </span>
                                     {/* Approve/Reject for pending — only senior/owner */}
@@ -249,15 +250,17 @@ export function UserBonuses({ user, currentUser }: Props) {
                                         <>
                                             <button
                                                 onClick={() => handleApprove(b.id)}
-                                                className="w-6 h-6 rounded-md bg-green-50 hover:bg-green-100 text-green-600 flex items-center justify-center transition-colors"
+                                                className="w-6 h-6 rounded-md bg-[var(--status-ok-bg)] hover:brightness-95 text-[var(--status-ok-fg)] flex items-center justify-center transition-colors"
                                                 title="Одобрить"
+                                                aria-label="Одобрить бонус"
                                             >
                                                 <Check size={12} />
                                             </button>
                                             <button
                                                 onClick={() => handleReject(b.id)}
-                                                className="w-6 h-6 rounded-md bg-red-50 hover:bg-red-100 text-red-500 flex items-center justify-center transition-colors"
+                                                className="w-6 h-6 rounded-md bg-[var(--status-danger-bg)] hover:brightness-95 text-[var(--status-danger-fg)] flex items-center justify-center transition-colors"
                                                 title="Отклонить"
+                                                aria-label="Отклонить бонус"
                                             >
                                                 <X size={12} />
                                             </button>
@@ -267,7 +270,7 @@ export function UserBonuses({ user, currentUser }: Props) {
                                     {b.status === 'active' && (
                                         <button
                                             onClick={() => handleUse(b.id)}
-                                            className="text-[11px] font-medium text-amber-600 hover:text-amber-800 transition-colors"
+                                            className="text-xs font-medium text-accent-ink hover:text-ink transition-colors"
                                             title="Списать"
                                         >
                                             Списать

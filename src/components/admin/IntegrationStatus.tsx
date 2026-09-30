@@ -27,9 +27,9 @@ export function IntegrationStatus({ compact = false }: IntegrationStatusProps) {
     if (loading) {
         if (compact) return <Loader2 size={14} className="animate-spin text-white/40" />;
         return (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full text-xs text-unbox-grey border border-gray-100">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full text-xs text-ink-60 border border-gray-100">
                 <Loader2 size={12} className="animate-spin" />
-                <span>Проверка системы...</span>
+                <span>Проверяем…</span>
             </div>
         );
     }
@@ -40,7 +40,7 @@ export function IntegrationStatus({ compact = false }: IntegrationStatusProps) {
             <div
                 title={connected ? 'Google Calendar: подключён' : 'Google Calendar: отключён'}
                 className={clsx(
-                    'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium cursor-help border',
+                    'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-help border',
                     connected
                         ? 'bg-green-500/15 text-green-400 border-green-500/25'
                         : 'bg-amber-500/15 text-amber-400 border-amber-500/25'
@@ -56,8 +56,8 @@ export function IntegrationStatus({ compact = false }: IntegrationStatusProps) {
         <div className={clsx(
             "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors cursor-help",
             connected
-                ? "bg-green-50 text-green-700 border-green-200"
-                : "bg-amber-50 text-amber-700 border-amber-200"
+                ? "bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] border-[var(--status-ok-fg)]/25"
+                : "bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)]/25"
         )} title={connected ? "Синхронизация активна" : "Сервисный аккаунт Google не найден"}>
             {connected ? (
                 <>
@@ -67,7 +67,7 @@ export function IntegrationStatus({ compact = false }: IntegrationStatusProps) {
             ) : (
                 <>
                     <AlertTriangle size={14} />
-                    <span>Google Calendar: Отключен</span>
+                    <span>Google Calendar: отключён</span>
                 </>
             )}
         </div>
