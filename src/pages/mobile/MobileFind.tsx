@@ -65,7 +65,7 @@ function validSet<T extends string>(saved: unknown, allowed: readonly T[]): Set<
     return ok.length === saved.length ? new Set(ok) : null;
 }
 
-// Большие залы для подписи фильтра — из данных (X3-20: было «залы 7, 8, 9»,
+// Большие залы для подписи фильтра — из данных (X3-20: раньше подпись перечисляла и 9-й,
 // а кабинет 9 закрыт).
 const GROUP_HALLS_SUB = (() => {
     const nums = RESOURCES
@@ -897,7 +897,7 @@ export function MobileFind() {
                                         }}
                                     >
                                         <div style={{ fontSize: 16, fontWeight: 600 }}>{top}</div>
-                                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{bot}</div>
+                                        <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>{bot}</div>
                                     </button>
                                 );
                             })}
@@ -928,7 +928,7 @@ export function MobileFind() {
                                         }}
                                     >
                                         <div style={{ fontSize: 12, fontWeight: 600 }}>{wd}</div>
-                                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{dayLabel}</div>
+                                        <div style={{ fontSize: 12, color: active ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>{dayLabel}</div>
                                     </button>
                                 );
                             })}
@@ -953,7 +953,7 @@ export function MobileFind() {
                                 <div style={{ fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                     <CalendarDays size={14} aria-hidden="true" /> Другой
                                 </div>
-                                <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+                                <div style={{ fontSize: 12, color: dayOffset === -1 ? COLOR.onInk : COLOR.ink60, marginTop: 2 }}>
                                     {dayOffset === -1 && customDate
                                         ? formatDayMonthShort(customDate)
                                         : 'день'}
