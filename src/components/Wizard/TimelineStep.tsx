@@ -220,19 +220,19 @@ export function TimelineStep() {
     // Check if slot is range start/end for styling
     const getSlotStyle = (slot: string) => {
         const isSelected = isSlotSelected(slot);
-        if (!isSelected) return 'bg-white border-unbox-light hover:border-unbox-green hover:text-unbox-green';
+        if (!isSelected) return 'bg-card border-unbox-light hover:border-accent hover:text-accent-ink';
 
         if (blockedSlots.includes(slot)) return 'bg-unbox-light/50 cursor-not-allowed opacity-50 stripe-bg';
 
         // It is selected
-        return 'bg-unbox-light border-unbox-green text-unbox-dark font-medium z-10';
+        return 'bg-unbox-light border-accent text-ink font-medium z-10';
     };
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div>
-                <h2 className="text-2xl font-bold mb-2">Выберите время</h2>
-                <p className="text-unbox-grey">Минимальная длительность — 1 час. Рабочее время 09:00–21:00.</p>
+                <h2 className="text-2xl font-semibold mb-2">Выберите время</h2>
+                <p className="text-ink-60">Минимальная длительность — 1 час. Рабочее время 09:00–21:00.</p>
             </div>
 
             <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
@@ -248,7 +248,7 @@ export function TimelineStep() {
                             className={clsx(
                                 "relative py-3 rounded-lg border text-sm transition-all focus:outline-none group/slot overflow-hidden",
                                 isBusy
-                                    ? "bg-unbox-light/40 border-unbox-light/60 text-unbox-grey/50 cursor-pointer hover:border-amber-400 hover:bg-amber-50"
+                                    ? "bg-unbox-light/40 border-unbox-light/60 text-ink-60 cursor-pointer hover:border-[var(--status-pending-fg)] hover:bg-[var(--status-pending-bg)]"
                                     : getSlotStyle(slot),
                                 selected && !isBusy && "ring-1 ring-unbox-green"
                             )}
@@ -259,8 +259,8 @@ export function TimelineStep() {
                                     <span className="block group-hover/slot:hidden">{slot}</span>
                                     {/* Hover: waitlist hint */}
                                     <span className="hidden group-hover/slot:flex flex-col items-center gap-0.5">
-                                        <Clock size={12} className="text-amber-500" />
-                                        <span className="text-[10px] font-semibold text-amber-600 leading-none">Ожидание</span>
+                                        <Clock size={12} className="text-[var(--status-pending-fg)]" aria-hidden="true" />
+                                        <span className="text-caption font-semibold text-[var(--status-pending-fg)] leading-none">Следить</span>
                                     </span>
                                 </>
                             ) : slot}
@@ -270,19 +270,19 @@ export function TimelineStep() {
             </div>
 
             {/* Legend */}
-            <div className="flex flex-wrap gap-4 text-sm text-unbox-grey justify-center pt-4">
+            <div className="flex flex-wrap gap-4 text-sm text-ink-60 justify-center pt-4">
                 <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border border-unbox-light bg-white"></div>
+                    <div className="w-4 h-4 rounded border border-unbox-light bg-card"></div>
                     <span>Свободно</span>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="w-4 h-4 rounded border border-unbox-light/60 bg-unbox-light/40 flex items-center justify-center">
-                        <Clock size={9} className="text-amber-500" />
+                        <Clock size={12} className="text-[var(--status-pending-fg)]" aria-hidden="true" />
                     </div>
                     <span>Занято — нажмите для листа ожидания</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded bg-unbox-light border border-unbox-green"></div>
+                    <div className="w-4 h-4 rounded bg-unbox-light border border-accent"></div>
                     <span>Выбрано</span>
                 </div>
             </div>

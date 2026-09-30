@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { X, ArrowRight, ChevronLeft, ExternalLink } from 'lucide-react';
+import { X, ArrowRight, ChevronLeft, ExternalLink, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { type Test, calcScore } from '../data/tests';
+import { COLOR, SHADOW, STATUS } from '../design/tokens';
 
 interface Props {
     test: Test;
@@ -9,18 +10,20 @@ interface Props {
     onScrollToSpecialists?: () => void;
 }
 
+// Цвет результата — только статусные токены (wave 1): свои оттенки
+// зелёного/жёлтого/красного были ниже AA на своём фоне.
 const COLOR_MAP: Record<string, string> = {
-    green: '#4a7c59',
-    yellow: '#b5860f',
-    orange: '#c2622d',
-    red: '#b83232',
+    green: STATUS.ok.fg,
+    yellow: STATUS.pending.fg,
+    orange: 'var(--status-warn-fg)',
+    red: STATUS.danger.fg,
 };
 
 const BG_MAP: Record<string, string> = {
-    green: 'rgba(71,122,89,0.10)',
-    yellow: 'rgba(181,134,15,0.10)',
-    orange: 'rgba(194,98,45,0.10)',
-    red: 'rgba(184,50,50,0.10)',
+    green: STATUS.ok.bg,
+    yellow: STATUS.pending.bg,
+    orange: 'var(--status-warn-bg)',
+    red: STATUS.danger.bg,
 };
 
 export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
@@ -54,7 +57,7 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
     return (
         <div
             className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }}
+            style={{ background: `${COLOR.ink}73` }}
             onClick={e => { if (e.target === e.currentTarget) onClose(); }}
         >
             <motion.div
@@ -64,29 +67,29 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                 transition={{ duration: 0.25 }}
                 className="w-full max-w-xl max-h-[90vh] overflow-hidden rounded-3xl flex flex-col"
                 style={{
-                    background: 'rgba(255,255,255,0.97)',
-                    boxShadow: '0 32px 80px rgba(0,0,0,0.20)',
+                    background: COLOR.card,
+                    boxShadow: SHADOW.pop,
                 }}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-black/8 shrink-0">
+                <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-ink-08 shrink-0">
                     <div className="flex items-center gap-3">
-                        <span className="text-2xl">{test.emoji}</span>
+                        <span className="text-2xl" aria-hidden="true">{test.emoji}</span>
                         <div>
-                            <div className="font-bold text-unbox-dark text-sm">{test.name}</div>
-                            <div className="text-xs text-unbox-dark/40">{test.questionCount} вопросов · {test.duration}</div>
+                            <div className="font-semibold text-ink text-sm">{test.name}</div>
+                            <div className="text-xs text-ink-60">{test.questionCount} вопросов · {test.duration}</div>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-black/5 text-unbox-dark/40 hover:text-unbox-dark transition-colors">
-                        <X size={18} />
+                    <button onClick={onClose} aria-label="Закрыть" className="-m-2 w-11 h-11 flex items-center justify-center rounded-xl hover:bg-ink-05 text-ink-60 hover:text-ink transition-colors">
+                        <X size={18} aria-hidden="true" />
                     </button>
                 </div>
 
                 {/* Progress bar */}
                 {!showResult && (
-                    <div className="h-1 shrink-0 bg-black/6">
+                    <div className="h-1 shrink-0 bg-ink-05">
                         <motion.div
-                            className="h-full bg-unbox-green rounded-full"
+                            className="h-full bg-accent rounded-full"
                             animate={{ width: `${progress * 100}%` }}
                             transition={{ duration: 0.3 }}
                         />
@@ -106,23 +109,26 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                 {/* Score card */}
                                 <div
                                     className="rounded-2xl p-5 text-center"
-                                    style={{ background: BG_MAP[result.color], border: `1px solid ${COLOR_MAP[result.color]}30` }}
+                                    style={{ background: BG_MAP[result.color] }}
                                 >
-                                    <div className="text-4xl font-black mb-1" style={{ color: COLOR_MAP[result.color] }}>
+                                    <div className="text-4xl font-semibold mb-1" style={{ color: COLOR_MAP[result.color] }}>
                                         {score}
                                     </div>
-                                    <div className="font-bold text-base" style={{ color: COLOR_MAP[result.color] }}>
+                                    <div className="font-semibold text-base" style={{ color: COLOR_MAP[result.color] }}>
                                         {result.label}
                                     </div>
                                 </div>
 
-                                <p className="text-unbox-dark/70 text-sm leading-relaxed">{result.description}</p>
+                                <p className="text-ink-80 text-sm leading-relaxed">{result.description}</p>
 
-                                <div className="rounded-xl p-4 text-sm" style={{ background: 'rgba(71,109,107,0.08)', border: '1px solid rgba(71,109,107,0.18)' }}>
-                                    <span className="text-unbox-green font-semibold">💬 {result.cta}</span>
+                                <div className="rounded-xl p-4 text-sm bg-accent-soft">
+                                    <span className="text-accent-ink font-semibold inline-flex items-start gap-2">
+                                        <MessageCircle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+                                        {result.cta}
+                                    </span>
                                 </div>
 
-                                <p className="text-[11px] text-unbox-dark/35 text-center leading-relaxed">
+                                <p className="text-caption text-ink-60 text-center leading-relaxed">
                                     Этот тест носит информационный характер и не является медицинским диагнозом.
                                     Для точной оценки обратитесь к специалисту.
                                 </p>
@@ -131,7 +137,7 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                 <div className="flex flex-col gap-2 pt-1">
                                     <button
                                         onClick={() => { onScrollToSpecialists?.(); onClose(); }}
-                                        className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl bg-unbox-green text-white font-bold text-sm hover:opacity-90 transition-opacity"
+                                        className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl bg-accent text-on-accent font-semibold text-sm hover:bg-accent-hover transition-colors"
                                     >
                                         Найти специалиста
                                         <ArrowRight size={15} />
@@ -140,8 +146,7 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                         href="https://t.me/UnboxCenter"
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl text-sm font-medium text-unbox-dark/70 hover:text-unbox-dark transition-colors"
-                                        style={{ border: '1px solid rgba(0,0,0,0.10)' }}
+                                        className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl text-sm font-medium text-ink-80 hover:text-ink transition-colors border border-ink-10"
                                     >
                                         <ExternalLink size={13} />
                                         Написать в Telegram
@@ -161,13 +166,15 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                         <button
                                             key={i}
                                             onClick={() => setCurrentQ(i)}
-                                            className="w-7 h-7 rounded-lg text-xs font-bold transition-all"
+                                            aria-label={`Вопрос ${i + 1}`}
+                                            aria-current={currentQ === i ? 'step' : undefined}
+                                            className="w-11 h-11 sm:w-8 sm:h-8 rounded-lg text-xs font-semibold transition-all"
                                             style={
                                                 answers[i] !== null
-                                                    ? { background: 'rgba(71,109,107,0.20)', color: 'rgb(44,80,78)', border: '1px solid rgba(71,109,107,0.35)' }
+                                                    ? { background: COLOR.accentSoft, color: COLOR.accentInk, border: `1px solid ${COLOR.accent}59` }
                                                     : currentQ === i
-                                                        ? { background: 'rgba(0,0,0,0.08)', color: 'rgb(44,50,64)', border: '1px solid rgba(0,0,0,0.15)' }
-                                                        : { background: 'rgba(0,0,0,0.04)', color: 'rgba(44,50,64,0.40)', border: '1px solid rgba(0,0,0,0.07)' }
+                                                        ? { background: COLOR.ink08, color: COLOR.ink, border: `1px solid ${COLOR.ink20}` }
+                                                        : { background: COLOR.ink05, color: COLOR.ink60, border: `1px solid ${COLOR.ink08}` }
                                             }
                                         >
                                             {i + 1}
@@ -184,8 +191,8 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                         exit={{ opacity: 0, x: -10 }}
                                         transition={{ duration: 0.18 }}
                                     >
-                                        <div className="font-semibold text-unbox-dark text-sm leading-relaxed mb-4">
-                                            <span className="text-unbox-dark/30 font-bold mr-2">{currentQ + 1}.</span>
+                                        <div className="font-semibold text-ink text-sm leading-relaxed mb-4">
+                                            <span className="text-ink-60 font-semibold mr-2">{currentQ + 1}.</span>
                                             {test.questions[currentQ].text}
                                         </div>
 
@@ -195,10 +202,11 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                                     key={opt.value}
                                                     onClick={() => selectAnswer(currentQ, opt.value)}
                                                     className="w-full text-left px-4 py-3 rounded-xl text-sm transition-all"
+                                                    aria-pressed={answers[currentQ] === opt.value}
                                                     style={
                                                         answers[currentQ] === opt.value
-                                                            ? { background: 'rgba(71,109,107,0.15)', border: '1.5px solid rgba(71,109,107,0.45)', color: 'rgb(44,80,78)', fontWeight: 600 }
-                                                            : { background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.07)', color: 'rgba(44,50,64,0.75)' }
+                                                            ? { background: COLOR.accentSoft, border: `1.5px solid ${COLOR.accent}`, color: COLOR.accentInk, fontWeight: 600 }
+                                                            : { background: COLOR.ink05, border: `1px solid ${COLOR.ink08}`, color: COLOR.ink80 }
                                                     }
                                                 >
                                                     {opt.label}
@@ -213,7 +221,7 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                     <button
                                         onClick={() => setCurrentQ(q => Math.max(0, q - 1))}
                                         disabled={currentQ === 0}
-                                        className="flex items-center gap-1 text-sm text-unbox-dark/40 hover:text-unbox-dark disabled:opacity-30 transition-colors"
+                                        className="flex items-center gap-1 text-sm text-ink-60 hover:text-ink disabled:opacity-30 transition-colors"
                                     >
                                         <ChevronLeft size={15} /> Назад
                                     </button>
@@ -221,19 +229,19 @@ export function SelfTestModal({ test, onClose, onScrollToSpecialists }: Props) {
                                     {currentQ < test.questions.length - 1 ? (
                                         <button
                                             onClick={() => setCurrentQ(q => q + 1)}
-                                            className="flex items-center gap-1 text-sm font-semibold text-unbox-green hover:opacity-70 transition-opacity"
+                                            className="flex items-center gap-1 text-sm font-semibold text-accent-ink hover:opacity-70 transition-opacity"
                                         >
                                             Далее <ArrowRight size={15} />
                                         </button>
                                     ) : allAnswered ? (
                                         <button
                                             onClick={handleFinish}
-                                            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-unbox-green text-white text-sm font-bold hover:opacity-90 transition-opacity"
+                                            className="flex items-center gap-2 px-5 py-2 min-h-11 rounded-xl bg-accent text-on-accent text-sm font-semibold hover:bg-accent-hover transition-colors"
                                         >
                                             Получить результат <ArrowRight size={14} />
                                         </button>
                                     ) : (
-                                        <span className="text-xs text-unbox-dark/35">
+                                        <span className="text-xs text-ink-60">
                                             Ответьте на все вопросы
                                         </span>
                                     )}

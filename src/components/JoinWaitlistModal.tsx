@@ -44,7 +44,7 @@ export function JoinWaitlistModal({ isOpen, onClose }: JoinWaitlistModalProps) {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-unbox-dark/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-ink/45 z-50 flex items-center justify-center p-4"
                         onClick={handleReset}
                     >
                         <motion.div
@@ -52,14 +52,15 @@ export function JoinWaitlistModal({ isOpen, onClose }: JoinWaitlistModalProps) {
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: 20 }}
                             transition={{ type: "spring", duration: 0.5, bounce: 0.3 }}
-                            className="bg-white/95 backdrop-blur-xl border border-white/50 rounded-3xl p-8 max-w-md w-full shadow-premium relative"
+                            className="bg-card border border-ink-10 rounded-3xl p-8 max-w-md w-full shadow-[var(--shadow-pop)] relative"
                             onClick={(e) => e.stopPropagation()}
                         >
                             <button
                                 onClick={handleReset}
-                                className="absolute top-4 right-4 p-2 text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 rounded-full transition-colors"
+                                aria-label="Закрыть"
+                                className="absolute top-3 right-3 w-11 h-11 flex items-center justify-center text-ink-60 hover:text-ink hover:bg-ink-05 rounded-full transition-colors"
                             >
-                                <X size={20} />
+                                <X size={20} aria-hidden="true" />
                             </button>
 
                             {submitWaitlist.isSuccess ? (
@@ -68,16 +69,16 @@ export function JoinWaitlistModal({ isOpen, onClose }: JoinWaitlistModalProps) {
                                     animate={{ opacity: 1, scale: 1 }}
                                     className="text-center py-8"
                                 >
-                                    <div className="w-16 h-16 bg-unbox-light text-unbox-green rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+                                    <div className="w-16 h-16 bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] rounded-full flex items-center justify-center mx-auto mb-6">
                                         <CheckCircle size={32} />
                                     </div>
-                                    <h3 className="text-2xl font-bold text-unbox-dark mb-2">Вы в списке ожидания!</h3>
-                                    <p className="text-unbox-grey mb-8">
+                                    <h3 className="text-2xl font-semibold text-ink mb-2">Вы в списке ожидания!</h3>
+                                    <p className="text-ink-60 mb-8">
                                         Мы сообщим вам, как только появятся новые доступные пространства или специальные предложения.
                                     </p>
                                     <button
                                         onClick={handleReset}
-                                        className="w-full py-3 bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark rounded-xl font-bold transition-colors"
+                                        className="w-full py-3 border border-ink-20 bg-card hover:bg-ink-05 text-ink rounded-xl font-semibold transition-colors"
                                     >
                                         Понятно, спасибо
                                     </button>
@@ -85,35 +86,35 @@ export function JoinWaitlistModal({ isOpen, onClose }: JoinWaitlistModalProps) {
                             ) : (
                                 <>
                                     <div className="mb-8 text-center pt-2">
-                                        <div className="w-14 h-14 bg-unbox-light text-unbox-green rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm transform -rotate-6">
+                                        <div className="w-14 h-14 bg-accent-soft text-accent-ink rounded-2xl flex items-center justify-center mx-auto mb-4">
                                             <Bell size={28} />
                                         </div>
-                                        <h3 className="text-2xl font-bold text-unbox-dark mb-2">Не нашли нужное?</h3>
-                                        <p className="text-unbox-grey text-sm px-4">
+                                        <h3 className="text-2xl font-semibold text-ink mb-2">Не нашли нужное?</h3>
+                                        <p className="text-ink-60 text-sm px-4">
                                             Оставьте контакты, и мы уведомим вас первыми при появлении новых локаций и свободных окон.
                                         </p>
                                     </div>
 
                                     <form onSubmit={handleSubmit} className="space-y-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-unbox-dark mb-1.5 ml-1">Ваше имя</label>
+                                            <label className="block text-sm font-medium text-ink mb-1.5 ml-1">Ваше имя</label>
                                             <input
                                                 type="text"
                                                 required
                                                 value={name}
                                                 onChange={(e) => setName(e.target.value)}
-                                                className="w-full px-4 py-3 bg-unbox-light/30 border border-unbox-light rounded-xl focus:ring-2 focus:ring-unbox-green focus:border-unbox-green transition-all outline-none"
+                                                className="w-full px-4 py-3 bg-card border border-ink-20 rounded-xl focus:ring-2 focus:ring-accent focus:border-accent transition-all outline-none"
                                                 placeholder="Иван Иванов"
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-unbox-dark mb-1.5 ml-1">Email</label>
+                                            <label className="block text-sm font-medium text-ink mb-1.5 ml-1">Email</label>
                                             <input
                                                 type="email"
                                                 required
                                                 value={email}
                                                 onChange={(e) => setEmail(e.target.value)}
-                                                className="w-full px-4 py-3 bg-unbox-light/30 border border-unbox-light rounded-xl focus:ring-2 focus:ring-unbox-green focus:border-unbox-green transition-all outline-none"
+                                                className="w-full px-4 py-3 bg-card border border-ink-20 rounded-xl focus:ring-2 focus:ring-accent focus:border-accent transition-all outline-none"
                                                 placeholder="ivan@example.com"
                                             />
                                         </div>
@@ -122,16 +123,16 @@ export function JoinWaitlistModal({ isOpen, onClose }: JoinWaitlistModalProps) {
                                             type="submit"
                                             disabled={submitWaitlist.isPending}
                                             className={clsx(
-                                                "w-full mt-6 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-white transition-all duration-300",
+                                                "w-full mt-6 flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-on-accent transition-colors duration-200",
                                                 submitWaitlist.isPending 
-                                                    ? "bg-unbox-green/70 cursor-not-allowed" 
-                                                    : "bg-unbox-green hover:bg-unbox-dark shadow-lg shadow-unbox-green/20 hover:shadow-unbox-green/40 hover:-translate-y-0.5"
+                                                    ? "bg-accent/70 cursor-not-allowed" 
+                                                    : "bg-accent hover:bg-accent-hover"
                                             )}
                                         >
                                             {submitWaitlist.isPending ? (
                                                 <>
-                                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                                    Отправка...
+                                                    <div className="w-5 h-5 border-2 border-on-accent/30 border-t-on-accent rounded-full animate-spin" aria-hidden="true" />
+                                                    Отправляем…
                                                 </>
                                             ) : (
                                                 'Подписаться на обновления'

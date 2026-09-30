@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ClipboardCheck, Clock } from 'lucide-react';
 import { GH, GH_MONO, GH_SANS } from '../hooks/useDesignFlag';
+import { COLOR, STATUS } from '../design/tokens';
 import type { SpecialistApplicationStatus } from '../hooks/useSpecialistApplication';
 
 /**
@@ -8,7 +9,8 @@ import type { SpecialistApplicationStatus } from '../hooks/useSpecialistApplicat
  * бронировать (require_can_book). Показываем её ДО выбора времени и оплаты,
  * а не отказом на последней кнопке.
  *
- * Два варианта текста: в мобильном /m на «ты», на компьютере — на «вы».
+ * Два варианта текста (в /m — «здесь откроется»), оба на «вы» — решение
+ * владельца 30.09: обращение на «вы» везде, включая /m.
  */
 
 export const SPECIALIST_APPLICATION_PATH = '/become-specialist';
@@ -18,7 +20,7 @@ type Copy = { title: string; text: string; cta: string };
 
 const MOBILE_COPY: Record<SpecialistApplicationStatus, Copy> = {
     none: {
-        title: 'Чтобы бронировать кабинеты, заполни анкету специалиста',
+        title: 'Чтобы бронировать кабинеты, заполните анкету специалиста',
         text: 'Админ проверит анкету — после этого здесь откроется бронирование.',
         cta: 'Заполнить анкету',
     },
@@ -29,12 +31,12 @@ const MOBILE_COPY: Record<SpecialistApplicationStatus, Copy> = {
     },
     rejected: {
         title: 'Анкета не прошла проверку',
-        text: 'Поправь её и отправь ещё раз — после одобрения откроется бронирование.',
+        text: 'Поправьте её и отправьте ещё раз — после одобрения здесь откроется бронирование.',
         cta: 'Открыть анкету',
     },
     approved: {
         title: 'Анкета одобрена',
-        text: 'Доступ к бронированию откроет администратор. Если долго — напиши ему.',
+        text: 'Доступ к бронированию откроет администратор. Если долго — напишите ему.',
         cta: 'Написать администратору',
     },
 };
@@ -83,8 +85,8 @@ export function SpecialistGateCard({ variant, status }: {
             <div
                 data-testid="specialist-gate"
                 style={{
-                    background: waiting ? '#FFFBEB' : '#F4F4F2',
-                    border: `1px solid ${waiting ? '#FCD34D' : 'rgba(0,0,0,0.06)'}`,
+                    background: waiting ? STATUS.pending.bg : COLOR.sunken,
+                    border: `1px solid ${waiting ? STATUS.pending.bg : COLOR.ink08}`,
                     borderRadius: 14,
                     padding: 16,
                     display: 'flex',
@@ -93,12 +95,12 @@ export function SpecialistGateCard({ variant, status }: {
                 }}
             >
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                    <Icon size={18} style={{ flexShrink: 0, marginTop: 2, color: waiting ? '#8A5A00' : '#0E0E0E' }} />
+                    <Icon size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: waiting ? STATUS.pending.fg : COLOR.ink }} />
                     <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.3, color: '#0E0E0E' }}>
+                        <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3, color: COLOR.ink }}>
                             {copy.title}
                         </div>
-                        <div style={{ fontSize: 13, lineHeight: 1.45, color: '#555', marginTop: 4 }}>
+                        <div style={{ fontSize: 14, lineHeight: 1.45, color: COLOR.ink80, marginTop: 4 }}>
                             {copy.text}
                         </div>
                     </div>
@@ -108,9 +110,9 @@ export function SpecialistGateCard({ variant, status }: {
                     className="press"
                     style={{
                         width: '100%',
-                        background: waiting ? '#fff' : '#0E0E0E',
-                        color: waiting ? '#0E0E0E' : '#fff',
-                        border: waiting ? '1px solid #0E0E0E' : 'none',
+                        background: waiting ? COLOR.card : COLOR.ink,
+                        color: waiting ? COLOR.ink : COLOR.onInk,
+                        border: waiting ? `1px solid ${COLOR.ink}` : 'none',
                         borderRadius: 12,
                         padding: '13px 16px',
                         display: 'flex',
@@ -119,12 +121,12 @@ export function SpecialistGateCard({ variant, status }: {
                         gap: 10,
                         cursor: 'pointer',
                         fontFamily: 'inherit',
-                        fontSize: 15,
-                        fontWeight: 700,
+                        fontSize: 16,
+                        fontWeight: 600,
                     }}
                 >
                     {copy.cta}
-                    <ArrowRight size={17} />
+                    <ArrowRight size={18} aria-hidden="true" />
                 </button>
             </div>
         );
@@ -136,25 +138,25 @@ export function SpecialistGateCard({ variant, status }: {
             style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 gap: 16, padding: '16px 20px', flexWrap: 'wrap',
-                background: waiting ? '#FEF3C7' : GH.ink,
-                color: waiting ? '#92400E' : GH.paper,
+                background: waiting ? STATUS.pending.bg : GH.ink,
+                color: waiting ? STATUS.pending.fg : GH.paper,
                 fontFamily: GH_SANS,
             }}
         >
             <div style={{ maxWidth: 560 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>{copy.title}</div>
-                <div style={{ fontSize: 13, lineHeight: 1.5, marginTop: 4, opacity: 0.85 }}>{copy.text}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.35 }}>{copy.title}</div>
+                <div style={{ fontSize: 14, lineHeight: 1.5, marginTop: 4 }}>{copy.text}</div>
             </div>
             <button
                 onClick={onCta}
                 style={{
                     padding: '9px 16px',
                     background: waiting ? 'transparent' : GH.paper,
-                    color: waiting ? '#92400E' : GH.ink,
-                    border: waiting ? '1px solid #92400E' : 'none',
+                    color: waiting ? STATUS.pending.fg : GH.ink,
+                    border: waiting ? `1px solid ${STATUS.pending.fg}` : 'none',
                     cursor: 'pointer',
-                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
-                    fontWeight: 700,
+                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    fontWeight: 600,
                 }}
             >
                 {copy.cta}

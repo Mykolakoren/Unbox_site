@@ -3,8 +3,8 @@ import { toast } from 'sonner';
 import { useUserStore, type User } from '../store/userStore';
 import { Calendar, RefreshCcw, Snowflake, CheckCircle2 } from 'lucide-react';
 import { LegacyButton as Button } from './ui/LegacyButton';
-import { format, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { parseISO } from 'date-fns';
+import { formatDayMonth } from '../utils/format';
 import { SUBSCRIPTION_PLANS } from '../utils/data';
 
 interface SubscriptionCardProps {
@@ -27,29 +27,28 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
     const canFreeze = !sub.isFrozen && sub.freezeCount < 1;
     const frozenUntil = sub.isFrozen && sub.frozenUntil ? parseISO(sub.frozenUntil) : null;
     const pauseOver = !!frozenUntil && frozenUntil.getTime() < Date.now();
-    const frozenUntilLabel = frozenUntil ? format(frozenUntil, 'd MMMM', { locale: ru }) : '';
+    const frozenUntilLabel = frozenUntil ? formatDayMonth(frozenUntil) : '';
 
     return (
-        <div className="bg-unbox-dark text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
-            {/* Background Decor */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-unbox-green/20 rounded-full blur-2xl -mr-10 -mt-10" />
-
-            <div className="relative z-10">
+        // Wave 1: светлая карточка Grid House (бумага, тонкая рамка) вместо
+        // тёмной со свечением — один визуальный язык с остальным кабинетом.
+        <div className="bg-card text-ink p-6 rounded-lg border border-ink-10 relative overflow-hidden">
+            <div className="relative">
                 <div className="flex justify-between items-start mb-4">
                     <div>
-                        <div className="text-white/60 text-sm font-medium mb-1">Абонемент</div>
-                        <h3 className="text-2xl font-bold flex items-center gap-2">
+                        <div className="text-ink-60 text-sm font-medium mb-1">Абонемент</div>
+                        <h3 className="text-2xl font-semibold flex items-center gap-2">
                             {sub.name}
                             {(sub.bonusHours || 0) > 0 && (
-                                <span className="bg-unbox-green/20 text-unbox-green text-[10px] px-1.5 py-0.5 rounded border border-unbox-green/30">
-                                    +{sub.bonusHours}ч бонус
+                                <span className="bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] text-caption font-medium px-1.5 py-0.5 rounded">
+                                    +{sub.bonusHours} ч бонус
                                 </span>
                             )}
                         </h3>
                     </div>
                     {sub.isFrozen && (
-                        <div className="bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full text-xs flex items-center gap-1 border border-blue-500/30">
-                            <Snowflake size={12} />
+                        <div className="bg-[var(--status-info-bg)] text-[var(--status-info-fg)] px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+                            <Snowflake size={12} aria-hidden="true" />
                             Заморожен
                         </div>
                     )}
@@ -58,12 +57,12 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                 {/* Progress Bar */}
                 <div className="mb-5">
                     <div className="flex justify-between text-sm mb-2">
-                        <span className="text-gray-400">Остаток часов</span>
-                        <span className="font-bold">{sub.remainingHours} / {totalWithBonus} ч</span>
+                        <span className="text-ink-60">Остаток часов</span>
+                        <span className="num font-semibold">{sub.remainingHours} / {totalWithBonus} ч</span>
                     </div>
-                    <div className="h-2 bg-gray-700/50 rounded-full overflow-hidden">
+                    <div className="h-2 bg-ink-10 rounded-full overflow-hidden">
                         <div
-                            className={`h-full rounded-full transition-all duration-500 ${sub.remainingHours < 5 ? 'bg-red-500' : 'bg-unbox-green'}`}
+                            className={`h-full rounded-full transition-all duration-500 ${sub.remainingHours < 5 ? 'bg-[var(--status-danger-solid)]' : 'bg-accent'}`}
                             style={{ width: `${percentRemaining}%` }}
                         />
                     </div>
@@ -73,8 +72,8 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                 {plan?.perks && plan.perks.length > 0 && (
                     <div className="mb-5 space-y-1.5">
                         {plan.perks.map((perk, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs text-white/80">
-                                <CheckCircle2 size={12} className="text-unbox-green" />
+                            <div key={i} className="flex items-center gap-2 text-xs text-ink-80">
+                                <CheckCircle2 size={12} className="text-[var(--status-ok-fg)] shrink-0" aria-hidden="true" />
                                 {perk}
                             </div>
                         ))}
@@ -83,23 +82,23 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
 
                 {/* Details Grid */}
                 <div className="grid grid-cols-2 gap-3 mb-5">
-                    <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
-                        <div className="flex items-center gap-2 text-gray-400 text-[10px] uppercase tracking-wider mb-1">
+                    <div className="bg-sunken p-2.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-ink-60 text-caption uppercase tracking-[0.06em] mb-1">
                             <Calendar size={12} />
                             Действует до
                         </div>
-                        <div className="font-bold text-sm">
-                            {format(parseISO(sub.expiryDate), 'd MMM yyyy', { locale: ru })}
+                        <div className="font-semibold text-sm">
+                            {formatDayMonth(parseISO(sub.expiryDate), { withYear: 'auto' })}
                         </div>
                     </div>
 
-                    <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
-                        <div className="flex items-center gap-2 text-gray-400 text-[10px] uppercase tracking-wider mb-1">
+                    <div className="bg-sunken p-2.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-ink-60 text-caption uppercase tracking-[0.06em] mb-1">
                             <RefreshCcw size={12} />
                             Переносы
                         </div>
-                        <div className="font-bold text-sm">
-                            {sub.freeReschedules > 0 ? `${sub.freeReschedules} дост.` : 'Нет'}
+                        <div className="font-semibold text-sm">
+                            {sub.freeReschedules > 0 ? `${sub.freeReschedules} доступно` : 'Нет'}
                         </div>
                     </div>
                 </div>
@@ -110,7 +109,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     <Button
                         variant="outline"
                         disabled={!canFreeze && !sub.isFrozen}
-                        className={`w-full h-10 border-white/10 hover:bg-white/10 text-white hover:text-white rounded-xl ${sub.isFrozen ? 'bg-blue-600/30 border-blue-500/50 text-blue-100' : ''}`}
+                        className={`w-full h-11 border border-ink-20 bg-card hover:bg-ink-05 text-ink hover:text-ink rounded-lg ${sub.isFrozen ? 'bg-[var(--status-info-bg)] text-[var(--status-info-fg)] border-transparent' : ''}`}
                         onClick={() => toggleSubscriptionFreeze(user.email).catch((err: any) =>
                             toast.error(err?.response?.data?.detail || 'Не удалось изменить заморозку'))}
                     >
@@ -119,7 +118,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     </Button>
 
                     {!canFreeze && !sub.isFrozen && (
-                        <p className="text-[10px] text-center text-white/40">
+                        <p className="text-caption text-center text-ink-60">
                             Лимит заморозок исчерпан (1 раз)
                         </p>
                     )}
@@ -127,13 +126,13 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                 ) : (
                 <div className="space-y-2 text-center">
                     {sub.isFrozen ? (
-                        <p className="text-xs text-blue-100 leading-snug">
+                        <p className="text-xs text-ink-80 leading-snug">
                             {pauseOver
                                 ? `Пауза закончилась ${frozenUntilLabel}, но ещё не снята. Пока абонемент на паузе, брони оплачиваются с баланса.`
                                 : 'Пока абонемент на паузе, часы не списываются — брони оплачиваются с баланса.'}
                         </p>
                     ) : (
-                        <p className="text-xs text-white/60 leading-snug">
+                        <p className="text-xs text-ink-60 leading-snug">
                             {canFreeze
                                 ? 'Абонемент можно один раз поставить на паузу на 7 дней — через администратора.'
                                 : 'Пауза по этому абонементу уже использована.'}
@@ -144,7 +143,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                             href="https://t.me/UnboxCenter"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 w-full h-11 rounded-xl border border-white/15 text-sm text-white hover:bg-white/10 transition-colors"
+                            className="flex items-center justify-center gap-2 w-full h-11 rounded-lg border border-ink-20 text-sm text-ink hover:bg-ink-05 transition-colors"
                         >
                             <Snowflake size={16} />
                             {sub.isFrozen ? 'Снять паузу — написать администратору' : 'Попросить паузу у администратора'}
@@ -154,7 +153,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                 )}
 
                 {sub.isFrozen && frozenUntil && (
-                    <div className={`text-center text-[11px] font-medium mt-3 py-1.5 rounded-lg border ${pauseOver ? 'text-amber-200 bg-amber-500/10 border-amber-500/30' : 'text-blue-300 bg-blue-500/10 border-blue-500/20'}`}>
+                    <div className={`text-center text-caption font-medium mt-3 py-1.5 rounded-lg ${pauseOver ? 'text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]' : 'text-[var(--status-info-fg)] bg-[var(--status-info-bg)]'}`}>
                         {pauseOver ? `Пауза должна была закончиться ${frozenUntilLabel}` : `На паузе до ${frozenUntilLabel}`}
                     </div>
                 )}

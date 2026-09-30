@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { User, Briefcase, ArrowRight } from 'lucide-react';
+import { COLOR } from '../design/tokens';
 
 interface Props {
     onSelect: (mode: 'client' | 'specialist') => void;
@@ -16,7 +17,7 @@ export function WelcomeOverlay({ onSelect }: Props) {
             className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6"
         >
             {/* Background */}
-            <div className="absolute inset-0" style={{ background: '#1A2420' }} />
+            <div className="absolute inset-0" style={{ background: COLOR.ink }} />
 
             {/* Content */}
             <div className="relative z-10 flex flex-col items-center w-full max-w-2xl">
@@ -37,10 +38,10 @@ export function WelcomeOverlay({ onSelect }: Props) {
                     transition={{ delay: 0.35, duration: 0.5 }}
                     className="text-center mb-10"
                 >
-                    <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+                    <h1 className="text-2xl sm:text-3xl font-semibold text-on-ink mb-2">
                         Добро пожаловать
                     </h1>
-                    <p className="text-white/50 text-sm sm:text-base">
+                    <p className="text-on-ink/75 text-sm sm:text-base">
                         Расскажите нам немного о себе, чтобы мы показали нужное
                     </p>
                 </motion.div>
@@ -67,17 +68,17 @@ export function WelcomeOverlay({ onSelect }: Props) {
                             className="w-12 h-12 rounded-2xl flex items-center justify-center"
                             style={{ background: 'rgba(71,109,107,0.30)', border: '1px solid rgba(71,109,107,0.5)' }}
                         >
-                            <User size={22} className="text-unbox-green" />
+                            <User size={22} className="text-accent-ink" />
                         </div>
                         <div className="flex-1">
-                            <div className="font-bold text-white text-lg leading-tight mb-1">
+                            <div className="font-semibold text-on-ink text-lg leading-tight mb-1">
                                 Я клиент
                             </div>
-                            <div className="text-white/45 text-sm leading-relaxed">
+                            <div className="text-on-ink/75 text-sm leading-relaxed">
                                 Ищу специалиста или хочу арендовать кабинет для работы
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 text-unbox-green text-sm font-semibold group-hover:gap-3 transition-all">
+                        <div className="flex items-center gap-2 text-accent-ink text-sm font-semibold group-hover:gap-3 transition-all">
                             Продолжить <ArrowRight size={15} />
                         </div>
                     </button>
@@ -100,14 +101,14 @@ export function WelcomeOverlay({ onSelect }: Props) {
                             <Briefcase size={22} className="text-white/70" />
                         </div>
                         <div className="flex-1">
-                            <div className="font-bold text-white text-lg leading-tight mb-1">
+                            <div className="font-semibold text-on-ink text-lg leading-tight mb-1">
                                 Я специалист
                             </div>
-                            <div className="text-white/45 text-sm leading-relaxed">
+                            <div className="text-on-ink/75 text-sm leading-relaxed">
                                 Психолог, терапевт или коуч — ищу пространство для практики
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 text-white/50 text-sm font-semibold group-hover:gap-3 group-hover:text-white/70 transition-all">
+                        <div className="flex items-center gap-2 text-on-ink/75 text-sm font-semibold group-hover:gap-3 group-hover:text-on-ink transition-all">
                             Продолжить <ArrowRight size={15} />
                         </div>
                     </button>
@@ -118,7 +119,7 @@ export function WelcomeOverlay({ onSelect }: Props) {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.8 }}
-                    className="mt-8 text-white/25 text-xs"
+                    className="mt-8 text-on-ink/75 text-xs"
                 >
                     Выбор сохранится для следующих визитов
                 </motion.p>

@@ -3,6 +3,8 @@ import { useUserStore } from '../store/userStore';
 import { useState, useEffect } from 'react';
 import { LegacyButton as Button } from './ui/LegacyButton';
 import { startOfWeek, endOfWeek } from 'date-fns';
+import { toast } from 'sonner';
+import { formatGel } from '../utils/format';
 
 interface ReconciliationModalProps {
     isOpen: boolean;
@@ -79,7 +81,7 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
     const handleApply = () => {
         const result = runWeeklyReconciliation();
         if (result && result.amount > 0) {
-            alert(`Успешно! На ваш баланс зачислено ${result.amount} GEL.`);
+            toast.success(`На ваш баланс зачислено ${formatGel(result.amount)}`);
             onClose();
         } else {
             onClose();
@@ -89,25 +91,25 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
     if (!isOpen || !analysis) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="flex justify-between items-center p-4 border-b border-gray-100">
-                    <h3 className="font-bold text-lg">Сверка за неделю</h3>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-                        <X size={20} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/45">
+            <div className="bg-card rounded-2xl w-full max-w-md shadow-[var(--shadow-pop)] overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="flex justify-between items-center p-4 border-b border-ink-10">
+                    <h3 className="font-semibold text-lg">Сверка за неделю</h3>
+                    <button onClick={onClose} aria-label="Закрыть" className="-m-2.5 w-11 h-11 flex items-center justify-center hover:bg-ink-05 rounded-full transition-colors">
+                        <X size={20} aria-hidden="true" />
                     </button>
                 </div>
 
                 <div className="p-6 space-y-6">
                     {/* Summary Stats */}
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-gray-50 p-3 rounded-xl">
-                            <div className="text-xs text-gray-500 uppercase font-bold mb-1">Всего часов</div>
-                            <div className="text-2xl font-bold">{analysis.totalHours.toFixed(1)} ч</div>
+                        <div className="bg-sunken p-3 rounded-xl">
+                            <div className="text-xs text-ink-60 uppercase font-semibold mb-1">Всего часов</div>
+                            <div className="text-2xl font-semibold">{analysis.totalHours.toFixed(1)} ч</div>
                         </div>
-                        <div className="bg-gray-50 p-3 rounded-xl">
-                            <div className="text-xs text-gray-500 uppercase font-bold mb-1">Ваша скидка</div>
-                            <div className="text-2xl font-bold text-unbox-green">{analysis.discountPercent}%</div>
+                        <div className="bg-sunken p-3 rounded-xl">
+                            <div className="text-xs text-ink-60 uppercase font-semibold mb-1">Ваша скидка</div>
+                            <div className="text-2xl font-semibold text-accent-ink">{analysis.discountPercent}%</div>
                         </div>
                     </div>
 
@@ -115,12 +117,12 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
                     {analysis.nextTier && (
                         <div>
                             <div className="flex justify-between text-xs mb-1.5">
-                                <span className="text-gray-500">Прогресс до {analysis.nextTier.percent}%</span>
+                                <span className="text-ink-60">Прогресс до {analysis.nextTier.percent}%</span>
                                 <span className="font-medium">{analysis.totalHours.toFixed(1)} / {analysis.nextTier.hours} ч</span>
                             </div>
-                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-2 bg-sunken rounded-full overflow-hidden">
                                 <div
-                                    className="h-full bg-unbox-green rounded-full transition-all duration-1000"
+                                    className="h-full bg-accent rounded-full transition-all duration-1000"
                                     style={{ width: `${Math.min(100, (analysis.totalHours / analysis.nextTier.hours) * 100)}%` }}
                                 />
                             </div>
@@ -130,17 +132,17 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
                     {/* Financials */}
                     <div className="space-y-3 pt-2">
                         <div className="flex justify-between items-center text-sm">
-                            <span className="text-gray-500">Фактически оплачено:</span>
-                            <span className="font-medium line-through text-gray-400">{analysis.totalPaidPrice.toFixed(2)} ₾</span>
+                            <span className="text-ink-60">Фактически оплачено:</span>
+                            <span className="num font-medium line-through text-ink-60">{formatGel(analysis.totalPaidPrice)}</span>
                         </div>
                         <div className="flex justify-between items-center text-sm">
-                            <span className="text-gray-500">Цена со скидкой (Идеал):</span>
-                            <span className="font-bold">{analysis.idealPrice.toFixed(2)} ₾</span>
+                            <span className="text-ink-60">Цена со скидкой:</span>
+                            <span className="num font-semibold">{formatGel(analysis.idealPrice)}</span>
                         </div>
-                        <div className="pt-3 border-t border-gray-100 flex justify-between items-center">
+                        <div className="pt-3 border-t border-ink-10 flex justify-between items-center">
                             <span className="font-medium">К возврату:</span>
-                            <span className={analysis.delta > 0.01 ? "text-xl font-bold text-green-600" : "text-xl font-bold text-gray-400"}>
-                                {analysis.delta > 0.01 ? `+${analysis.delta.toFixed(2)} ₾` : '0 ₾'}
+                            <span className={analysis.delta > 0.01 ? "num text-xl font-semibold text-[var(--status-ok-fg)]" : "num text-xl font-semibold text-ink-60"}>
+                                {analysis.delta > 0.01 ? formatGel(analysis.delta, { sign: true }) : formatGel(0)}
                             </span>
                         </div>
                     </div>
@@ -156,8 +158,8 @@ export function ReconciliationModal({ isOpen, onClose }: ReconciliationModalProp
                                 Корректировка не требуется
                             </Button>
                         )}
-                        <p className="text-xs text-center text-gray-400 mt-2">
-                            Расчет за последние 7 дней
+                        <p className="text-xs text-center text-ink-60 mt-2">
+                            Расчёт за последние 7 дней
                         </p>
                     </div>
                 </div>

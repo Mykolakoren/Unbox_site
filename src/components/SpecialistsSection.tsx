@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, User, Video, MapPin } from 'lucide-react';
 import { api } from '../api/client';
+import { formatGel } from '../utils/format';
 import type { Specialist } from './Specialists/SpecialistCard';
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -50,19 +51,19 @@ export function SpecialistsSection({ categoryFilter }: Props) {
                 className="flex items-end justify-between mb-8"
             >
                 <div>
-                    <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Резиденты</p>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark leading-tight">
+                    <p className="text-accent-ink text-xs font-semibold uppercase tracking-widest mb-2">Резиденты</p>
+                    <h2 className="text-2xl sm:text-3xl font-semibold text-ink leading-tight">
                         {categoryFilter && CATEGORY_LABELS[categoryFilter]
                             ? CATEGORY_LABELS[categoryFilter]
                             : 'Наши специалисты'}
                     </h2>
-                    <p className="mt-1.5 text-unbox-dark/55 max-w-xl text-sm">
+                    <p className="mt-1.5 text-ink-60 max-w-xl text-sm">
                         Профессионалы, которые принимают в пространствах Unbox
                     </p>
                 </div>
                 <Link
                     to="/specialists"
-                    className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-unbox-dark/60 hover:text-unbox-dark transition-colors shrink-0"
+                    className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-ink-60 hover:text-ink transition-colors shrink-0"
                     style={{
                         background: 'rgba(255,255,255,0.55)',
                         backdropFilter: 'blur(16px)',
@@ -106,25 +107,25 @@ export function SpecialistsSection({ categoryFilter }: Props) {
                                     />
                                 ) : (
                                     <div className="w-full h-full bg-gradient-to-br from-unbox-green/20 to-unbox-dark/20 flex items-center justify-center">
-                                        <User size={40} className="text-unbox-dark/20" strokeWidth={1.5} />
+                                        <User size={40} className="text-ink-60" strokeWidth={1.5} />
                                     </div>
                                 )}
                                 {/* Price badge */}
                                 <div
-                                    className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-xs font-bold text-unbox-dark"
+                                    className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-xs font-semibold text-ink"
                                     style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)' }}
                                 >
-                                    от {s.basePriceGel} ₾
+                                    от {formatGel(s.basePriceGel)}
                                 </div>
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
                             </div>
 
                             {/* Info */}
                             <div className="p-3.5 flex-1 flex flex-col gap-1.5">
-                                <div className="font-bold text-unbox-dark text-sm leading-tight">
+                                <div className="font-semibold text-ink text-sm leading-tight">
                                     {s.firstName} {s.lastName}
                                 </div>
-                                <div className="text-unbox-dark/50 text-xs line-clamp-2 leading-relaxed">
+                                <div className="text-ink-60 text-xs line-clamp-2 leading-relaxed">
                                     {s.tagline}
                                 </div>
 
@@ -135,7 +136,7 @@ export function SpecialistsSection({ categoryFilter }: Props) {
                                             return (
                                                 <span
                                                     key={fmt}
-                                                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] text-unbox-dark/50"
+                                                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-caption text-ink-60"
                                                     style={{ background: 'rgba(0,0,0,0.06)' }}
                                                 >
                                                     {Icon && <Icon size={9} />}
@@ -155,7 +156,7 @@ export function SpecialistsSection({ categoryFilter }: Props) {
             <div className="mt-6 flex justify-center sm:hidden">
                 <Link
                     to="/specialists"
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-unbox-dark/70 hover:text-unbox-dark transition-colors"
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-ink-80 hover:text-ink transition-colors"
                     style={{
                         background: 'rgba(255,255,255,0.55)',
                         border: '1px solid rgba(255,255,255,0.65)',

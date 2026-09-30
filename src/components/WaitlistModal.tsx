@@ -1,5 +1,5 @@
 import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { formatDayMonth } from '../utils/format';
 import { Bell, X, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../store/userStore';
@@ -37,7 +37,7 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
 
         const hasTelegram = !!(currentUser?.telegramId && /^\d+$/.test(currentUser.telegramId));
         if (hasTelegram) {
-            toast.success('Вы в листе ожидания. Пришлём уведомление в Telegram, когда слот освободится.');
+            toast.success('Готово — напишем в Telegram, когда время освободится.');
         } else {
             toast.success('Вы в листе ожидания. Уведомление появится в вашем аккаунте — подключите Telegram в профиле, чтобы не пропустить.');
         }
@@ -45,29 +45,29 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4 animate-in zoom-in-95">
+        <div className="fixed inset-0 bg-ink/45 z-50 flex items-center justify-center p-4">
+            <div className="bg-card rounded-2xl w-full max-w-sm p-6 space-y-4 animate-in zoom-in-95">
                 <div className="flex justify-between items-start">
-                    <div className="w-10 h-10 rounded-full bg-unbox-light flex items-center justify-center text-unbox-green">
-                        <Bell size={20} />
+                    <div className="w-10 h-10 rounded-full bg-accent-soft flex items-center justify-center text-accent-ink">
+                        <Bell size={20} aria-hidden="true" />
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-unbox-dark">
-                        <X size={20} />
+                    <button onClick={onClose} aria-label="Закрыть" className="-m-3 w-11 h-11 flex items-center justify-center text-ink-60 hover:text-ink">
+                        <X size={20} aria-hidden="true" />
                     </button>
                 </div>
 
                 <div>
-                    <h3 className="font-bold text-lg text-gray-900">Слот занят</h3>
-                    <p className="text-gray-500 mt-1 text-sm">
+                    <h3 className="font-semibold text-lg text-ink">Время занято</h3>
+                    <p className="text-ink-60 mt-1 text-sm">
                         Хотите получить уведомление, если время
-                        <span className="font-bold text-unbox-dark mx-1">{startTime}</span>
-                        на <span className="font-bold text-unbox-dark">{format(date, 'd MMMM', { locale: ru })}</span> освободится?
+                        <span className="font-semibold text-ink mx-1">{startTime}</span>
+                        на <span className="font-semibold text-ink">{formatDayMonth(date)}</span> освободится?
                     </p>
                     {(() => {
                         const hasTg = !!(currentUser?.telegramId && /^\d+$/.test(currentUser.telegramId));
                         return (
-                            <div className={`mt-3 flex items-start gap-2 text-xs rounded-lg px-3 py-2 ${hasTg ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                                <Send size={14} className="mt-0.5 shrink-0" />
+                            <div className={`mt-3 flex items-start gap-2 text-xs rounded-lg px-3 py-2 ${hasTg ? 'bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]' : 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]'}`}>
+                                <Send size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
                                 <span>
                                     {hasTg
                                         ? 'Telegram подключён — мгновенное уведомление в чат.'
@@ -81,15 +81,15 @@ export function WaitlistModal({ isOpen, onClose, resourceId, startTime, date }: 
                 <div className="pt-2">
                     <button
                         onClick={handleConfirm}
-                        className="w-full bg-unbox-green text-white font-bold py-3 rounded-xl hover:bg-unbox-dark transition-colors"
+                        className="w-full bg-accent text-on-accent font-semibold py-3 rounded-xl hover:bg-accent-hover transition-colors"
                     >
                         Сообщить мне
                     </button>
                     <button
                         onClick={onClose}
-                        className="w-full mt-2 text-gray-500 font-medium py-2 hover:text-unbox-dark"
+                        className="w-full mt-2 min-h-11 text-ink-60 font-medium py-2 hover:text-ink"
                     >
-                        Отмена
+                        Не нужно
                     </button>
                 </div>
             </div>

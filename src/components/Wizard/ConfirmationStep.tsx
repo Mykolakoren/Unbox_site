@@ -23,10 +23,13 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { groupSlotsIntoBookings } from '../../utils/cartHelpers';
 import { format, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { motion } from 'framer-motion';
 import { useCrmStore } from '../../store/crmStore';
-import { User as UserIcon, Gift } from 'lucide-react';
+import { User as UserIcon, Gift, MessageCircle, Ticket } from 'lucide-react';
+import { COLOR } from '../../design/tokens';
+import { formatDayMonth, formatGel } from '../../utils/format';
+import { ruCountWord } from '../../utils/plural';
+import { Button as UiButton } from '../ui/Button';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
@@ -87,7 +90,7 @@ export function ConfirmationStep() {
         return target?.id;
     }, [state.bookingForUser, users]);
 
-    // Specialists list for the "За кого бронируешь?" picker — admins/owner
+    // Specialists list for the "За кого бронируете?" picker — admins/owner
     // are included because they often have CRM clients of their own
     // (Yulia/Mykola see clients themselves).
     const specialistChoices = useMemo(() => {
@@ -376,7 +379,7 @@ export function ConfirmationStep() {
             }
 
             if (cartDetails.length === 0) {
-                toast.error("Ошибка: Корзина пуста. Пожалуйста, выберите время.");
+                toast.error('Корзина пуста — выберите время.');
                 return;
             }
 
@@ -399,8 +402,8 @@ export function ConfirmationStep() {
                         crmClientId: selectedCrmClientId || undefined,
                         targetUserId: state.bookingForUser || undefined,
                     });
-                    const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
-                    toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
+                    const patternLabel = recurringPattern === 'weekly' ? 'каждую неделю' : recurringPattern === 'biweekly' ? 'раз в 2 недели' : 'раз в 4 недели';
+                    toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0, { fraction: 0 })}`);
                     // Mark success BEFORE the refetch — the series IS created.
                     setConfirmed(true);
                     shouldResetOnUnmount.current = true;
@@ -441,7 +444,7 @@ export function ConfirmationStep() {
                             toast.error(`Конфликт: заняты ${detail.conflicts.map((c: any) => c.date).join(', ')}`, { duration: 8000 });
                         }
                     } else {
-                        toast.error(typeof detail === 'string' ? detail : e.message || 'Ошибка создания серии');
+                        toast.error(typeof detail === 'string' ? detail : e.message || 'Не удалось создать серию');
                     }
                 }
                 return;
@@ -478,45 +481,45 @@ export function ConfirmationStep() {
                     const hasSubscription = isSubscriptionEligible;
 
                     toast.custom((t) => (
-                        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border-l-4 border-red-500 overflow-hidden relative">
+                        <div className="w-full max-w-md bg-card rounded-2xl shadow-[var(--shadow-pop)] border border-ink-10 overflow-hidden relative">
                             <div className="p-5">
                                 <div className="flex items-start gap-4">
-                                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>
+                                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-[var(--status-danger-bg)] flex items-center justify-center text-[var(--status-danger-fg)]">
+                                        <AlertCircle size={20} aria-hidden="true" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <h3 className="text-sm font-bold text-unbox-dark mb-1">
+                                        <h3 className="text-sm font-semibold text-ink mb-1">
                                             Недостаточно средств для бронирования
                                         </h3>
-                                        <p className="text-sm text-unbox-grey leading-relaxed mb-3">
-                                            Для завершения бронирования не хватает <span className="font-bold text-red-600">{shortfall.toFixed(1)} ₾</span>.
+                                        <p className="text-sm text-ink-60 leading-relaxed mb-3">
+                                            Для бронирования не хватает <span className="num font-semibold text-[var(--status-danger-fg)]">{formatGel(shortfall)}</span>.
                                         </p>
 
-                                        <div className="bg-unbox-light/30 rounded-lg p-3 space-y-2 text-xs mb-3">
+                                        <div className="bg-sunken rounded-lg p-3 space-y-2 text-caption mb-3">
                                             <div className="flex justify-between">
-                                                <span className="text-unbox-grey">Ваш баланс:</span>
-                                                <span className={effectiveUser.balance < 0 ? "text-red-600 font-medium" : "text-unbox-dark font-medium"}>
-                                                    {effectiveUser.balance.toFixed(1)} ₾
+                                                <span className="text-ink-60">Ваш баланс:</span>
+                                                <span className={effectiveUser.balance < 0 ? "num text-[var(--status-danger-fg)] font-medium" : "num text-ink font-medium"}>
+                                                    {formatGel(effectiveUser.balance)}
                                                 </span>
                                             </div>
                                             <div className="flex justify-between">
-                                                <span className="text-unbox-grey">Кредитный лимит:</span>
-                                                <span className="text-unbox-dark font-medium">
-                                                    {effectiveUser.creditLimit || 0} ₾
+                                                <span className="text-ink-60">Кредитный лимит:</span>
+                                                <span className="num text-ink font-medium">
+                                                    {formatGel(effectiveUser.creditLimit || 0)}
                                                 </span>
                                             </div>
-                                            <div className="h-px bg-gray-200 my-1"></div>
-                                            <div className="flex justify-between font-bold">
-                                                <span className="text-unbox-dark">К оплате:</span>
-                                                <span className="text-unbox-dark">
-                                                    {netPrice.toFixed(1)} ₾
+                                            <div className="h-px bg-ink-10 my-1"></div>
+                                            <div className="flex justify-between font-semibold">
+                                                <span className="text-ink">К оплате:</span>
+                                                <span className="num text-ink">
+                                                    {formatGel(netPrice)}
                                                 </span>
                                             </div>
                                         </div>
 
                                         {/* Actionable guidance */}
-                                        <div className="space-y-2 text-xs">
-                                            <p className="font-semibold text-unbox-dark">Что можно сделать:</p>
+                                        <div className="space-y-2 text-caption">
+                                            <p className="font-semibold text-ink">Что можно сделать:</p>
                                             {hasSubscription && (
                                                 <button
                                                     onClick={() => {
@@ -524,9 +527,9 @@ export function ConfirmationStep() {
                                                         toast.dismiss(t);
                                                         toast.success('Способ оплаты изменён на абонемент');
                                                     }}
-                                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 transition-colors text-left"
+                                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] hover:brightness-95 transition-colors text-left"
                                                 >
-                                                    <span className="text-base">✨</span>
+                                                    <Ticket size={16} className="shrink-0" aria-hidden="true" />
                                                     <span><strong>Списать с абонемента</strong> — у вас есть активный абонемент</span>
                                                 </button>
                                             )}
@@ -534,9 +537,9 @@ export function ConfirmationStep() {
                                                 href="https://t.me/UnboxCenter"
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer no-underline"
+                                                className="w-full flex items-start gap-2 px-3 py-2 rounded-lg border border-ink-20 text-ink hover:bg-ink-05 transition-colors cursor-pointer no-underline"
                                             >
-                                                <span className="text-base mt-0.5">💬</span>
+                                                <MessageCircle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
                                                 <span>
                                                     <strong>Связаться с администратором</strong> — для пополнения баланса или установления кредитного лимита
                                                 </span>
@@ -545,14 +548,11 @@ export function ConfirmationStep() {
                                     </div>
                                 </div>
                             </div>
-                            <div className="bg-red-50 px-4 py-3 border-t border-red-100 flex justify-between items-center">
-                                <span className="text-xs text-red-600 font-medium">Не хватает: {shortfall.toFixed(1)} ₾</span>
-                                <button
-                                    onClick={() => toast.dismiss(t)}
-                                    className="px-4 py-1.5 text-xs font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
-                                >
+                            <div className="bg-[var(--status-danger-bg)] px-4 py-3 flex justify-between items-center">
+                                <span className="text-caption text-[var(--status-danger-fg)] font-medium">Не хватает: <span className="num">{formatGel(shortfall)}</span></span>
+                                <UiButton variant="secondary" size="compact" onClick={() => toast.dismiss(t)}>
                                     Понятно
-                                </button>
+                                </UiButton>
                             </div>
                         </div>
                     ), { duration: Infinity });
@@ -656,13 +656,14 @@ export function ConfirmationStep() {
                 const hasGcalFailure = latestBookings.some(b => (b as any).gcalSyncFailed);
 
                 if (isPending) {
-                    toast.info('🕐 Запрос на горячую бронь отправлен администратору. Вы получите уведомление.');
+                    toast.info('Запрос отправлен администратору — ждём подтверждения. Пришлём уведомление.');
                 } else {
-                    toast.success(isRescheduling ? 'Бронирование успешно перенесено!' : 'Бронирование успешно создано!');
+                    toast.success(isRescheduling ? 'Бронь перенесена' : 'Бронь создана');
                     if (!isRescheduling) {
                         // Invite the user to subscribe to Telegram booking notifications.
                         // Backend will only manage to send if the user has /start'ed the bot.
-                        toast('💬 Получать уведомления о бронях в Telegram', {
+                        toast('Получайте уведомления о бронях в Telegram', {
+                            icon: <MessageCircle size={16} aria-hidden="true" />,
                             description: 'Напишите /start нашему боту → @Unbox_Booking_G_Bot',
                             action: {
                                 label: 'Открыть',
@@ -683,7 +684,7 @@ export function ConfirmationStep() {
                     navigate(getMyBookingsPath(currentUser), { state: { targetDate: bookingDate } });
                 }, isPending ? 3000 : 2000);
             } else {
-                toast.error("Ошибка создания бронирования: не удалось сформировать данные.");
+                toast.error('Не удалось оформить бронь. Попробуйте ещё раз.');
             }
 
         } catch (error: any) {
@@ -807,8 +808,8 @@ export function ConfirmationStep() {
     if (isCheckingAvailability) {
         return (
             <div className="flex flex-col items-center justify-center py-20 space-y-4">
-                <Loader2 className="h-8 w-8 animate-spin text-unbox-green" />
-                <p className="text-unbox-grey text-sm">Проверяем доступность слота...</p>
+                <Loader2 className="h-8 w-8 animate-spin text-accent" aria-hidden="true" />
+                <p className="text-ink-60 text-sm">Проверяем, свободно ли время…</p>
             </div>
         );
     }
@@ -827,19 +828,19 @@ export function ConfirmationStep() {
                 transition={{ duration: 0.4 }}
                 className="flex flex-col items-center text-center py-16 space-y-6"
             >
-                <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center text-red-500">
-                    <AlertCircle size={40} />
+                <div className="w-20 h-20 rounded-full bg-[var(--status-danger-bg)] flex items-center justify-center text-[var(--status-danger-fg)]">
+                    <AlertCircle size={40} aria-hidden="true" />
                 </div>
 
                 <div className="space-y-2 max-w-sm">
-                    <h2 className="text-2xl font-bold text-unbox-dark">Время уже занято</h2>
-                    <p className="text-unbox-grey leading-relaxed">
-                        К сожалению, выбранный слот был забронирован другим пользователем.
+                    <h2 className="text-2xl font-semibold text-ink">Время уже занято</h2>
+                    <p className="text-ink-60 leading-relaxed">
+                        Это время только что занял кто-то другой.
                         {timeRange && (
-                            <> Конфликт: <span className="font-semibold text-unbox-dark">{timeRange}</span>.</>
+                            <> Занято: <span className="num font-semibold text-ink">{timeRange}</span>.</>
                         )}
                     </p>
-                    <p className="text-unbox-grey text-sm">Пожалуйста, выберите другое время.</p>
+                    <p className="text-ink-60 text-sm">Выберите другое время.</p>
                 </div>
 
                 <Button
@@ -858,12 +859,12 @@ export function ConfirmationStep() {
     if (confirmed) {
         return (
             <div className="text-center py-12 animate-in fade-in zoom-in duration-500">
-                <div className="w-20 h-20 bg-unbox-light text-unbox-green rounded-full flex items-center justify-center mx-auto mb-6">
-                    <CheckCircle size={40} />
+                <div className="w-20 h-20 bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] rounded-full flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle size={40} aria-hidden="true" />
                 </div>
-                <h2 className="text-3xl font-bold mb-4 text-unbox-dark">{isEditing ? (isRescheduling ? 'Бронирование перенесено!' : 'Бронирование обновлено!') : 'Бронирование подтверждено!'}</h2>
-                <p className="text-unbox-grey max-w-md mx-auto mb-8">
-                    {isEditing ? 'Изменения успешно сохранены.' : 'Мы отправили подтверждение на вашу почту. Ждем вас в Unbox!'}
+                <h2 className="text-heading font-semibold mb-4 text-ink">{isEditing ? (isRescheduling ? 'Бронирование перенесено!' : 'Бронирование обновлено!') : 'Бронирование подтверждено!'}</h2>
+                <p className="text-ink-60 max-w-md mx-auto mb-8">
+                    {isEditing ? 'Изменения сохранены.' : 'Мы отправили подтверждение на вашу почту. Ждём вас в Unbox!'}
                 </p>
 
                 <div className="flex flex-col sm:flex-row justify-center gap-4">
@@ -893,42 +894,36 @@ export function ConfirmationStep() {
             className="space-y-4 sm:space-y-8"
         >
             <div>
-                <h2 className="text-xl sm:text-2xl font-bold mb-1 sm:mb-2">Подтверждение</h2>
-                <p className="text-unbox-grey text-sm sm:text-base">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
+                <h2 className="text-xl sm:text-2xl font-semibold mb-1 sm:mb-2">Подтверждение</h2>
+                <p className="text-ink-60 text-sm sm:text-base">{effectiveUser ? 'Проверьте данные бронирования' : 'Заполните контактную информацию'}</p>
             </div>
 
             <div className="space-y-3 sm:space-y-4 max-w-md">
                 {effectiveUser ? (
                     <div className="p-3 sm:p-4 rounded-xl"
-                        style={{
-                            background: 'rgba(255,255,255,0.35)',
-                            backdropFilter: 'blur(24px) saturate(150%)',
-                            WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-                            border: '1px solid rgba(255,255,255,0.55)',
-                            boxShadow: '0 4px 16px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.70)',
-                        }}>
-                        <div className="text-xs sm:text-sm text-unbox-grey mb-0.5">Бронирование на имя:</div>
-                        <div className="font-bold text-sm sm:text-base text-unbox-dark">{effectiveUser.name}</div>
-                        <div className="text-xs sm:text-sm text-unbox-grey mt-1.5 sm:mt-2">Контакты:</div>
-                        <div className="text-sm text-unbox-dark">{effectiveUser.phone}</div>
-                        <div className="text-sm text-unbox-dark">{effectiveUser.email}</div>
+                        style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
+                        <div className="text-xs sm:text-sm text-ink-60 mb-0.5">Бронирование на имя:</div>
+                        <div className="font-semibold text-sm sm:text-base text-ink">{effectiveUser.name}</div>
+                        <div className="text-xs sm:text-sm text-ink-60 mt-1.5 sm:mt-2">Контакты:</div>
+                        <div className="text-sm text-ink">{effectiveUser.phone}</div>
+                        <div className="text-sm text-ink">{effectiveUser.email}</div>
                     </div>
                 ) : (
                     <>
                         <div className="space-y-2">
-                            <label htmlFor="guest-name" className="text-sm font-medium text-unbox-dark">Имя *</label>
-                            <input id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="Иван Иванов" />
+                            <label htmlFor="guest-name" className="text-sm font-medium text-ink">Имя *</label>
+                            <input id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light bg-card focus:outline-none focus:ring-2 focus:ring-accent" placeholder="Иван Иванов" />
                         </div>
                         <div className="space-y-2">
-                            <label htmlFor="guest-phone" className="text-sm font-medium text-unbox-dark">Телефон</label>
-                            <PhoneInput id="guest-phone" value={guestPhone} onChange={setGuestPhone} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" />
+                            <label htmlFor="guest-phone" className="text-sm font-medium text-ink">Телефон</label>
+                            <PhoneInput id="guest-phone" value={guestPhone} onChange={setGuestPhone} className="w-full px-4 py-3 rounded-xl border border-unbox-light bg-card focus:outline-none focus:ring-2 focus:ring-accent" />
                         </div>
                         <div className="space-y-2">
-                            <label htmlFor="guest-email" className="text-sm font-medium text-unbox-dark">Email *</label>
-                            <input id="guest-email" type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green" placeholder="ivan@example.com" />
+                            <label htmlFor="guest-email" className="text-sm font-medium text-ink">Email *</label>
+                            <input id="guest-email" type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-unbox-light bg-card focus:outline-none focus:ring-2 focus:ring-accent" placeholder="ivan@example.com" />
                         </div>
                         {(!guestName.trim() || !guestEmail.trim()) && (
-                            <p className="text-xs text-amber-600">* Заполните имя и email для бронирования</p>
+                            <p className="text-xs text-[var(--status-pending-fg)]">* Заполните имя и email для бронирования</p>
                         )}
                     </>
                 )}
@@ -940,8 +935,8 @@ export function ConfirmationStep() {
                 refetches scoped to their roster. */}
             {isAdminActor && specialistChoices.length > 0 && (
                 <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
-                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark flex items-center gap-2">
-                        <UserIcon size={16} /> За кого бронируешь?
+                    <h3 className="font-semibold text-base sm:text-lg text-ink flex items-center gap-2">
+                        <UserIcon size={16} aria-hidden="true" /> За кого бронируете?
                     </h3>
                     <select
                         value={state.bookingForUser || ''}
@@ -952,7 +947,7 @@ export function ConfirmationStep() {
                             // different specialist's CRM and would 403 on submit.
                             setSelectedCrmClientId('');
                         }}
-                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm sm:text-base text-unbox-dark bg-white"
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base text-ink bg-card"
                     >
                         <option value="">— За себя ({currentUser?.name || currentUser?.email}) —</option>
                         {specialistChoices
@@ -963,7 +958,7 @@ export function ConfirmationStep() {
                                 </option>
                             ))}
                     </select>
-                    <p className="text-xs text-unbox-grey">
+                    <p className="text-xs text-ink-60">
                         Бронь будет создана от имени выбранного специалиста (списание/абонемент тоже его).
                     </p>
                 </div>
@@ -972,13 +967,13 @@ export function ConfirmationStep() {
             {/* CRM Client Selector (for specialists) */}
             {crmClients.length > 0 && (
                 <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
-                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark flex items-center gap-2">
-                        <UserIcon size={16} /> Привязать клиента
+                    <h3 className="font-semibold text-base sm:text-lg text-ink flex items-center gap-2">
+                        <UserIcon size={16} aria-hidden="true" /> Привязать клиента
                     </h3>
                     <select
                         value={selectedCrmClientId}
                         onChange={(e) => setSelectedCrmClientId(e.target.value)}
-                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm sm:text-base text-unbox-dark bg-white"
+                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base text-ink bg-card"
                     >
                         <option value="">— Без привязки к клиенту —</option>
                         {crmClients.map(c => (
@@ -987,14 +982,14 @@ export function ConfirmationStep() {
                             </option>
                         ))}
                     </select>
-                    <p className="text-xs text-unbox-grey">Выберите клиента из CRM для привязки к бронированию</p>
+                    <p className="text-xs text-ink-60">Выберите клиента из CRM для привязки к бронированию</p>
                 </div>
             )}
 
             {/* Payment Method Selector — при переносе способ оплаты не меняется. */}
             {effectiveUser && !isRescheduling && (
                 <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
-                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark">Способ оплаты</h3>
+                    <h3 className="font-semibold text-base sm:text-lg text-ink">Способ оплаты</h3>
                     {/* Варианты в порядке сервера: бонус → абонемент → баланс. */}
                     <div role="radiogroup" aria-label="Способ оплаты" className="grid gap-2 sm:gap-3">
                         {/* Option: Bonus */}
@@ -1005,10 +1000,10 @@ export function ConfirmationStep() {
                                 aria-checked={payMethod === 'bonus'}
                                 aria-disabled={!isBonusEligible}
                                 className={`
-                                    relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                    relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all
                                     ${payMethod === 'bonus'
-                                        ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-400'
-                                        : 'border-amber-200 hover:border-amber-300 bg-amber-50/50'}
+                                        ? 'border-accent bg-accent-soft ring-1 ring-accent'
+                                        : 'border-ink-20 hover:border-ink-40 bg-card'}
                                     ${!isBonusEligible ? 'opacity-50 pointer-events-none' : ''}
                                 `}
                                 onClick={() => pickPay('bonus')}
@@ -1021,17 +1016,17 @@ export function ConfirmationStep() {
                             >
                                 <div className="flex justify-between items-center">
                                     <div className="flex items-center gap-2">
-                                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'bonus' ? 'border-amber-500' : 'border-amber-300'}`}>
-                                            {payMethod === 'bonus' && <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />}
+                                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'bonus' ? 'border-accent' : 'border-ink-60'}`}>
+                                            {payMethod === 'bonus' && <div className="w-2.5 h-2.5 rounded-full bg-accent" />}
                                         </div>
-                                        <Gift size={16} className="text-amber-600" />
-                                        <span className="font-bold text-amber-800">Бонусные часы</span>
+                                        <Gift size={16} className="text-ink-60" aria-hidden="true" />
+                                        <span className="font-semibold text-ink">Бонусные часы</span>
                                     </div>
-                                    <span className="font-bold text-amber-700">Бесплатно</span>
+                                    <span className="font-semibold text-[var(--status-ok-fg)]">Бесплатно</span>
                                 </div>
-                                <div className="ml-7 text-xs text-amber-600 mt-1 font-medium">
+                                <div className="ml-7 text-xs text-ink-60 mt-1 font-medium">
                                     Доступно: {fmtHours(totalBonusHours)} бонусов
-                                    {!isBonusEligible && <span className="text-amber-800 ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
+                                    {!isBonusEligible && <span className="text-ink ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
                                 </div>
                             </div>
                         )}
@@ -1043,10 +1038,10 @@ export function ConfirmationStep() {
                             aria-checked={payMethod === 'subscription'}
                             aria-disabled={!isSubscriptionEligible}
                             className={`
-                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all
                                 ${payMethod === 'subscription'
-                                    ? 'border-unbox-green bg-unbox-light/50 ring-1 ring-unbox-green'
-                                    : 'border-gray-300 hover:border-gray-400 bg-white'}
+                                    ? 'border-accent bg-accent-soft ring-1 ring-accent'
+                                    : 'border-ink-20 hover:border-ink-40 bg-card'}
                                 ${!isSubscriptionEligible ? 'opacity-50 pointer-events-none' : ''}
                             `}
                             onClick={() => pickPay('subscription')}
@@ -1059,26 +1054,26 @@ export function ConfirmationStep() {
                         >
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
-                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'subscription' ? 'border-unbox-green' : 'border-gray-300'}`}>
-                                        {payMethod === 'subscription' && <div className="w-2.5 h-2.5 rounded-full bg-unbox-green" />}
+                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'subscription' ? 'border-accent' : 'border-ink-60'}`}>
+                                        {payMethod === 'subscription' && <div className="w-2.5 h-2.5 rounded-full bg-accent" />}
                                     </div>
-                                    <span className="font-bold text-unbox-dark">Списать с абонемента</span>
+                                    <span className="font-semibold text-ink">Списать с абонемента</span>
                                 </div>
-                                <span className="font-bold text-unbox-dark">
-                                    {fmtHours(totalBookingHours)}{subMoney > 0 ? ` + ${subMoney.toFixed(1)} ₾` : ''}
+                                <span className="num font-semibold text-ink">
+                                    {fmtHours(totalBookingHours)}{subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}
                                 </span>
                             </div>
                             {effectiveUser.subscription && (
-                                <div className="ml-7 text-xs text-unbox-grey mt-1 font-medium">
+                                <div className="ml-7 text-xs text-ink-60 mt-1 font-medium">
                                     {subHours.ok ? subscriptionHoursLabel(subHours) : subHours.reason}
-                                    {subHours.ok && !isSubscriptionEligible && <span className="text-unbox-dark ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
+                                    {subHours.ok && !isSubscriptionEligible && <span className="text-ink ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
                                 </div>
                             )}
                             {/* Часть остатка уже обещана будущим броням — честно
                                 говорим, что при нехватке часов крон за сутки до
                                 встречи возьмёт деньги (billing_defer). */}
                             {payMethod === 'subscription' && !isSeries && !plan.subFreeCovers && (
-                                <div className="ml-7 text-xs text-red-600 mt-1">
+                                <div className="ml-7 text-xs text-[var(--status-danger-fg)] mt-1">
                                     Свободно только {fmtHours(subHours.free)}: {fmtHours(subHours.reserved)} уже в других бронях. Если к списанию часов не хватит, одна из броней спишется с баланса по обычной цене.
                                 </div>
                             )}
@@ -1091,10 +1086,10 @@ export function ConfirmationStep() {
                             aria-checked={payMethod === 'balance'}
                             aria-disabled={!isSelectable('balance', plan, isSeries)}
                             className={`
-                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md
+                                relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all
                                 ${payMethod === 'balance'
-                                    ? 'border-unbox-green bg-unbox-light/50 ring-1 ring-unbox-green'
-                                    : 'border-gray-300 hover:border-gray-400 bg-white'}
+                                    ? 'border-accent bg-accent-soft ring-1 ring-accent'
+                                    : 'border-ink-20 hover:border-ink-40 bg-card'}
                                 ${!isSelectable('balance', plan, isSeries) ? 'opacity-50 pointer-events-none' : ''}
                             `}
                             onClick={() => pickPay('balance')}
@@ -1107,22 +1102,22 @@ export function ConfirmationStep() {
                         >
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
-                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'balance' ? 'border-unbox-green' : 'border-gray-300'}`}>
-                                        {payMethod === 'balance' && <div className="w-2.5 h-2.5 rounded-full bg-unbox-green" />}
+                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMethod === 'balance' ? 'border-accent' : 'border-ink-60'}`}>
+                                        {payMethod === 'balance' && <div className="w-2.5 h-2.5 rounded-full bg-accent" />}
                                     </div>
-                                    <span className="font-bold text-unbox-dark">Списать с баланса</span>
+                                    <span className="font-semibold text-ink">Списать с баланса</span>
                                 </div>
                                 {isSelectable('balance', plan, isSeries) && (
-                                    <span className="font-bold text-unbox-dark">{totalPrice.toFixed(1)} ₾</span>
+                                    <span className="num font-semibold text-ink">{formatGel(totalPrice)}</span>
                                 )}
                             </div>
-                            <div className="ml-7 text-xs text-unbox-grey mt-1 font-medium">
-                                Текущий баланс: {effectiveUser.balance} ₾
+                            <div className="ml-7 text-xs text-ink-60 mt-1 font-medium">
+                                Текущий баланс: <span className="num">{formatGel(effectiveUser.balance)}</span>
                                 {!isSelectable('balance', plan, isSeries) && (
-                                    <span className="text-unbox-dark ml-1">· {balanceLockedReason(plan).toLowerCase()}</span>
+                                    <span className="text-ink ml-1">· {balanceLockedReason(plan).toLowerCase()}</span>
                                 )}
                                 {isSeries && plan.subCovers && (
-                                    <span className="text-unbox-dark ml-1">· сначала спишутся часы абонемента</span>
+                                    <span className="text-ink ml-1">· сначала спишутся часы абонемента</span>
                                 )}
                             </div>
                         </div>
@@ -1135,21 +1130,21 @@ export function ConfirmationStep() {
                 bookings have zero extras), expandable for the rare case. */}
             {effectiveUser && !isRescheduling && !isEditing && (
                 <details
-                    className="pt-3 sm:pt-4 border-t border-unbox-light"
+                    className="group pt-3 sm:pt-4 border-t border-unbox-light"
                     style={{ cursor: 'pointer' }}
                 >
                     <summary
-                        className="font-bold text-base sm:text-lg text-unbox-dark flex items-center justify-between gap-2 list-none"
-                        style={{ outline: 'none' }}
+                        className="font-semibold text-base sm:text-lg text-ink flex items-center justify-between gap-2 list-none"
                     >
                         <span>Дополнительные услуги
                             {state.extras.length > 0 && (
-                                <span className="ml-2 text-sm font-normal text-unbox-green">
+                                <span className="ml-2 text-sm font-normal text-accent-ink">
                                     · {state.extras.length} выбрано
                                 </span>
                             )}
                         </span>
-                        <span className="text-xs text-unbox-grey">тапни чтобы открыть</span>
+                        <span className="text-xs text-ink-60 group-open:hidden">Показать</span>
+                        <span className="text-xs text-ink-60 hidden group-open:inline">Скрыть</span>
                     </summary>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                         {availableExtrasForResource(
@@ -1161,15 +1156,16 @@ export function ConfirmationStep() {
                                     key={e.id}
                                     type="button"
                                     onClick={() => state.toggleExtra(e.id)}
+                                    aria-pressed={sel}
                                     className={`p-3 rounded-xl border text-left transition-colors ${
                                         sel
-                                            ? 'bg-unbox-light border-unbox-green'
-                                            : 'bg-white border-unbox-light hover:border-unbox-green/50'
+                                            ? 'bg-accent-soft border-accent'
+                                            : 'bg-card border-ink-20 hover:border-ink-40'
                                     }`}
                                 >
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="font-medium text-unbox-dark text-sm">{e.name}</span>
-                                        <span className="text-sm text-unbox-dark font-bold">+{e.price} ₾</span>
+                                        <span className="font-medium text-ink text-sm">{e.name}</span>
+                                        <span className="num text-sm text-ink font-semibold">{formatGel(e.price, { sign: true })}</span>
                                     </div>
                                 </button>
                             );
@@ -1181,24 +1177,25 @@ export function ConfirmationStep() {
             {/* Recurring Booking Selector */}
             {effectiveUser && !isRescheduling && !isEditing && (
                 <div className="space-y-2 sm:space-y-3 pt-3 sm:pt-4 border-t border-unbox-light">
-                    <h3 className="font-bold text-base sm:text-lg text-unbox-dark flex items-center gap-2">
-                        <Repeat size={16} /> Повторение
+                    <h3 className="font-semibold text-base sm:text-lg text-ink flex items-center gap-2">
+                        <Repeat size={16} aria-hidden="true" /> Повторение
                     </h3>
                     <div className="grid grid-cols-4 gap-1.5">
                         {([
                             { id: '' as const, label: 'Разово' },
-                            { id: 'weekly' as const, label: 'Кажд. неделю' },
-                            { id: 'biweekly' as const, label: 'Раз в 2 нед.' },
+                            { id: 'weekly' as const, label: 'Каждую неделю' },
+                            { id: 'biweekly' as const, label: 'Раз в 2 недели' },
                             { id: 'monthly' as const, label: 'Раз в 4 недели' },
                         ]).map(p => (
                             <button
                                 key={p.id}
                                 type="button"
                                 onClick={() => setRecurringPattern(p.id)}
+                                aria-pressed={recurringPattern === p.id}
                                 className={`py-2 sm:py-2.5 rounded-xl border text-xs font-semibold transition-colors text-center ${
                                     recurringPattern === p.id
-                                        ? 'bg-unbox-green text-white border-unbox-green shadow-sm'
-                                        : 'border-gray-200 text-gray-500 hover:border-unbox-green hover:text-unbox-green'
+                                        ? 'bg-accent text-on-accent border-accent'
+                                        : 'border-ink-20 text-ink-60 hover:border-accent hover:text-accent-ink'
                                 }`}
                             >
                                 {p.label}
@@ -1206,7 +1203,7 @@ export function ConfirmationStep() {
                         ))}
                     </div>
                     {recurringPattern && (
-                        <div className="flex items-center gap-2.5 bg-unbox-light/30 rounded-xl px-3 py-2.5">
+                        <div className="flex items-center gap-2.5 bg-sunken rounded-xl px-3 py-2.5">
                             <input
                                 type="number"
                                 value={recurringOccurrences}
@@ -1216,15 +1213,15 @@ export function ConfirmationStep() {
                                 }}
                                 min={2}
                                 max={recurringPattern === 'monthly' ? 24 : 52}
-                                className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green bg-white"
+                                className="w-16 px-2 py-1.5 rounded-lg border border-ink-20 text-sm text-center focus:outline-none focus:ring-2 focus:ring-accent bg-card"
                             />
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-ink-60">
                                 повторений · {recurringPattern === 'monthly'
                                     ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                     : recurringPattern === 'biweekly'
                                         ? `≈ ${Math.round(recurringOccurrences / 2)} мес.`
                                         : `≈ ${Math.round(recurringOccurrences / 4.3)} мес.`}
-                                {totalPrice > 0 && ` · ≈ ${(totalPrice * recurringOccurrences).toFixed(0)} ₾ всего`}
+                                {totalPrice > 0 && ` · ≈ ${formatGel(totalPrice * recurringOccurrences, { fraction: 0 })} всего`}
                             </span>
                         </div>
                     )}
@@ -1234,33 +1231,27 @@ export function ConfirmationStep() {
             <div className="pt-4 sm:pt-8 border-t border-unbox-light">
                 {isRescheduling && oldBooking && (
                     <div className="mb-6 p-4 rounded-xl"
-                        style={{
-                            background: 'rgba(255,255,255,0.35)',
-                            backdropFilter: 'blur(24px) saturate(150%)',
-                            WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-                            border: '1px solid rgba(255,255,255,0.55)',
-                            boxShadow: '0 4px 16px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.70)',
-                        }}>
-                        <h4 className="font-bold flex items-center gap-2 text-unbox-dark mb-3">
-                            <RefreshCw size={18} /> Перенос бронирования
+                        style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
+                        <h4 className="font-semibold flex items-center gap-2 text-ink mb-3">
+                            <RefreshCw size={18} aria-hidden="true" /> Перенос бронирования
                         </h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                             {/* Old */}
-                            <div className="opacity-70 text-unbox-dark/80">
-                                <div className="text-xs uppercase font-bold text-unbox-grey mb-1">Было</div>
-                                <div className="font-medium text-unbox-dark">
-                                    {format(new Date(oldBooking.date), 'd MMM', { locale: ru })}, {oldBooking.startTime}
+                            <div className="text-ink-60">
+                                <div className="text-xs uppercase font-semibold text-ink-60 mb-1">Было</div>
+                                <div className="font-medium text-ink-80">
+                                    {formatDayMonth(new Date(oldBooking.date))}, {oldBooking.startTime}
                                 </div>
-                                <div className="text-sm text-unbox-grey">
+                                <div className="text-sm text-ink-60">
                                     {RESOURCES.find(r => r.id === oldBooking.resourceId)?.name}
                                 </div>
-                                <div className="text-sm font-bold mt-1 line-through text-unbox-grey">
-                                    {oldBooking.finalPrice} ₾
+                                <div className="num text-sm font-semibold mt-1 line-through text-ink-60">
+                                    {formatGel(oldBooking.finalPrice)}
                                 </div>
                             </div>
                             {/* Arrow */}
-                            <div className="hidden md:flex justify-center text-unbox-grey">
-                                <ArrowRight size={24} />
+                            <div className="hidden md:flex justify-center text-ink-40">
+                                <ArrowRight size={24} aria-hidden="true" />
                             </div>
 
                             {/* New — read from cartDetails first. state.startTime/
@@ -1270,27 +1261,27 @@ export function ConfirmationStep() {
                                 "Станет" panel show the time the user is
                                 leaving instead of the new pick. */}
                             <div>
-                                <div className="text-xs uppercase font-bold text-unbox-green mb-1">Станет</div>
-                                <div className="font-medium text-unbox-dark">
-                                    {format(new Date(state.date), 'd MMM', { locale: ru })}, {cartDetails[0]?.startTime || state.startTime}
+                                <div className="text-xs uppercase font-semibold text-accent-ink mb-1">Станет</div>
+                                <div className="font-medium text-ink">
+                                    {formatDayMonth(new Date(state.date))}, {cartDetails[0]?.startTime || state.startTime}
                                 </div>
-                                <div className="text-sm text-unbox-grey">
+                                <div className="text-sm text-ink-60">
                                     {RESOURCES.find(r => r.id === (cartDetails[0]?.resourceId || state.resourceId))?.name}
                                 </div>
-                                <div className="text-sm font-bold mt-1 text-unbox-green">
-                                    {rescheduleNewPrice} ₾
+                                <div className="num text-sm font-semibold mt-1 text-ink">
+                                    {formatGel(rescheduleNewPrice)}
                                 </div>
                             </div>
                         </div>
 
                         <div className="mt-4 pt-3 border-t border-unbox-light flex justify-between items-center text-sm">
-                            <span className="text-unbox-dark">Разница к оплате:</span>
-                            <span className="font-bold text-lg text-unbox-dark">
+                            <span className="text-ink">Разница к оплате:</span>
+                            <span className="num font-semibold text-lg text-ink">
                                 {rescheduleDiff > 0.005
-                                    ? `+${rescheduleDiff.toFixed(1)} ₾`
+                                    ? formatGel(rescheduleDiff, { sign: true })
                                     : rescheduleDiff < -0.005
-                                        ? `${rescheduleDiff.toFixed(1)} ₾ (Возврат)`
-                                        : '0 ₾'
+                                        ? `${formatGel(rescheduleDiff)} (возврат)`
+                                        : formatGel(0)
                                 }
                             </span>
                         </div>
@@ -1301,24 +1292,24 @@ export function ConfirmationStep() {
                     <button
                         type="button"
                         onClick={() => state.setStep(state.step - 1)}
-                        className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl border-2 border-unbox-light text-unbox-dark font-bold text-sm sm:text-base hover:bg-unbox-light/50 transition-colors cursor-pointer"
+                        className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl border-2 border-unbox-light text-ink font-semibold text-sm sm:text-base hover:bg-ink-05 transition-colors cursor-pointer"
                     >
                         ← Назад
                     </button>
                     <Button size="lg" className="flex-1 md:flex-none" onClick={handleConfirm} disabled={isLoadingPricing || isSubmitting}>
                         {isLoadingPricing || isSubmitting
-                            ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {isLoadingPricing ? 'Расчет цены...' : 'Оформление...'}</>
+                            ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> {isLoadingPricing ? 'Считаем цену…' : 'Бронируем…'}</>
                             : isRescheduling
                                 ? 'Подтвердить перенос'
                                 : isEditing
                                     ? 'Сохранить изменения'
                                     : recurringPattern
-                                        ? `Создать серию · ${recurringOccurrences} бронирований`
+                                        ? `Создать серию · ${ruCountWord(recurringOccurrences, ['бронь', 'брони', 'броней'])}`
                                         : payMethod === 'bonus'
                                             ? 'Забронировать бесплатно'
                                             : payMethod === 'subscription'
-                                                ? `Списать ${fmtHours(totalBookingHours)} абонемента${subMoney > 0 ? ` + ${subMoney.toFixed(1)} ₾` : ''}`
-                                                : `Оплатить ${totalPrice.toFixed(1)} ₾`
+                                                ? `Списать ${fmtHours(totalBookingHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
+                                                : `Оплатить ${formatGel(totalPrice)}`
                         }
                     </Button>
                 </div>

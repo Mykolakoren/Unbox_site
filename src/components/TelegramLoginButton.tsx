@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send } from 'lucide-react';
+import { Button } from './ui/Button';
 
 interface TelegramLoginButtonProps {
     botName: string;
@@ -61,23 +62,16 @@ export const TelegramLoginButton = ({
     };
 
     return (
-        <button
-            type="button"
+        // Wave 1 (X4-15, G1-16): белый текст на голубом #54A9EB давал 2.5:1.
+        // Теперь общая кнопка с рамкой и значком Telegram — как в Grid House.
+        <Button
+            variant="secondary"
+            size="touch"
             onClick={handleClick}
-            disabled={isLoading}
-            className="flex items-center gap-2 px-6 py-2.5 bg-[#54A9EB] hover:bg-[#4A96D2] disabled:bg-[#54A9EB]/60 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-all duration-200 hover:shadow-md active:scale-[0.98]"
+            loading={isLoading}
+            icon={<Send size={18} aria-hidden="true" />}
         >
-            {isLoading ? (
-                <>
-                    <Loader2 size={18} className="animate-spin" />
-                    <span>Переход в Telegram...</span>
-                </>
-            ) : (
-                <>
-                    <Send size={18} />
-                    <span>Войти через Telegram</span>
-                </>
-            )}
-        </button>
+            {isLoading ? 'Переходим в Telegram…' : 'Войти через Telegram'}
+        </Button>
     );
 };

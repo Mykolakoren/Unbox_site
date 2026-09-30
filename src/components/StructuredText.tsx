@@ -115,8 +115,8 @@ export function StructuredText({ text }: { text: string }) {
                 return (
                     <div key={idx}>
                         <div style={{
-                            fontFamily: GH_MONO, fontSize: 11,
-                            letterSpacing: '0.18em', textTransform: 'uppercase',
+                            fontFamily: GH_MONO, fontSize: 12,
+                            letterSpacing: '0.06em', textTransform: 'uppercase',
                             color: GH.ink60, marginBottom: 6,
                         }}>
                             {heading}

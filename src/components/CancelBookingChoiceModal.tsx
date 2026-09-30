@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../api/bookings';
+import { ruCountWord } from '../utils/plural';
 
 /**
  * Choice modal shown when an admin / specialist / user clicks "Удалить" on a
  * booking that belongs to a recurring series.
  *
- *   - "Только эту"            → DELETE /bookings/{id}
- *   - "Эту и все следующие"   → DELETE /bookings/recurring/{group_id}?from_booking_id=<this>
+ *   - «Отменить только эту»      → DELETE /bookings/{id}
+ *   - «Отменить эту и следующие» → DELETE /bookings/recurring/{group_id}?from_booking_id=<this>
  *                                Cancels the clicked booking + every later
  *                                sibling on the same calendar day or after.
  *                                Earlier siblings (incl. completed ones in
@@ -56,7 +57,7 @@ export function CancelBookingChoiceModal({
             // this booking and later siblings get cancelled, never the
             // earlier ones in the series.
             const res = await bookingsApi.cancelRecurringSeries(groupId, bookingId);
-            toast.success(`Серия отменена (${res?.cancelled ?? 0} броней)`);
+            toast.success(`Серия отменена: ${ruCountWord(res?.cancelled ?? 0, ['бронь', 'брони', 'броней'])}`);
             onCompleted('series');
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось отменить серию');
@@ -67,47 +68,48 @@ export function CancelBookingChoiceModal({
 
     return (
         <div
-            className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[1000] bg-ink/45 flex items-center justify-center p-4"
             onClick={(e) => { if (e.target === e.currentTarget && busy === null) onClose(); }}
         >
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-unbox-light">
-                    <div className="font-semibold text-unbox-dark">Это серия броней</div>
+            <div className="bg-card rounded-2xl shadow-[var(--shadow-pop)] w-full max-w-sm overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-ink-10">
+                    <div className="font-semibold text-ink">Это серия броней</div>
                     <button
                         onClick={onClose}
                         disabled={busy !== null}
-                        className="p-1 hover:bg-unbox-light rounded-lg disabled:opacity-30"
+                        aria-label="Закрыть"
+                        className="-m-2.5 w-11 h-11 flex items-center justify-center hover:bg-ink-05 rounded-lg disabled:opacity-30"
                     >
-                        <X size={16} />
+                        <X size={16} aria-hidden="true" />
                     </button>
                 </div>
-                <div className="px-4 py-3 text-sm text-unbox-grey">
-                    Удалить только эту бронь или эту и все последующие в серии?
+                <div className="px-4 py-3 text-sm text-ink-80">
+                    Отменить только эту бронь или эту и все следующие в серии?
                     Более ранние брони серии останутся.
                 </div>
                 <div className="px-4 pb-4 space-y-2">
                     <button
                         onClick={cancelOne}
                         disabled={busy !== null}
-                        className="w-full py-2 text-sm font-medium rounded-lg bg-red-50 hover:bg-red-100 text-red-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="w-full min-h-11 py-2 text-sm font-medium rounded-lg bg-[var(--status-danger-bg)] hover:brightness-95 text-[var(--status-danger-fg)] disabled:opacity-50 flex items-center justify-center gap-2"
                     >
-                        {busy === 'this' && <Loader2 size={14} className="animate-spin" />}
-                        Только эту
+                        {busy === 'this' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                        Отменить только эту
                     </button>
                     <button
                         onClick={cancelSeries}
                         disabled={busy !== null}
-                        className="w-full py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="w-full min-h-11 py-2 text-sm font-medium rounded-lg bg-[var(--status-danger-solid)] hover:brightness-95 text-card disabled:opacity-50 flex items-center justify-center gap-2"
                     >
-                        {busy === 'series' && <Loader2 size={14} className="animate-spin" />}
-                        Эту и все последующие
+                        {busy === 'series' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                        Отменить эту и следующие
                     </button>
                     <button
                         onClick={onClose}
                         disabled={busy !== null}
-                        className="w-full py-2 text-sm font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark disabled:opacity-50"
+                        className="w-full min-h-11 py-2 text-sm font-medium rounded-lg border border-ink-20 bg-card hover:bg-ink-05 text-ink disabled:opacity-50"
                     >
-                        Отмена
+                        Оставить
                     </button>
                 </div>
             </div>

@@ -3,6 +3,10 @@ import { useUserStore } from '../../store/userStore';
 import { usersApi } from '../../api/users';
 import { Zap, TrendingUp, ChevronRight, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { COLOR } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
+import { Skeleton } from '../ui/Skeleton';
+import { ErrorBar } from '../ui/ErrorBar';
 
 export function DiscountProgress() {
     const { currentUser } = useUserStore();
@@ -14,21 +18,32 @@ export function DiscountProgress() {
         nextTierDiscount: number;
         progressPercent: number;
     } | null>(null);
+    // Wave 1: ошибка загрузки ≠ вечная «Загрузка…». Раньше при сбое карточка
+    // навсегда оставалась в состоянии загрузки.
+    const [failed, setFailed] = useState(false);
+    const [retrying, setRetrying] = useState(false);
 
-    useEffect(() => {
+    const load = () => {
+        setRetrying(true);
         usersApi.getDiscountProgress().then((res) => {
             setData(res as any);
-        }).catch(() => {});
+            setFailed(false);
+        }).catch(() => setFailed(true))
+            .finally(() => setRetrying(false));
+    };
+
+    useEffect(() => {
+        load();
     }, []);
 
+    if (!data && failed) return (
+        <ErrorBar message="Не удалось загрузить скидку" onRetry={load} retrying={retrying} />
+    );
+
     if (!data) return (
-        <div className="h-48 rounded-2xl animate-pulse flex items-center justify-center text-unbox-grey text-sm font-medium"
-            style={{
-                background: 'rgba(255,255,255,0.35)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255,255,255,0.55)',
-            }}>
-            Загрузка прогресса...
+        <div role="status" aria-busy="true">
+            <span className="sr-only">Загружаем скидку…</span>
+            <Skeleton height={192} radius={16} />
         </div>
     );
 
@@ -47,34 +62,26 @@ export function DiscountProgress() {
     const isPersonalWinning = personalDiscount > 0 && personalDiscount >= progressiveDiscount;
 
     return (
-        <div className="p-6 rounded-2xl relative overflow-hidden group"
-            style={{
-                background: 'rgba(255,255,255,0.45)',
-                backdropFilter: 'blur(24px) saturate(150%)',
-                WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-                border: '1px solid rgba(255,255,255,0.65)',
-                boxShadow: '0 8px 32px rgba(71,109,107,0.07), inset 0 1px 0 rgba(255,255,255,0.80)',
-            }}>
-            {/* Background Gradient Accent */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-unbox-light rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110 duration-700" />
+        <div className="p-6 rounded-2xl relative overflow-hidden"
+            style={{ background: COLOR.card, border: `1px solid ${COLOR.ink10}` }}>
 
             <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
-                    <h3 className="text-sm font-medium text-unbox-grey mb-1 flex items-center">
-                        <Zap size={14} className="mr-1 text-unbox-green fill-unbox-green" />
+                    <h3 className="text-sm font-medium text-ink-60 mb-1 flex items-center">
+                        <Zap size={14} className="mr-1 text-ink-60" aria-hidden="true" />
                         Ваша скидка
                     </h3>
                     <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-unbox-dark">{activeDiscount}%</span>
-                        <span className="text-xs font-medium text-unbox-green bg-unbox-light px-2 py-0.5 rounded-full">
+                        <span className="text-3xl font-semibold text-ink">{activeDiscount}%</span>
+                        <span className="text-xs font-medium text-ink-80 bg-sunken px-2 py-0.5 rounded-full">
                             {isPersonalWinning ? 'персональная' : 'за объём'}
                         </span>
                     </div>
                 </div>
                 <div className="text-right">
-                    <div className="text-xs text-unbox-grey mb-1 font-medium italic">Всего сэкономлено</div>
-                    <div className="text-xl font-bold text-unbox-green">
-                        {totalSaved.toFixed(2)} ₾
+                    <div className="text-xs text-ink-60 mb-1 font-medium">Всего сэкономлено</div>
+                    <div className="num text-xl font-semibold text-[var(--status-ok-fg)]">
+                        {formatGel(totalSaved)}
                     </div>
                 </div>
             </div>
@@ -83,22 +90,22 @@ export function DiscountProgress() {
             {personalDiscount > 0 && (
                 <div className={`flex items-center gap-2 mb-4 p-2.5 rounded-xl relative z-10 ${
                     isPersonalWinning
-                        ? 'bg-violet-50 border border-violet-200'
-                        : 'bg-gray-50 border border-gray-150'
+                        ? 'bg-accent-soft border border-accent/30'
+                        : 'bg-sunken border border-ink-10'
                 }`}>
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        isPersonalWinning ? 'bg-violet-100' : 'bg-gray-100'
+                        isPersonalWinning ? 'bg-card' : 'bg-sunken'
                     }`}>
-                        <UserCheck size={14} className={isPersonalWinning ? 'text-violet-600' : 'text-gray-400'} />
+                        <UserCheck size={14} className={isPersonalWinning ? 'text-accent-ink' : 'text-ink-60'} aria-hidden="true" />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <div className={`font-bold ${
-                            isPersonalWinning ? 'text-sm text-violet-700' : 'text-xs text-gray-400'
+                        <div className={`font-semibold ${
+                            isPersonalWinning ? 'text-sm text-accent-ink' : 'text-xs text-ink-60'
                         }`}>
                             Персональная скидка: {personalDiscount}%
                         </div>
                         {!isPersonalWinning && (
-                            <div className="text-[10px] text-gray-400">
+                            <div className="text-caption text-ink-60">
                                 Прогрессивная скидка выгоднее
                             </div>
                         )}
@@ -107,59 +114,50 @@ export function DiscountProgress() {
             )}
 
             {/* Progressive discount section */}
-            <div className={`space-y-3 relative z-10 ${
-                personalDiscount > 0 && isPersonalWinning ? 'opacity-60' : ''
-            }`}>
+            <div className="space-y-3 relative z-10">
                 {personalDiscount > 0 && (
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-unbox-grey">
-                        <TrendingUp size={12} />
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-ink-60">
+                        <TrendingUp size={12} aria-hidden="true" />
                         Прогрессивная скидка: {progressiveDiscount}%
-                        {isPersonalWinning && <span className="text-gray-400 ml-1">(не активна)</span>}
+                        {isPersonalWinning && <span className="text-ink-60 ml-1">(не активна)</span>}
                     </div>
                 )}
 
                 <div className="flex justify-between text-xs font-medium">
-                    <span className="text-unbox-grey">
-                        Накоплено: <span className="text-unbox-dark font-bold">{accumulatedHours}ч</span>
+                    <span className="text-ink-60">
+                        Накоплено: <span className="num text-ink font-semibold">{accumulatedHours} ч</span>
                     </span>
-                    <span className="text-unbox-grey">
-                        Цель: {nextTierHours}ч
+                    <span className="text-ink-60">
+                        Цель: <span className="num">{nextTierHours} ч</span>
                     </span>
                 </div>
 
-                <div className="relative h-3 w-full rounded-full overflow-hidden" style={{ background: 'rgba(212,226,225,0.60)' }}>
-                    <div className="absolute left-[31%] top-0 bottom-0 w-px bg-white/50 z-20" />
-                    <div className="absolute left-[69%] top-0 bottom-0 w-px bg-white/50 z-20" />
+                <div className="relative h-3 w-full rounded-full overflow-hidden bg-ink-10">
+                    <div className="absolute left-[31%] top-0 bottom-0 w-px bg-card z-20" />
+                    <div className="absolute left-[69%] top-0 bottom-0 w-px bg-card z-20" />
 
                     <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${progressPercent}%` }}
                         transition={{ duration: 1, ease: "easeOut" }}
-                        className="h-full bg-gradient-to-r from-unbox-green to-unbox-dark rounded-full shadow-sm shadow-unbox-green/20"
+                        className="h-full bg-accent rounded-full"
                     />
                 </div>
 
                 {(!personalDiscount || !isPersonalWinning) && (
-                    <div className="flex justify-between items-center p-3 rounded-xl mt-1"
-                        style={{
-                            background: 'rgba(212,226,225,0.40)',
-                            backdropFilter: 'blur(12px)',
-                            WebkitBackdropFilter: 'blur(12px)',
-                            border: '1px solid rgba(255,255,255,0.60)',
-                        }}>
+                    <div className="flex justify-between items-center p-3 rounded-xl mt-1 bg-sunken">
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm"
-                                style={{ background: 'rgba(255,255,255,0.70)', border: '1px solid rgba(255,255,255,0.80)' }}>
-                                <TrendingUp size={16} className="text-unbox-dark" />
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-card border border-ink-10">
+                                <TrendingUp size={16} className="text-ink" aria-hidden="true" />
                             </div>
                             <div>
-                                <div className="text-[10px] text-unbox-grey font-bold uppercase tracking-wider">Следующий уровень</div>
-                                <div className="text-sm font-bold text-unbox-dark">Скидка {nextTierDiscount}%</div>
+                                <div className="text-caption text-ink-60 font-semibold uppercase tracking-[0.06em]">Следующий уровень</div>
+                                <div className="text-sm font-semibold text-ink">Скидка {nextTierDiscount}%</div>
                             </div>
                         </div>
-                        <div className="flex items-center text-[11px] font-bold text-unbox-green">
-                            Нужно еще {Math.max(0, nextTierHours - accumulatedHours).toFixed(1)}ч
-                            <ChevronRight size={14} className="ml-0.5" />
+                        <div className="flex items-center text-caption font-semibold text-ink">
+                            Нужно ещё {Math.max(0, nextTierHours - accumulatedHours).toFixed(1)} ч
+                            <ChevronRight size={14} className="ml-0.5" aria-hidden="true" />
                         </div>
                     </div>
                 )}

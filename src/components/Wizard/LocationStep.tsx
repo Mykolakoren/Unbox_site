@@ -23,8 +23,8 @@ export function LocationStep() {
             className="space-y-8"
         >
             <div>
-                <h2 className="text-2xl font-bold mb-2">Выберите локацию</h2>
-                <p className="text-unbox-grey">Где вы хотите работать?</p>
+                <h2 className="text-2xl font-semibold mb-2">Выберите локацию</h2>
+                <p className="text-ink-60">Где вы хотите работать?</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -37,13 +37,13 @@ export function LocationStep() {
                     >
                         <div className={clsx(
                             "p-3 rounded-xl transition-colors",
-                            locationId === loc.id ? "bg-unbox-green text-white" : "bg-unbox-light text-unbox-grey group-hover:text-unbox-dark"
+                            locationId === loc.id ? "bg-accent text-on-accent" : "bg-unbox-light text-ink-60 group-hover:text-ink"
                         )}>
                             <MapPin size={24} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-lg">{loc.name}</h3>
-                            <p className="text-unbox-grey text-sm mt-1">{loc.address}</p>
+                            <h3 className="font-semibold text-lg">{loc.name}</h3>
+                            <p className="text-ink-60 text-sm mt-1">{loc.address}</p>
                         </div>
                     </Card>
                 ))}
@@ -53,8 +53,8 @@ export function LocationStep() {
             {locationId && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
                     <div className="border-t border-unbox-light pt-8">
-                        <h2 className="text-xl font-bold mb-2">Выберите пространство</h2>
-                        <p className="text-unbox-grey">Кабинет или капсула?</p>
+                        <h2 className="text-xl font-semibold mb-2">Выберите пространство</h2>
+                        <p className="text-ink-60">Кабинет или капсула?</p>
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -68,19 +68,19 @@ export function LocationStep() {
                                 <div className="flex flex-col h-full justify-between gap-4">
                                     <div className="flex justify-between items-start">
                                         <span className={clsx(
-                                            "text-xs font-bold px-2 py-1 rounded",
-                                            "bg-unbox-light text-unbox-dark" // Unified peaceful style
+                                            "text-xs font-semibold px-2 py-1 rounded",
+                                            "bg-unbox-light text-ink" // Unified peaceful style
                                         )}>
                                             {res.type === 'cabinet' ? 'Кабинет' : 'Капсула'}
                                         </span>
                                         {resourceId === res.id && (
-                                            <div className="bg-unbox-green text-white rounded-full p-1">
+                                            <div className="bg-accent text-on-accent rounded-full p-1">
                                                 <Box size={12} />
                                             </div>
                                         )}
                                     </div>
                                     <div>
-                                        <h4 className="font-bold">{res.name}</h4>
+                                        <h4 className="font-semibold">{res.name}</h4>
                                     </div>
                                 </div>
                             </Card>

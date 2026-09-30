@@ -12,6 +12,11 @@ import { googleCalendarService } from '../../services/googleCalendarMock';
 import type { ExternalEvent } from '../../services/googleCalendarMock';
 import { isPeakTime } from '../../utils/pricing';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { COLOR, STATUS } from '../../design/tokens';
+import { EmptyState } from '../ui/EmptyState';
+import { ErrorBar } from '../ui/ErrorBar';
+import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
+import { formatDateLabel, formatGel } from '../../utils/format';
 
 // Hook to detect mobile viewport
 function useIsMobile(breakpoint = 768) {
@@ -47,11 +52,19 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const isGH = true;
 
     // Refresh bookings on mount — admin sees ALL bookings, users see only their own
-    useEffect(() => {
+    const reloadBookings = () => {
         setIsLoadingBookings(true);
         const fetchFn = isAdminBooking ? fetchAllBookings : fetchBookings;
-        fetchFn().finally(() => setIsLoadingBookings(false));
+        return fetchFn().finally(() => setIsLoadingBookings(false));
+    };
+    useEffect(() => {
+        reloadBookings();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchBookings, fetchAllBookings, isAdminBooking]);
+    // Занятость не загрузилась → занятое время выглядит свободным. Не молчим
+    // (wave 1: загрузка ≠ ошибка ≠ пусто), а говорим и даём повторить.
+    const occupancyStatus = useUserStore(s => s.occupancyStatus);
+    const occupancyFailed = !isAdminBooking && occupancyStatus === 'error';
 
     // Week View State
     const [weekStart, setWeekStart] = useState(() => startOfWeek(date, { weekStartsOn: 1 }));
@@ -332,8 +345,9 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         return false;
     }, [selectedBlocks]);
 
-    // Overlap confirmation dialog state
-    const [showOverlapWarning, setShowOverlapWarning] = useState(false);
+    // Пересечение по времени подтверждаем общим окном (wave 1): кнопки
+    // называют действие вместо «Да, продолжить».
+    const { confirm } = useConfirmDialog();
 
     // Drag / Interaction State — using refs to avoid stale closures during fast pointer events
     type DragMode = 'new' | 'move' | 'resize-start' | 'resize-end' | null;
@@ -576,12 +590,18 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             bookingFormat === 'group' ? 35 :
             bookingFormat === 'intervision' ? 30 : 20
         );
-        return `${rate} ₾`;
+        return formatGel(rate);
     };
 
-    const handleNext = () => {
+    const handleNext = async () => {
         if (hasTimeOverlap) {
-            setShowOverlapWarning(true);
+            const ok = await confirm({
+                title: 'Кабинеты пересекаются по времени',
+                body: 'Вы выбрали несколько кабинетов на одно и то же время — значит, будете занимать их одновременно.',
+                confirmLabel: 'Продолжить с пересечением',
+                cancelLabel: 'Изменить выбор',
+            });
+            if (ok) setStep(3);
         } else {
             setStep(3);
         }
@@ -657,25 +677,26 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                  className={isGH ? '' : "animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32 px-3 pt-4 relative"}>
                 {/* Loading overlay while bookings are being fetched */}
                 {isLoadingBookings && (
-                    <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: 'rgba(250,250,247,0.85)', backdropFilter: 'blur(4px)' }}>
+                    <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: `${COLOR.paper}D9`, backdropFilter: 'blur(4px)' }}>
                         <div className="flex flex-col items-center gap-3">
-                            <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
-                            <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загрузка расписания...</span>
+                            <div className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
+                            <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загружаем расписание…</span>
                         </div>
                     </div>
                 )}
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h2 style={isGH ? { fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
+                        <h2 style={isGH ? { fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
                             className={isGH ? '' : "text-xl font-bold"}>Выберите время</h2>
                         <p style={isGH ? { fontSize: 13, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
                            className={isGH ? '' : "text-unbox-grey text-sm"}>
-                            {format(date, 'd MMMM yyyy', { locale: ru })}
+                            {formatDateLabel(date, { capitalize: true, withYear: 'auto' })}
                         </p>
                     </div>
                     <button onClick={() => setStep(1)}
-                        style={isGH ? { padding: 8, border: `1px solid ${GH.ink10}`, borderRadius: 8, background: 'transparent', color: GH.ink60, cursor: 'pointer' } : undefined}
+                        aria-label="Назад"
+                        style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${GH.ink10}`, borderRadius: 8, background: 'transparent', color: GH.ink60, cursor: 'pointer' } : undefined}
                         className={isGH ? '' : "p-2 rounded-xl border border-unbox-light text-unbox-grey"}>
                         <ArrowLeft size={18} />
                     </button>
@@ -690,10 +711,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     border: `1px solid ${GH.ink10}`,
                     borderRadius: 10,
                     overflow: 'hidden',
-                    background: '#fff',
+                    background: GH.card,
                 }}>
                     {([
-                        { key: 'individual', label: 'Индивид.', price: '20' },
+                        { key: 'individual', label: 'Индивидуально', price: '20' },
                         { key: 'group', label: 'Группа', price: '35' },
                         { key: 'intervision', label: 'Интервизия', price: '30' },
                     ] as const).map((opt, i) => {
@@ -706,9 +727,9 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     padding: '10px 8px',
                                     fontFamily: GH_SANS,
                                     fontSize: 12,
-                                    fontWeight: active ? 700 : 500,
+                                    fontWeight: active ? 600 : 500,
                                     background: active ? GH.ink : 'transparent',
-                                    color: active ? '#fff' : GH.ink,
+                                    color: active ? COLOR.onInk : GH.ink,
                                     border: 'none',
                                     borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none',
                                     cursor: 'pointer',
@@ -720,7 +741,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 }}
                             >
                                 <span>{opt.label}</span>
-                                <span style={{ fontSize: 10, opacity: active ? 0.75 : 0.55, fontFamily: GH_MONO }}>
+                                <span style={{ fontSize: 12, color: active ? COLOR.onInk : GH.ink60, fontFamily: GH_MONO }}>
                                     {opt.price} ₾/ч
                                 </span>
                             </button>
@@ -732,7 +753,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                 <div style={isGH ? { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, padding: 4, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
                      className={isGH ? '' : "flex items-center gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"}>
                     <button onClick={handlePrevWeek}
-                        style={isGH ? { padding: 6, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                        aria-label="Предыдущая неделя"
+                        style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
                         className={isGH ? '' : "p-1.5 rounded-lg hover:bg-white text-unbox-grey"}>
                         <ChevronLeft size={16} />
                     </button>
@@ -746,8 +768,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     style={isGH ? {
                                         display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
                                         padding: '8px 0', borderRadius: 8, border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
-                                        background: isSelectedDate ? GH.accent : '#fff',
-                                        color: isSelectedDate ? '#fff' : GH.ink60,
+                                        background: isSelectedDate ? GH.accent : GH.card,
+                                        color: isSelectedDate ? COLOR.onAccent : GH.ink60,
                                         cursor: 'pointer', transition: 'all 0.15s',
                                     } : undefined}
                                     className={isGH ? '' : clsx(
@@ -757,27 +779,37 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                             : "bg-white text-unbox-grey border border-unbox-light/50"
                                     )}
                                 >
-                                    <span style={isGH ? { fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, fontFamily: GH_MONO } : undefined}
+                                    <span style={isGH ? { fontSize: 12, fontWeight: 600, textTransform: 'uppercase' as const, fontFamily: GH_MONO } : undefined}
                                           className={isGH ? '' : "text-[9px] font-bold uppercase"}>{format(day, 'EEEEEE', { locale: ru })}</span>
-                                    <span style={isGH ? { fontSize: 14, fontWeight: 700 } : undefined}
+                                    <span style={isGH ? { fontSize: 14, fontWeight: 600 } : undefined}
                                           className={isGH ? '' : "text-sm font-bold"}>{format(day, 'd')}</span>
                                 </button>
                             );
                         })}
                     </div>
                     <button onClick={handleNextWeek}
-                        style={isGH ? { padding: 6, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                        aria-label="Следующая неделя"
+                        style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
                         className={isGH ? '' : "p-1.5 rounded-lg hover:bg-white text-unbox-grey"}>
                         <ChevronRight size={16} />
                     </button>
                 </div>
 
+                {occupancyFailed && (
+                    <ErrorBar
+                        className="mb-3"
+                        message="Не удалось проверить занятость — часть времени может выглядеть свободной"
+                        onRetry={() => { void reloadBookings(); }}
+                        retrying={isLoadingBookings}
+                    />
+                )}
+
                 {/* Info banner — auto-expanded to all locations */}
                 {autoExpanded && (bookingFormat === 'group' || bookingFormat === 'intervision') && (
                     <div style={{
                         padding: '10px 12px', marginBottom: 12,
-                        background: '#FEF3C7', border: '1px solid #FDE68A',
-                        borderRadius: 8, fontSize: 12, color: '#92400E', lineHeight: 1.4,
+                        background: STATUS.pending.bg,
+                        borderRadius: 8, fontSize: 12, color: STATUS.pending.fg, lineHeight: 1.4,
                     }}>
                         Для формата «{bookingFormat === 'group' ? 'Группа' : 'Интервизия'}» подходящие кабинеты есть только в <b>Unbox Uni</b> — показан расширенный список.
                     </div>
@@ -785,13 +817,12 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
                 {/* Empty state — no resources match */}
                 {resources.length === 0 && (
-                    <div style={{
-                        padding: '24px 16px', marginBottom: 16, textAlign: 'center' as const,
-                        background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 8,
-                        color: '#991B1B', fontSize: 13, lineHeight: 1.5,
-                    }}>
-                        <b>Нет подходящих кабинетов</b><br />
-                        Попробуйте изменить формат{groupSize ? ' или размер группы' : ''}.
+                    <div style={{ marginBottom: 16 }}>
+                        <EmptyState
+                            compact
+                            title="Нет подходящих кабинетов"
+                            hint={`Попробуйте изменить формат${groupSize ? ' или размер группы' : ''}.`}
+                        />
                     </div>
                 )}
 
@@ -805,8 +836,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                             style={isGH ? {
                                 flexShrink: 0, padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
                                 border: `1px solid ${mobileResourceIdx === idx ? GH.accent : GH.ink10}`,
-                                background: mobileResourceIdx === idx ? GH.accent : '#fff',
-                                color: mobileResourceIdx === idx ? '#fff' : GH.ink,
+                                background: mobileResourceIdx === idx ? GH.accent : GH.card,
+                                color: mobileResourceIdx === idx ? COLOR.onAccent : GH.ink,
                                 cursor: 'pointer', fontFamily: GH_SANS, transition: 'all 0.15s',
                             } : undefined}
                             className={isGH ? '' : clsx(
@@ -816,9 +847,9 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     : "bg-white text-unbox-grey border-unbox-light hover:border-unbox-green/40"
                             )}
                         >
-                            <div style={isGH ? { fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' as const } : undefined}
+                            <div style={isGH ? { fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const } : undefined}
                                  className={isGH ? '' : "font-bold text-xs whitespace-nowrap"}>{r.name}</div>
-                            <div style={isGH ? { fontSize: 10, opacity: 0.6, whiteSpace: 'nowrap' as const, fontFamily: GH_MONO } : undefined}
+                            <div style={isGH ? { fontSize: 12, color: mobileResourceIdx === idx ? COLOR.onAccent : GH.ink60, whiteSpace: 'nowrap' as const, fontFamily: GH_MONO } : undefined}
                                  className={isGH ? '' : "text-[10px] opacity-70 whitespace-nowrap"}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
                         </button>
                     ))}
@@ -833,23 +864,24 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     } : undefined}
                          className={isGH ? '' : "flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3 mb-3"}>
                         <div>
-                            <div style={isGH ? { fontSize: 14, fontWeight: 700, color: GH.ink } : undefined}
+                            <div style={isGH ? { fontSize: 14, fontWeight: 600, color: GH.ink } : undefined}
                                  className={isGH ? '' : "text-sm font-bold text-unbox-dark"}>{mobileBlockStart} — {mobileBlockEnd}</div>
                             <div style={isGH ? { fontSize: 12, color: GH.ink60, fontFamily: GH_MONO } : undefined}
                                  className={isGH ? '' : "text-xs text-unbox-grey"}>{mobileBlockDuration} мин · {mobileResource.name}</div>
                         </div>
                         <button
                             onClick={() => useBookingStore.getState().setSlotRange(mobileResource.id, [])}
-                            style={isGH ? { padding: 6, borderRadius: 6, background: '#B84A2F18', color: GH.danger, border: 'none', cursor: 'pointer' } : undefined}
+                            aria-label="Убрать выбранное время"
+                            style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: STATUS.danger.bg, color: STATUS.danger.fg, border: 'none', cursor: 'pointer' } : undefined}
                             className={isGH ? '' : "p-1.5 rounded-lg bg-red-100 text-red-500 hover:bg-red-200 transition-colors"}
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            <X size={16} strokeWidth={2.5} aria-hidden="true" />
                         </button>
                     </div>
                 )}
 
                 {/* 2-column time grid: XX:00 | XX:30 */}
-                <div style={isGH ? { borderRadius: 12, border: `1px solid ${GH.ink8}`, background: '#fff', padding: 8 } : undefined}
+                <div style={isGH ? { borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.card, padding: 8 } : undefined}
                      className={isGH ? '' : "rounded-2xl bg-white/60 backdrop-blur-sm border border-unbox-light/30 p-2 space-y-1.5"}>
                     {mobileResource && mobileHourPairs.map(([left, right]) => (
                         <div key={left} style={isGH ? { display: 'flex', gap: 6, marginBottom: 6 } : undefined} className={isGH ? '' : "flex gap-1.5"}>
@@ -881,8 +913,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                                             padding: '12px 12px', borderRadius: 8, minHeight: 48, border: 'none',
                                             fontFamily: GH_MONO, fontSize: 13, cursor: 'pointer',
-                                            background: blocked ? GH.cellDead : selected ? GH.accent : isPeakTime(time) ? '#FEF3C7' : '#fff',
-                                            color: blocked ? GH.ink30 : selected ? '#fff' : GH.ink,
+                                            background: blocked ? GH.cellDead : selected ? GH.accent : isPeakTime(time) ? STATUS.pending.bg : GH.card,
+                                            color: blocked ? GH.ink60 : selected ? COLOR.onAccent : GH.ink,
                                             outline: !blocked && !selected ? `1px solid ${GH.ink8}` : 'none',
                                             transition: 'all 0.15s',
                                         } : undefined}
@@ -906,18 +938,18 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                 {time}
                                             </span>
                                             {blocked && bookerName && (
-                                                <span style={isGH ? { fontSize: 10, color: GH.ink30 } : undefined}
+                                                <span style={isGH ? { fontSize: 12, color: GH.ink60 } : undefined}
                                                       className={isGH ? '' : "text-[10px] text-gray-400 truncate"}>{bookerName}</span>
                                             )}
                                             {blocked && !bookerName && (
-                                                <span style={isGH ? { fontSize: 10, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 2 } : undefined}
+                                                <span style={isGH ? { fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 } : undefined}
                                                       className={isGH ? '' : "text-[10px] text-gray-400 flex items-center gap-0.5"}>
-                                                    <Clock size={9} /> Занято — тап чтобы следить
+                                                    <Clock size={12} aria-hidden="true" /> Занято · следить
                                                 </span>
                                             )}
                                         </div>
                                         {selected ? (
-                                            <div style={isGH ? { width: 20, height: 20, borderRadius: '50%', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}
+                                            <div style={isGH ? { width: 20, height: 20, borderRadius: '50%', background: `${COLOR.onAccent}40`, display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}
                                                  className={isGH ? '' : "w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0"}>
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                                             </div>
@@ -950,9 +982,9 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     >
                         <div style={isGH ? { fontSize: 14, color: GH.ink, fontFamily: GH_SANS } : undefined} className={isGH ? '' : "text-sm text-unbox-dark"}>
                             {selectedSlots.length > 0 ? (
-                                <span><span style={isGH ? { fontWeight: 700, color: GH.accent } : undefined} className={isGH ? '' : "font-bold text-unbox-green"}>{selectedSlots.length * 30}</span> мин выбрано</span>
+                                <span><span style={isGH ? { fontWeight: 600, color: GH.accent } : undefined} className={isGH ? '' : "font-bold text-unbox-green"}>{selectedSlots.length * 30}</span> мин выбрано</span>
                             ) : (
-                                <span style={isGH ? { color: GH.ink30 } : undefined} className={isGH ? '' : "text-unbox-grey"}>Выберите слоты</span>
+                                <span style={isGH ? { color: GH.ink60 } : undefined} className={isGH ? '' : "text-unbox-grey"}>Выберите время</span>
                             )}
                         </div>
                         {isGH ? (
@@ -962,7 +994,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 style={{
                                     padding: '10px 24px', borderRadius: 8, border: 'none',
                                     background: selectedSlots.length === 0 ? GH.ink10 : GH.accent,
-                                    color: selectedSlots.length === 0 ? GH.ink30 : '#fff',
+                                    color: selectedSlots.length === 0 ? GH.ink30 : COLOR.onAccent,
                                     fontFamily: GH_SANS, fontSize: 14, fontWeight: 600,
                                     cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
                                     display: 'flex', alignItems: 'center', gap: 6,
@@ -1016,7 +1048,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
     const ghBtn = (active: boolean): React.CSSProperties => ({
         padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
         fontFamily: GH_SANS, cursor: 'pointer', border: `1px solid ${active ? GH.accent : GH.ink10}`,
-        background: active ? GH.accent : 'transparent', color: active ? '#fff' : GH.ink,
+        background: active ? GH.accent : 'transparent', color: active ? COLOR.onAccent : GH.ink,
         display: 'inline-flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
     });
 
@@ -1026,9 +1058,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             {/* Excel #24 — banner when user clicked "+ Ещё период" in Summary */}
             {pendingAddResourceId && (
                 <div style={{
-                    background: '#FEF3C7',
-                    border: `1px solid ${GH.ink10}`,
-                    color: '#92400E',
+                    background: STATUS.pending.bg,
+                    color: STATUS.pending.fg,
                     padding: '12px 16px',
                     borderRadius: 8,
                     fontFamily: GH_SANS,
@@ -1039,7 +1070,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     gap: 12,
                 }}>
                     <span>
-                        <strong style={{ fontWeight: 700 }}>Добавление периода:</strong>
+                        <strong style={{ fontWeight: 600 }}>Добавление периода:</strong>
                         {' '}Выделите второй интервал в <em>{resources.find(r => r.id === pendingAddResourceId)?.name || pendingAddResourceId}</em>.
                         {' '}Первый период сохранится.
                     </span>
@@ -1047,31 +1078,31 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         type="button"
                         onClick={() => useBookingStore.getState().clearAddMore()}
                         style={{
-                            fontSize: 13, fontWeight: 700, textDecoration: 'underline',
-                            background: 'none', border: 'none', cursor: 'pointer', color: '#92400E',
+                            fontSize: 14, fontWeight: 600, textDecoration: 'underline',
+                            background: 'none', border: 'none', cursor: 'pointer', color: STATUS.pending.fg,
                         }}
                     >
-                        Отмена
+                        Не добавлять
                     </button>
                 </div>
             )}
             {/* Loading overlay while bookings are being fetched */}
             {isLoadingBookings && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: 'rgba(250,250,247,0.85)', backdropFilter: 'blur(4px)' }}>
+                <div className="absolute inset-0 z-20 flex items-center justify-center" style={{ background: `${COLOR.paper}D9`, backdropFilter: 'blur(4px)' }}>
                     <div className="flex flex-col items-center gap-3">
-                        <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
-                        <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загрузка расписания...</span>
+                        <div className="w-8 h-8 border-2 border-ink-20 border-t-ink rounded-full animate-spin" />
+                        <span style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink60 }}>Загружаем расписание…</span>
                     </div>
                 </div>
             )}
             <div className={isGH ? '' : "flex flex-col md:flex-row justify-between items-start md:items-center gap-4"}
                  style={isGH ? { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: 16 } : undefined}>
                 <div>
-                    <h2 style={isGH ? { fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
+                    <h2 style={isGH ? { fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: GH.ink, margin: 0 } : undefined}
                         className={isGH ? '' : "text-2xl font-bold"}>Выберите время</h2>
                     <p style={isGH ? { fontSize: 14, color: GH.ink60, fontFamily: GH_MONO, marginTop: 4 } : undefined}
                        className={isGH ? '' : "text-unbox-grey"}>
-                        {format(date, 'd MMMM yyyy', { locale: ru })} • {
+                        {formatDateLabel(date, { capitalize: true, withYear: 'auto' })} · {
                             bookingFormat === 'individual' ? 'Индивидуально · 20 ₾/ч' :
                             bookingFormat === 'intervision' ? 'Интервизия · 30 ₾/ч' : 'Группа · 35 ₾/ч'
                         }
@@ -1083,7 +1114,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         border: `1px solid ${GH.ink10}`,
                         borderRadius: 8,
                         overflow: 'hidden',
-                        background: '#fff',
+                        background: GH.card,
                     }}>
                         {([
                             { key: 'individual', label: 'Индивидуально', price: '20' },
@@ -1100,8 +1131,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                         fontFamily: GH_SANS,
                                         fontSize: 13,
                                         fontWeight: active ? 600 : 500,
-                                        background: active ? GH.ink : '#fff',
-                                        color: active ? '#fff' : GH.ink,
+                                        background: active ? GH.ink : GH.card,
+                                        color: active ? COLOR.onInk : GH.ink,
                                         border: 'none',
                                         borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none',
                                         cursor: 'pointer',
@@ -1113,11 +1144,11 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     {opt.label}
                                     <span style={{
                                         marginLeft: 6,
-                                        fontSize: 11,
-                                        opacity: active ? 0.75 : 0.5,
+                                        fontSize: 12,
+                                        color: active ? COLOR.onInk : GH.ink60,
                                         fontFamily: GH_MONO,
                                     }}>
-                                        {opt.price}₾
+                                        {opt.price} ₾
                                     </span>
                                 </button>
                             );
@@ -1178,6 +1209,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
             <div style={isGH ? { display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
                  className={isGH ? '' : "flex items-center gap-2 p-1.5 rounded-2xl border border-unbox-light/60"}>
                 <button onClick={handlePrevWeek}
+                    aria-label="Предыдущая неделя"
                     style={isGH ? { padding: 8, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
                     className={isGH ? '' : "p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light"}>
                     <ChevronLeft size={18} />
@@ -1194,8 +1226,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
                                     padding: '10px 0', borderRadius: 8,
                                     border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
-                                    background: isSelectedDate ? GH.accent : '#fff',
-                                    color: isSelectedDate ? '#fff' : GH.ink60,
+                                    background: isSelectedDate ? GH.accent : GH.card,
+                                    color: isSelectedDate ? COLOR.onAccent : GH.ink60,
                                     cursor: 'pointer', transition: 'all 0.15s',
                                 } : undefined}
                                 className={isGH ? '' : clsx(
@@ -1205,17 +1237,18 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                         : "bg-white text-unbox-grey border border-unbox-light hover:border-unbox-green/40 hover:text-unbox-dark hover:shadow-sm"
                                 )}
                             >
-                                <span style={isGH ? { fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em', marginBottom: 4, fontFamily: GH_MONO, opacity: isSelectedDate ? 0.8 : 0.5 } : undefined}
+                                <span style={isGH ? { fontSize: 12, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: 4, fontFamily: GH_MONO } : undefined}
                                       className={isGH ? '' : clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelectedDate ? "opacity-80" : "opacity-50")}>
                                     {format(day, 'EEE', { locale: ru })}
                                 </span>
-                                <span style={isGH ? { fontSize: 16, fontWeight: 700, lineHeight: 1 } : undefined}
+                                <span style={isGH ? { fontSize: 16, fontWeight: 600, lineHeight: 1 } : undefined}
                                       className={isGH ? '' : "text-base font-bold leading-none"}>{format(day, 'd')}</span>
                             </button>
                         );
                     })}
                 </div>
                 <button onClick={handleNextWeek}
+                    aria-label="Следующая неделя"
                     style={isGH ? { padding: 8, borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
                     className={isGH ? '' : "p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark hover:shadow-sm border border-transparent hover:border-unbox-light"}>
                     <ChevronRight size={18} />
@@ -1224,12 +1257,20 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
 
 
+            {occupancyFailed && (
+                <ErrorBar
+                    message="Не удалось проверить занятость — часть времени может выглядеть свободной"
+                    onRetry={() => { void reloadBookings(); }}
+                    retrying={isLoadingBookings}
+                />
+            )}
+
             {/* Info banner — auto-expanded to all locations */}
             {autoExpanded && (bookingFormat === 'group' || bookingFormat === 'intervision') && (
                 <div style={{
                     padding: '12px 16px',
-                    background: '#FEF3C7', border: '1px solid #FDE68A',
-                    borderRadius: 10, fontSize: 13, color: '#92400E', lineHeight: 1.5,
+                    background: STATUS.pending.bg,
+                    borderRadius: 8, fontSize: 14, color: STATUS.pending.fg, lineHeight: 1.5,
                 }}>
                     Для формата «{bookingFormat === 'group' ? 'Группа' : 'Интервизия'}» подходящие кабинеты есть только в <b>Unbox Uni</b> (Кабинеты 7, 8, 9) — показан расширенный список.
                 </div>
@@ -1237,14 +1278,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
             {/* Empty state — no resources match */}
             {resources.length === 0 && (
-                <div style={{
-                    padding: '32px 20px', textAlign: 'center' as const,
-                    background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 12,
-                    color: '#991B1B', fontSize: 14, lineHeight: 1.6,
-                }}>
-                    <div style={{ fontWeight: 700, marginBottom: 6 }}>Нет подходящих кабинетов</div>
-                    <div>Для выбранного формата{groupSize ? ' и размера группы' : ''} нет доступных кабинетов. Попробуйте изменить параметры.</div>
-                </div>
+                <EmptyState
+                    title="Нет подходящих кабинетов"
+                    hint={`Для выбранного формата${groupSize ? ' и размера группы' : ''} свободных кабинетов нет. Попробуйте изменить параметры.`}
+                />
             )}
 
             {/* The Grid - Refactored to Horizontal Layout */}
@@ -1258,7 +1295,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         <tr>
                             <th style={isGH ? {
                                 position: 'sticky' as const, left: 0, padding: 12, borderRight: `1px solid ${GH.ink8}`,
-                                zIndex: 20, width: 128, fontWeight: 700, fontSize: 11, color: GH.ink,
+                                zIndex: 20, width: 128, fontWeight: 600, fontSize: 12, color: GH.ink,
                                 background: GH.paper, fontFamily: GH_MONO, textTransform: 'uppercase' as const, letterSpacing: '0.06em',
                             } : { background: 'rgba(212,226,225,0.60)' }}
                                 className={isGH ? '' : "sticky left-0 backdrop-blur-sm p-3 border-r border-unbox-light/50 z-20 w-32 font-bold text-unbox-dark text-xs"}>
@@ -1268,10 +1305,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 <th key={time}
                                     style={isGH ? {
                                         padding: 6, textAlign: 'center' as const, minWidth: 48,
-                                        borderRight: `1px solid ${GH.ink5}`, fontSize: 10, fontWeight: 700,
+                                        borderRight: `1px solid ${GH.ink5}`, fontSize: 12, fontWeight: 600,
                                         textTransform: 'uppercase' as const, fontFamily: GH_MONO,
-                                        color: isPeakTime(time) ? '#B45309' : GH.ink30,
-                                        background: isPeakTime(time) ? '#FEF9C320' : 'transparent',
+                                        color: isPeakTime(time) ? STATUS.pending.fg : GH.ink60,
+                                        background: isPeakTime(time) ? `${STATUS.pending.bg}20` : 'transparent',
                                     } : undefined}
                                     className={isGH ? '' : clsx(
                                     "p-1.5 text-center min-w-[48px] border-r border-unbox-light/40 text-[10px] uppercase font-bold",
@@ -1300,10 +1337,10 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                     "sticky left-0 backdrop-blur-sm p-3 border-r z-10 shadow-[2px_0_5px_rgba(71,109,107,0.04)] w-32",
                                     isHighlighted ? "border-r-unbox-green/40" : "border-r-unbox-light/40"
                                 )}>
-                                    <div style={isGH ? { fontWeight: 700, fontSize: 12, lineHeight: 1.3, color: isHighlighted ? GH.accent : GH.ink } : undefined}
+                                    <div style={isGH ? { fontWeight: 600, fontSize: 12, lineHeight: 1.3, color: isHighlighted ? GH.accent : GH.ink } : undefined}
                                          className={isGH ? '' : clsx("font-bold text-xs leading-tight", isHighlighted ? "text-unbox-green" : "text-unbox-dark")}>{r.name}</div>
-                                    <div style={isGH ? { fontSize: 9, color: GH.ink30, lineHeight: 1.3, fontFamily: GH_MONO } : undefined}
-                                         className={isGH ? '' : "text-[9px] text-unbox-grey leading-tight"}>{r.capacity} чел. • {getPrice(r.id)}/час</div>
+                                    <div style={isGH ? { fontSize: 12, color: GH.ink60, lineHeight: 1.3, fontFamily: GH_MONO } : undefined}
+                                         className={isGH ? '' : "text-[9px] text-unbox-grey leading-tight"}>{r.capacity} чел. · {getPrice(r.id)}/ч</div>
                                 </td>
                                 {timeSlots.map(time => {
                                     const isBlocked = isSlotBlocked(r.id, time);
@@ -1352,13 +1389,13 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                 onPointerEnter={() => handlePointerEnter(r.id, time)}
                                                 style={isGH ? {
                                                     width: '100%', height: '100%', display: 'flex', flexDirection: 'column' as const,
-                                                    alignItems: 'center', justifyContent: 'center', fontSize: 9, position: 'relative' as const,
+                                                    alignItems: 'center', justifyContent: 'center', fontSize: 12, position: 'relative' as const,
                                                     userSelect: 'none' as const, touchAction: 'none' as const, transition: 'background 0.1s',
                                                     background: isBlocked ? GH.cellDead
                                                         : selected ? GH.accent
                                                         : isHovered ? `${GH.accent}14`
-                                                        : isPeakTime(time) ? '#FEF9C340' : 'transparent',
-                                                    color: isBlocked ? GH.ink30 : selected ? '#fff' : isHovered ? GH.ink : isPeakTime(time) ? '#B45309' : GH.ink30,
+                                                        : isPeakTime(time) ? `${STATUS.pending.bg}40` : 'transparent',
+                                                    color: isBlocked ? GH.ink60 : selected ? COLOR.onAccent : isHovered ? GH.ink : isPeakTime(time) ? STATUS.pending.fg : GH.ink60,
                                                     cursor: isBlocked ? 'pointer' : selected ? 'grab' : 'pointer',
                                                     borderRadius: isBlockStart && isBlockEnd ? 6
                                                         : isBlockStart ? '6px 0 0 6px'
@@ -1388,7 +1425,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                             {/* Start: show time label */}
                                                             {isBlockStart && (
                                                                 <div className="flex flex-col items-center justify-center w-full">
-                                                                    <div className="font-bold text-white text-xs">{time}</div>
+                                                                    <div className="font-semibold text-on-accent text-caption">{time}</div>
                                                                 </div>
                                                             )}
 
@@ -1412,10 +1449,12 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                                     );
                                                                 }}
                                                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                                                                className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:bg-red-600 hover:scale-110 transition-all z-50"
+                                                                className="absolute top-0.5 right-0.5 rounded-full w-4 h-4 flex items-center justify-center hover:brightness-90 transition-all z-50"
+                                                                style={{ background: STATUS.dangerSolid, color: COLOR.card }}
                                                                 title="Убрать этот период"
+                                                                aria-label="Убрать этот период"
                                                             >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                                                <X size={10} strokeWidth={3} aria-hidden="true" />
                                                             </button>
                                                         )}
                                                     </>
@@ -1426,12 +1465,12 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                     const bookerName = getSlotBookerInfo(r.id, time);
                                                     return bookerName ? (
                                                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-0">
-                                                            <span className="text-[8px] font-bold text-unbox-dark/60 leading-none truncate max-w-[55px]">{bookerName}</span>
+                                                            <span className="text-caption font-semibold text-ink-60 leading-none truncate max-w-[55px]">{bookerName}</span>
                                                         </div>
                                                     ) : (
                                                         <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 group-hover/slot:opacity-100 transition-opacity duration-300 gap-0.5">
-                                                            <Clock size={10} className="text-amber-500" />
-                                                            <span className="text-[8px] font-semibold text-amber-600 leading-none">Ожидание</span>
+                                                            <Clock size={12} style={{ color: STATUS.pending.fg }} aria-hidden="true" />
+                                                            <span className="text-caption font-semibold leading-none" style={{ color: STATUS.pending.fg }}>Следить</span>
                                                         </div>
                                                     );
                                                 })()}
@@ -1450,8 +1489,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
 
             {/* Overlap warning bar */}
             {hasTimeOverlap && (
-                <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-                    <AlertTriangle size={18} className="shrink-0 text-amber-500" />
+                <div className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: STATUS.pending.bg, color: STATUS.pending.fg }}>
+                    <AlertTriangle size={18} className="shrink-0" aria-hidden="true" />
                     <span>Выбранные блоки <strong>пересекаются по времени</strong>. Вы бронируете несколько кабинетов на одно время.</span>
                 </div>
             )}
@@ -1504,7 +1543,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                 if (cur.length) chunks.push({ resId, idxs: cur });
                             }
                             if (chunks.length === 0) {
-                                return <span style={{ color: GH.ink30, fontFamily: GH_SANS, fontSize: 14 }}>Выберите слоты — можно несколько в разных кабинетах или несколько периодов в одном</span>;
+                                return <span style={{ color: GH.ink60, fontFamily: GH_SANS, fontSize: 14 }}>Выберите время — можно несколько периодов, в одном кабинете или в разных</span>;
                             }
                             return chunks.map((ch, i) => {
                                 const res = resources.find(r => r.id === ch.resId);
@@ -1517,12 +1556,12 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                          style={{
                                              display: 'inline-flex', alignItems: 'center', gap: 6,
                                              padding: '6px 8px 6px 12px', borderRadius: 6,
-                                             background: GH.ink5, fontFamily: GH_MONO, fontSize: 11,
+                                             background: GH.ink5, fontFamily: GH_MONO, fontSize: 12,
                                              letterSpacing: '0.04em',
                                          }}>
                                         <span style={{ color: GH.ink60 }}>{res?.name || ch.resId}</span>
-                                        <span style={{ fontWeight: 700, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>{startT}–{endT}</span>
-                                        <span style={{ color: GH.ink30 }}>· {mins >= 60 ? `${(mins/60).toString().replace(/\.0$/,'')}ч` : `${mins}м`}</span>
+                                        <span style={{ fontWeight: 600, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>{startT}–{endT}</span>
+                                        <span style={{ color: GH.ink60 }}>· {mins >= 60 ? `${(mins/60).toString().replace(/\.0$/,'')}ч` : `${mins}м`}</span>
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -1532,6 +1571,7 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                                                 );
                                             }}
                                             title="Убрать этот период"
+                                            aria-label="Убрать этот период"
                                             style={{
                                                 width: 18, height: 18, borderRadius: '50%', border: 'none',
                                                 background: GH.ink10, color: GH.ink60, cursor: 'pointer',
@@ -1550,8 +1590,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                             type="button"
                             onClick={() => useBookingStore.getState().clearCart()}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.1em',
-                                background: 'none', border: 'none', color: GH.ink30,
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
+                                background: 'none', border: 'none', color: GH.ink60,
                                 cursor: 'pointer', textDecoration: 'underline',
                             }}
                         >
@@ -1565,8 +1605,8 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                             style={{
                                 padding: '12px 32px', borderRadius: 8, border: 'none',
                                 background: selectedSlots.length === 0 ? GH.ink10 : GH.accent,
-                                color: selectedSlots.length === 0 ? GH.ink30 : '#fff',
-                                fontFamily: GH_SANS, fontSize: 15, fontWeight: 600,
+                                color: selectedSlots.length === 0 ? GH.ink30 : COLOR.onAccent,
+                                fontFamily: GH_SANS, fontSize: 16, fontWeight: 600,
                                 cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
                                 display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
                             }}
@@ -1580,42 +1620,6 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     )}
                 </div>
             </div></div></div>
-
-            {/* Overlap confirmation dialog */}
-            {showOverlapWarning && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-                    <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-                        <div className="flex items-start gap-4 mb-5">
-                            <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                                <AlertTriangle size={24} className="text-amber-500" />
-                            </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-unbox-dark mb-1">Наложение времени</h3>
-                                <p className="text-unbox-grey text-sm">
-                                    Вы выбрали несколько кабинетов, которые <strong>пересекаются по времени</strong>. Это значит, вы планируете одновременно использовать несколько помещений.
-                                </p>
-                                <p className="text-unbox-grey text-sm mt-2">
-                                    Вы уверены, что хотите продолжить?
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => setShowOverlapWarning(false)}
-                                className="flex-1 px-4 py-2.5 rounded-xl border border-unbox-light text-unbox-dark font-medium hover:bg-unbox-light/30 transition-colors"
-                            >
-                                Изменить выбор
-                            </button>
-                            <button
-                                onClick={() => { setShowOverlapWarning(false); setStep(3); }}
-                                className="flex-1 px-4 py-2.5 rounded-xl bg-unbox-green text-white font-medium hover:bg-unbox-green/90 transition-colors"
-                            >
-                                Да, продолжить
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {(() => {
                 const wlRes = waitlistData ? RESOURCES.find(r => r.id === waitlistData.resourceId) : null;

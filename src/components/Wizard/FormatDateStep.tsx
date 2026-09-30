@@ -16,8 +16,8 @@ export function FormatDateStep() {
 
             {/* Format Selection */}
             <section>
-                <h2 className="text-2xl font-bold mb-2">Выберите формат</h2>
-                <p className="text-unbox-grey mb-6">Индивидуально, групповой или интервизия?</p>
+                <h2 className="text-2xl font-semibold mb-2">Выберите формат</h2>
+                <p className="text-ink-60 mb-6">Индивидуально, групповой или интервизия?</p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <Card
@@ -27,13 +27,13 @@ export function FormatDateStep() {
                     >
                         <div className={clsx(
                             "p-3 rounded-xl shrink-0",
-                            bookingFormat === 'individual' ? "bg-unbox-green text-white" : "bg-unbox-light/50 text-unbox-grey"
+                            bookingFormat === 'individual' ? "bg-accent text-on-accent" : "bg-unbox-light/50 text-ink-60"
                         )}>
                             <User size={22} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-base">Индивидуальный</h3>
-                            <p className="text-unbox-grey text-sm">20 ₾ / час</p>
+                            <h3 className="font-semibold text-base">Индивидуальный</h3>
+                            <p className="text-ink-60 text-sm">20 ₾ / час</p>
                         </div>
                     </Card>
 
@@ -44,13 +44,13 @@ export function FormatDateStep() {
                     >
                         <div className={clsx(
                             "p-3 rounded-xl shrink-0",
-                            bookingFormat === 'group' ? "bg-unbox-green text-white" : "bg-unbox-light/50 text-unbox-grey"
+                            bookingFormat === 'group' ? "bg-accent text-on-accent" : "bg-unbox-light/50 text-ink-60"
                         )}>
                             <Users size={22} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-base">Групповой</h3>
-                            <p className="text-unbox-grey text-sm">35 ₾ / час</p>
+                            <h3 className="font-semibold text-base">Групповой</h3>
+                            <p className="text-ink-60 text-sm">35 ₾ / час</p>
                         </div>
                     </Card>
 
@@ -61,13 +61,13 @@ export function FormatDateStep() {
                     >
                         <div className={clsx(
                             "p-3 rounded-xl shrink-0",
-                            bookingFormat === 'intervision' ? "bg-unbox-green text-white" : "bg-unbox-light/50 text-unbox-grey"
+                            bookingFormat === 'intervision' ? "bg-accent text-on-accent" : "bg-unbox-light/50 text-ink-60"
                         )}>
                             <GraduationCap size={22} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-base">Интервизия</h3>
-                            <p className="text-unbox-grey text-sm">30 ₾ / час</p>
+                            <h3 className="font-semibold text-base">Интервизия</h3>
+                            <p className="text-ink-60 text-sm">30 ₾ / час</p>
                         </div>
                     </Card>
                 </div>
@@ -75,8 +75,8 @@ export function FormatDateStep() {
 
             {/* Date Selection */}
             <section>
-                <h2 className="text-2xl font-bold mb-2">Выберите дату</h2>
-                <p className="text-unbox-grey mb-6">Доступно бронирование на 2 недели вперед</p>
+                <h2 className="text-2xl font-semibold mb-2">Выберите дату</h2>
+                <p className="text-ink-60 mb-6">Доступно бронирование на 2 недели вперед</p>
 
                 {/* Horizontal Scroll Area */}
                 <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
@@ -89,14 +89,14 @@ export function FormatDateStep() {
                                 className={clsx(
                                     "flex flex-col items-center justify-center min-w-[4.5rem] h-20 rounded-xl border transition-all",
                                     isSelected
-                                        ? "border-unbox-green bg-unbox-green text-white shadow-md"
-                                        : "border-unbox-light bg-white hover:border-gray-300 hover:bg-unbox-light/30"
+                                        ? "border-accent bg-accent text-on-accent shadow-md"
+                                        : "border-unbox-light bg-card hover:border-ink-20 hover:bg-unbox-light/30"
                                 )}
                             >
-                                <span className="text-xs font-medium uppercase opacity-60">
+                                <span className="text-xs font-medium uppercase">
                                     {format(date, 'EEE', { locale: ru })}
                                 </span>
-                                <span className="text-xl font-bold">
+                                <span className="text-xl font-semibold">
                                     {format(date, 'd')}
                                 </span>
                             </button>

@@ -3,6 +3,7 @@ import { AlertTriangle, X, ArrowRight, CalendarClock, Loader2 } from 'lucide-rea
 import { RESOURCES, LOCATIONS } from '../utils/data';
 import { bookingsApi } from '../api/bookings';
 import type { BookingHistoryItem } from '../store/types';
+import { formatDateLabel } from '../utils/format';
 
 /**
  * Branded conflict dialog — shown when a booking attempt hits an occupied
@@ -94,46 +95,41 @@ export function BookingConflictDialog({
 
     if (!primary) return null;
 
-    const dateLabel = (() => {
-        try {
-            return new Date(primary.date + 'T00:00:00').toLocaleDateString('ru-RU', {
-                day: 'numeric', month: 'long', weekday: 'short',
-            });
-        } catch { return primary.date; }
-    })();
+    // «вт, 29 сентября» — общий форматтер (календарная дата, без сдвига пояса).
+    const dateLabel = formatDateLabel(primary.date, { fallback: primary.date });
 
     return (
         <div
-            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-ink/45 p-4"
             onClick={onClose}
         >
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+                className="bg-card rounded-2xl shadow-[var(--shadow-pop)] w-full max-w-sm overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
                 onClick={e => e.stopPropagation()}
             >
-                {/* Header — amber for "your own", red for someone else's */}
-                <div className={`px-5 py-4 flex items-start gap-3 ${own ? 'bg-amber-50' : 'bg-red-50'}`}>
-                    <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${
-                        own ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                {/* Шапка: «ждём» (янтарь) — своя бронь, «опасно» (красный) — чужая */}
+                <div className={`px-5 py-4 flex items-start gap-3 ${own ? 'bg-[var(--status-pending-bg)]' : 'bg-[var(--status-danger-bg)]'}`}>
+                    <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center bg-card ${
+                        own ? 'text-[var(--status-pending-fg)]' : 'text-[var(--status-danger-fg)]'
                     }`}>
-                        <AlertTriangle size={18} />
+                        <AlertTriangle size={18} aria-hidden="true" />
                     </div>
                     <div className="flex-1">
-                        <h3 className="font-bold text-unbox-dark leading-tight">
-                            {own ? 'Это ваша бронь' : 'Слот уже занят'}
+                        <h3 className="font-semibold text-ink leading-tight">
+                            {own ? 'Это ваша бронь' : 'Время уже занято'}
                         </h3>
-                        <p className="text-xs text-unbox-grey mt-0.5">
+                        <p className="text-xs text-ink-60 mt-0.5">
                             {resource?.name} · {dateLabel} · {time}
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-1 hover:bg-black/5 rounded-lg shrink-0">
-                        <X size={16} className="text-unbox-grey" />
+                    <button onClick={onClose} aria-label="Закрыть" className="-m-2.5 w-11 h-11 flex items-center justify-center hover:bg-ink-05 rounded-lg shrink-0">
+                        <X size={16} className="text-ink-60" aria-hidden="true" />
                     </button>
                 </div>
 
                 <div className="p-5 space-y-4">
                     {conflicts.length > 1 && (
-                        <div className="text-xs text-unbox-grey bg-unbox-light/60 rounded-lg px-3 py-2">
+                        <div className="text-xs text-ink-60 bg-sunken rounded-lg px-3 py-2">
                             Конфликт в {conflicts.length} датах серии. Показана первая —
                             остальные решите после.
                         </div>
@@ -142,22 +138,22 @@ export function BookingConflictDialog({
                     {own ? (
                         /* ── Own booking — offer to open it ── */
                         <>
-                            <p className="text-sm text-unbox-dark leading-relaxed">
+                            <p className="text-sm text-ink leading-relaxed">
                                 На это время у вас уже есть бронь этого кабинета.
                                 Откройте её, чтобы посмотреть детали или изменить.
                             </p>
                             {ownBooking ? (
                                 <button
                                     onClick={() => onOpenBooking(ownBooking.id)}
-                                    className="w-full flex items-center justify-between gap-2 px-4 py-3 rounded-xl bg-unbox-green text-white font-semibold text-sm"
+                                    className="w-full flex items-center justify-between gap-2 px-4 py-3 rounded-xl bg-accent text-on-accent font-semibold text-sm"
                                 >
                                     <span className="flex items-center gap-2">
-                                        <CalendarClock size={16} /> Открыть мою бронь
+                                        <CalendarClock size={16} aria-hidden="true" /> Открыть мою бронь
                                     </span>
-                                    <ArrowRight size={16} />
+                                    <ArrowRight size={16} aria-hidden="true" />
                                 </button>
                             ) : (
-                                <div className="text-xs text-unbox-grey">
+                                <div className="text-xs text-ink-60">
                                     Бронь не найдена в вашем списке — обновите страницу
                                     или проверьте «Мои брони».
                                 </div>
@@ -166,16 +162,16 @@ export function BookingConflictDialog({
                     ) : (
                         /* ── Someone else's slot — suggest free cabinets ── */
                         <>
-                            <p className="text-sm text-unbox-dark leading-relaxed">
+                            <p className="text-sm text-ink leading-relaxed">
                                 {primary.reason}
                             </p>
                             <div>
-                                <div className="text-[11px] font-semibold uppercase tracking-wide text-unbox-grey mb-2">
+                                <div className="text-caption font-semibold uppercase tracking-wide text-ink-60 mb-2">
                                     Свободно в {location?.name ?? 'этом центре'} · {time}
                                 </div>
                                 {loadingAlts ? (
-                                    <div className="flex items-center gap-2 text-sm text-unbox-grey py-2">
-                                        <Loader2 size={14} className="animate-spin" /> Ищем свободные кабинеты…
+                                    <div className="flex items-center gap-2 text-sm text-ink-60 py-2">
+                                        <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Ищем свободные кабинеты…
                                     </div>
                                 ) : alts.length > 0 ? (
                                     <div className="space-y-1.5">
@@ -183,15 +179,15 @@ export function BookingConflictDialog({
                                             <button
                                                 key={a.id}
                                                 onClick={() => onPickCabinet(a.id, primary.date)}
-                                                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-unbox-light hover:border-unbox-green/60 hover:bg-unbox-green/5 transition-colors text-sm font-medium text-unbox-dark"
+                                                className="w-full min-h-11 flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-ink-20 hover:border-accent hover:bg-accent-soft transition-colors text-sm font-medium text-ink"
                                             >
                                                 <span>{a.name}</span>
-                                                <ArrowRight size={15} className="text-unbox-green" />
+                                                <ArrowRight size={15} className="text-accent-ink" aria-hidden="true" />
                                             </button>
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="text-sm text-unbox-grey py-2">
+                                    <div className="text-sm text-ink-60 py-2">
                                         В это время все кабинеты центра заняты. Попробуйте
                                         другое время или дату.
                                     </div>
@@ -202,7 +198,7 @@ export function BookingConflictDialog({
 
                     <button
                         onClick={onClose}
-                        className="w-full py-2.5 rounded-xl border border-unbox-light text-sm font-medium text-unbox-grey hover:bg-unbox-light/50"
+                        className="w-full min-h-11 py-2.5 rounded-xl border border-ink-20 text-sm font-medium text-ink-80 hover:bg-ink-05"
                     >
                         Закрыть
                     </button>

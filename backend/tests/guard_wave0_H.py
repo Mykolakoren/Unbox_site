@@ -143,7 +143,8 @@ def test_landing_apply_button_returns_to_application():
 def test_mobile_has_way_to_application():
     gate = _read("src/components/SpecialistGate.tsx")
     assert "SPECIALIST_APPLICATION_PATH = '/become-specialist'" in gate
-    assert "Чтобы бронировать кабинеты, заполни анкету специалиста" in gate
+    # Wave 1 (30.09): обращение на «вы» и в /m — текст карточки обновлён.
+    assert "Чтобы бронировать кабинеты, заполните анкету специалиста" in gate
     assert "Анкета на проверке" in gate
     profile = _read("src/pages/mobile/MobileProfile.tsx")
     assert "navigate('/become-specialist')" in profile, "в /m/me пропала строка «Анкета специалиста»"

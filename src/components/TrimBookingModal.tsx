@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingsApi } from '../api/bookings';
+import { formatGel } from '../utils/format';
 
 /**
  * Partial cancellation ("trim") modal.
@@ -89,7 +90,7 @@ export function TrimBookingModal({
                 remove_to: fmt(effectiveTo),
             });
             if (typeof res.refunded_amount === 'number' && res.refunded_amount > 0) {
-                toast.success(`Возвращено ${res.refunded_amount} ₾`);
+                toast.success(`Возвращено ${formatGel(res.refunded_amount)}`);
             } else if (typeof res.refunded_hours === 'number' && res.refunded_hours > 0) {
                 toast.success(`Возвращено ${res.refunded_hours} ч`);
             } else {
@@ -108,30 +109,31 @@ export function TrimBookingModal({
 
     return (
         <div
-            className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[1000] bg-ink/45 flex items-center justify-center p-4"
             onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
         >
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-unbox-light">
-                    <div className="font-semibold text-unbox-dark">Отменить часть брони</div>
+            <div className="bg-card rounded-2xl shadow-[var(--shadow-pop)] w-full max-w-sm overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-ink-10">
+                    <div className="font-semibold text-ink">Отменить часть брони</div>
                     <button
                         onClick={onClose}
                         disabled={busy}
-                        className="p-1 hover:bg-unbox-light rounded-lg disabled:opacity-30"
+                        aria-label="Закрыть"
+                        className="-m-2.5 w-11 h-11 flex items-center justify-center hover:bg-ink-05 rounded-lg disabled:opacity-30"
                     >
-                        <X size={16} />
+                        <X size={16} aria-hidden="true" />
                     </button>
                 </div>
 
                 <div className="px-4 py-3 space-y-3">
-                    <div className="text-sm text-unbox-grey">
-                        Бронь: <span className="font-medium text-unbox-dark">{fmt(startMin)}–{fmt(endMin)}</span>
+                    <div className="text-sm text-ink-60">
+                        Бронь: <span className="num font-medium text-ink">{fmt(startMin)}–{fmt(endMin)}</span>
                     </div>
 
                     {/* Range selectors */}
                     <div className="flex items-end gap-2">
                         <label className="flex-1">
-                            <div className="text-[11px] text-unbox-grey mb-1">Убрать с</div>
+                            <div className="text-caption text-ink-60 mb-1">Убрать с</div>
                             <select
                                 value={removeFrom}
                                 onChange={(e) => {
@@ -140,7 +142,7 @@ export function TrimBookingModal({
                                     if (removeTo <= v) setRemoveTo(v + 30);
                                 }}
                                 disabled={busy}
-                                className="w-full px-2 py-2 text-sm rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green disabled:opacity-50"
+                                className="w-full min-h-11 px-2 py-2 text-sm rounded-lg border border-ink-20 bg-card focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
                             >
                                 {fromOptions.map(m => (
                                     <option key={m} value={m}>{fmt(m)}</option>
@@ -148,12 +150,12 @@ export function TrimBookingModal({
                             </select>
                         </label>
                         <label className="flex-1">
-                            <div className="text-[11px] text-unbox-grey mb-1">по</div>
+                            <div className="text-caption text-ink-60 mb-1">по</div>
                             <select
                                 value={effectiveTo}
                                 onChange={(e) => setRemoveTo(Number(e.target.value))}
                                 disabled={busy}
-                                className="w-full px-2 py-2 text-sm rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green disabled:opacity-50"
+                                className="w-full min-h-11 px-2 py-2 text-sm rounded-lg border border-ink-20 bg-card focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
                             >
                                 {toOptions.map(m => (
                                     <option key={m} value={m}>{fmt(m)}</option>
@@ -164,13 +166,13 @@ export function TrimBookingModal({
 
                     {/* Error / preview */}
                     {error ? (
-                        <div className="text-sm text-red-600">{error}</div>
+                        <div className="text-sm text-[var(--status-danger-fg)]">{error}</div>
                     ) : (
                         <div className="space-y-1">
-                            <div className="text-sm text-unbox-dark">
+                            <div className="text-sm text-ink">
                                 Останется: <span className="font-medium">{remnantRanges.join(' и ')}</span>
                             </div>
-                            <div className="text-[11px] text-unbox-grey">
+                            <div className="text-caption text-ink-60">
                                 Сумма возврата и пересчёт скидки рассчитаются при подтверждении.
                             </div>
                         </div>
@@ -181,17 +183,17 @@ export function TrimBookingModal({
                     <button
                         onClick={confirm}
                         disabled={!valid || busy}
-                        className="w-full py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="w-full min-h-11 py-2 text-sm font-medium rounded-lg bg-[var(--status-danger-solid)] hover:brightness-95 text-card disabled:opacity-50 flex items-center justify-center gap-2"
                     >
-                        {busy && <Loader2 size={14} className="animate-spin" />}
-                        {busy ? 'Отменяю…' : 'Отменить выбранное'}
+                        {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                        {busy ? 'Отменяем…' : 'Отменить выбранное'}
                     </button>
                     <button
                         onClick={onClose}
                         disabled={busy}
-                        className="w-full py-2 text-sm font-medium rounded-lg bg-unbox-light hover:bg-unbox-light/70 text-unbox-dark disabled:opacity-50"
+                        className="w-full min-h-11 py-2 text-sm font-medium rounded-lg border border-ink-20 bg-card hover:bg-ink-05 text-ink disabled:opacity-50"
                     >
-                        Закрыть
+                        Оставить как есть
                     </button>
                 </div>
             </div>

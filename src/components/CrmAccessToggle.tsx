@@ -4,6 +4,8 @@ import { BriefcaseMedical, Loader2, Clock, AlertCircle } from 'lucide-react';
 import { crmApi, type CrmAccessStatus } from '../api/crm';
 import { useUserStore } from '../store/userStore';
 import { useCrmModeStore } from '../store/crmModeStore';
+import { toast } from 'sonner';
+import { ruPlural } from '../utils/plural';
 
 export function CrmAccessToggle() {
     const navigate = useNavigate();
@@ -54,7 +56,8 @@ export function CrmAccessToggle() {
                 setAccess(prev => prev ? { ...prev, accessStatus: 'pending' } : prev);
             }
         } catch {
-            // Error handled silently
+            // Раньше ошибка глоталась молча (G3-21) — клиент не знал, ушла ли заявка.
+            toast.error('Не удалось отправить заявку на CRM. Попробуйте ещё раз.');
         } finally {
             setApplying(false);
         }
@@ -62,9 +65,9 @@ export function CrmAccessToggle() {
 
     if (loading) {
         return (
-            <div className="flex items-center gap-3 px-3 py-2.5 text-sm text-unbox-grey">
-                <Loader2 size={18} className="animate-spin" />
-                <span>CRM...</span>
+            <div className="flex items-center gap-3 px-3 py-2.5 text-sm text-ink-60">
+                <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                <span>CRM…</span>
             </div>
         );
     }
@@ -83,10 +86,10 @@ export function CrmAccessToggle() {
                 className={`
                     flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
                     ${isOn
-                        ? 'bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/20 cursor-pointer'
+                        ? 'bg-accent/10 text-accent-ink hover:bg-accent/20 cursor-pointer'
                         : isPending
-                            ? 'bg-amber-50 text-amber-600 cursor-default'
-                            : 'bg-gray-50 text-unbox-grey cursor-default'
+                            ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] cursor-default'
+                            : 'bg-sunken text-ink-60 cursor-default'
                     }
                 `}
             >
@@ -96,29 +99,29 @@ export function CrmAccessToggle() {
                         {hasAccess ? 'Мой CRM' : 'Режим CRM'}
                     </div>
                     {isOn && !access.permanent && access.daysRemaining !== null && (
-                        <div className="text-[10px] opacity-70 flex items-center gap-1">
-                            <Clock size={10} />
+                        <div className="text-caption flex items-center gap-1">
+                            <Clock size={12} aria-hidden="true" />
                             {access.daysRemaining} {getDaysLabel(access.daysRemaining)}
                         </div>
                     )}
                     {hasAccess && !crmEnabled && (
-                        <div className="text-[10px] opacity-70">Отключён</div>
+                        <div className="text-caption">Отключён</div>
                     )}
                     {isPending && (
-                        <div className="text-[10px] opacity-70 flex items-center gap-1">
-                            <AlertCircle size={10} />
+                        <div className="text-caption flex items-center gap-1">
+                            <AlertCircle size={12} aria-hidden="true" />
                             На рассмотрении
                         </div>
                     )}
                     {isExpired && (
-                        <div className="text-[10px] text-red-400 flex items-center gap-1">
-                            <AlertCircle size={10} />
+                        <div className="text-caption text-[var(--status-danger-fg)] flex items-center gap-1">
+                            <AlertCircle size={12} aria-hidden="true" />
                             Истёк
                         </div>
                     )}
                     {isRejected && (
-                        <div className="text-[10px] text-red-400 flex items-center gap-1">
-                            <AlertCircle size={10} />
+                        <div className="text-caption text-[var(--status-danger-fg)] flex items-center gap-1">
+                            <AlertCircle size={12} aria-hidden="true" />
                             Отклонено
                         </div>
                     )}
@@ -129,25 +132,34 @@ export function CrmAccessToggle() {
             <button
                 onClick={handleToggle}
                 disabled={isPending || applying}
-                className="flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                role="switch"
+                aria-checked={isOn}
+                aria-label={
+                    hasAccess
+                        ? 'Режим CRM'
+                        : isPending
+                            ? 'Заявка на CRM ждёт одобрения'
+                            : 'Запросить доступ к CRM'
+                }
+                className="flex-shrink-0 p-1.5 rounded-lg hover:bg-ink-05 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title={
                     hasAccess
                         ? (crmEnabled ? 'Выключить CRM режим' : 'Включить CRM режим')
                         : isPending
-                            ? 'Ожидает одобрения'
+                            ? 'Ждёт одобрения'
                             : 'Запросить доступ'
                 }
             >
                 <div className={`
                     w-10 h-[22px] rounded-full flex items-center transition-all px-0.5
-                    ${isOn ? 'bg-unbox-green justify-end' : isPending ? 'bg-amber-300 justify-center' : 'bg-gray-300 justify-start'}
+                    ${isOn ? 'bg-accent justify-end' : isPending ? 'bg-[var(--status-pending-fg)] justify-center' : 'bg-ink-60 justify-start'}
                 `}>
                     {applying ? (
-                        <Loader2 size={12} className="text-white animate-spin mx-auto" />
+                        <Loader2 size={12} className="text-card animate-spin mx-auto" aria-hidden="true" />
                     ) : isPending ? (
-                        <Clock size={12} className="text-white mx-auto" />
+                        <Clock size={12} className="text-card mx-auto" aria-hidden="true" />
                     ) : (
-                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-all
+                        <div className={`w-4 h-4 rounded-full bg-card shadow-sm transition-all
                             ${isOn ? 'scale-100' : 'scale-90'}
                         `} />
                     )}
@@ -158,7 +170,6 @@ export function CrmAccessToggle() {
 }
 
 function getDaysLabel(days: number): string {
-    if (days === 1) return 'день';
-    if (days >= 2 && days <= 4) return 'дня';
-    return 'дней';
+    // ruPlural: 21 день, 22 дня, 25 дней (раньше «21 дней»).
+    return ruPlural(days, ['день', 'дня', 'дней']);
 }

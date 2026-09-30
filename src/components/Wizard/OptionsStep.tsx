@@ -4,6 +4,7 @@ import { Card } from '../ui/Card';
 import { Check, ArrowRight, ArrowLeft, User as UserIcon, Users as UsersIcon, MessageSquare } from 'lucide-react';
 import { LegacyButton as Button } from '../ui/LegacyButton';
 import clsx from 'clsx';
+import { formatGel } from '../../utils/format';
 import { motion } from 'framer-motion';
 
 // Format options shown to the user. Сервер пересчитывает цену по формату
@@ -28,15 +29,15 @@ export function OptionsStep() {
             className="flex flex-col gap-8"
         >
             <div>
-                <h2 className="text-2xl font-bold mb-2">Параметры брони</h2>
-                <p className="text-unbox-grey">Уточните формат и при необходимости выберите допуслуги.</p>
+                <h2 className="text-2xl font-semibold mb-2">Параметры брони</h2>
+                <p className="text-ink-60">Уточните формат и при необходимости выберите допуслуги.</p>
             </div>
 
             {/* Формат сессии — раньше зашит в 'individual' по умолчанию, юзер
                 не имел способа поменять. Для Кабинетов 7/8 цена групп vs.
                 индивид отличается, поэтому это важно показать здесь. */}
             <div>
-                <h3 className="text-base font-bold mb-3">Формат</h3>
+                <h3 className="text-base font-semibold mb-3">Формат</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {FORMAT_CARDS.map(opt => {
                         const isSelected = format === opt.id;
@@ -50,17 +51,17 @@ export function OptionsStep() {
                             >
                                 <div className={clsx(
                                     "w-9 h-9 shrink-0 rounded-full flex items-center justify-center transition-colors",
-                                    isSelected ? "bg-unbox-green text-white" : "bg-unbox-light text-unbox-grey"
+                                    isSelected ? "bg-accent text-on-accent" : "bg-unbox-light text-ink-60"
                                 )}>
                                     <Icon size={16} />
                                 </div>
                                 <div className="min-w-0">
-                                    <div className="font-bold text-sm leading-tight">{opt.label}</div>
-                                    <div className="text-unbox-grey text-xs mt-0.5 leading-snug">{opt.sub}</div>
+                                    <div className="font-semibold text-sm leading-tight">{opt.label}</div>
+                                    <div className="text-ink-60 text-xs mt-0.5 leading-snug">{opt.sub}</div>
                                 </div>
                                 <div className={clsx(
                                     "w-5 h-5 shrink-0 ml-auto rounded-full border flex items-center justify-center transition-colors",
-                                    isSelected ? "bg-unbox-green border-unbox-green text-white" : "border-gray-300"
+                                    isSelected ? "bg-accent border-accent text-on-accent" : "border-ink-20"
                                 )}>
                                     {isSelected && <Check size={12} />}
                                 </div>
@@ -72,7 +73,7 @@ export function OptionsStep() {
 
             {/* Допуслуги */}
             <div>
-                <h3 className="text-base font-bold mb-3">Дополнительные услуги</h3>
+                <h3 className="text-base font-semibold mb-3">Дополнительные услуги</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-fr">
                     {EXTRAS.map((extra) => {
                         const isSelected = extras.includes(extra.id);
@@ -84,13 +85,13 @@ export function OptionsStep() {
                                 onClick={() => toggleExtra(extra.id)}
                             >
                                 <div>
-                                    <h3 className="font-bold text-base leading-snug">{extra.name}</h3>
-                                    <p className="text-unbox-grey text-sm mt-0.5">{extra.price} ₾</p>
+                                    <h3 className="font-semibold text-base leading-snug">{extra.name}</h3>
+                                    <p className="num text-ink-60 text-sm mt-0.5">{formatGel(extra.price)}</p>
                                 </div>
 
                                 <div className={clsx(
                                     "w-6 h-6 shrink-0 rounded-full border flex items-center justify-center transition-colors",
-                                    isSelected ? "bg-unbox-green border-unbox-green text-white" : "border-gray-300"
+                                    isSelected ? "bg-accent border-accent text-on-accent" : "border-ink-20"
                                 )}>
                                     {isSelected && <Check size={14} />}
                                 </div>
@@ -100,7 +101,7 @@ export function OptionsStep() {
                 </div>
             </div>
 
-            <div className="bg-white/40 backdrop-blur-md border-t border-white/40 p-4 -mx-8 -mb-8 flex justify-between rounded-b-[28px]">
+            <div className="bg-card border-t border-ink-10 p-4 -mx-8 -mb-8 flex justify-between rounded-b-[28px]">
                 <Button variant="outline" onClick={() => setStep(2)}>
                     <ArrowLeft size={16} className="mr-2" /> Назад
                 </Button>

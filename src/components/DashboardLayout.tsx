@@ -5,6 +5,7 @@ import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, Log
 import { useEffect, useState } from 'react';
 import { CrmAccessToggle } from './CrmAccessToggle';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { SHADOW } from '../design/tokens';
 import { loginPathWithRedirect } from '../utils/loginRedirect';
 import { canBookCabinets } from '../utils/permissions';
 
@@ -37,7 +38,7 @@ export function DashboardLayout() {
     if (isLoading || !currentUser) {
         return (
             <div className="flex items-center justify-center min-h-screen" style={{ background: GH.paper }}>
-                <Loader2 className="w-8 h-8 animate-spin text-unbox-green" />
+                <Loader2 className="w-8 h-8 animate-spin text-accent" aria-label="Загружаем кабинет" />
             </div>
         );
     }
@@ -113,7 +114,7 @@ export function DashboardLayout() {
         // Кому сервер бронь не даст (роль user) — сразу анкета, а не шахматка
         // с отказом на кнопке «Оплатить».
         canBookCabinets(currentUser)
-            ? { label: 'Забронировать кабинет', sub: 'Выбрать слот в шахматке', path: '/dashboard/bookings', icon: Plus }
+            ? { label: 'Забронировать кабинет', sub: 'Выбрать время в шахматке', path: '/dashboard/bookings', icon: Plus }
             : { label: 'Заполнить анкету', sub: 'Бронь — после проверки анкеты', path: '/become-specialist', icon: Plus },
         { label: 'Мои бронирования', sub: 'Ближайшие и история', path: '/dashboard/bookings', icon: Calendar },
         { label: 'Найти специалиста', sub: 'Каталог и запись', path: '/specialists', icon: Search },
@@ -132,10 +133,11 @@ export function DashboardLayout() {
 // Grid House — Dashboard Shell
 // ═══════════════════════════════════════════════════════════════
 
+// Моно-подпись: 12 px и разрядка ≤ 0.06em (wave 1: меньше 12 — нельзя).
 const ghMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
-    letterSpacing: '0.18em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
 };
 
@@ -200,12 +202,12 @@ function GridHouseDashboardShell({
                     zIndex: 50,
                     display: 'flex',
                     flexDirection: 'column',
-                    boxShadow: narrow && mobileOpen ? '2px 0 24px rgba(0,0,0,0.12)' : 'none',
+                    boxShadow: narrow && mobileOpen ? SHADOW.pop : 'none',
                 }}
             >
                 {/* Brand */}
                 <div style={{ padding: '22px 24px 18px', borderBottom: hairline }}>
-                    <Link to="/" style={{ fontSize: 24, fontWeight: 700, color: GH.ink, textDecoration: 'none', letterSpacing: '-0.01em' }}>
+                    <Link to="/" style={{ fontSize: 24, fontWeight: 600, color: GH.ink, textDecoration: 'none', letterSpacing: '-0.01em' }}>
                         Unbox
                     </Link>
                     <div style={{ ...ghMono, color: GH.ink60, marginTop: 6 }}>
@@ -245,13 +247,14 @@ function GridHouseDashboardShell({
                                 key={item.path}
                                 to={item.path}
                                 onClick={() => setMobileOpen(false)}
+                                aria-current={active ? 'page' : undefined}
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: 10,
                                     padding: '12px 24px',
                                     fontSize: 14,
-                                    fontWeight: active ? 700 : 500,
+                                    fontWeight: active ? 600 : 500,
                                     color: active ? GH.ink : GH.ink60,
                                     textDecoration: 'none',
                                     background: active ? GH.paper : 'transparent',
@@ -259,7 +262,7 @@ function GridHouseDashboardShell({
                                     transition: 'all 0.12s ease',
                                 }}
                             >
-                                <span style={{ ...ghMono, width: 20, textAlign: 'center', color: active ? GH.ink : GH.ink30 }}>
+                                <span aria-hidden="true" style={{ ...ghMono, width: 20, textAlign: 'center', color: active ? GH.ink : GH.ink60 }}>
                                     {String(i + 1).padStart(2, '0')}
                                 </span>
                                 {item.label}
@@ -285,7 +288,7 @@ function GridHouseDashboardShell({
                         to="/"
                         style={{
                             display: 'block', marginTop: 12,
-                            ...ghMono, color: GH.ink30, textDecoration: 'none', fontSize: 10,
+                            ...ghMono, color: GH.ink60, textDecoration: 'none',
                         }}
                     >
                         ← На сайт
@@ -296,7 +299,7 @@ function GridHouseDashboardShell({
             {/* Mobile overlay */}
             {narrow && mobileOpen && (
                 <div
-                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 40 }}
+                    style={{ position: 'fixed', inset: 0, background: GH.ink30, zIndex: 40 }}
                     onClick={() => setMobileOpen(false)}
                 />
             )}
@@ -321,12 +324,15 @@ function GridHouseDashboardShell({
                         {narrow && (
                             <button
                                 onClick={() => setMobileOpen(!mobileOpen)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: GH.ink, padding: 0 }}
+                                aria-label={mobileOpen ? 'Закрыть меню' : 'Открыть меню'}
+                                aria-expanded={mobileOpen}
+                                // 44×44 для пальца; отрицательный отступ держит высоту шапки прежней.
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: GH.ink, padding: 0, width: 44, height: 44, margin: -12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
                                 {mobileOpen ? <X size={20} /> : <Menu size={20} />}
                             </button>
                         )}
-                        <span style={{ ...ghMono, color: GH.ink30 }}>
+                        <span style={{ ...ghMono, color: GH.ink60 }}>
                             Unbox · Кабинет
                         </span>
                     </div>

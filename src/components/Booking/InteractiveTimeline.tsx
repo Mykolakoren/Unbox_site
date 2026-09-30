@@ -2,6 +2,8 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { format, addMinutes, setHours, setMinutes, startOfToday, isBefore, isSameDay, addDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import clsx from 'clsx';
+import { Check } from 'lucide-react';
+import { formatTime } from '../../utils/format';
 import { useBookingStore } from '../../store/bookingStore';
 import { useUserStore } from '../../store/userStore';
 import { googleCalendarService } from '../../services/googleCalendarMock';
@@ -353,13 +355,13 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
                             onClick={() => setDate(d)}
                             className={clsx(
                                 "flex-shrink-0 flex flex-col items-center justify-center w-16 h-20 rounded-2xl transition-all border",
-                                active ? "bg-unbox-green text-white border-unbox-green shadow-md" : "bg-white text-gray-600 border-gray-200 hover:border-unbox-green/50"
+                                active ? "bg-accent text-on-accent border-accent shadow-md" : "bg-card text-ink-80 border-ink-10 hover:border-accent/50"
                             )}
                         >
-                            <span className={clsx("text-xs font-medium uppercase", active ? "text-unbox-light" : "text-gray-400")}>
+                            <span className={clsx("text-xs font-medium uppercase", active ? "text-unbox-light" : "text-ink-60")}>
                                 {format(d, 'EEE', { locale: ru })}
                             </span>
-                            <span className="text-xl font-bold mt-1">{format(d, 'd')}</span>
+                            <span className="text-xl font-semibold mt-1">{format(d, 'd')}</span>
                         </button>
                     );
                 })}
@@ -367,10 +369,10 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
 
             <div className="space-y-4">
                 {locationResources.map(res => (
-                    <div key={res.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center gap-4">
+                    <div key={res.id} className="bg-card p-4 rounded-2xl shadow-sm border border-ink-10 flex flex-col md:flex-row md:items-center gap-4">
                         <div className="w-full md:w-1/4">
-                            <h3 className="font-semibold text-gray-900">{res.name}</h3>
-                            <p className="text-sm text-gray-500">{res.capacity} чел. • {res.hourlyRate} ₾/ч</p>
+                            <h3 className="font-semibold text-ink">{res.name}</h3>
+                            <p className="text-sm text-ink-60">{res.capacity} чел. • {res.hourlyRate} ₾/ч</p>
                         </div>
                         <div className="flex-1 overflow-x-auto scrollbar-visible pb-2 md:pb-0 relative">
                             <div className="flex gap-1 min-w-max relative custom-slots-container">
@@ -396,18 +398,18 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
                                             className={clsx(
                                                 "flex flex-col items-center justify-center w-12 h-14 rounded-lg transition-all text-xs font-medium relative border group select-none flex-shrink-0",
                                                 isPreview
-                                                    ? "bg-unbox-light border-unbox-green/50 border-dashed opacity-50"
+                                                    ? "bg-unbox-light border-accent/50 border-dashed opacity-50"
                                                     : isMovingOriginal
-                                                        ? "bg-gray-50 border-gray-200 opacity-20"
+                                                        ? "bg-sunken border-ink-10 opacity-20"
                                                         : blocked
-                                                            ? "bg-gray-100 border-transparent text-transparent cursor-not-allowed opacity-60 styling-blocked"
-                                                            : "bg-unbox-light/30 text-unbox-dark border-unbox-green/20 hover:bg-unbox-light hover:border-unbox-green/50 cursor-pointer"
+                                                            ? "bg-sunken border-transparent text-transparent cursor-not-allowed opacity-60 styling-blocked"
+                                                            : "bg-unbox-light/30 text-ink border-accent/20 hover:bg-unbox-light hover:border-accent/50 cursor-pointer"
                                             )}
                                         >
                                             {blocked && (
                                                 <div className="absolute inset-x-0 mx-auto w-1 h-3/4 bg-gray-300 rounded-full transform rotate-45 pointer-events-none" />
                                             )}
-                                            {!blocked && <span className={clsx("mb-1 pointer-events-none", isPreview ? "text-unbox-green/70" : "text-unbox-green/70")}>{time}</span>}
+                                            {!blocked && <span className={clsx("mb-1 pointer-events-none", isPreview ? "text-accent-ink" : "text-accent-ink")}>{time}</span>}
                                         </button>
                                     );
                                 })}
@@ -440,26 +442,26 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
                                                 left: `${leftPosition}px`,
                                                 width: `${width}px`
                                             }}
-                                            className="absolute top-0 bottom-0 bg-unbox-green border-unbox-green shadow-md rounded-lg z-10 flex flex-col items-center justify-center cursor-move select-none group/overlay"
+                                            className="absolute top-0 bottom-0 bg-accent border-accent shadow-md rounded-lg z-10 flex flex-col items-center justify-center cursor-move select-none group/overlay"
                                         >
 
                                             {/* Resize Handle - Left */}
                                             <div
-                                                className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-20 group-hover/overlay:bg-unbox-green/30 rounded-l-lg flex items-center justify-center opacity-0 group-hover/overlay:opacity-100 transition-opacity"
+                                                className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-20 group-hover/overlay:bg-accent/30 rounded-l-lg flex items-center justify-center opacity-0 group-hover/overlay:opacity-100 transition-opacity"
                                                 onMouseDown={(e) => handleResizeStart(e, block, 'left')}
                                             >
                                                 <div className="w-[2px] h-4 bg-white/70 rounded-full" />
                                             </div>
 
-                                            <span className="text-white text-xs font-bold pointer-events-none mb-1">
+                                            <span className="text-on-accent text-xs font-semibold pointer-events-none mb-1">
                                                 {timeSlots[block.startIndex]}
-                                                {block.startIndex !== block.endIndex ? ` - ${addMinutes(setMinutes(setHours(new Date(), Number(timeSlots[block.endIndex].split(':')[0])), Number(timeSlots[block.endIndex].split(':')[1])), 30).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                                {block.startIndex !== block.endIndex ? `–${formatTime(addMinutes(setMinutes(setHours(new Date(), Number(timeSlots[block.endIndex].split(':')[0])), Number(timeSlots[block.endIndex].split(':')[1])), 30))}` : ''}
                                             </span>
-                                            <span className="text-[10px] text-unbox-light font-bold pointer-events-none">✓</span>
+                                            <Check size={12} strokeWidth={3} className="text-on-accent pointer-events-none" aria-hidden="true" />
 
                                             {/* Resize Handle - Right */}
                                             <div
-                                                className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-20 group-hover/overlay:bg-unbox-green/30 rounded-r-lg flex items-center justify-center opacity-0 group-hover/overlay:opacity-100 transition-opacity"
+                                                className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-20 group-hover/overlay:bg-accent/30 rounded-r-lg flex items-center justify-center opacity-0 group-hover/overlay:opacity-100 transition-opacity"
                                                 onMouseDown={(e) => handleResizeStart(e, block, 'right')}
                                             >
                                                 <div className="w-[2px] h-4 bg-white/70 rounded-full" />
@@ -491,8 +493,8 @@ export function InteractiveTimeline({ locationId }: { locationId: string }) {
                                             className={clsx(
                                                 "absolute top-0 bottom-0 rounded-lg z-20 flex flex-col items-center justify-center pointer-events-none transition-all duration-75",
                                                 isConflict
-                                                    ? "bg-red-500/50 border-2 border-red-500 shadow-sm"
-                                                    : "bg-unbox-green/80 border-2 border-unbox-green/60 shadow-md backdrop-blur-[2px]"
+                                                    ? "bg-[var(--status-danger-bg)] border-2 border-[var(--status-danger-solid)]"
+                                                    : "bg-accent/80 border-2 border-accent/60 shadow-md backdrop-blur-[2px]"
                                             )}
                                         />
                                     );

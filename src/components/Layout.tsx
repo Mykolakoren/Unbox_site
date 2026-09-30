@@ -8,9 +8,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
     const user = useUserStore((s) => s.currentUser);
 
     return (
-        <div className="min-h-screen bg-unbox-light text-unbox-dark font-sans selection:bg-unbox-green selection:text-white">
+        <div className="min-h-screen bg-paper text-ink font-sans selection:bg-accent selection:text-on-accent">
             {/* Header */}
-            <header className="sticky top-0 z-50 w-full border-b border-unbox-light bg-white/80 backdrop-blur-md text-unbox-dark">
+            <header className="sticky top-0 z-50 w-full border-b border-ink-10 bg-paper text-ink">
                 <div className="container mx-auto px-4 h-24 flex items-center justify-between">
                     <div className="flex items-center gap-6">
                         <Link
@@ -22,13 +22,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         </Link>
 
                         <nav className="hidden md:flex items-center gap-1">
-                            <Link to="/dashboard/bookings" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
+                            <Link to="/dashboard/bookings" className="px-3 py-2 rounded-lg font-medium text-sm text-ink-60 hover:text-ink hover:bg-unbox-light/50 transition-colors">
                                 Забронировать
                             </Link>
-                            <Link to="/#locations" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
+                            <Link to="/#locations" className="px-3 py-2 rounded-lg font-medium text-sm text-ink-60 hover:text-ink hover:bg-unbox-light/50 transition-colors">
                                 Кабинеты
                             </Link>
-                            <Link to="/specialists" className="px-3 py-2 rounded-lg font-medium text-sm text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/50 transition-colors">
+                            <Link to="/specialists" className="px-3 py-2 rounded-lg font-medium text-sm text-ink-60 hover:text-ink hover:bg-unbox-light/50 transition-colors">
                                 Специалисты
                             </Link>
                         </nav>
@@ -37,7 +37,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     <div className="flex items-center gap-4">
                         {user && (user.role === 'admin' || user.role === 'senior_admin' || user.role === 'owner') && (
                             <Link to="/admin">
-                                <Button variant="ghost" size="sm" className="font-medium text-unbox-dark hover:text-unbox-green">
+                                <Button variant="ghost" size="sm" className="font-medium text-ink hover:text-accent-ink">
                                     <ShieldCheck size={18} className="mr-2" />
                                     Админ-панель
                                 </Button>
@@ -47,10 +47,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         {user ? (
                             <Link to="/dashboard" className="flex items-center gap-2 hover:bg-unbox-light/50 p-1.5 rounded-lg transition-colors">
                                 <div className="hidden sm:block text-right">
-                                    <div className="text-sm font-bold leading-none">{user.name}</div>
-                                    <div className="text-[10px] text-unbox-grey font-medium uppercase tracking-wider">{user.level}</div>
+                                    <div className="text-sm font-semibold leading-none">{user.name}</div>
+                                    <div className="text-caption text-ink-60 font-medium uppercase tracking-[0.06em]">{user.level}</div>
                                 </div>
-                                <div className="w-8 h-8 bg-unbox-dark text-white rounded-full flex items-center justify-center font-bold text-xs">
+                                <div className="w-8 h-8 bg-ink text-on-ink rounded-full flex items-center justify-center font-semibold text-xs">
                                     {user.name[0]?.toUpperCase()}
                                 </div>
                             </Link>
@@ -72,9 +72,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </main>
 
             {/* Footer */}
-            <footer className="border-t border-unbox-light bg-white py-8 mt-auto">
-                <div className="container mx-auto px-4 text-center text-unbox-grey text-sm">
-                    &copy; {new Date().getFullYear()} Unbox. All rights reserved.
+            <footer className="border-t border-ink-10 bg-card py-8 mt-auto">
+                <div className="container mx-auto px-4 text-center text-ink-60 text-sm">
+                    &copy; {new Date().getFullYear()} Unbox
                 </div>
             </footer>
         </div>
