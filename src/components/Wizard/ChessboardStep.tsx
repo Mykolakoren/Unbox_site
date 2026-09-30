@@ -16,7 +16,7 @@ import { COLOR, STATUS } from '../../design/tokens';
 import { EmptyState } from '../ui/EmptyState';
 import { ErrorBar } from '../ui/ErrorBar';
 import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
-import { formatDateLabel, formatGel } from '../../utils/format';
+import { formatDateLabel, formatDayMonthShort, formatGel } from '../../utils/format';
 
 // Hook to detect mobile viewport
 function useIsMobile(breakpoint = 768) {
@@ -593,15 +593,25 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
         return formatGel(rate);
     };
 
+    // Пока открыто окно «Кабинеты пересекаются» — «Далее» заблокирована:
+    // повторный тап открывал второе окно поверх первого.
+    const [nextPending, setNextPending] = useState(false);
+    const nextDisabled = selectedSlots.length === 0 || nextPending;
     const handleNext = async () => {
+        if (nextPending) return;
         if (hasTimeOverlap) {
-            const ok = await confirm({
-                title: 'Кабинеты пересекаются по времени',
-                body: 'Вы выбрали несколько кабинетов на одно и то же время — значит, будете занимать их одновременно.',
-                confirmLabel: 'Продолжить с пересечением',
-                cancelLabel: 'Изменить выбор',
-            });
-            if (ok) setStep(3);
+            setNextPending(true);
+            try {
+                const ok = await confirm({
+                    title: 'Кабинеты пересекаются по времени',
+                    body: 'Вы выбрали несколько кабинетов на одно и то же время — значит, будете занимать их одновременно.',
+                    confirmLabel: 'Продолжить с пересечением',
+                    cancelLabel: 'Изменить выбор',
+                });
+                if (ok) setStep(3);
+            } finally {
+                setNextPending(false);
+            }
         } else {
             setStep(3);
         }
@@ -749,24 +759,41 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     })}
                 </div>
 
-                {/* Week Picker — compact mobile */}
-                <div style={isGH ? { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, padding: 4, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
-                     className={isGH ? '' : "flex items-center gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"}>
-                    <button onClick={handlePrevWeek}
-                        aria-label="Предыдущая неделя"
-                        style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
-                        className={isGH ? '' : "p-1.5 rounded-lg hover:bg-white text-unbox-grey"}>
-                        <ChevronLeft size={16} />
-                    </button>
-                    <div className={isGH ? '' : "flex-1 grid grid-cols-7 gap-1"} style={isGH ? { flex: 1, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 } : undefined}>
+                {/* Week Picker — compact mobile.
+                    Стрелки недели — отдельной строкой над днями: в одну строку
+                    с двумя стрелками по 44 px семь дней на 375 px сжимались до
+                    ~32 px (мимо пальца). Так стрелки остаются 44×44, а дни
+                    занимают всю ширину (~46 px на 375). */}
+                <div style={isGH ? { display: 'flex', flexDirection: 'column' as const, gap: 4, marginBottom: 16, padding: 4, borderRadius: 12, border: `1px solid ${GH.ink8}`, background: GH.ink5 } : { background: 'rgba(212,226,225,0.35)' }}
+                     className={isGH ? '' : "flex flex-col gap-1 mb-4 p-1 rounded-2xl border border-unbox-light/60"}>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <button onClick={handlePrevWeek}
+                            aria-label="Предыдущая неделя"
+                            style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                            className={isGH ? '' : "min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-white text-unbox-grey"}>
+                            <ChevronLeft size={18} />
+                        </button>
+                        <div style={{ flex: 1, textAlign: 'center', fontSize: 14, fontWeight: 500, color: GH.ink60 }} aria-live="polite">
+                            {weekDays.length > 0 && `${formatDayMonthShort(weekDays[0])} – ${formatDayMonthShort(weekDays[weekDays.length - 1])}`}
+                        </div>
+                        <button onClick={handleNextWeek}
+                            aria-label="Следующая неделя"
+                            style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
+                            className={isGH ? '' : "min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-white text-unbox-grey"}>
+                            <ChevronRight size={18} />
+                        </button>
+                    </div>
+                    <div className={isGH ? '' : "grid grid-cols-7 gap-1"} style={isGH ? { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 3 } : undefined}>
                         {weekDays.map(day => {
                             const isSelectedDate = isSameDay(day, date);
                             return (
                                 <button
                                     key={day.toISOString()}
                                     onClick={() => setDate(day)}
+                                    aria-pressed={isSelectedDate}
                                     style={isGH ? {
-                                        display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
+                                        display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
+                                        minHeight: 44, minWidth: 0,
                                         padding: '8px 0', borderRadius: 8, border: isSelectedDate ? 'none' : `1px solid ${GH.ink8}`,
                                         background: isSelectedDate ? GH.accent : GH.card,
                                         color: isSelectedDate ? COLOR.onAccent : GH.ink60,
@@ -787,12 +814,6 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                             );
                         })}
                     </div>
-                    <button onClick={handleNextWeek}
-                        aria-label="Следующая неделя"
-                        style={isGH ? { minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer' } : undefined}
-                        className={isGH ? '' : "p-1.5 rounded-lg hover:bg-white text-unbox-grey"}>
-                        <ChevronRight size={16} />
-                    </button>
                 </div>
 
                 {occupancyFailed && (
@@ -989,21 +1010,21 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                         </div>
                         {isGH ? (
                             <button
-                                disabled={selectedSlots.length === 0}
+                                disabled={nextDisabled}
                                 onClick={handleNext}
                                 style={{
                                     padding: '10px 24px', borderRadius: 8, border: 'none',
-                                    background: selectedSlots.length === 0 ? GH.ink10 : GH.accent,
-                                    color: selectedSlots.length === 0 ? GH.ink30 : COLOR.onAccent,
+                                    background: nextDisabled ? GH.ink10 : GH.accent,
+                                    color: nextDisabled ? GH.ink30 : COLOR.onAccent,
                                     fontFamily: GH_SANS, fontSize: 14, fontWeight: 600,
-                                    cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
+                                    cursor: nextDisabled ? 'not-allowed' : 'pointer',
                                     display: 'flex', alignItems: 'center', gap: 6,
                                 }}
                             >
                                 Далее <ArrowRight size={14} />
                             </button>
                         ) : (
-                            <Button disabled={selectedSlots.length === 0} onClick={handleNext} size="sm" className="shadow-md px-6">
+                            <Button disabled={nextDisabled} onClick={handleNext} size="sm" className="shadow-md px-6">
                                 Далее <ArrowRight size={14} className="ml-1" />
                             </Button>
                         )}
@@ -1600,21 +1621,21 @@ export function ChessboardStep({ embedded = false }: { embedded?: boolean }) {
                     )}
                     {isGH ? (
                         <button
-                            disabled={selectedSlots.length === 0}
+                            disabled={nextDisabled}
                             onClick={handleNext}
                             style={{
                                 padding: '12px 32px', borderRadius: 8, border: 'none',
-                                background: selectedSlots.length === 0 ? GH.ink10 : GH.accent,
-                                color: selectedSlots.length === 0 ? GH.ink30 : COLOR.onAccent,
+                                background: nextDisabled ? GH.ink10 : GH.accent,
+                                color: nextDisabled ? GH.ink30 : COLOR.onAccent,
                                 fontFamily: GH_SANS, fontSize: 16, fontWeight: 600,
-                                cursor: selectedSlots.length === 0 ? 'not-allowed' : 'pointer',
+                                cursor: nextDisabled ? 'not-allowed' : 'pointer',
                                 display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
                             }}
                         >
                             Далее <ArrowRight size={16} />
                         </button>
                     ) : (
-                        <Button disabled={selectedSlots.length === 0} onClick={handleNext} className="shadow-lg shadow-unbox-green/20 px-8">
+                        <Button disabled={nextDisabled} onClick={handleNext} className="shadow-lg shadow-unbox-green/20 px-8">
                             Далее <ArrowRight size={16} className="ml-2" />
                         </Button>
                     )}

@@ -100,7 +100,7 @@ export function AdminBookings() {
     // chessboard right away so the highlighted booking is visible.
     const viewFromQuery = searchParams.get('view');
     const navigate = useNavigate();
-    const { bookings, users, fetchUsers, cancelBooking, listForReRent } = useUserStore();
+    const { bookings, users, fetchUsers, fetchAllBookings, cancelBooking, listForReRent } = useUserStore();
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
     const [search, setSearch] = useState(searchParams.get('search') || '');
@@ -117,6 +117,22 @@ export function AdminBookings() {
     const [priceBooking, setPriceBooking] = useState<BookingHistoryItem | null>(null);
     const [extendModalId, setExtendModalId] = useState<string | null>(null);
     const [extrasModalId, setExtrasModalId] = useState<string | null>(null);
+
+    // Полный админский список броней. При прямом заходе на /admin/bookings
+    // в сторе лежат только «мои + публичные» брони от стартового
+    // fetchBookings (у публичных нет имён), и по ним «Броней не найдено»
+    // было бы неправдой. Поэтому грузим всё на mount (как Dashboard) и
+    // до ответа показываем силуэты, при сбое — полосу с «Повторить».
+    const [allListStatus, setAllListStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+    const loadAllBookings = async () => {
+        setAllListStatus(s => (s === 'ready' ? 'ready' : 'loading'));
+        const ok = await fetchAllBookings();
+        setAllListStatus(prev => (ok ? 'ready' : prev === 'ready' ? 'ready' : 'error'));
+    };
+    useEffect(() => {
+        void loadAllBookings();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         // На mount — один раз. Дополнительно дёргаем при возврате на вкладку,
@@ -427,6 +443,8 @@ export function AdminBookings() {
                 approvingId={approvingId}
                 rejectingId={rejectingId}
                 extendingId={extendingId}
+                allListStatus={allListStatus}
+                onRetryAll={() => { void loadAllBookings(); }}
             />
         </>
     );
@@ -455,6 +473,9 @@ type GHAdminBookingsProps = {
     approvingId: string | null;
     rejectingId: string | null;
     extendingId: string | null;
+    /** Полный админский список: 'ready' — только тогда можно сказать «броней нет». */
+    allListStatus: 'loading' | 'ready' | 'error';
+    onRetryAll: () => void;
 };
 
 function GridHouseAdminBookings(props: GHAdminBookingsProps) {
@@ -465,6 +486,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
         handleReRent, handleExtend, handleAddExtras, handleToSubscription, canToSubscription,
         convertingId, handleMove, handleApprove, handleReject,
         approvingId, rejectingId, extendingId,
+        allListStatus, onRetryAll,
     } = props;
 
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -491,8 +513,6 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
     ];
 
     // Статусы в строках — общий StatusBadge (слова из src/design/statuses.ts).
-    // Нужен, чтобы отличить «ещё грузим» от «броней нет».
-    const bookingsStatus = useUserStore(s => s.bookingsStatus);
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
@@ -694,15 +714,17 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                     </div>
 
                     {filteredBookings.length === 0 ? (
-                        // Загрузка ≠ ошибка ≠ пусто: пока брони не пришли — силуэты,
-                        // упало — полоса с «Повторить», и только потом «не нашли».
-                        <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghabHairline, padding: bookings.length === 0 && bookingsStatus !== 'ready' ? '16px 0' : '48px 24px' }}>
-                            {bookings.length === 0 && bookingsStatus === 'error' ? (
+                        // Загрузка ≠ ошибка ≠ пусто: пока полный админский список не
+                        // пришёл — силуэты, упал — полоса с «Повторить», и только
+                        // после ответа — «не нашли» (иначе это был бы вывод по
+                        // неполным «мои + публичные» броням из стартовой загрузки).
+                        <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghabHairline, padding: allListStatus !== 'ready' ? '16px 0' : '48px 24px' }}>
+                            {allListStatus === 'error' ? (
                                 <ErrorBar
                                     message="Не удалось загрузить брони"
-                                    onRetry={() => useUserStore.getState().fetchAllBookings()}
+                                    onRetry={onRetryAll}
                                 />
-                            ) : bookings.length === 0 && bookingsStatus !== 'ready' ? (
+                            ) : allListStatus !== 'ready' ? (
                                 <SkeletonList count={4} label="Загружаем брони" />
                             ) : (
                                 <EmptyState
@@ -1158,6 +1180,9 @@ function RejectBookingSheet({ open, busy, onClose, onSubmit }: {
         <Sheet
             open={open}
             onClose={onClose}
+            // Пока запрос идёт — шторку не закрыть (Esc/фон/свайп), иначе
+            // админ не узнает, отклонилась ли бронь.
+            dismissible={!busy}
             title="Отклонить бронь?"
             description="Клиент получит уведомление, деньги не списываются."
             width={460}
@@ -1166,7 +1191,7 @@ function RejectBookingSheet({ open, busy, onClose, onSubmit }: {
                     <Button variant="danger" block loading={busy} onClick={() => onSubmit(reason)}>
                         Отклонить бронь
                     </Button>
-                    <Button variant="secondary" block onClick={onClose}>
+                    <Button variant="secondary" block onClick={onClose} disabled={busy}>
                         Оставить
                     </Button>
                 </>

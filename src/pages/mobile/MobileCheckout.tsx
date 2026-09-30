@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { ArrowLeft, Check, Clock, Hourglass, MapPin, Loader2, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -23,7 +22,7 @@ import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 import { COLOR, STATUS, Z } from '../../design/tokens';
-import { formatDateLabel, formatGel, formatTime } from '../../utils/format';
+import { formatDateLabel, formatDayMonthShort, formatGel, formatTime } from '../../utils/format';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
@@ -1021,10 +1020,10 @@ export function MobileCheckout() {
                                     <b>Создастся {recurDates.length} {ruPlural(recurDates.length, ['сессия', 'сессии', 'сессий'])}:</b>{' '}
                                     {recurDates
                                         .slice(0, 4)
-                                        .map(d => fmtDate(d, 'd MMM', { locale: ru }))
+                                        .map(d => formatDayMonthShort(d))
                                         .join(', ')}
                                     {recurDates.length > 4 && (
-                                        <>, …, <b>{fmtDate(recurDates[recurDates.length - 1], 'd MMM', { locale: ru })}</b></>
+                                        <>, …, <b>{formatDayMonthShort(recurDates[recurDates.length - 1])}</b></>
                                     )}
                                 </div>
                             )}

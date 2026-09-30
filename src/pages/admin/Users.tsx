@@ -167,7 +167,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                     </form>
                 ) : (
                     <div className="space-y-4">
-                        <div className="bg-[color:var(--status-ok-bg)] border border-[color:var(--status-ok-bg)] rounded-xl p-4 space-y-2">
+                        <div className="bg-[color:var(--status-ok-bg)] border border-[color:var(--status-ok-fg)]/35 rounded-xl p-4 space-y-2">
                             <p className="text-sm text-[color:var(--status-ok-fg)] font-medium">Передайте клиенту данные для входа:</p>
                             <div className="bg-white rounded-lg p-3 font-mono text-sm space-y-1">
                                 <div><span className="text-ink-60">Логин:</span> {email}</div>

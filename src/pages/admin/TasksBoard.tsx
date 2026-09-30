@@ -277,7 +277,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
                     <h2 className="text-lg font-bold text-unbox-dark">{isNew ? 'Новая задача' : 'Редактирование'}</h2>
-                    <button onClick={onClose} className="text-ink-60 hover:text-ink p-1"><X size={20} /></button>
+                    <button onClick={onClose} aria-label="Закрыть" className="text-ink-60 hover:text-ink p-1"><X size={20} aria-hidden="true" /></button>
                 </div>
                 <div className="p-6 space-y-5">
                     <div>
@@ -318,7 +318,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                             {participants.map(p => (
                                 <span key={p.id} className="inline-flex items-center gap-1 text-xs font-medium bg-sunken text-ink-80 px-2 py-1 rounded-lg">
                                     {p.name}
-                                    <button onClick={() => setParticipants(prev => prev.filter(x => x.id !== p.id))} className="text-ink-60 hover:text-[color:var(--status-danger-fg)]"><X size={12} /></button>
+                                    <button onClick={() => setParticipants(prev => prev.filter(x => x.id !== p.id))} aria-label={`Убрать участника ${p.name}`} className="text-ink-60 hover:text-[color:var(--status-danger-fg)]"><X size={12} aria-hidden="true" /></button>
                                 </span>
                             ))}
                         </div>
@@ -369,18 +369,18 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                         <div className="space-y-1.5">
                             {checklist.map(item => (
                                 <div key={item.id} className="flex items-center gap-2 group/check">
-                                    <button onClick={() => toggleCheckItem(item.id)} className="flex-shrink-0">
+                                    <button onClick={() => toggleCheckItem(item.id)} aria-label={item.done ? `Снять отметку: ${item.text}` : `Отметить выполненным: ${item.text}`} aria-pressed={item.done} className="flex-shrink-0">
                                         {item.done ? <CheckSquare size={16} className="text-[color:var(--status-ok-fg)]" /> : <Square size={16} className="text-ink-60" />}
                                     </button>
                                     <span className={clsx('text-sm flex-1', item.done && 'line-through text-ink-60')}>{item.text}</span>
-                                    <button onClick={() => removeCheckItem(item.id)} className="text-ink-60 hover:text-[color:var(--status-danger-fg)] opacity-0 group-hover/check:opacity-100 transition-opacity"><X size={14} /></button>
+                                    <button onClick={() => removeCheckItem(item.id)} aria-label={`Удалить пункт: ${item.text}`} className="text-ink-60 hover:text-[color:var(--status-danger-fg)] opacity-0 group-hover/check:opacity-100 focus-visible:opacity-100 transition-opacity"><X size={14} aria-hidden="true" /></button>
                                 </div>
                             ))}
                         </div>
                         <div className="flex gap-2 mt-2">
                             <input value={newCheckItem} onChange={e => setNewCheckItem(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addCheckItem(); }}
                                 placeholder="Добавить пункт..." className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none" />
-                            <button onClick={addCheckItem} className="px-3 py-1.5 text-sm font-medium text-unbox-green hover:bg-unbox-light rounded-lg"><Plus size={14} /></button>
+                            <button onClick={addCheckItem} aria-label="Добавить пункт" className="px-3 py-1.5 text-sm font-medium text-unbox-green hover:bg-unbox-light rounded-lg"><Plus size={14} aria-hidden="true" /></button>
                         </div>
                     </div>
                     {/* Attachments */}
@@ -395,7 +395,8 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                                             className="flex-1 text-sm text-ink-80 hover:underline truncate">{att.name}</a>
                                         {att.size != null && <span className="text-caption text-ink-60 flex-shrink-0">{(att.size / 1024).toFixed(0)} KB</span>}
                                         <button onClick={() => removeAttachment(att.id)}
-                                            className="text-ink-60 hover:text-[color:var(--status-danger-fg)] opacity-0 group-hover/att:opacity-100 transition-opacity flex-shrink-0"><X size={14} /></button>
+                                            aria-label={`Удалить вложение ${att.name}`}
+                                            className="text-ink-60 hover:text-[color:var(--status-danger-fg)] opacity-0 group-hover/att:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"><X size={14} aria-hidden="true" /></button>
                                     </div>
                                 ))}
                             </div>
@@ -408,7 +409,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                             <input value={newLinkName} onChange={e => setNewLinkName(e.target.value)} placeholder="Название (необяз.)"
                                 onKeyDown={e => { if (e.key === 'Enter') addLink(); }}
                                 className="w-36 px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none" />
-                            <button onClick={addLink} disabled={!newLinkUrl.trim()} className="px-3 py-1.5 text-sm font-medium text-ink-60 hover:bg-ink-05 rounded-lg disabled:opacity-30"><Link2 size={14} /></button>
+                            <button onClick={addLink} disabled={!newLinkUrl.trim()} aria-label="Добавить ссылку" className="px-3 py-1.5 text-sm font-medium text-ink-60 hover:bg-ink-05 rounded-lg disabled:opacity-30"><Link2 size={14} aria-hidden="true" /></button>
                         </div>
                         {/* Upload file */}
                         <label className={clsx(
@@ -425,7 +426,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                             <div className="flex gap-2 mb-3">
                                 <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddComment(); }}
                                     placeholder="Написать комментарий..." className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none" />
-                                <button onClick={handleAddComment} className="px-3 py-2 text-unbox-green hover:bg-unbox-light rounded-lg"><Send size={14} /></button>
+                                <button onClick={handleAddComment} aria-label="Отправить комментарий" className="px-3 py-2 text-unbox-green hover:bg-unbox-light rounded-lg"><Send size={14} aria-hidden="true" /></button>
                             </div>
                             {loadingComments ? <SkeletonList count={2} label="Загружаем комментарии" cardHeight={56} />
                             : comments.length === 0 ? <div className="text-sm text-ink-60 text-center py-3">Комментариев пока нет</div>
@@ -671,9 +672,10 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                                     </span>
                                                     <button
                                                         onClick={() => { p.setQuickAddCol(col.id); p.setQuickAddTitle(''); }}
+                                                        aria-label={`Добавить задачу в «${col.title}»`}
                                                         style={{ width: 28, height: 28, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                                     >
-                                                        <Plus size={14} />
+                                                        <Plus size={14} aria-hidden="true" />
                                                     </button>
                                                 </div>
                                             </div>

@@ -154,7 +154,7 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
 
                 {sub.isFrozen && frozenUntil && (
                     <div className={`text-center text-caption font-medium mt-3 py-1.5 rounded-lg ${pauseOver ? 'text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]' : 'text-[var(--status-info-fg)] bg-[var(--status-info-bg)]'}`}>
-                        {pauseOver ? `Пауза должна была закончиться ${frozenUntilLabel}` : `На паузе до ${frozenUntilLabel}`}
+                        {pauseOver ? `Пауза закончилась ${frozenUntilLabel} — администратор ещё не снял её` : `На паузе до ${frozenUntilLabel}`}
                     </div>
                 )}
             </div>

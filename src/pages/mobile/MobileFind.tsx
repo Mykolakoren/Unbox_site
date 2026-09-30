@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, CalendarDays, Check, ExternalLink, Link as LinkIcon, Loader2, Move, Repeat, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
@@ -17,7 +16,7 @@ import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
 import { COLOR, STATUS, Z } from '../../design/tokens';
-import { formatDayMonth, formatGel } from '../../utils/format';
+import { formatDayMonth, formatDayMonthShort, formatGel, formatWeekdayShort } from '../../utils/format';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
 import { EmptyState } from '../../components/ui/EmptyState';
 
@@ -524,8 +523,8 @@ export function MobileFind() {
                     <ChipsRow>
                         {[2, 3, 4, 5, 6, 7, 8].map(off => {
                             const d = addDays(new Date(), off);
-                            const wd = fmtDate(d, 'EEE', { locale: ru }).toUpperCase().replace('.', '');
-                            const dayLabel = fmtDate(d, 'd MMM', { locale: ru });
+                            const wd = formatWeekdayShort(d);
+                            const dayLabel = formatDayMonthShort(d);
                             const active = dayOffset === off;
                             return (
                                 <button
@@ -573,7 +572,7 @@ export function MobileFind() {
                             </div>
                             <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
                                 {dayOffset === -1 && customDate
-                                    ? fmtDate(customDate, 'd MMM', { locale: ru })
+                                    ? formatDayMonthShort(customDate)
                                     : 'день'}
                             </div>
                             <input

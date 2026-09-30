@@ -135,6 +135,31 @@ export function formatDayMonth(d: DateLike, opts: DateOptions & { withYear?: boo
 }
 
 /**
+ * «3 окт.» — короткая дата для чипов и плотных списков (серии, полоса дней).
+ * Месяц сокращённый, в родительном («3 мая», «3 сент.»), как в date-fns
+ * 'd MMM' с ru-локалью, которым раньше писал каждый экран сам.
+ * withYear: 'auto' — год только если не текущий («3 окт. 2027»).
+ */
+export function formatDayMonthShort(d: DateLike, opts: DateOptions & { withYear?: boolean | 'auto' } = {}): string {
+    const withYear = opts.withYear === true || (opts.withYear === 'auto' && needsYear(d, opts));
+    const s = fmt(d, withYear
+        ? { day: 'numeric', month: 'short', year: 'numeric' }
+        : { day: 'numeric', month: 'short' }, opts);
+    if (s === null) return opts.fallback ?? '—';
+    return s.replace(/\s?г\.$/, '');
+}
+
+/**
+ * «Пт» — день недели коротко, с заглавной (для чипов дней).
+ * capitalize: false — «пт».
+ */
+export function formatWeekdayShort(d: DateLike, opts: DateOptions & { capitalize?: boolean } = {}): string {
+    const s = fmt(d, { weekday: 'short' }, opts);
+    if (s === null) return opts.fallback ?? '—';
+    return opts.capitalize === false ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
  * «вт, 29 сентября» — день недели коротко, день, месяц в родительном.
  * capitalize: «Вт, 29 сентября» — заглавная только у первой буквы строки.
  */

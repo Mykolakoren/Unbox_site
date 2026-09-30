@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { Clock, MapPin, X, Calendar, CalendarClock, Plus, AlertTriangle, Repeat, User as UserIcon, BellOff, Users, ArrowUpRight } from 'lucide-react';
@@ -54,10 +54,14 @@ export function BookingDetailSheet({ booking, onClose }: {
     useScrollLock();
 
     // Esc закрывает карточку. Если поверх открыта общая шторка или окно
-    // подтверждения — Esc принадлежит им.
+    // подтверждения — Esc принадлежит им. «Сократить бронь» (TrimBookingModal) —
+    // старое окно без data-sheet, поэтому пока оно открыто, Esc тоже игнорируем:
+    // иначе закрылась бы карточка под ним.
+    const trimmingRef = useRef(trimming);
+    trimmingRef.current = trimming;
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key !== 'Escape' || document.querySelector('[data-sheet]')) return;
+            if (e.key !== 'Escape' || trimmingRef.current || document.querySelector('[data-sheet]')) return;
             onClose();
         };
         document.addEventListener('keydown', onKey);
@@ -154,7 +158,7 @@ export function BookingDetailSheet({ booking, onClose }: {
                 scope === 'tail' ? booking.id : undefined,
             );
             await fetchBookings();
-            toast.success(`Отменено ${res.cancelled} ${ruPlural(res.cancelled, ['бронь', 'брони', 'бронь'])}`);
+            toast.success(`Отменено ${res.cancelled} ${ruPlural(res.cancelled, ['бронь', 'брони', 'броней'])}`);
             onClose();
         } catch (e: any) {
             const msg = e?.response?.data?.detail ?? e?.message ?? 'Не удалось отменить серию';

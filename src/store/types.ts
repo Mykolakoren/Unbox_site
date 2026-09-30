@@ -198,7 +198,9 @@ export interface BookingSlice {
      *  «Свободно» не имеет права показывать кабинеты свободными. */
     occupancyStatus: LoadStatus;
     fetchBookings: () => Promise<void>;
-    fetchAllBookings: () => Promise<void>; // Admin only
+    /** Admin only. true — полный список пришёл; false — не админ или сбой
+     *  (ошибку уже показал тост). По false экран не должен говорить «броней нет». */
+    fetchAllBookings: () => Promise<boolean>;
     addBooking: (booking: Omit<BookingHistoryItem, 'userId' | 'status'>) => Promise<BookingHistoryItem | null>;
     addBookings: (bookings: Omit<BookingHistoryItem, 'userId' | 'status'>[]) => Promise<void>;
     /** Cancel a booking. Excel #66 — `opts` lets admins override the

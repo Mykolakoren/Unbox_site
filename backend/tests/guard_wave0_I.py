@@ -121,10 +121,27 @@ def test_no_hryvnia_sign_in_src():
 
 
 def test_dashboard_money_in_lari():
-    """Баланс, кредит и последние платежи в кабинете — в лари."""
+    """Баланс, кредит и последние платежи в кабинете — в лари.
+
+    Годится и старая запись «… ₾», и общий форматтер formatGel(...) /
+    formatMoney(...) / <Money> (wave 1: он всегда ставит ₾ для GEL).
+    Смысл сторожа прежний: лари, никогда не гривна."""
     src = _read("src/pages/DashboardOverview.tsx")
-    assert "|| '0'} ₾" in src, "баланс в кабинете без знака лари"
-    assert "Кредит: {availableCredit.toLocaleString('ru-RU')} ₾ из" in src, "кредит без знака лари"
+    uses_formatter = bool(re.search(r"\bformat(?:Gel|Money)\(|<Money\b", src))
+
+    balance_ok = "|| '0'} ₾" in src or bool(
+        re.search(r"(?:formatGel|formatMoney)\([^)]*\bbalance\b|<Money\b[^>]*\bbalance\b", src))
+    assert balance_ok, "баланс в кабинете без знака лари (ни «… ₾», ни formatGel/formatMoney/<Money>)"
+
+    credit_ok = "Кредит: {availableCredit.toLocaleString('ru-RU')} ₾ из" in src or bool(
+        re.search(r"Кредит:[^\n]*(?:formatGel|formatMoney)\(\s*availableCredit|Кредит:[^\n]*<Money\b[^>]*availableCredit", src))
+    assert credit_ok, "кредит без знака лари (ни «… ₾», ни formatGel/formatMoney/<Money>)"
+
+    # Лари, не гривна: ни знака, ни кода валюты гривны рядом с суммами.
+    assert "₴" not in src and "UAH" not in src and "грн" not in src, "в кабинете снова гривна"
+    if uses_formatter:
+        # formatMoney без явной валюты = GEL; с валютой — только не гривна.
+        assert not re.search(r"currency:\s*['\"]UAH['\"]", src), "formatMoney с гривной"
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -409,7 +409,10 @@ def test_booking_and_session_labels_come_from_one_dictionary():
     ]
     for f in files:
         src = open(os.path.join(root, f), encoding="utf-8").read()
-        assert "statusLabel(" in src, f"{f}: подписи статусов не из общего словаря"
+        # Общий словарь — через statusLabel(...) или компонент <StatusBadge>
+        # (он сам берёт слова из statuses.ts).
+        assert "statusLabel(" in src or "<StatusBadge" in src, \
+            f"{f}: подписи статусов не из общего словаря (нет ни statusLabel(, ни <StatusBadge)"
         for old in ("'Ожидает'", "'Завершена'", "'Не пришёл'", "'Актив'"):
             assert old not in src, f"{f}: снова своя подпись статуса {old}"
 

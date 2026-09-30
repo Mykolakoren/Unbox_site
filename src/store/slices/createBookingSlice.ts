@@ -78,7 +78,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
         const role = (get() as any)?.currentUser?.role;
         const isAdmin = role === 'owner' || role === 'senior_admin' || role === 'admin';
         if (!isAdmin) {
-            return;
+            return false;
         }
         // Quiet retry: a single 5xx / network blip shouldn't bother the
         // admin either. Surface only the second failure with the server's
@@ -92,13 +92,15 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
                 return tryOnce();
             });
             set({ bookings });
+            return true;
         } catch (error: any) {
             const status = error?.response?.status;
-            if (status === 401 || status === 403) return;  // not for us, no UI noise
+            if (status === 401 || status === 403) return false;  // not for us, no UI noise
             const detail = error?.response?.data?.detail
                 || error?.message
                 || 'Не удалось загрузить бронирования';
             toast.error(detail);
+            return false;
         }
     },
 

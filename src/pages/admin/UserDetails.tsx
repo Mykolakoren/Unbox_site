@@ -1716,6 +1716,9 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
         <Sheet
             open={!!field}
             onClose={onClose}
+            // Пока идёт запрос (смена email, архив, @username) — шторку не
+            // закрыть: иначе непонятно, сохранилось ли.
+            dismissible={!busy}
             title={c?.title ?? ''}
             description={c?.description}
             width={460}
@@ -1724,7 +1727,7 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
                     <UiButton variant={c.danger ? 'danger' : 'primary'} block loading={busy} onClick={save}>
                         {c.action}
                     </UiButton>
-                    <UiButton variant="secondary" block onClick={onClose}>
+                    <UiButton variant="secondary" block onClick={onClose} disabled={busy}>
                         Отмена
                     </UiButton>
                 </>
@@ -1737,7 +1740,7 @@ function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChang
                         value={value}
                         placeholder={c.placeholder}
                         onChange={(e) => { setValue(e.target.value); if (error) setError(null); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void save(); } }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (!busy) void save(); } }}
                         autoFocus
                     />
                 </Field>

@@ -86,7 +86,8 @@ export function SpecialistGateCard({ variant, status }: {
                 data-testid="specialist-gate"
                 style={{
                     background: waiting ? STATUS.pending.bg : COLOR.sunken,
-                    border: `1px solid ${waiting ? STATUS.pending.bg : COLOR.ink08}`,
+                    // Рамка «ждём» — янтарём на 35 % (0x59): цветом фона её не было видно.
+                    border: `1px solid ${waiting ? `${STATUS.pending.fg}59` : COLOR.ink08}`,
                     borderRadius: 14,
                     padding: 16,
                     display: 'flex',
