@@ -46,6 +46,18 @@ def _order_specialists(session: Session, specialists: list) -> List[SpecialistRe
     return out
 
 
+def _public_view(r: SpecialistRead) -> SpecialistRead:
+    """Карточка для ПУБЛИЧНОГО каталога (без входа).
+
+    Приватность (2026-09-30, owner): сканы дипломов/сертификатов из анкеты
+    (`documents`) и счета для оплаты из Psy-CRM (`payment_accounts`) видят
+    только админ (/admin/all) и сам специалист (/me) — не каждый посетитель
+    сайта. Раньше оба поля уходили в GET /specialists/ и /{id}."""
+    r.documents = []
+    r.payment_accounts = []
+    return r
+
+
 @router.get("/", response_model=List[SpecialistRead])
 def get_specialists(
     *,
@@ -85,7 +97,7 @@ def get_specialists(
     if category:
         specialists = [s for s in specialists if s.category == category]
 
-    return _order_specialists(session, specialists)
+    return [_public_view(r) for r in _order_specialists(session, specialists)]
 
 
 @router.get("/admin/all", response_model=List[SpecialistRead])
@@ -499,4 +511,4 @@ def get_specialist(
     if not specialist or not specialist.is_verified:
         raise HTTPException(status_code=404, detail="Specialist not found")
 
-    return specialist
+    return _public_view(SpecialistRead.model_validate(specialist, from_attributes=True))
