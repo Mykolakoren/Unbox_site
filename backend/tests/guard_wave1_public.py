@@ -213,15 +213,16 @@ def test_individual_cabinets_list_matches_data():
     групповые (35 ₾/час), 3 и 4 нет. Список берётся из RESOURCES."""
     src = _strip_comments((ROOT / "src/pages/SubscriptionsPage.tsx").read_text(encoding="utf-8"))
     assert "Кабинеты 1–8" not in src and "Кабинеты 1-8" not in src, "SubscriptionsPage: снова «Кабинеты 1–8»"
-    assert re.search(r"RESOURCES\s*\n?\s*\.filter\(r => r\.type === 'cabinet' && \(r\.capacity \?\? 0\) < 20\)", src), \
+    assert re.search(r"RESOURCES\s*\n?\s*\.filter\(r => r\.type === 'cabinet' && \(r\.capacity \?\? 0\) < 20 && r\.isActive !== false\)", src), \
         "SubscriptionsPage: список индивидуальных кабинетов не из данных"
     cabs = _data_cabinets()
     assert cabs, "не разобрал кабинеты в data.ts"
     for group_room in (7, 8):
         assert group_room in cabs and cabs[group_room][0] >= 20, \
             f"data.ts: кабинет {group_room} больше не групповой — пересмотрите фильтр «вместимость < 20»"
-    individual = sorted(n for n, (cap, _active) in cabs.items() if cap < 20)
-    assert individual == [1, 2, 5, 6, 9], f"индивидуальные кабинеты по data.ts: {individual} (ждали 1, 2, 5, 6, 9)"
+    # Кабинет 9 закрыт (владелец, 30.09): на тарифах только сдаваемые.
+    individual = sorted(n for n, (cap, active) in cabs.items() if cap < 20 and active)
+    assert individual == [1, 2, 5, 6], f"сдаваемые индивидуальные кабинеты по data.ts: {individual} (ждали 1, 2, 5, 6)"
 
 
 def test_phq_orange_result_uses_warn_pair():
