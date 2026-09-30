@@ -129,10 +129,13 @@ export function AdminBookings() {
         const ok = await fetchAllBookings();
         setAllListStatus(prev => (ok ? 'ready' : prev === 'ready' ? 'ready' : 'error'));
     };
+    // Только для списка: шахматка (AdminChessboardView) сама грузит полный
+    // список на mount — иначе два одинаковых тяжёлых запроса (6000+ броней).
     useEffect(() => {
+        if (viewMode !== 'list' || allListStatus === 'ready') return;
         void loadAllBookings();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [viewMode]);
 
     useEffect(() => {
         // На mount — один раз. Дополнительно дёргаем при возврате на вкладку,
