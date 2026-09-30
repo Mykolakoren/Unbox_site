@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
-import { GridHouseLanding } from '../components/landing/GridHouseLanding';
 import { Button } from '../components/ui/Button';
-import { Z } from '../design/tokens';
+import { COLOR, Z } from '../design/tokens';
 import { canBookCabinets } from '../utils/permissions';
+
+// G1-25 / X5-10: лендинг — отдельным чанком. ExplorePage подключён в App.tsx
+// сразу (маршрут «/»), и весь лендинг попадал в общий entry, который качают
+// и в /m. Пока чанк едет — пустая бумага (заглушку «Unbox» уже показал index.html).
+const GridHouseLanding = lazy(() => import('../components/landing/GridHouseLanding').then(m => ({ default: m.GridHouseLanding })));
 
 // Волна 2 (G1-25, X5-10): здесь больше нет карты. Раньше страница
 // импортировала leaflet + react-leaflet + leaflet.css и 12 секций старого
@@ -57,11 +61,13 @@ export function ExplorePage() {
 
     return (
         <>
-            <GridHouseLanding
-                visitorMode={visitorMode}
-                onModeSelect={handleModeSelect}
-                onModeReset={resetMode}
-            />
+            <Suspense fallback={<div style={{ minHeight: '100vh', background: COLOR.paper }} />}>
+                <GridHouseLanding
+                    visitorMode={visitorMode}
+                    onModeSelect={handleModeSelect}
+                    onModeReset={resetMode}
+                />
+            </Suspense>
             <MobileSpecialistFab visitorMode={visitorMode} />
         </>
     );
