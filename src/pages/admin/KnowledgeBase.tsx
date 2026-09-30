@@ -40,12 +40,12 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
         body: React.ReactNode;
     };
 
-    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
     const para: React.CSSProperties = { fontFamily: GH_SANS, fontSize: 14, lineHeight: 1.55, color: GH.ink, margin: '0 0 12px 0' };
     const li: React.CSSProperties = { fontFamily: GH_SANS, fontSize: 14, lineHeight: 1.55, color: GH.ink, paddingLeft: 28, position: 'relative', marginBottom: 8 };
-    const bullet: React.CSSProperties = { position: 'absolute', left: 0, top: 0, fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', color: GH.ink60, fontVariantNumeric: 'tabular-nums' };
+    const bullet: React.CSSProperties = { position: 'absolute', left: 0, top: 0, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums' };
     const boxHair: React.CSSProperties = { border: `1px solid ${GH.ink10}`, padding: 20, marginBottom: 16 };
-    const subhead: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${GH.ink10}` };
+    const subhead: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${GH.ink10}` };
 
     const MorningChecklist = () => {
         const items = [
@@ -157,7 +157,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                     </div>
                 ))}
                 <div style={{ border: `2px solid ${GH.danger}`, padding: 20, marginTop: 16 }}>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.danger, marginBottom: 8 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.danger, marginBottom: 8 }}>
                         10 · Финальный контроль
                     </div>
                     <p style={{ ...para, margin: 0, color: GH.ink, fontWeight: 600 }}>
@@ -174,21 +174,21 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                 <div style={subhead}>Основные правила бронирования</div>
                 <div style={li}><span style={bullet}>01</span><strong style={{ fontWeight: 700 }}>Минималка.</strong> 1 час (60 мин). Шаг тарификации: 30 мин.</div>
                 <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>55+5.</strong> 55 мин работы + 5 мин буфер перед следующим специалистом.</div>
-                <div style={li}><span style={bullet}>03</span><strong style={{ fontWeight: 700, color: GH.danger }}>Overstay.</strong> Задержка &gt;5 мин — +30 мин к счёту. Продление только если следом нет брони.</div>
+                <div style={li}><span style={bullet}>03</span><strong style={{ fontWeight: 700, color: GH.danger }}>Задержка.</strong> Задержка &gt;5 мин — +30 мин к счёту. Продление только если следом нет брони.</div>
             </div>
             <div style={boxHair}>
                 <div style={subhead}>Отмена и горящие окна</div>
                 <div style={li}><span style={bullet}>01</span><strong style={{ fontWeight: 700 }}>Бесплатная отмена.</strong> Строго более чем за 24 часа до начала.</div>
-                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Hot Booking.</strong> Бронь менее чем за 12 часов — требует одобрения администратора.</div>
+                <div style={li}><span style={bullet}>02</span><strong style={{ fontWeight: 700 }}>Горячая бронь.</strong> Бронь менее чем за 12 часов — требует одобрения администратора.</div>
             </div>
         </div>
     );
 
     const Pricing = () => {
         const rates = [
-            ['Индивидуальный · Кабинет', '20 GEL'],
-            ['Индивидуальный · Капсула', '10 GEL'],
-            ['Групповой · Кабинет', '35 GEL'],
+            ['Индивидуальный · Кабинет', '20 ₾'],
+            ['Индивидуальный · Капсула', '10 ₾'],
+            ['Групповой · Кабинет', '35 ₾'],
         ];
         // 2026-05-26: weekly_progressive disabled in backend — KB block
         // repurposed for the peak-hour surcharge that actually applies.
@@ -224,7 +224,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                                 <strong style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>{disc}</strong>
                             </div>
                         ))}
-                        <p style={{ ...para, fontSize: 11, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic' }}>
+                        <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic' }}>
                             Все остальные часы — по стандартному тарифу.
                         </p>
                     </div>
@@ -243,7 +243,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                                 <strong style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, background: GH.ink, color: GH.paper, padding: '2px 10px' }}>{disc}</strong>
                             </div>
                         ))}
-                        <p style={{ ...para, fontSize: 11, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic' }}>
+                        <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic' }}>
                             Разорванные или параллельные брони в разных кабинетах в эту скидку не складываются.
                         </p>
                     </div>
@@ -260,16 +260,16 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                         </p>
                         <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
                             <div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Подарок</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>Подарок</div>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>1 час</div>
                             </div>
                             <div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>Срок действия</div>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>Срок действия</div>
                                 <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700 }}>15 дней</div>
                             </div>
                         </div>
                         <p style={{ ...para, fontSize: 12, color: GH.ink60, margin: '10px 0 0' }}>
-                            Начисляется на бонусный кошелёк. Списывается FIFO. Срок 15 дней — за это время
+                            Начисляется на бонусный кошелёк. Списывается по очереди: сначала самый ранний. Срок 15 дней — за это время
                             клиент должен попробовать пространство, иначе бонус сгорает.
                         </p>
                     </div>
@@ -301,11 +301,11 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
 
     const Subscriptions = () => {
         const plans = [
-            { name: 'Пробный', price: '70 GEL', period: '14 дней', hours: '4 часа инд. + 1 час капсула', discount: '—', fmt: 'Индивидуальный', perk: 'Для первого знакомства' },
-            { name: 'Тёплый старт', price: '180 GEL', period: '30 дней', hours: '10 часов инд. + 4 часа капсула', discount: '10%', fmt: 'Индивидуальный', perk: null },
-            { name: 'Регулярный практик', price: '350 GEL', period: '30 дней', hours: '20 часов инд. + 6 часов капсула', discount: '15%', fmt: 'Индивидуальный', perk: '1 бесплатный перенос' },
-            { name: 'Профи+', price: '650 GEL', period: '45 дней', hours: '40 часов инд. + 10 часов капсула', discount: '20%', fmt: 'Инд. и Групповой', perk: 'Приоритет · внеурочный доступ · рекомендуемый специалист' },
-            { name: 'Групповой мастер', price: '450 GEL', period: '45 дней', hours: '20 часов групп. + 4 часа инд.', discount: '25%', fmt: 'Групповой · Кабинет', perk: 'Анонс мероприятия по базе' },
+            { name: 'Пробный', price: '70 ₾', period: '14 дней', hours: '4 часа инд. + 1 час капсула', discount: '—', fmt: 'Индивидуальный', perk: 'Для первого знакомства' },
+            { name: 'Тёплый старт', price: '180 ₾', period: '30 дней', hours: '10 часов инд. + 4 часа капсула', discount: '10%', fmt: 'Индивидуальный', perk: null },
+            { name: 'Регулярный практик', price: '350 ₾', period: '30 дней', hours: '20 часов инд. + 6 часов капсула', discount: '15%', fmt: 'Индивидуальный', perk: '1 бесплатный перенос' },
+            { name: 'Профи+', price: '650 ₾', period: '45 дней', hours: '40 часов инд. + 10 часов капсула', discount: '20%', fmt: 'Инд. и Групповой', perk: 'Приоритет · внеурочный доступ · рекомендуемый специалист' },
+            { name: 'Групповой мастер', price: '450 ₾', period: '45 дней', hours: '20 часов групп. + 4 часа инд.', discount: '25%', fmt: 'Групповой · Кабинет', perk: 'Анонс мероприятия по базе' },
         ];
         return (
             <div>
@@ -323,7 +323,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                             <div style={{ fontFamily: GH_MONO, fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
                                 {plan.price}
                             </div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 16 }}>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 16 }}>
                                 / {plan.period}
                             </div>
                             <div style={{ borderTop: `1px solid ${GH.ink10}`, paddingTop: 12 }}>
@@ -384,11 +384,11 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
             <div style={boxHair}>
                 <div style={subhead}>Статусы бронирования</div>
                 <div style={li}><span style={bullet}>01</span><strong>Подтверждена</strong> — активная бронь, клиент придёт.</div>
-                <div style={li}><span style={bullet}>02</span><strong>Пересдана</strong> (re-rented) — владелец выставил на переаренду, другой клиент подхватил. Первоначальная бронь отменена с 50% возвратом.</div>
-                <div style={li}><span style={bullet}>03</span><strong>На переаренде</strong> — владелец выставил слот на переаренду, но никто пока не подхватил. Бронь ещё активна.</div>
+                <div style={li}><span style={bullet}>02</span><strong>Пересдана</strong> — владелец нажал «Пересдать», и другой клиент занял это время. Первоначальная бронь отменена с 50% возвратом.</div>
+                <div style={li}><span style={bullet}>03</span><strong>На пересдаче</strong> — владелец нажал «Пересдать», но время пока никто не занял. Бронь ещё активна.</div>
                 <div style={li}><span style={bullet}>04</span><strong>Отменена</strong> — бронь отменена (возврат зависит от политики — см. ценовую политику).</div>
-                <div style={li}><span style={bullet}>05</span><strong>Завершена</strong> — бронь прошла, время вышло.</div>
-                <div style={li}><span style={bullet}>06</span><strong>No-show</strong> — клиент не пришёл без отмены. Попадает в чек-лист закрытия смены.</div>
+                <div style={li}><span style={bullet}>05</span><strong>Прошла</strong> — время брони вышло.</div>
+                <div style={li}><span style={bullet}>06</span><strong>Неявка</strong> — клиент не пришёл без отмены. Попадает в чек-лист закрытия смены.</div>
             </div>
 
             <div style={boxHair}>
@@ -425,7 +425,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                 </p>
                 <p style={para}>
                     <strong style={{ fontWeight: 700 }}>Бонус</strong> — бесплатные часы
-                    (приветственный, за приглашение друга, за лояльность). FIFO-очередь: сначала
+                    (приветственный, за приглашение друга, за лояльность). Очередь: сначала
                     тратятся бонусы, потом абонемент, потом баланс.
                 </p>
             </div>
@@ -478,12 +478,12 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                                         color: GH.ink,
                                     }}
                                 >
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.14em', color: GH.ink60 }}>{section.num}</div>
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60 }}>{section.num}</div>
                                     <div>
                                         <div style={{ fontFamily: GH_SANS, fontSize: 'clamp(20px, 2.2vw, 28px)', fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.1 }}>
                                             {section.title}
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
                                             {section.subtitle}
                                         </div>
                                     </div>
@@ -511,7 +511,7 @@ function GridHouseKnowledgeBase({ expandedIds, setExpandedIds }: GHKBProps) {
                             </div>
                         );
                     })}
-                    <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 20, fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, display: 'flex', justifyContent: 'space-between' }}>
+                    <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 20, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, display: 'flex', justifyContent: 'space-between' }}>
                         <span>Unbox · Справочник · {new Date().getFullYear()}</span>
                         <span>{sections.length} разделов</span>
                     </div>

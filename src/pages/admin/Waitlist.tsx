@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { Clock, Trash2, Bell } from 'lucide-react';
 import clsx from 'clsx';
 import { RESOURCES } from '../../utils/data';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { WaitlistEntry } from '../../store/types';
 import { toast } from 'sonner';
-import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { formatDayMonth } from '../../utils/format';
 import { waitlistApi } from '../../api/waitlist';
 
 export function AdminWaitlist() {
         const { waitlist, removeFromWaitlist, users } = useUserStore();
 
-    const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; entryId: string }>({ open: false, entryId: '' });
+    const { confirm } = useConfirmDialog();
 
     // Helper to get user name
     const getUserName = (userId: string) => {
@@ -31,31 +31,23 @@ export function AdminWaitlist() {
         }
     };
 
-    const handleDeleteRequest = (entryId: string) => {
-        setDeleteConfirm({ open: true, entryId });
-    };
-
-    const handleDeleteConfirm = () => {
-        removeFromWaitlist(deleteConfirm.entryId);
+    // Общее окно подтверждения вместо своего ConfirmationModal с «Вы уверены?».
+    const handleDeleteRequest = async (entryId: string) => {
+        const ok = await confirm({
+            title: 'Удалить запись из листа ожидания?',
+            body: 'Клиент больше не получит уведомление об освободившемся времени. Вернуть запись не получится.',
+            confirmLabel: 'Удалить запись',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        removeFromWaitlist(entryId);
         toast.success('Запись удалена из листа ожидания');
     };
-
-    const deleteModal = (
-        <ConfirmationModal
-            isOpen={deleteConfirm.open}
-            onClose={() => setDeleteConfirm({ open: false, entryId: '' })}
-            onConfirm={handleDeleteConfirm}
-            title="Удалить из листа ожидания"
-            message="Вы уверены? Эту запись нельзя будет восстановить."
-            isDestructive
-            confirmLabel="Удалить"
-        />
-    );
 
     return (
 
         <>
-            {deleteModal}
             <GridHouseWaitlist
                 waitlist={waitlist}
                 getUserName={getUserName}
@@ -73,11 +65,18 @@ export function AdminWaitlist() {
 // ═════════════════════════════════════════════════════════════════════════
 
 const ghwHairline = `1px solid ${GH.ink10}`;
+
+// Статусы записи листа ожидания (не брони — поэтому не из statuses.ts).
+const WAITLIST_STATUS: Record<string, string> = {
+    active: 'Ждёт места',
+    fulfilled: 'Место нашлось',
+    cancelled: 'Отменена',
+};
 const ghwMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -164,7 +163,7 @@ function GridHouseWaitlist({
                             >
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                                             {String(idx + 1).padStart(3, '0')}
                                         </span>
                                         <span style={{
@@ -175,18 +174,18 @@ function GridHouseWaitlist({
                                         </span>
                                     </div>
                                     <span style={{
-                                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em',
+                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                         textTransform: 'uppercase' as const, padding: '3px 7px',
-                                        border: `1px solid ${entry.status === 'active' ? GH.ink : GH.ink30}`,
+                                        border: `1px solid ${entry.status === 'active' ? GH.ink : GH.ink20}`,
                                         color: entry.status === 'active' ? GH.ink : GH.ink60,
                                         whiteSpace: 'nowrap' as const,
                                     }}>
-                                        {entry.status === 'active' ? 'Ожидает' : entry.status}
+                                        {WAITLIST_STATUS[entry.status] ?? 'Другой статус'}
                                     </span>
                                 </div>
                                 <div style={{ ...ghwMono, color: GH.ink60, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                        {format(new Date(entry.date), 'dd MMM', { locale: ru })}
+                                        {formatDayMonth(entry.date)}
                                     </span>
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontVariantNumeric: 'tabular-nums' }}>
                                         <Clock size={10} /> {entry.startTime}–{entry.endTime}
@@ -197,9 +196,9 @@ function GridHouseWaitlist({
                                     <button
                                         onClick={() => handleNotify(entry.id)}
                                         style={{
-                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
-                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
-                                            padding: '6px 10px', background: 'transparent', color: GH.ink,
+                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+                                            padding: '6px 10px', minHeight: 44, background: 'transparent', color: GH.ink,
                                             border: `1px solid ${GH.ink10}`, cursor: 'pointer',
                                             display: 'inline-flex', alignItems: 'center', gap: 4,
                                         }}
@@ -209,9 +208,9 @@ function GridHouseWaitlist({
                                     <button
                                         onClick={() => removeFromWaitlist(entry.id)}
                                         style={{
-                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
-                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
-                                            padding: '6px 10px', background: 'transparent', color: GH.danger,
+                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+                                            padding: '6px 10px', minHeight: 44, background: 'transparent', color: GH.danger,
                                             border: `1px solid ${GH.danger}40`, cursor: 'pointer',
                                             display: 'inline-flex', alignItems: 'center', gap: 4,
                                         }}
@@ -261,7 +260,7 @@ function GridHouseWaitlist({
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 16 }}>
-                <p style={{ ...ghwMono, color: GH.ink30, margin: 0 }}>UNBOX ADMIN · 2026</p>
+                <p style={{ ...ghwMono, color: GH.ink60, margin: 0 }}>Unbox · админка · 2026</p>
             </div>
         </div>
     );
@@ -297,8 +296,8 @@ function GHWRow({
             <div
                 style={{
                     fontFamily: GH_MONO,
-                    fontSize: 11,
-                    letterSpacing: '0.1em',
+                    fontSize: 12,
+                    letterSpacing: '0.06em',
                     color: GH.ink60,
                     fontVariantNumeric: 'tabular-nums',
                 }}
@@ -312,11 +311,11 @@ function GHWRow({
                 <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>
                     {getUserName(entry.userId)}
                 </div>
-                <div style={{ ...ghwMono, color: GH.ink30, marginTop: 2 }}>{entry.userId}</div>
+                <div style={{ ...ghwMono, color: GH.ink60, marginTop: 2 }}>{entry.userId}</div>
             </div>
             <div>
                 <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.005em' }}>
-                    {format(new Date(entry.date), 'dd MMMM', { locale: ru })}
+                    {formatDayMonth(entry.date)}
                 </div>
                 <div style={{ ...ghwMono, color: GH.ink60, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6, fontVariantNumeric: 'tabular-nums' }}>
                     <Clock size={11} /> {entry.startTime}–{entry.endTime}
@@ -330,16 +329,16 @@ function GHWRow({
                     style={{
                         display: 'inline-block',
                         fontFamily: GH_MONO,
-                        fontSize: 10,
-                        letterSpacing: '0.14em',
+                        fontSize: 12,
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         padding: '4px 10px',
-                        border: `1px solid ${entry.status === 'active' ? GH.ink : GH.ink30}`,
+                        border: `1px solid ${entry.status === 'active' ? GH.ink : GH.ink20}`,
                         color: entry.status === 'active' ? GH.ink : GH.ink60,
                         background: entry.status === 'active' ? GH.paper : 'transparent',
                     }}
                 >
-                    {entry.status === 'active' ? 'Ожидает' : entry.status}
+                    {WAITLIST_STATUS[entry.status] ?? 'Другой статус'}
                 </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
@@ -372,6 +371,7 @@ function GHWIconButton({
         <button
             onClick={onClick}
             title={title}
+            aria-label={title}
             style={{
                 width: 32,
                 height: 32,

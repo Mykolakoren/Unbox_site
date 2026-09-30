@@ -8,6 +8,7 @@ import { TimelineList } from '../../components/Timeline/TimelineList';
 import { api } from '../../api/client';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { formatGel } from '../../utils/format';
 
 export function AdminUsers() {
         const { users, updateUserById, fetchUsers } = useUserStore();
@@ -100,8 +101,8 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5 animate-in slide-in-from-bottom-4 duration-200" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between">
                     <h3 className="text-lg font-bold">{created ? 'Клиент создан' : 'Новый клиент'}</h3>
-                    <button onClick={created ? onCreated : onClose} className="p-1 hover:bg-unbox-light rounded-lg">
-                        <X size={20} className="text-unbox-grey" />
+                    <button onClick={created ? onCreated : onClose} className="p-1 hover:bg-unbox-light rounded-lg" aria-label="Закрыть">
+                        <X size={20} className="text-ink-60" />
                     </button>
                 </div>
 
@@ -147,10 +148,10 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                                     onChange={e => setPassword(e.target.value)}
                                 />
                                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-                                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="p-1 text-unbox-grey hover:text-unbox-dark">
+                                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="p-1 text-ink-60 hover:text-unbox-dark">
                                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                                     </button>
-                                    <button type="button" onClick={() => setPassword(generatePassword())} className="p-1 text-unbox-grey hover:text-unbox-dark text-xs font-bold">
+                                    <button type="button" onClick={() => setPassword(generatePassword())} className="p-1 text-ink-60 hover:text-unbox-dark text-xs font-bold">
                                         ↻
                                     </button>
                                 </div>
@@ -166,12 +167,12 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                     </form>
                 ) : (
                     <div className="space-y-4">
-                        <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
-                            <p className="text-sm text-green-800 font-medium">Передайте клиенту данные для входа:</p>
+                        <div className="bg-[color:var(--status-ok-bg)] border border-[color:var(--status-ok-bg)] rounded-xl p-4 space-y-2">
+                            <p className="text-sm text-[color:var(--status-ok-fg)] font-medium">Передайте клиенту данные для входа:</p>
                             <div className="bg-white rounded-lg p-3 font-mono text-sm space-y-1">
-                                <div><span className="text-unbox-grey">Логин:</span> {email}</div>
-                                <div><span className="text-unbox-grey">Пароль:</span> {password}</div>
-                                <div><span className="text-unbox-grey">Сайт:</span> unbox.com.ge/login</div>
+                                <div><span className="text-ink-60">Логин:</span> {email}</div>
+                                <div><span className="text-ink-60">Пароль:</span> {password}</div>
+                                <div><span className="text-ink-60">Сайт:</span> unbox.com.ge/login</div>
                             </div>
                         </div>
                         <button
@@ -201,7 +202,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const ghMono: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
 };
 const ghHairline = `1px solid ${GH.ink10}`;
 
@@ -270,7 +271,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
     };
 
     const sortBtn = (mode: SortMode, _label: string): React.CSSProperties => ({
-        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
         padding: '6px 10px', border: `1px solid ${sortMode === mode ? GH.ink : GH.ink10}`,
         background: sortMode === mode ? GH.ink : 'transparent',
         color: sortMode === mode ? GH.paper : GH.ink60,
@@ -281,7 +282,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Header ── */}
             <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 16 : 28, marginBottom: narrow ? 16 : 28 }}>
-                <div style={{ ...monoLabel, color: GH.ink30, marginBottom: narrow ? 8 : 14 }}>ADMIN · USERS</div>
+                <div style={{ ...monoLabel, color: GH.ink60, marginBottom: narrow ? 8 : 14 }}>Админка · клиенты</div>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
                     <h1 style={{
                         fontFamily: GH_SANS,
@@ -299,9 +300,9 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                             background: GH.ink,
                             color: GH.paper,
                             fontFamily: GH_MONO,
-                            fontSize: narrow ? 9 : 11,
+                            fontSize: 12,
                             fontWeight: 600,
-                            letterSpacing: '0.18em',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             padding: narrow ? '10px 14px' : '14px 22px',
                             border: 'none',
@@ -319,20 +320,20 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
             {/* ── KPI strip ── */}
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: narrow ? 20 : 32, marginBottom: narrow ? 16 : 32, flexWrap: 'wrap' }}>
                 <div>
-                    <p style={{ ...ghMono, color: GH.ink30, marginBottom: 4, margin: 0 }}>ВСЕГО</p>
+                    <p style={{ ...ghMono, color: GH.ink60, marginBottom: 4, margin: 0 }}>ВСЕГО</p>
                     <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 36 : 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
                         {allFmt}
                     </span>
                 </div>
                 <div>
-                    <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
+                    <p style={{ ...ghMono, color: GH.ink60, marginBottom: 2, margin: 0 }}>ПОКАЗАНО</p>
                     <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.accent, fontVariantNumeric: 'tabular-nums' }}>
                         {totalFmt}
                     </span>
                 </div>
                 {debtorCount > 0 && (
                     <div>
-                        <p style={{ ...ghMono, color: GH.ink30, marginBottom: 2, margin: 0 }}>ДОЛЖНИКИ</p>
+                        <p style={{ ...ghMono, color: GH.ink60, marginBottom: 2, margin: 0 }}>ДОЛЖНИКИ</p>
                         <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 18 : 22, fontWeight: 600, color: GH.danger, fontVariantNumeric: 'tabular-nums' }}>
                             {String(debtorCount).padStart(3, '0')}
                         </span>
@@ -384,7 +385,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                 <button
                     onClick={() => setFilterMode(filterMode === 'debtors' ? 'all' : 'debtors')}
                     style={{
-                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                         padding: '6px 10px',
                         border: `1px solid ${filterMode === 'debtors' ? GH.danger : GH.ink10}`,
                         background: filterMode === 'debtors' ? GH.danger : 'transparent',
@@ -471,8 +472,8 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                     {user.isAdmin && <Shield size={12} color={GH.ink60} />}
                                     {user.role && user.role !== 'user' && (
                                         <span style={{
-                                            fontFamily: GH_MONO, fontSize: 8, fontWeight: 600,
-                                            letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                                             padding: '2px 5px',
                                             background: user.role === 'owner' ? GH.ink : `${GH.accent}18`,
                                             color: user.role === 'owner' ? GH.paper : GH.accent,
@@ -484,7 +485,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                     )}
                                 </div>
                                 <div style={{
-                                    fontFamily: GH_MONO, fontSize: 10, color: GH.ink30,
+                                    fontFamily: GH_MONO, fontSize: 12, color: GH.ink60,
                                     letterSpacing: '0.05em', marginTop: 2,
                                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                                 }}>
@@ -500,7 +501,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 textAlign: 'right',
                                 minWidth: 56,
                             }}>
-                                {user.balance.toFixed(0)} ₾
+                                {formatGel(user.balance, { fraction: 0 })}
                             </div>
                         </Link>
                     ))}
@@ -542,8 +543,8 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                         >
                             <div style={{
                                 fontFamily: GH_MONO,
-                                fontSize: 11,
-                                letterSpacing: '0.1em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 color: GH.ink60,
                                 fontVariantNumeric: 'tabular-nums',
                             }}>
@@ -566,9 +567,9 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 title="Изменить роль"
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 10,
+                                    fontSize: 12,
                                     fontWeight: 600,
-                                    letterSpacing: '0.14em',
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     padding: '5px 9px',
                                     background: user.role === 'owner' ? GH.ink : 'transparent',
@@ -588,13 +589,13 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 color: user.balance < 0 ? GH.danger : GH.ink,
                                 fontVariantNumeric: 'tabular-nums',
                             }}>
-                                {user.balance.toFixed(0)} GEL
+                                {formatGel(user.balance, { fraction: 0 })}
                             </div>
                             <div style={{ textAlign: 'center' }}>
                                 {user.personalDiscountPercent ? (
                                     <span style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                         fontWeight: 700,
                                         padding: '3px 7px',
                                         color: GH.paper,
@@ -604,7 +605,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                         {user.personalDiscountPercent}%
                                     </span>
                                 ) : (
-                                    <span style={{ ...monoLabel, color: GH.ink30 }}></span>
+                                    <span style={{ ...monoLabel, color: GH.ink60 }}></span>
                                 )}
                             </div>
                             <div style={{ ...monoLabel, color: GH.ink }}>
@@ -614,6 +615,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 <Link
                                     to={`/admin/users/${encodeURIComponent(user.email)}`}
                                     title="Карточка"
+                                    aria-label={`Карточка: ${user.name || user.email}`}
                                     style={{
                                         width: 32,
                                         height: 32,
@@ -631,6 +633,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
                                 <button
                                     onClick={() => setSelectedUser(user)}
                                     title="Быстрые настройки"
+                                    aria-label={`Быстрые настройки: ${user.name || user.email}`}
                                     style={{
                                         width: 32,
                                         height: 32,
@@ -653,7 +656,7 @@ function GridHouseAdminUsers(props: GHAdminUsersProps) {
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, paddingTop: 16 }}>
-                <p style={{ ...ghMono, color: GH.ink30, margin: 0 }}>UNBOX ADMIN · 2026</p>
+                <p style={{ ...ghMono, color: GH.ink60, margin: 0 }}>Unbox · админка · 2026</p>
             </div>
 
             {/* Modals (reuse legacy internals) */}
@@ -722,13 +725,13 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
             <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-6 animate-in zoom-in-95">
                 <div className="flex justify-between items-start">
                     <h2 className="text-xl font-bold">Настройки клиента</h2>
-                    <button onClick={onClose} className="text-unbox-grey hover:text-black">
+                    <button onClick={onClose} className="text-ink-60 hover:text-ink" aria-label="Закрыть">
                         <span className="text-2xl">×</span>
                     </button>
                 </div>
 
                 <div className="space-y-4">
-                    <div className="text-sm text-unbox-grey pb-2 border-b border-unbox-light">
+                    <div className="text-sm text-ink-60 pb-2 border-b border-unbox-light">
                         {user.name} ({user.email})
                     </div>
 
@@ -751,11 +754,11 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
                                 ))}
                             </select>
                             {localRole !== user.role && (
-                                <div className="text-xs text-amber-600 font-medium">
+                                <div className="text-xs text-[color:var(--status-pending-fg)] font-medium">
                                     Роль будет изменена после нажатия "Сохранить"
                                 </div>
                             )}
-                            <div className="text-xs text-unbox-grey">
+                            <div className="text-xs text-ink-60">
                                 {isSeniorAdmin
                                     ? "Вы можете назначать только Пользователей и Администраторов."
                                     : "Внимание: изменение роли влияет на доступ к функционалу."
@@ -768,7 +771,7 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
                     <div className="flex items-center justify-between p-3 bg-unbox-light/30 rounded-lg border border-unbox-light">
                         <div>
                             <div className="font-medium text-sm text-unbox-dark">Персональное ценообразование</div>
-                            <div className="text-xs text-unbox-grey">Отключает стандартные скидки</div>
+                            <div className="text-xs text-ink-60">Отключает стандартные скидки</div>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">
                             <input
@@ -779,7 +782,7 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
                                     setLocalPricingSystem(localPricingSystem === 'personal' ? 'standard' : 'personal');
                                 }}
                             />
-                            <div className="w-11 h-6 bg-unbox-light peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-unbox-light after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <div className="w-11 h-6 bg-unbox-light peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-unbox-light after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
                         </label>
                     </div>
 
@@ -806,7 +809,7 @@ function UserEditModal({ user, onClose, onUpdate }: { user: User; onClose: () =>
                     <div className="pt-4 border-t border-unbox-light flex justify-end gap-3">
                         <button
                             onClick={onClose}
-                            className="px-4 py-2 text-unbox-grey hover:bg-unbox-light/50 rounded-lg"
+                            className="px-4 py-2 text-ink-60 hover:bg-unbox-light/50 rounded-lg"
                         >
                             Отмена
                         </button>

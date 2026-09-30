@@ -9,14 +9,19 @@ import { resourcesApi } from '../../api/resources';
 import { locationsApi } from '../../api/locations';
 import type { Resource, Location } from '../../types';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { undoToast } from '../../components/ui/undoToast';
+import { ruCountWord } from '../../utils/plural';
+import { STATUS } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 
 /* ── Grid House module-scope constants (prefix: ghc) ── */
 const ghcHairline = `1px solid ${GH.ink10}`;
 const ghcMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -33,6 +38,7 @@ export function AdminCabinets() {
     const { resources, fetchResources, locations, fetchLocations } = useBookingStore();
     const [filterLocation, setFilterLocation] = useState<string | 'all'>('all');
     const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
+    const { confirm } = useConfirmDialog();
 
     // Edit State
     const [editingResource, setEditingResource] = useState<Resource | null>(null);
@@ -58,7 +64,19 @@ export function AdminCabinets() {
         try {
             await resourcesApi.update(r.id, { isActive: next });
             await fetchResources();
-            toast.success(next ? 'Кабинет включён' : 'Кабинет скрыт');
+            if (next) {
+                toast.success('Кабинет снова виден клиентам');
+            } else {
+                // Аудит G8-05: скрыть — один клик, поэтому 5 секунд на «Вернуть».
+                undoToast('Кабинет скрыт от клиентов', async () => {
+                    try {
+                        await resourcesApi.update(r.id, { isActive: true });
+                        await fetchResources();
+                    } catch (e: any) {
+                        toast.error(e?.response?.data?.detail || 'Не удалось вернуть кабинет');
+                    }
+                });
+            }
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось');
         } finally {
@@ -76,12 +94,21 @@ export function AdminCabinets() {
         const next = !(loc.isActive !== false);
         const action = next ? 'включить' : 'выключить';
         const childrenAffected = resources.filter(r => r.locationId === loc.id);
-        if (!confirm(
-            `${next ? 'Включить' : 'Выключить'} локацию "${loc.name}"?\n\n`
-            + (next
-                ? 'Кабинеты внутри останутся в своём текущем состоянии (включи нужные вручную).'
-                : `Все ${childrenAffected.length} кабинета в этой локации станут скрытыми.`),
-        )) return;
+        const ok = await confirm(next
+            ? {
+                title: `Показать локацию «${loc.name}»?`,
+                body: 'Кабинеты внутри останутся как есть — нужные включите вручную.',
+                confirmLabel: 'Показать локацию',
+                cancelLabel: 'Оставить скрытой',
+            }
+            : {
+                title: `Скрыть локацию «${loc.name}»?`,
+                body: `Клиенты перестанут её видеть, и все ${ruCountWord(childrenAffected.length, ['кабинет', 'кабинета', 'кабинетов'])} в ней тоже скроются.`,
+                confirmLabel: 'Скрыть локацию',
+                cancelLabel: 'Оставить',
+                tone: 'danger',
+            });
+        if (!ok) return;
         setToggleBusyId(loc.id);
         try {
             await locationsApi.update(loc.id, { isActive: next });
@@ -212,8 +239,8 @@ function GridHouseCabinets({
                                         {!isActive && (
                                             <span style={{
                                                 fontFamily: GH_MONO,
-                                                fontSize: 9,
-                                                letterSpacing: '0.14em',
+                                                fontSize: 12,
+                                                letterSpacing: '0.06em',
                                                 textTransform: 'uppercase',
                                                 color: GH.paper,
                                                 background: GH.danger,
@@ -237,23 +264,23 @@ function GridHouseCabinets({
                                         alignItems: 'center',
                                         gap: 6,
                                         padding: '8px 14px',
-                                        background: isActive ? GH.ink5 : GH.danger,
+                                        background: isActive ? GH.ink5 : GH.ink,
                                         color: isActive ? GH.ink : GH.paper,
                                         border: 'none',
                                         fontFamily: GH_MONO,
-                                        fontSize: 10,
+                                        fontSize: 12,
                                         fontWeight: 700,
-                                        letterSpacing: '0.14em',
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         cursor: busy ? 'wait' : 'pointer',
                                         opacity: busy ? 0.6 : 1,
                                     }}
                                     title={isActive
                                         ? 'Скрыть локацию и все её кабинеты'
-                                        : 'Показать локацию (кабинеты включай вручную)'}
+                                        : 'Показать локацию (кабинеты включите вручную)'}
                                 >
                                     {busy ? <Loader2 size={12} className="animate-spin" /> : <Power size={12} />}
-                                    {isActive ? 'Вкл' : 'Выкл'}
+                                    {isActive ? 'Скрыть' : 'Показать'}
                                 </button>
                             </div>
                         );
@@ -280,9 +307,9 @@ function GridHouseCabinets({
                             onClick={() => setFilterLocation(loc.id)}
                             style={{
                                 fontFamily: GH_MONO,
-                                fontSize: narrow ? 10 : 11,
+                                fontSize: 12,
                                 fontWeight: 600,
-                                letterSpacing: '0.14em',
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase' as const,
                                 padding: narrow ? '12px 14px' : '18px 24px',
                                 background: active ? GH.ink : 'transparent',
@@ -360,7 +387,7 @@ function GridHouseCabinets({
                                             >
                                                 {String(idx + 1).padStart(2, '0')}
                                             </div>
-                                            <div style={{ position: 'absolute', top: 10, left: 12, ...ghcMono, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <div style={{ position: 'absolute', top: 10, left: 12, ...ghcMono, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
                                                 <ImageOff size={10} /> Без фото
                                             </div>
                                         </>
@@ -371,8 +398,8 @@ function GridHouseCabinets({
                                         <span
                                             style={{
                                                 fontFamily: GH_MONO,
-                                                fontSize: 10,
-                                                letterSpacing: '0.14em',
+                                                fontSize: 12,
+                                                letterSpacing: '0.06em',
                                                 textTransform: 'uppercase',
                                                 color: GH.paper,
                                                 background: GH.ink,
@@ -385,8 +412,8 @@ function GridHouseCabinets({
                                             <span
                                                 style={{
                                                     fontFamily: GH_MONO,
-                                                    fontSize: 10,
-                                                    letterSpacing: '0.14em',
+                                                    fontSize: 12,
+                                                    letterSpacing: '0.06em',
                                                     textTransform: 'uppercase',
                                                     color: GH.paper,
                                                     background: GH.danger,
@@ -457,8 +484,8 @@ function GridHouseCabinets({
                                                             title={svc.label}
                                                             style={{
                                                                 fontFamily: GH_MONO,
-                                                                fontSize: 10,
-                                                                letterSpacing: '0.08em',
+                                                                fontSize: 12,
+                                                                letterSpacing: '0.06em',
                                                                 textTransform: 'uppercase',
                                                                 padding: '3px 7px',
                                                                 color: GH.ink,
@@ -499,7 +526,7 @@ function GridHouseCabinets({
                                                 </span>
                                             )}
                                             <span style={{ color: GH.ink, fontWeight: 700 }}>
-                                                {resource.hourlyRate}₾/ч
+                                                {formatGel(resource.hourlyRate)}/ч
                                             </span>
                                         </div>
                                         <div style={{ display: 'flex', gap: 6 }}>
@@ -508,13 +535,13 @@ function GridHouseCabinets({
                                                 disabled={toggleBusyId === resource.id}
                                                 style={{
                                                     fontFamily: GH_MONO,
-                                                    fontSize: 10,
+                                                    fontSize: 12,
                                                     fontWeight: 600,
-                                                    letterSpacing: '0.14em',
+                                                    letterSpacing: '0.06em',
                                                     textTransform: 'uppercase',
                                                     padding: '6px 10px',
-                                                    background: resource.isActive === false ? GH.danger : GH.ink5,
-                                                    color: resource.isActive === false ? GH.paper : GH.ink,
+                                                    background: resource.isActive === false ? STATUS.danger.bg : GH.ink5,
+                                                    color: resource.isActive === false ? STATUS.danger.fg : GH.ink,
                                                     border: 'none',
                                                     cursor: toggleBusyId === resource.id ? 'wait' : 'pointer',
                                                     display: 'inline-flex',
@@ -529,15 +556,15 @@ function GridHouseCabinets({
                                                 {toggleBusyId === resource.id
                                                     ? <Loader2 size={11} className="animate-spin" />
                                                     : <Power size={11} />}
-                                                {resource.isActive === false ? 'Выкл' : 'Вкл'}
+                                                {resource.isActive === false ? 'Скрыт · показать' : 'Скрыть'}
                                             </button>
                                             <button
                                                 onClick={() => handleEdit(resource)}
                                                 style={{
                                                     fontFamily: GH_MONO,
-                                                    fontSize: 10,
+                                                    fontSize: 12,
                                                     fontWeight: 600,
-                                                    letterSpacing: '0.14em',
+                                                    letterSpacing: '0.06em',
                                                     textTransform: 'uppercase',
                                                     padding: '6px 10px',
                                                     background: 'transparent',
@@ -562,8 +589,8 @@ function GridHouseCabinets({
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, padding: '18px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ ...ghcMono, color: GH.ink30 }}>UNBOX ADMIN · 2026</div>
-                <div style={{ ...ghcMono, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ ...ghcMono, color: GH.ink60 }}>Unbox · админка · 2026</div>
+                <div style={{ ...ghcMono, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                     {total} кабинетов
                 </div>
             </div>

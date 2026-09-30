@@ -5,6 +5,10 @@ import clsx from 'clsx';
 import { api, API_URL } from '../../api/client';
 import { compressImage } from '../../utils/imageCompress';
 import { postsApi, type Post, type PostType } from '../../api/posts';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 /**
  * AdminPosts — редактор новостей/анонсов и статей специалистов.
@@ -26,12 +30,15 @@ export function AdminPosts() {
     const [loading, setLoading] = useState(true);
     const [editing, setEditing] = useState<Post | null>(null);
     const [specs, setSpecs] = useState<SpecOption[]>([]);
+    const [failed, setFailed] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     const load = () => {
         setLoading(true);
+        setFailed(false);
         postsApi.listAdmin(tab)
             .then(setPosts)
-            .catch(() => toast.error('Не удалось загрузить'))
+            .catch(() => { setFailed(true); toast.error('Не удалось загрузить'); })
             .finally(() => setLoading(false));
     };
     useEffect(load, [tab]);
@@ -65,7 +72,7 @@ export function AdminPosts() {
                         onClick={() => setTab(t)}
                         className={clsx(
                             'px-4 py-2 rounded-xl text-sm font-medium border transition-colors',
-                            tab === t ? 'bg-unbox-dark text-white border-unbox-dark' : 'bg-white text-unbox-grey border-gray-200 hover:border-unbox-dark/40'
+                            tab === t ? 'bg-unbox-dark text-white border-unbox-dark' : 'bg-white text-ink-60 border-gray-200 hover:border-unbox-dark/40'
                         )}
                     >
                         {label}
@@ -74,9 +81,15 @@ export function AdminPosts() {
             </div>
 
             {loading ? (
-                <div className="text-center py-16 text-gray-400"><Loader2 className="animate-spin mx-auto" /></div>
+                <SkeletonList count={3} label="Загружаем публикации" />
+            ) : failed ? (
+                <ErrorBar message="Не удалось загрузить публикации" onRetry={load} />
             ) : posts.length === 0 ? (
-                <div className="text-center py-16 text-gray-400 text-sm">Пока ничего нет. Создайте первый.</div>
+                <EmptyState
+                    title="Пока ничего нет"
+                    hint="Создайте первую публикацию — она появится здесь."
+                    action={{ label: tab === 'news' ? 'Новый анонс' : 'Новый текст', onClick: () => setEditing({ ...EMPTY, type: tab }) }}
+                />
             ) : (
                 <div className="flex flex-col gap-2">
                     {posts.map(p => (
@@ -86,22 +99,31 @@ export function AdminPosts() {
                             </div>
                             <div className="min-w-0 flex-1">
                                 <div className="font-semibold text-sm truncate">{p.title || '(без заголовка)'}</div>
-                                <div className="text-xs text-gray-400 flex items-center gap-2">
+                                <div className="text-xs text-ink-60 flex items-center gap-2">
                                     {p.isPublished
-                                        ? <span className="inline-flex items-center gap-1 text-green-600"><Eye size={11} /> Опубликовано</span>
-                                        : <span className="inline-flex items-center gap-1 text-gray-400"><EyeOff size={11} /> Черновик</span>}
+                                        ? <span className="inline-flex items-center gap-1 text-[color:var(--status-ok-fg)]"><Eye size={11} /> Опубликовано</span>
+                                        : <span className="inline-flex items-center gap-1 text-ink-60"><EyeOff size={11} /> Черновик</span>}
                                     <span>· /{p.slug}</span>
                                     {p.type === 'article' && p.authorName && <span>· {p.authorName}</span>}
                                 </div>
                             </div>
-                            <button onClick={() => setEditing(p)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><Pencil size={15} /></button>
+                            <button onClick={() => setEditing(p)} className="p-3 rounded-lg hover:bg-gray-100 text-ink-60" aria-label={`Изменить «${p.title || 'без заголовка'}»`} title="Изменить"><Pencil size={15} /></button>
                             <button
+                                aria-label={`Удалить «${p.title || 'без заголовка'}»`}
+                                title="Удалить"
                                 onClick={async () => {
-                                    if (!window.confirm(`Удалить «${p.title}»?`)) return;
+                                    const ok = await confirm({
+                                        title: `Удалить «${p.title || 'без заголовка'}»?`,
+                                        body: 'Публикация пропадёт с сайта. Вернуть её не получится.',
+                                        confirmLabel: 'Удалить публикацию',
+                                        cancelLabel: 'Оставить',
+                                        tone: 'danger',
+                                    });
+                                    if (!ok) return;
                                     try { await postsApi.remove(p.id); toast.success('Удалено'); load(); }
                                     catch { toast.error('Не удалось удалить'); }
                                 }}
-                                className="p-2 rounded-lg hover:bg-red-50 text-red-500"
+                                className="p-3 rounded-lg hover:bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger-fg)]"
                             ><Trash2 size={15} /></button>
                         </div>
                     ))}
@@ -160,7 +182,7 @@ function PostEditModal({ post, specs, onClose, onSaved }: {
             >
                 <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-3 flex items-center justify-between">
                     <h3 className="font-bold">{isNew ? 'Новый материал' : 'Редактирование'}</h3>
-                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={18} /></button>
+                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100" aria-label="Закрыть"><X size={18} /></button>
                 </div>
 
                 <div className="p-5 space-y-4">
@@ -169,7 +191,7 @@ function PostEditModal({ post, specs, onClose, onSaved }: {
                         {([['news', 'Новость / анонс'], ['article', 'Статья специалиста']] as [PostType, string][]).map(([t, l]) => (
                             <button key={t} type="button" onClick={() => setType(t)}
                                 className={clsx('flex-1 py-2 rounded-xl text-sm font-medium border',
-                                    type === t ? 'bg-unbox-green text-white border-unbox-green' : 'bg-white border-gray-200 text-unbox-grey')}>
+                                    type === t ? 'bg-unbox-green text-white border-unbox-green' : 'bg-white border-gray-200 text-ink-60')}>
                                 {l}
                             </button>
                         ))}
@@ -211,7 +233,7 @@ function PostEditModal({ post, specs, onClose, onSaved }: {
                             <div className="mb-2 relative w-full aspect-[16/10] rounded-lg overflow-hidden bg-gray-100">
                                 <img src={coverImageUrl} alt="" className="w-full h-full object-cover" />
                                 <button onClick={() => setCoverImageUrl(null)}
-                                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white"><X size={14} /></button>
+                                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white" aria-label="Убрать обложку"><X size={14} /></button>
                             </div>
                         )}
                         <CoverUpload onUploaded={setCoverImageUrl} />
@@ -238,8 +260,8 @@ function PostEditModal({ post, specs, onClose, onSaved }: {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
     return (
         <div>
-            <label className="text-xs font-semibold text-unbox-grey mb-1 block">
-                {label}{hint && <span className="font-normal text-gray-400"> · {hint}</span>}
+            <label className="text-xs font-semibold text-ink-60 mb-1 block">
+                {label}{hint && <span className="font-normal text-ink-60"> · {hint}</span>}
             </label>
             {children}
         </div>

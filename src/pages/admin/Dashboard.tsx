@@ -11,9 +11,11 @@ import { cashboxApi, type CashboxAnalytics } from '../../api/cashbox';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 // Wave 1: месяцы были по-английски («September 2026», «29 September») —
 // format() без русской локали. Теперь общие форматтеры.
-import { formatDayMonth, formatMonthLabel } from '../../utils/format';
+import { formatDayMonth, formatMonthLabel, formatGel } from '../../utils/format';
 import type { BookingHistoryItem, User as AppUser } from '../../store/types';
-import { statusLabel } from '../../design/statuses';
+import { statusLabel, getStatusDef } from '../../design/statuses';
+import { STATUS } from '../../design/tokens';
+import { SkeletonList } from '../../components/ui/Skeleton';
 
 
 export function AdminDashboard() {
@@ -66,13 +68,13 @@ export function AdminDashboard() {
     const stats = [
         {
             label: 'Выручка за сегодня',
-            value: `${todayRevenue.toFixed(2)} ₾`,
+            value: formatGel(todayRevenue),
             icon: TrendingUp,
             color: 'bg-unbox-light text-unbox-green',
         },
         {
             label: 'Выручка за месяц',
-            value: `${monthRevenue.toFixed(2)} ₾`,
+            value: formatGel(monthRevenue),
             icon: CreditCard,
             color: 'bg-unbox-light text-unbox-dark',
         },
@@ -168,6 +170,7 @@ function GridHouseAdminDashboard({
     incomingCounts,
 }: GHDashProps) {
     const navigate = useNavigate();
+    const bookingsStatus = useUserStore(s => s.bookingsStatus);
     const hairline = `1px solid ${GH.ink10}`;
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
     useEffect(() => {
@@ -177,8 +180,8 @@ function GridHouseAdminDashboard({
     }, []);
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
-        fontSize: 10,
-        letterSpacing: '0.18em',
+        fontSize: 12,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         color: GH.ink60,
     };
@@ -194,17 +197,17 @@ function GridHouseAdminDashboard({
     const fmt = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n);
 
     const kpi = [
-        { label: 'Выручка · Сегодня', num: `${fmt(todayRevenue)} ₾`, sub: formatDayMonth(new Date()) },
-        { label: 'Выручка · Месяц', num: `${fmt(monthRevenue)} ₾`, sub: formatMonthLabel(new Date()) },
+        { label: 'Выручка · Сегодня', num: formatGel(todayRevenue, { fraction: 0 }), sub: formatDayMonth(new Date()) },
+        { label: 'Выручка · Месяц', num: formatGel(monthRevenue, { fraction: 0 }), sub: formatMonthLabel(new Date()) },
         { label: 'Броней · Активных', num: String(activeBookingsCount).padStart(2, '0'), sub: 'Впереди' },
         { label: 'Клиентов · Всего', num: String(totalUsers).padStart(2, '0'), sub: 'В базе' },
     ];
 
     const secondary = [
-        { label: 'Касса', num: `${fmt(balance)} ₾`, sub: 'Текущий баланс' },
+        { label: 'Касса', num: formatGel(balance, { fraction: 0 }), sub: 'Текущий баланс' },
         { label: 'Пересдано', num: String(reRentedCount).padStart(2, '0'), sub: 'Возвратов' },
         { label: 'Средний день', num: monthAnalytics?.dailyData && monthAnalytics.dailyData.length > 0
-            ? `${fmt(monthRevenue / Math.max(1, monthAnalytics.dailyData.length))} ₾`
+            ? formatGel(monthRevenue / Math.max(1, monthAnalytics.dailyData.length), { fraction: 0 })
             : '—', sub: 'Выручки за день' },
     ];
 
@@ -253,9 +256,9 @@ function GridHouseAdminDashboard({
                             borderBottom: hairline,
                         }}
                     >
-                        <div style={{ ...monoLabel, marginBottom: narrow ? 8 : 14, fontSize: narrow ? 9 : 10 }}>{c.label}</div>
+                        <div style={{ ...monoLabel, marginBottom: narrow ? 8 : 14, fontSize: 12 }}>{c.label}</div>
                         <div style={{ ...bigNumber, fontSize: narrow ? 20 : 'clamp(24px, 4vw, 44px)' }}>{c.num}</div>
-                        <div style={{ fontSize: narrow ? 10 : 12, color: GH.ink60, marginTop: narrow ? 6 : 10, textTransform: 'capitalize' }}>{c.sub}</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: narrow ? 6 : 10, textTransform: 'capitalize' }}>{c.sub}</div>
                     </div>
                 ))}
             </div>
@@ -279,9 +282,9 @@ function GridHouseAdminDashboard({
                             borderBottom: hairline,
                         }}
                     >
-                        <div style={{ ...monoLabel, marginBottom: narrow ? 6 : 12, fontSize: narrow ? 8 : 10 }}>{c.label}</div>
+                        <div style={{ ...monoLabel, marginBottom: narrow ? 6 : 12, fontSize: 12 }}>{c.label}</div>
                         <div style={{ ...bigNumber, fontSize: narrow ? 14 : 'clamp(20px, 3vw, 28px)' }}>{c.num}</div>
-                        <div style={{ fontSize: narrow ? 9 : 12, color: GH.ink60, marginTop: narrow ? 4 : 8 }}>{c.sub}</div>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: narrow ? 4 : 8 }}>{c.sub}</div>
                     </div>
                 ))}
             </div>
@@ -332,14 +335,21 @@ function GridHouseAdminDashboard({
                             <div style={{ textAlign: 'right' }}>Сумма</div>
                         </div>
                     )}
-                    {recentBookings.length === 0 && (
+                    {/* Пока брони не пришли — силуэты, а не «Нет бронирований». */}
+                    {recentBookings.length === 0 && allBookings.length === 0 && bookingsStatus !== 'ready' && (
+                        <div style={{ padding: 16 }}>
+                            <SkeletonList count={3} label="Загружаем брони" />
+                        </div>
+                    )}
+                    {recentBookings.length === 0 && (allBookings.length > 0 || bookingsStatus === 'ready') && (
                         <div style={{ padding: 32, textAlign: 'center', color: GH.ink60, ...monoLabel }}>
-                            Нет бронирований
+                            Новых броней пока нет
                         </div>
                     )}
                     {recentBookings.map((b, i) => {
                         const clientName = users.find(u => u.email === b.userId)?.name || b.userId;
-                        const statusColor = b.status === 'confirmed' ? GH.accent : b.status === 'cancelled' ? GH.ink30 : b.status === 're-rented' ? GH.ink : GH.ink60;
+                        // Слово и цвет — из общего словаря статусов (цвет = смысл статуса).
+                        const statusColor = STATUS[getStatusDef('booking', b.status).tone].fg;
                         const statusText = statusLabel('booking', b.status, 'staff');
                         if (narrow) {
                             return (
@@ -363,7 +373,7 @@ function GridHouseAdminDashboard({
                                 >
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                            <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                                            <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                                                 {String(i + 1).padStart(2, '0')}
                                             </span>
                                             <span style={{
@@ -377,14 +387,14 @@ function GridHouseAdminDashboard({
                                             fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, color: GH.ink,
                                             fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' as const,
                                         }}>
-                                            {b.paymentMethod === 'subscription' ? 'Абн.' : `${b.finalPrice}₾`}
+                                            {b.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(b.finalPrice)}
                                         </span>
                                     </div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                                             {format(new Date(b.date), 'dd.MM')} · {b.startTime}
                                         </span>
-                                        <span style={{ ...monoLabel, color: statusColor, fontSize: 9 }}>{statusText}</span>
+                                        <span style={{ ...monoLabel, color: statusColor, fontSize: 12 }}>{statusText}</span>
                                     </div>
                                 </button>
                             );
@@ -420,7 +430,7 @@ function GridHouseAdminDashboard({
                                     {format(new Date(b.date), 'dd.MM')} · {b.startTime}
                                 </div>
                                 <div style={{ fontSize: 14, color: GH.ink }}>{clientName}</div>
-                                <div style={{ ...monoLabel, color: statusColor, fontSize: 10 }}>{statusText}</div>
+                                <div style={{ ...monoLabel, color: statusColor, fontSize: 12 }}>{statusText}</div>
                                 <div
                                     style={{
                                         fontFamily: GH_MONO,
@@ -430,7 +440,7 @@ function GridHouseAdminDashboard({
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
                                 >
-                                    {b.paymentMethod === 'subscription' ? 'Абн.' : `${b.finalPrice} ₾`}
+                                    {b.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(b.finalPrice)}
                                 </div>
                             </button>
                         );

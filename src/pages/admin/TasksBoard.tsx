@@ -8,8 +8,7 @@ import {
     X, MessageSquare, CheckSquare, Square, Tag, Send, Loader2,
     Archive, Link2, Paperclip, Upload, FileText,
 } from 'lucide-react';
-import { format, isPast, isToday, isTomorrow, differenceInDays } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { format, isPast, isToday, differenceInDays } from 'date-fns';
 import clsx from 'clsx';
 import { LegacyButton as Button } from '../../components/ui/LegacyButton';
 import { toast } from 'sonner';
@@ -23,30 +22,28 @@ import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { formatDayMonth, formatTime } from '../../utils/format';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const COLUMNS: { id: TaskStatus; title: string; color: string; headerColor: string; headerBg: string }[] = [
-    { id: 'TODO', title: 'К выполнению', color: 'border-slate-200/60', headerColor: 'text-slate-700', headerBg: 'bg-slate-100' },
-    { id: 'IN_PROGRESS', title: 'В процессе', color: 'border-blue-200/60', headerColor: 'text-blue-700', headerBg: 'bg-blue-50' },
-    { id: 'DONE', title: 'Готово', color: 'border-emerald-200/60', headerColor: 'text-emerald-700', headerBg: 'bg-emerald-50' },
+const COLUMNS: { id: TaskStatus; title: string }[] = [
+    { id: 'TODO', title: 'К выполнению' },
+    { id: 'IN_PROGRESS', title: 'В процессе' },
+    { id: 'DONE', title: 'Готово' },
 ];
 
+// Метки — категории, а не статусы: без своих цветов (wave 1). Выбранная метка
+// в окне задачи подсвечивается бирюзой «выбрано».
 const LABEL_OPTIONS = [
-    { value: 'cleaning', label: 'Уборка', color: 'bg-cyan-100 text-cyan-700 border-cyan-200' },
-    { value: 'finance', label: 'Финансы', color: 'bg-green-100 text-green-700 border-green-200' },
-    { value: 'clients', label: 'Клиенты', color: 'bg-violet-100 text-violet-700 border-violet-200' },
-    { value: 'rooms', label: 'Кабинеты', color: 'bg-orange-100 text-orange-700 border-orange-200' },
-    { value: 'purchase', label: 'Закупки', color: 'bg-pink-100 text-pink-700 border-pink-200' },
-    { value: 'marketing', label: 'Маркетинг', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-    { value: 'tech', label: 'Техника', color: 'bg-gray-100 text-gray-700 border-gray-200' },
+    { value: 'cleaning', label: 'Уборка' },
+    { value: 'finance', label: 'Финансы' },
+    { value: 'clients', label: 'Клиенты' },
+    { value: 'rooms', label: 'Кабинеты' },
+    { value: 'purchase', label: 'Закупки' },
+    { value: 'marketing', label: 'Маркетинг' },
+    { value: 'tech', label: 'Техника' },
 ];
-
-const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
-    HIGH: { label: 'Срочно', color: 'text-red-600 bg-red-50 border-red-200' },
-    MEDIUM: { label: 'Средний', color: 'text-amber-600 bg-amber-50 border-amber-200' },
-    LOW: { label: 'Низкий', color: 'text-green-600 bg-green-50 border-green-200' },
-};
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
@@ -193,128 +190,6 @@ export function AdminTasksBoard() {
 }
 
 
-// ── Droppable Column ─────────────────────────────────────────────────────────
-
-function DroppableColumn({ colId, children, className }: { colId: string; children: React.ReactNode; className?: string }) {
-    const { setNodeRef, isOver } = useDroppable({ id: `column-${colId}` });
-    return (
-        <div ref={setNodeRef} className={clsx(className, isOver && 'ring-2 ring-unbox-green/40 bg-unbox-light/20')}>
-            {children}
-        </div>
-    );
-}
-
-// ── Sortable Card ────────────────────────────────────────────────────────────
-
-function SortableTaskCard({ task, onEdit, onDelete, onMove }: { task: AdminTask; onEdit: () => void; onDelete: () => void; onMove: (status: TaskStatus) => void }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
-    const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
-    return (
-        <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-            <TaskCardView task={task} onEdit={onEdit} onDelete={onDelete} onMove={onMove} dragListeners={listeners} />
-        </div>
-    );
-}
-
-function TaskCardView({ task, onEdit, onDelete, onMove, dragListeners, isDragging }: {
-    task: AdminTask; onEdit?: () => void; onDelete?: () => void; onMove?: (status: TaskStatus) => void; dragListeners?: any; isDragging?: boolean;
-}) {
-    const pri = PRIORITY_LABELS[task.priority] || PRIORITY_LABELS.MEDIUM;
-    const clDone = (task.checklist || []).filter(c => c.done).length;
-    const clTotal = (task.checklist || []).length;
-
-    // Quick move buttons — show the two OTHER columns
-    const moveTargets = COLUMNS.filter(c => c.id !== task.status);
-
-    return (
-        <div onClick={onEdit} className={clsx(
-            'bg-white p-3.5 rounded-xl border border-gray-100 cursor-pointer transition-all group relative',
-            isDragging ? 'shadow-xl ring-2 ring-unbox-green' : 'shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-md hover:border-gray-200'
-        )}>
-            <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={clsx('text-[10px] uppercase tracking-wide font-bold px-1.5 py-0.5 rounded border', pri.color)}>{pri.label}</span>
-                    {(task.labels || []).map(l => {
-                        const opt = LABEL_OPTIONS.find(o => o.value === l);
-                        return opt ? <span key={l} className={clsx('text-[10px] font-medium px-1.5 py-0.5 rounded border', opt.color)}>{opt.label}</span> : null;
-                    })}
-                </div>
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {/* Quick move buttons */}
-                    {onMove && moveTargets.map(col => (
-                        <button
-                            key={col.id}
-                            onClick={e => { e.stopPropagation(); onMove(col.id); }}
-                            title={`Переместить в "${col.title}"`}
-                            className={clsx(
-                                'text-[9px] font-bold px-1.5 py-0.5 rounded-md border transition-colors',
-                                col.id === 'TODO' ? 'text-slate-500 border-slate-200 hover:bg-slate-100' :
-                                col.id === 'IN_PROGRESS' ? 'text-blue-500 border-blue-200 hover:bg-blue-50' :
-                                'text-emerald-500 border-emerald-200 hover:bg-emerald-50'
-                            )}
-                        >
-                            {col.id === 'TODO' ? 'TODO' : col.id === 'IN_PROGRESS' ? 'WIP' : 'DONE'}
-                        </button>
-                    ))}
-                    <div {...dragListeners} className="text-gray-300 hover:text-gray-500 p-1 cursor-grab active:cursor-grabbing" onClick={e => e.stopPropagation()}>
-                        <GripVertical size={14} />
-                    </div>
-                    {onDelete && (
-                        <button onClick={e => { e.stopPropagation(); onDelete(); }}
-                            className="text-gray-300 hover:text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors"><Trash2 size={13} /></button>
-                    )}
-                </div>
-            </div>
-
-            <p className={clsx('text-[13px] font-semibold leading-snug', task.status === 'DONE' ? 'text-gray-400 line-through' : 'text-unbox-dark')}>{task.title}</p>
-            {task.description && <p className="text-xs text-gray-400 mt-1 line-clamp-2 leading-relaxed">{task.description}</p>}
-
-            {clTotal > 0 && (
-                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-400">
-                    <CheckSquare size={12} className={clDone === clTotal ? 'text-green-500' : ''} />
-                    <span>{clDone}/{clTotal}</span>
-                    <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-unbox-green rounded-full transition-all" style={{ width: `${(clDone / clTotal) * 100}%` }} />
-                    </div>
-                </div>
-            )}
-
-            {(task.attachments?.length > 0) && (
-                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-400">
-                    <Paperclip size={12} />
-                    <span>{task.attachments.length} вложени{task.attachments.length === 1 ? 'е' : task.attachments.length < 5 ? 'я' : 'й'}</span>
-                </div>
-            )}
-
-            <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-gray-50">
-                <div className="flex items-center gap-1 flex-wrap">
-                    {task.assigneeName && (
-                        <div className="flex items-center gap-1 text-[11px] font-medium text-gray-500 bg-gray-50 px-2 py-1 rounded-md">
-                            <User size={11} /><span className="truncate max-w-[80px]">{task.assigneeName}</span>
-                        </div>
-                    )}
-                    {(task.participants?.length > 0) && (
-                        <div className="flex items-center gap-1 text-[11px] font-medium text-blue-500 bg-blue-50 px-2 py-1 rounded-md">
-                            <Users size={11} />+{task.participants.length}
-                        </div>
-                    )}
-                    {!task.assigneeName && !(task.participants?.length > 0) && <div />}
-                </div>
-                {task.deadline && (() => {
-                    const d = new Date(task.deadline);
-                    let color = 'text-gray-400';
-                    if (task.status !== 'DONE') {
-                        if (isPast(d) && !isToday(d)) color = 'text-red-500 font-bold';
-                        else if (isToday(d)) color = 'text-orange-500 font-bold';
-                        else if (isTomorrow(d)) color = 'text-yellow-600';
-                    }
-                    return <div className={clsx('flex items-center gap-1 text-[11px]', color)}><Clock size={11} />{format(d, 'd MMM, HH:mm', { locale: ru })}</div>;
-                })()}
-            </div>
-        </div>
-    );
-}
-
 // ── Edit Modal ───────────────────────────────────────────────────────────────
 
 function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
@@ -402,34 +277,34 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
                     <h2 className="text-lg font-bold text-unbox-dark">{isNew ? 'Новая задача' : 'Редактирование'}</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><X size={20} /></button>
+                    <button onClick={onClose} className="text-ink-60 hover:text-ink p-1"><X size={20} /></button>
                 </div>
                 <div className="p-6 space-y-5">
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1">Название *</label>
+                        <label className="block text-xs font-semibold text-ink-60 mb-1">Название *</label>
                         <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Что нужно сделать?"
                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none font-medium" />
                     </div>
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1">Описание</label>
+                        <label className="block text-xs font-semibold text-ink-60 mb-1">Описание</label>
                         <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="Детали..."
                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none resize-none" />
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Статус</label>
+                            <label className="block text-xs font-semibold text-ink-60 mb-1">Статус</label>
                             <select value={status} onChange={e => setStatus(e.target.value as TaskStatus)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none">
                                 <option value="TODO">К выполнению</option><option value="IN_PROGRESS">В процессе</option><option value="DONE">Готово</option>
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Приоритет</label>
+                            <label className="block text-xs font-semibold text-ink-60 mb-1">Приоритет</label>
                             <select value={priority} onChange={e => setPriority(e.target.value as TaskPriority)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none">
-                                <option value="LOW">🟢 Низкий</option><option value="MEDIUM">🟡 Средний</option><option value="HIGH">🔴 Срочно</option>
+                                <option value="LOW">Низкий</option><option value="MEDIUM">Средний</option><option value="HIGH">Срочно</option>
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Ответственный</label>
+                            <label className="block text-xs font-semibold text-ink-60 mb-1">Ответственный</label>
                             <select value={assigneeId} onChange={handleAssigneeChange} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none">
                                 <option value="">— Не назначен —</option>
                                 {admins.map(a => <option key={a.email} value={String((a as any).id || a.email)}>{a.name}</option>)}
@@ -438,12 +313,12 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                     </div>
                     {/* Participants */}
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1"><Users size={12} className="inline mr-1" />Участники</label>
+                        <label className="block text-xs font-semibold text-ink-60 mb-1"><Users size={12} className="inline mr-1" />Участники</label>
                         <div className="flex flex-wrap gap-1.5 mb-2">
                             {participants.map(p => (
-                                <span key={p.id} className="inline-flex items-center gap-1 text-xs font-medium bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
+                                <span key={p.id} className="inline-flex items-center gap-1 text-xs font-medium bg-sunken text-ink-80 px-2 py-1 rounded-lg">
                                     {p.name}
-                                    <button onClick={() => setParticipants(prev => prev.filter(x => x.id !== p.id))} className="text-blue-400 hover:text-red-500"><X size={12} /></button>
+                                    <button onClick={() => setParticipants(prev => prev.filter(x => x.id !== p.id))} className="text-ink-60 hover:text-[color:var(--status-danger-fg)]"><X size={12} /></button>
                                 </span>
                             ))}
                         </div>
@@ -468,37 +343,37 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                     {/* Date range */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Начало</label>
+                            <label className="block text-xs font-semibold text-ink-60 mb-1">Начало</label>
                             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none" />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1">Дедлайн</label>
+                            <label className="block text-xs font-semibold text-ink-60 mb-1">Дедлайн</label>
                             <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-unbox-green outline-none" />
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-2"><Tag size={12} className="inline mr-1" />Метки</label>
+                        <label className="block text-xs font-semibold text-ink-60 mb-2"><Tag size={12} className="inline mr-1" />Метки</label>
                         <div className="flex flex-wrap gap-2">
                             {LABEL_OPTIONS.map(opt => (
                                 <button key={opt.value} onClick={() => toggleLabel(opt.value)} className={clsx(
                                     'text-xs font-medium px-2.5 py-1 rounded-lg border transition-all',
-                                    labels.includes(opt.value) ? opt.color + ' ring-2 ring-offset-1 ring-gray-300' : 'bg-gray-50 text-gray-400 border-gray-100 hover:bg-gray-100'
-                                )}>{opt.label}</button>
+                                    labels.includes(opt.value) ? 'bg-accent-soft text-accent-ink border-accent' : 'bg-gray-50 text-ink-60 border-gray-100 hover:bg-gray-100'
+                                )} aria-pressed={labels.includes(opt.value)}>{opt.label}</button>
                             ))}
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-2"><CheckSquare size={12} className="inline mr-1" />Чеклист</label>
+                        <label className="block text-xs font-semibold text-ink-60 mb-2"><CheckSquare size={12} className="inline mr-1" />Чеклист</label>
                         <div className="space-y-1.5">
                             {checklist.map(item => (
                                 <div key={item.id} className="flex items-center gap-2 group/check">
                                     <button onClick={() => toggleCheckItem(item.id)} className="flex-shrink-0">
-                                        {item.done ? <CheckSquare size={16} className="text-green-500" /> : <Square size={16} className="text-gray-300" />}
+                                        {item.done ? <CheckSquare size={16} className="text-[color:var(--status-ok-fg)]" /> : <Square size={16} className="text-ink-60" />}
                                     </button>
-                                    <span className={clsx('text-sm flex-1', item.done && 'line-through text-gray-400')}>{item.text}</span>
-                                    <button onClick={() => removeCheckItem(item.id)} className="text-gray-200 hover:text-red-400 opacity-0 group-hover/check:opacity-100 transition-opacity"><X size={14} /></button>
+                                    <span className={clsx('text-sm flex-1', item.done && 'line-through text-ink-60')}>{item.text}</span>
+                                    <button onClick={() => removeCheckItem(item.id)} className="text-ink-60 hover:text-[color:var(--status-danger-fg)] opacity-0 group-hover/check:opacity-100 transition-opacity"><X size={14} /></button>
                                 </div>
                             ))}
                         </div>
@@ -510,17 +385,17 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                     </div>
                     {/* Attachments */}
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-2"><Paperclip size={12} className="inline mr-1" />Вложения</label>
+                        <label className="block text-xs font-semibold text-ink-60 mb-2"><Paperclip size={12} className="inline mr-1" />Вложения</label>
                         {attachments.length > 0 && (
                             <div className="space-y-1.5 mb-3">
                                 {attachments.map(att => (
                                     <div key={att.id} className="flex items-center gap-2 group/att bg-gray-50 rounded-lg px-3 py-2">
-                                        {att.type === 'link' ? <Link2 size={14} className="text-blue-500 flex-shrink-0" /> : <FileText size={14} className="text-gray-400 flex-shrink-0" />}
+                                        {att.type === 'link' ? <Link2 size={14} className="text-ink-60 flex-shrink-0" /> : <FileText size={14} className="text-ink-60 flex-shrink-0" />}
                                         <a href={att.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-                                            className="flex-1 text-sm text-blue-600 hover:underline truncate">{att.name}</a>
-                                        {att.size != null && <span className="text-[10px] text-gray-400 flex-shrink-0">{(att.size / 1024).toFixed(0)} KB</span>}
+                                            className="flex-1 text-sm text-ink-80 hover:underline truncate">{att.name}</a>
+                                        {att.size != null && <span className="text-caption text-ink-60 flex-shrink-0">{(att.size / 1024).toFixed(0)} KB</span>}
                                         <button onClick={() => removeAttachment(att.id)}
-                                            className="text-gray-200 hover:text-red-400 opacity-0 group-hover/att:opacity-100 transition-opacity flex-shrink-0"><X size={14} /></button>
+                                            className="text-ink-60 hover:text-[color:var(--status-danger-fg)] opacity-0 group-hover/att:opacity-100 transition-opacity flex-shrink-0"><X size={14} /></button>
                                     </div>
                                 ))}
                             </div>
@@ -533,35 +408,35 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                             <input value={newLinkName} onChange={e => setNewLinkName(e.target.value)} placeholder="Название (необяз.)"
                                 onKeyDown={e => { if (e.key === 'Enter') addLink(); }}
                                 className="w-36 px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none" />
-                            <button onClick={addLink} disabled={!newLinkUrl.trim()} className="px-3 py-1.5 text-sm font-medium text-blue-500 hover:bg-blue-50 rounded-lg disabled:opacity-30"><Link2 size={14} /></button>
+                            <button onClick={addLink} disabled={!newLinkUrl.trim()} className="px-3 py-1.5 text-sm font-medium text-ink-60 hover:bg-ink-05 rounded-lg disabled:opacity-30"><Link2 size={14} /></button>
                         </div>
                         {/* Upload file */}
                         <label className={clsx(
                             'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg cursor-pointer transition-colors',
-                            uploadingFile ? 'text-gray-400 bg-gray-50' : 'text-gray-500 hover:bg-gray-100 border border-dashed border-gray-300'
+                            uploadingFile ? 'text-ink-60 bg-gray-50' : 'text-ink-60 hover:bg-gray-100 border border-dashed border-gray-300'
                         )}>
-                            {uploadingFile ? <><Loader2 size={14} className="animate-spin" /> Загрузка...</> : <><Upload size={14} /> Загрузить файл</>}
+                            {uploadingFile ? <><Loader2 size={14} className="animate-spin" /> Загружаем…</> : <><Upload size={14} /> Загрузить файл</>}
                             <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploadingFile} />
                         </label>
                     </div>
                     {task.id && (
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-2"><MessageSquare size={12} className="inline mr-1" />Комментарии</label>
+                            <label className="block text-xs font-semibold text-ink-60 mb-2"><MessageSquare size={12} className="inline mr-1" />Комментарии</label>
                             <div className="flex gap-2 mb-3">
                                 <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddComment(); }}
                                     placeholder="Написать комментарий..." className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none" />
                                 <button onClick={handleAddComment} className="px-3 py-2 text-unbox-green hover:bg-unbox-light rounded-lg"><Send size={14} /></button>
                             </div>
-                            {loadingComments ? <div className="text-sm text-gray-400 text-center py-3">Загрузка...</div>
-                            : comments.length === 0 ? <div className="text-sm text-gray-300 text-center py-3 italic">Нет комментариев</div>
+                            {loadingComments ? <SkeletonList count={2} label="Загружаем комментарии" cardHeight={56} />
+                            : comments.length === 0 ? <div className="text-sm text-ink-60 text-center py-3">Комментариев пока нет</div>
                             : <div className="space-y-2.5 max-h-48 overflow-y-auto">
                                 {comments.map(c => (
                                     <div key={c.id} className="bg-gray-50 rounded-lg p-3">
                                         <div className="flex items-center justify-between mb-1">
                                             <span className="text-xs font-bold text-unbox-dark">{c.authorName}</span>
-                                            <span className="text-[10px] text-gray-400">{format(new Date(c.createdAt), 'd MMM, HH:mm', { locale: ru })}</span>
+                                            <span className="text-caption text-ink-60">{formatDayMonth(c.createdAt)}, {formatTime(c.createdAt)}</span>
                                         </div>
-                                        <p className="text-sm text-gray-600">{c.text}</p>
+                                        <p className="text-sm text-ink-80">{c.text}</p>
                                     </div>
                                 ))}
                             </div>}
@@ -569,7 +444,7 @@ function TaskEditModal({ task, admins, onClose, onSave, onDelete }: {
                     )}
                 </div>
                 <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 sticky bottom-0 bg-white rounded-b-2xl">
-                    {onDelete ? <button onClick={onDelete} className="text-sm text-red-400 hover:text-red-600 flex items-center gap-1 py-2 -my-2"><Trash2 size={14} />Удалить</button> : <div />}
+                    {onDelete ? <button onClick={onDelete} className="text-sm text-[color:var(--status-danger-fg)] hover:text-[color:var(--status-danger-fg)] flex items-center gap-1 py-2 -my-2"><Trash2 size={14} />Удалить</button> : <div />}
                     <div className="flex gap-2">
                         <Button variant="outline" onClick={onClose}>Отмена</Button>
                         <Button onClick={handleSave} disabled={saving}>{saving ? <><Loader2 size={14} className="animate-spin mr-1" />Сохранение...</> : isNew ? 'Создать' : 'Сохранить'}</Button>
@@ -618,7 +493,7 @@ const GH_COLUMNS: { id: TaskStatus; num: string; title: string }[] = [
 ];
 
 function GridHouseAdminTasksBoard(p: GHTBProps) {
-    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
     useEffect(() => {
         const h = () => setNarrow(window.innerWidth < 768);
@@ -645,8 +520,8 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                         onClick={() => p.setEditingTask(p.emptyNewTask)}
                         style={{
                             fontFamily: GH_MONO,
-                            fontSize: narrow ? 9 : 11,
-                            letterSpacing: '0.16em',
+                            fontSize: 12,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             background: GH.ink,
                             color: GH.paper,
@@ -695,7 +570,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                         <select
                             value={p.filterPriority}
                             onChange={e => p.setFilterPriority(e.target.value)}
-                            style={{ flex: narrow ? 1 : undefined, minWidth: 0, fontFamily: GH_MONO, fontSize: narrow ? 10 : 11, letterSpacing: '0.12em', textTransform: 'uppercase', background: GH.paper, color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 10px', outline: 'none', cursor: 'pointer' }}
+                            style={{ flex: narrow ? 1 : undefined, minWidth: 0, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', background: GH.paper, color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 10px', outline: 'none', cursor: 'pointer' }}
                         >
                             <option value="">Все приоритеты</option>
                             <option value="HIGH">Срочно</option>
@@ -705,7 +580,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                         <select
                             value={p.filterAssignee}
                             onChange={e => p.setFilterAssignee(e.target.value)}
-                            style={{ flex: narrow ? 1 : undefined, minWidth: 0, fontFamily: GH_MONO, fontSize: narrow ? 10 : 11, letterSpacing: '0.12em', textTransform: 'uppercase', background: GH.paper, color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 10px', outline: 'none', cursor: 'pointer' }}
+                            style={{ flex: narrow ? 1 : undefined, minWidth: 0, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', background: GH.paper, color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 10px', outline: 'none', cursor: 'pointer' }}
                         >
                             <option value="">Все ответственные</option>
                             {p.admins.map((a: any) => (
@@ -715,7 +590,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                         {p.hasFilters && (
                             <button
                                 onClick={() => { p.setSearchQuery(''); p.setFilterPriority(''); p.setFilterAssignee(''); }}
-                                style={{ fontFamily: GH_MONO, fontSize: narrow ? 10 : 11, letterSpacing: '0.12em', textTransform: 'uppercase', background: 'transparent', color: GH.danger, border: `1px solid ${GH.danger}`, padding: '8px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', background: 'transparent', color: GH.danger, border: `1px solid ${GH.danger}`, padding: '8px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                             >
                                 <X size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />
                                 Сброс
@@ -742,9 +617,9 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                         background: active ? GH.ink : 'transparent',
                                         color: active ? GH.paper : GH.ink,
                                         fontFamily: GH_MONO,
-                                        fontSize: 9,
+                                        fontSize: 12,
                                         fontWeight: 600,
-                                        letterSpacing: '0.12em',
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         cursor: 'pointer',
                                         display: 'flex',
@@ -763,8 +638,8 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
 
                 {/* BOARD */}
                 {p.loading ? (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Loader2 className="animate-spin" size={24} color={GH.ink60} />
+                    <div style={{ flex: 1 }}>
+                        <SkeletonList count={4} label="Загружаем задачи" />
                     </div>
                 ) : (
                     <DndContext sensors={p.sensors} collisionDetection={p.collisionDetection} onDragStart={p.handleDragStart} onDragEnd={p.handleDragEnd}>
@@ -783,7 +658,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                             {/* Column head */}
                                             <div style={{ padding: '16px 16px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <div>
-                                                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                                                         {col.num}
                                                     </div>
                                                     <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', marginTop: 2 }}>
@@ -817,13 +692,13 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
                                                         <button
                                                             onClick={() => p.setQuickAddCol(null)}
-                                                            style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, background: 'transparent', border: 'none', padding: '4px 10px', cursor: 'pointer' }}
+                                                            style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, background: 'transparent', border: 'none', padding: '4px 10px', cursor: 'pointer' }}
                                                         >
                                                             Отмена
                                                         </button>
                                                         <button
                                                             onClick={() => p.handleQuickAdd(col.id)}
-                                                            style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.paper, background: GH.ink, border: 'none', padding: '4px 12px', cursor: 'pointer' }}
+                                                            style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.paper, background: GH.ink, border: 'none', padding: '4px 12px', cursor: 'pointer' }}
                                                         >
                                                             Создать
                                                         </button>
@@ -844,7 +719,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                                         />
                                                     ))}
                                                     {colTasks.length === 0 && (
-                                                        <div style={{ padding: '40px 16px', border: `1px dashed ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: GH.ink60, textAlign: 'center' }}>
+                                                        <div style={{ padding: '40px 16px', border: `1px dashed ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, textAlign: 'center' }}>
                                                             Пусто
                                                         </div>
                                                     )}
@@ -854,7 +729,7 @@ function GridHouseAdminTasksBoard(p: GHTBProps) {
                                             {col.id === 'DONE' && p.archivedCount > 0 && (
                                                 <button
                                                     onClick={() => p.setShowArchive(!p.showArchive)}
-                                                    style={{ margin: 12, padding: '10px 12px', border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                                                    style={{ margin: 12, padding: '10px 12px', border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                                                 >
                                                     <Archive size={12} />
                                                     {p.showArchive ? 'Скрыть архив' : `Архив · ${p.archivedCount}`}
@@ -952,11 +827,11 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
             {/* Top row: index + priority + move buttons */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                         №{String(index + 1).padStart(3, '0')}
                     </span>
                     <span style={{
-                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
+                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700,
                         color: priColor, border: `1px solid ${priColor}`, padding: '2px 6px',
                     }}>
                         {priLabel}
@@ -965,7 +840,7 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
                         const opt = LABEL_OPTIONS.find(o => o.value === l);
                         return opt ? (
                             <span key={l} style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 color: GH.ink60, border: `1px solid ${GH.ink10}`, padding: '2px 6px',
                             }}>
                                 {opt.label}
@@ -980,12 +855,12 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
                             onClick={e => { e.stopPropagation(); onMove(col.id); }}
                             title={`→ ${col.title}`}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', fontWeight: 700,
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', fontWeight: 700,
                                 color: GH.ink60, background: 'transparent', border: `1px solid ${GH.ink10}`,
                                 padding: '3px 6px', cursor: 'pointer',
                             }}
                         >
-                            {col.id === 'TODO' ? 'TODO' : col.id === 'IN_PROGRESS' ? 'WIP' : 'DONE'}
+                            {col.id === 'TODO' ? 'Отложить' : col.id === 'IN_PROGRESS' ? 'В работу' : 'Готово'}
                         </button>
                     ))}
                     <div {...dragListeners} style={{ padding: 3, cursor: 'grab', color: GH.ink60 }} onClick={e => e.stopPropagation()}>
@@ -1037,7 +912,7 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
             {clTotal > 0 && (
                 <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <CheckSquare size={12} color={clDone === clTotal ? GH.ink : GH.ink60} />
-                    <span style={{ fontFamily: GH_MONO, fontSize: 10, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>
                         {clDone}/{clTotal}
                     </span>
                     <div style={{ flex: 1, height: 2, background: GH.ink10, position: 'relative' }}>
@@ -1047,7 +922,7 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
             )}
 
             {(task.attachments?.length > 0) && (
-                <div style={{ marginTop: 8, fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ marginTop: 8, fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Paperclip size={11} />
                     <span>{task.attachments.length} вложений</span>
                 </div>
@@ -1057,13 +932,13 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${GH.ink10}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     {task.assigneeName && (
-                        <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                             <User size={10} />
                             {task.assigneeName}
                         </span>
                     )}
                     {(task.participants?.length > 0) && (
-                        <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', color: GH.ink60, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                             <Users size={10} />+{task.participants.length}
                         </span>
                     )}
@@ -1076,9 +951,9 @@ function GHTaskCardView({ task, index, onEdit, onDelete, onMove, dragListeners, 
                         else if (isToday(d)) color = GH.ink;
                     }
                     return (
-                        <span style={{ fontFamily: GH_MONO, fontSize: 10, fontVariantNumeric: 'tabular-nums', color, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                             <Clock size={10} />
-                            {format(d, 'd MMM · HH:mm', { locale: ru })}
+                            {formatDayMonth(d)} · {formatTime(d)}
                         </span>
                     );
                 })()}

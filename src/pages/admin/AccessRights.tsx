@@ -18,11 +18,11 @@ function roleLabel(role?: string) {
 
 function roleBadgeClass(role?: string) {
     switch (role) {
-        case 'owner':        return 'bg-purple-100 text-purple-700';
-        case 'senior_admin': return 'bg-blue-100 text-blue-700';
-        case 'admin':        return 'bg-green-100 text-green-700';
-        case 'specialist':   return 'bg-amber-100 text-amber-700';
-        default:             return 'bg-gray-100 text-gray-600';
+        case 'owner':        return 'bg-sunken text-ink-80';
+        case 'senior_admin': return 'bg-sunken text-ink-80';
+        case 'admin':        return 'bg-sunken text-ink-80';
+        case 'specialist':   return 'bg-sunken text-ink-80';
+        default:             return 'bg-gray-100 text-ink-80';
     }
 }
 
@@ -89,9 +89,9 @@ export function AdminAccessRights() {
 const gharHairline = `1px solid ${GH.ink10}`;
 const gharMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -176,9 +176,9 @@ function GridHouseAccessRights({
                                 <span
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 10,
+                                        fontSize: 12,
                                         fontWeight: 600,
-                                        letterSpacing: '0.14em',
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         padding: '5px 9px',
                                         color: GH.paper,
@@ -286,7 +286,7 @@ function GridHouseAccessRights({
                     >
                         Выберите пользователя.
                     </h2>
-                    <div style={{ ...gharMono, marginTop: 12, color: GH.ink30 }}>
+                    <div style={{ ...gharMono, marginTop: 12, color: GH.ink60 }}>
                         Управление разрешениями откроется после выбора
                     </div>
                 </div>
@@ -294,7 +294,7 @@ function GridHouseAccessRights({
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 16 }}>
-                <p style={{ ...gharMono, color: GH.ink30, margin: 0 }}>UNBOX ADMIN · 2026</p>
+                <p style={{ ...gharMono, color: GH.ink60, margin: 0 }}>Unbox · админка · 2026</p>
             </div>
         </div>
     );
@@ -330,7 +330,7 @@ function GHARUserRow({
                 textAlign: 'left',
             }}
         >
-            <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.1em' }}>
+            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.06em' }}>
                 {String(index + 1).padStart(3, '0')}
             </div>
             <div>
@@ -344,9 +344,9 @@ function GHARUserRow({
             <span
                 style={{
                     fontFamily: GH_MONO,
-                    fontSize: 9,
+                    fontSize: 12,
                     fontWeight: 600,
-                    letterSpacing: '0.14em',
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                     padding: '4px 7px',
                     color: GH.ink,

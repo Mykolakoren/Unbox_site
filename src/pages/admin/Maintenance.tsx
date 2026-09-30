@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { formatDateLabel } from '../../utils/format';
 
 interface MaintenanceBlock {
     id: string;
@@ -25,9 +30,12 @@ export function AdminMaintenance() {
     const [blocks, setBlocks] = useState<MaintenanceBlock[]>([]);
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const { confirm } = useConfirmDialog();
 
     const load = async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const today = new Date().toISOString().slice(0, 10);
             const { data } = await api.get<MaintenanceBlock[]>('/maintenance-blocks', {
@@ -37,6 +45,7 @@ export function AdminMaintenance() {
         } catch (e: unknown) {
             const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
             toast.error(msg || 'Не удалось загрузить блокировки');
+            setFailed(true);
         } finally {
             setLoading(false);
         }
@@ -44,8 +53,15 @@ export function AdminMaintenance() {
 
     useEffect(() => { load(); }, []);
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Снять блокировку?')) return;
+    const handleDelete = async (b: MaintenanceBlock) => {
+        const ok = await confirm({
+            title: 'Снять блокировку?',
+            body: `${formatDateLabel(b.date)}, ${b.startTime} — слот снова станет свободным для бронирования.`,
+            confirmLabel: 'Снять блокировку',
+            cancelLabel: 'Оставить',
+        });
+        if (!ok) return;
+        const id = b.id;
         try {
             await api.delete(`/maintenance-blocks/${id}`);
             toast.success('Блокировка снята');
@@ -76,17 +92,21 @@ export function AdminMaintenance() {
                 слот занят, но не считается в финансах.
             </div>
 
+            {/* Загрузка ≠ ошибка ≠ пусто (wave 1): раньше при сбое загрузки
+                показывалось «Активных блокировок нет». */}
             {loading ? (
-                <div style={{ color: GH.ink60, padding: 32 }}>Загрузка…</div>
+                <SkeletonList count={3} label="Загружаем блокировки" />
+            ) : failed ? (
+                <ErrorBar message="Не удалось загрузить блокировки" onRetry={load} />
             ) : sortedResources.length === 0 ? (
                 <div style={emptyState}>
-                    <AlertCircle size={20} color={GH.ink60} />
-                    <div>
-                        <div style={{ fontWeight: 700, marginBottom: 4 }}>Активных блокировок нет</div>
-                        <div style={{ fontSize: 13, color: GH.ink60 }}>
-                            Нажмите «Закрыть кабинет», чтобы зарезервировать слот на обслуживание.
-                        </div>
-                    </div>
+                    <EmptyState
+                        icon={<Wrench size={24} />}
+                        title="Активных блокировок нет"
+                        hint="Нажмите «Закрыть кабинет», чтобы зарезервировать слот на обслуживание."
+                        action={{ label: 'Закрыть кабинет', onClick: () => setCreating(true) }}
+                        compact
+                    />
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -109,7 +129,7 @@ export function AdminMaintenance() {
                                             key={b.id}
                                             style={{
                                                 display: 'grid',
-                                                gridTemplateColumns: '120px 90px 1fr 32px',
+                                                gridTemplateColumns: '140px 100px 1fr 36px',
                                                 gap: 12,
                                                 padding: '10px 18px',
                                                 borderBottom: `1px solid ${GH.ink8}`,
@@ -118,15 +138,16 @@ export function AdminMaintenance() {
                                             }}
                                         >
                                             <span style={{ fontFamily: GH_MONO, fontSize: 12 }}>
-                                                {fmtDate(b.date)}
+                                                {formatDateLabel(b.date)}
                                             </span>
                                             <span style={{ fontFamily: GH_MONO, fontSize: 12 }}>
-                                                {b.startTime}, {b.duration}м
+                                                {b.startTime}, {b.duration} мин
                                             </span>
                                             <span style={{ color: GH.ink60 }}>{b.reason || '—'}</span>
                                             <button
-                                                onClick={() => handleDelete(b.id)}
-                                                title="Снять"
+                                                onClick={() => handleDelete(b)}
+                                                title="Снять блокировку"
+                                                aria-label="Снять блокировку"
                                                 style={iconBtn}
                                             >
                                                 <Trash2 size={14} />
@@ -247,15 +268,15 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
                                     onClick={() => toggleWeekday(w.idx)}
                                     style={{
                                         ...weekdayBtn,
-                                        background: weekdays.includes(w.idx) ? GH.ink : '#fff',
-                                        color: weekdays.includes(w.idx) ? '#fff' : GH.ink,
+                                        background: weekdays.includes(w.idx) ? GH.ink : GH.card,
+                                        color: weekdays.includes(w.idx) ? GH.paper : GH.ink,
                                     }}
                                 >
                                     {w.label}
                                 </button>
                             ))}
                         </div>
-                        <div style={{ fontSize: 11, color: GH.ink60, marginTop: 6 }}>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6 }}>
                             Пусто = каждый день в диапазоне.
                         </div>
                     </Field>
@@ -285,7 +306,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: GH.ink60, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: GH.ink60, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>
                 {label}
             </div>
             {children}
@@ -304,53 +325,43 @@ function groupByResource(blocks: MaintenanceBlock[]): Record<string, Maintenance
     return out;
 }
 
-function fmtDate(iso: string): string {
-    try {
-        const d = new Date(iso);
-        return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', weekday: 'short' });
-    } catch {
-        return iso;
-    }
-}
-
 const subtitleStyle: React.CSSProperties = { color: GH.ink60, fontSize: 14 };
 
 const primaryBtn: React.CSSProperties = {
-    background: GH.ink, color: '#fff',
+    background: GH.ink, color: GH.paper,
     border: 'none', borderRadius: 8, padding: '10px 14px',
     fontWeight: 700, fontSize: 14, fontFamily: 'inherit', cursor: 'pointer',
     display: 'inline-flex', alignItems: 'center', gap: 6,
 };
 
 const secondaryBtn: React.CSSProperties = {
-    background: '#fff', color: GH.ink,
+    background: GH.card, color: GH.ink,
     border: `1px solid ${GH.ink10}`, borderRadius: 8, padding: '10px 14px',
     fontWeight: 600, fontSize: 14, fontFamily: 'inherit', cursor: 'pointer',
 };
 
 const iconBtn: React.CSSProperties = {
     background: 'none', border: 'none', cursor: 'pointer',
-    padding: 4, color: GH.ink60, display: 'grid', placeItems: 'center',
+    padding: 8, color: GH.ink60, display: 'grid', placeItems: 'center',
     borderRadius: 6,
 };
 
 const cardStyle: React.CSSProperties = {
-    background: '#fff', border: `1px solid ${GH.ink10}`, borderRadius: 12,
+    background: GH.card, border: `1px solid ${GH.ink10}`, borderRadius: 0,
     overflow: 'hidden',
 };
 
 const emptyState: React.CSSProperties = {
-    background: '#fff', border: `1px solid ${GH.ink10}`, borderRadius: 12,
-    padding: 24, display: 'flex', alignItems: 'center', gap: 12,
+    background: GH.card, border: `1px solid ${GH.ink10}`, borderRadius: 0,
 };
 
 const overlayStyle: React.CSSProperties = {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+    position: 'fixed', inset: 0, background: 'rgba(15,15,16,0.4)',
     display: 'grid', placeItems: 'center', zIndex: 1000, padding: 16,
 };
 
 const modalStyle: React.CSSProperties = {
-    background: '#fff', borderRadius: 14, padding: 24,
+    background: GH.card, borderRadius: 0, padding: 24,
     width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto',
     fontFamily: GH_SANS,
 };

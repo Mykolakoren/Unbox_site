@@ -3,11 +3,10 @@ import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
 import { LegacyButton as Button } from '../../components/ui/LegacyButton';
 import { Card } from '../../components/ui/Card';
-import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet } from 'lucide-react';
+import { Mail, Phone, CreditCard, Shield, ArrowLeft, Plus, History, RotateCcw, ChevronDown, UserCheck, UserCircle, X, Loader2, PackagePlus, KeyRound, CalendarClock, CheckCircle2, XCircle, Clock, Pencil, Check, Wallet, AlertTriangle } from 'lucide-react';
 import { BalanceCorrectionModal } from '../../components/admin/BalanceCorrectionModal';
 import { hasPermission } from '../../utils/permissions';
 import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { safeFormat } from '../../utils/dateUtils';
 import { subscriptionBadge, subscriptionLifecycle } from '../../utils/subscription';
 import { bookingsApi } from '../../api/bookings';
@@ -39,9 +38,17 @@ import { MergeAccountsModal } from '../../components/admin/modals/MergeAccountsM
 import { api } from '../../api/client';
 import { cashboxApi } from '../../api/cashbox';
 import { crmApi, type CrmAccessStatus } from '../../api/crm';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button as UiButton } from '../../components/ui/Button';
+import { Field, Input, type InputKind } from '../../components/ui/Field';
+import { statusLabel } from '../../design/statuses';
+import { formatGel, formatDayMonth, formatTime } from '../../utils/format';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 const ghudMono: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
 };
 
 /** Заголовок блока абонемента под его реальный статус. */
@@ -81,6 +88,10 @@ export function AdminUserDetails() {
     // (аудит 29.09, G7-04). Хуки — до раннего return «Загрузка…».
     const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
     const [isMergeOpen, setIsMergeOpen] = useState(false);
+    // Wave 1: подтверждения — общее окно с кнопками-действиями; правка телефона,
+    // Telegram, email и причины архивации — шторка с полем вместо prompt().
+    const { confirm } = useConfirmDialog();
+    const [editField, setEditField] = useState<null | 'phone' | 'telegram' | 'email' | 'archive'>(null);
     const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
     const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
     const [adminPickerType, setAdminPickerType] = useState<'responsible' | 'attracted' | null>(null);
@@ -181,9 +192,15 @@ export function AdminUserDetails() {
         // the false-negative "Клиент не найден". Distinguishes "still
         // loading" from "really doesn't exist".
         if (users.length === 0) {
-            return <div className="p-8 text-center text-unbox-grey">Загрузка…</div>;
+            return <div className="p-8"><SkeletonList count={3} label="Загружаем карточку клиента" /></div>;
         }
-        return <div className="p-8 text-center">Клиент не найден</div>;
+        return (
+            <EmptyState
+                title="Клиент не найден"
+                hint="Возможно, email изменился или аккаунт склеили с другим. Найдите клиента в списке."
+                action={{ label: 'К списку клиентов', onClick: () => navigate(window.location.pathname.startsWith('/m/admin') ? '/m/admin/users' : '/admin/users') }}
+            />
+        );
     }
 
     const handleCrmApprove = async (days: number) => {
@@ -317,18 +334,30 @@ export function AdminUserDetails() {
         }
     };
 
-    const handleCancelBooking = (id: string) => {
-        if (confirm('Вы уверены, что хотите отменить это бронирование?')) {
-            cancelBooking(id);
-            toast.success('Бронирование отменено');
-        }
+    const handleCancelBooking = async (id: string) => {
+        const ok = await confirm({
+            title: 'Отменить бронь?',
+            body: 'Клиент увидит бронь в отменённых.',
+            confirmLabel: 'Отменить бронь',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        cancelBooking(id);
+        toast.success('Бронирование отменено');
     };
 
     // «На абонемент» прямо из карточки клиента: клиент мог забронировать в момент,
     // когда часы кончились (бронь ушла за деньги), а абонемент пополнили следом.
     // Перевод вернёт деньги на баланс и спишет час. Кейс Валерии 13.08.
     const handleToSubscription = async (bookingId: string) => {
-        if (!confirm('Перевести бронь на абонемент? Деньги вернутся на баланс, спишется час с абонемента.')) return;
+        const ok = await confirm({
+            title: 'Списать с абонемента?',
+            body: 'Деньги за эту бронь вернутся на баланс клиента, а часы спишутся с его абонемента.',
+            confirmLabel: 'Списать с абонемента',
+            cancelLabel: 'Оставить как есть',
+        });
+        if (!ok) return;
         setConvertingId(bookingId);
         try {
             await bookingsApi.convertToSubscription(bookingId);
@@ -395,7 +424,7 @@ export function AdminUserDetails() {
     const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
         new: { label: 'Новый', color: 'text-unbox-green', bg: 'bg-unbox-light' },
         active: { label: 'Активный', color: 'text-unbox-green', bg: 'bg-white border border-unbox-green' },
-        sleeping: { label: 'Спящий', color: 'text-unbox-grey', bg: 'bg-unbox-light/30' },
+        sleeping: { label: 'Спящий', color: 'text-ink-60', bg: 'bg-unbox-light/30' },
         vip: { label: 'VIP', color: 'text-white', bg: 'bg-unbox-dark' }, // Special status
         partner: { label: 'Партнёр', color: 'text-unbox-dark', bg: 'bg-unbox-light' },
         bad_client: { label: 'Проблемный', color: 'text-unbox-dark', bg: 'bg-unbox-light' },
@@ -438,6 +467,18 @@ export function AdminUserDetails() {
                 onClose={() => setIsResetPasswordOpen(false)}
                 user={{ id: user.id, email: user.email, name: user.name }}
             />
+            <UserFieldSheets
+                user={user}
+                field={editField}
+                onClose={() => setEditField(null)}
+                updateUserById={updateUserById}
+                afterEmailChange={async (next) => {
+                    // Сначала свежий список, потом переход — иначе новая карточка
+                    // ищет клиента по новому email в старом списке («не найден»).
+                    await fetchUsers();
+                    navigate(`/admin/users/${encodeURIComponent(next)}`, { replace: true });
+                }}
+            />
             <MergeAccountsModal
                 open={isMergeOpen}
                 onClose={() => setIsMergeOpen(false)}
@@ -455,11 +496,12 @@ export function AdminUserDetails() {
                 <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 28 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
                         <button onClick={() => navigate(window.location.pathname.startsWith('/m/admin') ? '/m/admin/users' : '/admin/users')}
-                            style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30, marginTop: 4 }}>
+                            aria-label="Назад к списку клиентов"
+                            style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, marginTop: 4 }}>
                             <ArrowLeft size={18} />
                         </button>
                         <div style={{ flex: 1 }}>
-                            <p style={{ ...ghudMono, color: GH.ink30, marginBottom: 6 }}>CLIENT PROFILE</p>
+                            <p style={{ ...ghudMono, color: GH.ink60, marginBottom: 6 }}>Карточка клиента</p>
                             {isEditingName ? (
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                                     <input
@@ -523,23 +565,21 @@ export function AdminUserDetails() {
                                     <button
                                         onClick={() => { setEditName(user.name || ''); setIsEditingName(true); }}
                                         title="Изменить отображаемое имя (для расписания)"
-                                        style={{ padding: 4, background: 'transparent', border: 'none', color: GH.ink30, cursor: 'pointer', display: 'inline-flex' }}
+                                        style={{ padding: 4, background: 'transparent', border: 'none', color: GH.ink60, cursor: 'pointer', display: 'inline-flex' }}
                                     >
                                         <Pencil size={14} />
                                     </button>
                                 </h1>
                             )}
                             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                                <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px', background: GH.ink5, color: GH.ink60 }}>
-                                    {(user.role || 'user').toUpperCase()}
+                                <span style={{ ...ghudMono, fontSize: 12, padding: '3px 8px', background: GH.ink5, color: GH.ink60 }}>
+                                    {ROLE_LABEL[user.role || 'user'] || 'Клиент'}
                                 </span>
-                                <span style={{ ...ghudMono, fontSize: 9, padding: '3px 8px',
-                                    background: clientStatus === 'active' ? 'rgba(71,109,107,0.12)' : clientStatus === 'vip' ? 'rgba(147,51,234,0.12)' : GH.ink5,
-                                    color: clientStatus === 'active' ? GH.accent : clientStatus === 'vip' ? '#9333ea' : GH.ink30,
-                                }}>
-                                    {currentStatusConfig.label.toUpperCase()}
+                                {/* Этап клиента — не статус брони, поэтому без цвета статуса. */}
+                                <span style={{ ...ghudMono, fontSize: 12, padding: '3px 8px', background: GH.ink5, color: GH.ink80 }}>
+                                    {currentStatusConfig.label}
                                 </span>
-                                {user.email && <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>{user.email}</span>}
+                                {user.email && <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{user.email}</span>}
                                 {user.registrationDate && (() => {
                                     // Defensive: after /users/merge the target user may
                                     // carry over a malformed registrationDate from the
@@ -547,7 +587,7 @@ export function AdminUserDetails() {
                                     const formatted = safeFormat(user.registrationDate, 'd.MM.yyyy');
                                     if (!formatted) return null;
                                     return (
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>
                                             с {formatted}
                                         </span>
                                     );
@@ -584,7 +624,7 @@ export function AdminUserDetails() {
                                 padding: '10px 14px', border: 'none', cursor: 'pointer',
                                 fontFamily: GH_SANS, fontSize: 12, fontWeight: 600,
                                 background: 'transparent',
-                                color: activeTab === key ? GH.ink : GH.ink30,
+                                color: activeTab === key ? GH.ink : GH.ink60,
                                 borderBottom: activeTab === key ? `2px solid ${GH.ink}` : '2px solid transparent',
                                 marginBottom: -1, letterSpacing: '0.04em',
                                 whiteSpace: 'nowrap',
@@ -603,7 +643,7 @@ export function AdminUserDetails() {
                     <Card className="p-6">
                         <div className="flex flex-col items-center text-center mb-6">
                             <div className="relative group">
-                                <div className="w-24 h-24 rounded-full overflow-hidden bg-unbox-light/50 flex items-center justify-center text-3xl font-bold text-unbox-grey mb-4 border-2 border-transparent group-hover:border-unbox-light transition-all">
+                                <div className="w-24 h-24 rounded-full overflow-hidden bg-unbox-light/50 flex items-center justify-center text-3xl font-bold text-ink-60 mb-4 border-2 border-transparent group-hover:border-unbox-light transition-all">
                                     {user.avatarUrl ? (
                                         <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
                                     ) : (
@@ -632,40 +672,39 @@ export function AdminUserDetails() {
                             </div>
                             <div className="font-bold text-lg">{user.name}</div>
                             <div className={clsx("text-sm px-2 py-0.5 rounded-full mt-1",
-                                user.level === 'vip' ? 'bg-purple-100 text-purple-700' :
+                                user.level === 'vip' ? 'bg-sunken text-ink-80' :
                                     user.level === 'loyal' ? 'bg-unbox-light text-unbox-dark' :
-                                        'bg-gray-100 text-gray-600'
+                                        'bg-gray-100 text-ink-80'
                             )}>
-                                {user.level === 'vip' ? 'VIP Client' : user.level === 'loyal' ? 'Loyal Client' : 'Basic Client'}
+                                {user.level === 'vip' ? 'VIP' : user.level === 'loyal' ? 'Постоянный' : 'Базовый'}
                             </div>
                         </div>
 
                         <div className="space-y-4">
                             <div className="flex items-center gap-3 text-sm">
-                                <Mail size={16} className="text-unbox-grey" />
+                                <Mail size={16} className="text-ink-60" />
                                 <a href={`mailto:${user.email}`} className="text-unbox-green hover:underline">{user.email}</a>
                             </div>
-                            {/* Phone field — clickable to edit. Mirrors the
-                                Telegram ID editor pattern below: prompt with
-                                current value, save via updateUserById. Empty
-                                string clears the phone. Light validation
-                                (only digits, + and spaces) — серверная
-                                сторона хранит как есть, формата нет. */}
-                            <div className="flex items-center gap-3 text-sm group/phone cursor-pointer" onClick={() => {
-                                const next = prompt('Телефон клиента (например, +995 555 12 34 56):', user.phone || '');
-                                if (next === null) return; // cancel
-                                const trimmed = next.trim();
-                                if (trimmed && !/^[+\d\s()-]+$/.test(trimmed)) {
-                                    toast.error('Только цифры, пробелы и + ()-');
-                                    return;
-                                }
-                                updateUserById(user.email, { phone: trimmed || undefined });
-                            }}>
-                                <Phone size={16} className="text-unbox-grey" />
-                                <span className={user.phone ? 'text-unbox-dark' : 'text-unbox-grey'}>
-                                    {user.phone || 'Не указан'}
-                                </span>
-                                <span className="opacity-0 group-hover/phone:opacity-100 text-xs text-blue-500">Изменить</span>
+                            {/* Телефон. Аудит G7-21: раньше нажатие на номер открывало
+                                prompt() правки, и на телефоне админ вместо звонка случайно
+                                менял номер. Теперь номер — ссылка tel:, правка — кнопкой. */}
+                            <div className="flex items-center gap-3 text-sm">
+                                <Phone size={16} className="text-ink-60" />
+                                {user.phone ? (
+                                    <a href={`tel:${user.phone.replace(/[^+\d]/g, '')}`} className="text-unbox-dark hover:underline">
+                                        {user.phone}
+                                    </a>
+                                ) : (
+                                    <span className="text-ink-60">Не указан</span>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setEditField('phone')}
+                                    className="ml-auto inline-flex items-center gap-1 text-xs text-ink-60 hover:text-ink min-h-[32px] px-1"
+                                    aria-label="Изменить телефон"
+                                >
+                                    <Pencil size={12} aria-hidden="true" /> Изменить
+                                </button>
                             </div>
 
                             {/* Telegram Field — принимает @username ИЛИ числовой
@@ -673,53 +712,24 @@ export function AdminUserDetails() {
                                 (Telegram getChat). Если бот ещё не виделся
                                 с пользователем (нет общего чата) — выдадим
                                 админу понятный текст что нужно сделать. */}
-                            <div className="flex items-center gap-3 text-sm group/tg cursor-pointer" onClick={async () => {
-                                const raw = prompt(
-                                    'Введите @username или числовой Telegram ID:',
-                                    user.telegramId || ''
-                                );
-                                if (raw === null) return;
-                                const trimmed = raw.trim();
-                                if (!trimmed) {
-                                    // Очистить
-                                    updateUserById(user.email, { telegramId: '' });
-                                    return;
-                                }
-                                // Чистый numeric → сохраняем как есть.
-                                if (/^-?\d+$/.test(trimmed)) {
-                                    updateUserById(user.email, { telegramId: trimmed });
-                                    toast.success('Telegram ID сохранён');
-                                    return;
-                                }
-                                // Иначе — @username, пробуем резолвить.
-                                try {
-                                    const resp = await api.post<{ chat_id: string; name?: string | null }>(
-                                        '/telegram/resolve-username',
-                                        { username: trimmed },
-                                    );
-                                    const chatId = resp.data.chat_id;
-                                    updateUserById(user.email, { telegramId: chatId });
-                                    toast.success(
-                                        resp.data.name
-                                            ? `Привязан Telegram: ${resp.data.name} (${chatId})`
-                                            : `Привязан Telegram ID ${chatId}`
-                                    );
-                                } catch (e: any) {
-                                    const msg = e?.response?.data?.detail
-                                        || 'Не удалось распознать @username';
-                                    toast.error(msg, { duration: 8000 });
-                                }
-                            }}>
-                                <div className="text-unbox-grey"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-send"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></div>
-                                <span className={user.telegramId ? 'text-unbox-dark' : 'text-unbox-grey dashed underline'}>
+                            <div className="flex items-center gap-3 text-sm">
+                                <div className="text-ink-60"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-send"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></div>
+                                <span className={user.telegramId ? 'text-unbox-dark' : 'text-ink-60'}>
                                     {user.telegramId || 'Telegram не указан'}
                                 </span>
-                                <span className="opacity-0 group-hover/tg:opacity-100 text-xs text-blue-500">Изменить</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setEditField('telegram')}
+                                    className="ml-auto inline-flex items-center gap-1 text-xs text-ink-60 hover:text-ink min-h-[32px] px-1"
+                                    aria-label="Изменить Telegram"
+                                >
+                                    <Pencil size={12} aria-hidden="true" /> Изменить
+                                </button>
                             </div>
 
                             {/* Profession Field */}
                             <div className="pt-2 border-t border-gray-100">
-                                <div className="text-xs text-gray-500 mb-1">Профессия</div>
+                                <div className="text-xs text-ink-60 mb-1">Профессия</div>
                                 <ProfessionEditor
                                     value={user.profession}
                                     onChange={(val) => updateUserById(user.email, { profession: val })}
@@ -728,7 +738,7 @@ export function AdminUserDetails() {
 
                             {/* Target Audience Field */}
                             <div className="pt-2 border-t border-gray-100">
-                                <div className="text-xs text-gray-500 mb-1">Работает с</div>
+                                <div className="text-xs text-ink-60 mb-1">Работает с</div>
                                 <TargetAudienceEditor
                                     value={user.targetAudience}
                                     onChange={(val) => updateUserById(user.email, { targetAudience: val })}
@@ -738,22 +748,22 @@ export function AdminUserDetails() {
 
                         <div className="border-t border-unbox-light my-4 pt-4 space-y-3">
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-unbox-grey">Первый визит</span>
+                                <span className="text-ink-60">Первый визит</span>
                                 <span className="font-medium text-unbox-dark">
-                                    {safeFormat(firstBookingDate, 'd MMM yyyy', ru, '—')}
+                                    {formatDayMonth(firstBookingDate, { withYear: true })}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-unbox-grey">Последний визит</span>
+                                <span className="text-ink-60">Последний визит</span>
                                 <span className="font-medium text-unbox-dark">
-                                    {safeFormat(lastVisitDate, 'd MMM yyyy', ru, '—')}
+                                    {formatDayMonth(lastVisitDate, { withYear: true })}
                                 </span>
                             </div>
                         </div>
 
                         {/* ── Admin Assignment ── */}
                         <div className="border-t border-unbox-light pt-4 space-y-1">
-                            <div className="text-xs font-semibold text-unbox-grey uppercase tracking-wider mb-3">Назначения</div>
+                            <div className="text-xs font-semibold text-ink-60 uppercase tracking-wider mb-3">Назначения</div>
 
                             {/* Responsible row */}
                             <button
@@ -762,17 +772,17 @@ export function AdminUserDetails() {
                             >
                                 <div className={clsx(
                                     'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
-                                    responsibleAdmin ? 'bg-unbox-green text-white' : 'bg-unbox-light text-unbox-grey'
+                                    responsibleAdmin ? 'bg-unbox-green text-white' : 'bg-unbox-light text-ink-60'
                                 )}>
                                     {responsibleAdmin ? (responsibleAdmin.name?.[0]?.toUpperCase() ?? '?') : <UserCircle size={14} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className="text-[10px] text-unbox-grey">Ответственный</div>
-                                    <div className={clsx('text-sm font-medium truncate', responsibleAdmin ? 'text-unbox-dark' : 'text-gray-500 italic')}>
+                                    <div className="text-caption text-ink-60">Ответственный</div>
+                                    <div className={clsx('text-sm font-medium truncate', responsibleAdmin ? 'text-unbox-dark' : 'text-ink-60 italic')}>
                                         {responsibleAdmin ? responsibleAdmin.name : 'не назначен'}
                                     </div>
                                 </div>
-                                <span className="text-xs text-unbox-grey shrink-0">✎</span>
+                                <Pencil size={12} className="text-ink-60 shrink-0" aria-hidden="true" />
                             </button>
 
                             {/* Attracted row */}
@@ -782,88 +792,52 @@ export function AdminUserDetails() {
                             >
                                 <div className={clsx(
                                     'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
-                                    attractedAdmin ? 'bg-amber-400 text-white' : 'bg-unbox-light text-unbox-grey'
+                                    attractedAdmin ? 'bg-ink-60 text-white' : 'bg-unbox-light text-ink-60'
                                 )}>
                                     {attractedAdmin ? (attractedAdmin.name?.[0]?.toUpperCase() ?? '?') : <UserCircle size={14} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className="text-[10px] text-unbox-grey">Привлёк клиента</div>
-                                    <div className={clsx('text-sm font-medium truncate', attractedAdmin ? 'text-unbox-dark' : 'text-gray-500 italic')}>
+                                    <div className="text-caption text-ink-60">Привлёк клиента</div>
+                                    <div className={clsx('text-sm font-medium truncate', attractedAdmin ? 'text-unbox-dark' : 'text-ink-60 italic')}>
                                         {attractedAdmin ? attractedAdmin.name : 'не указан'}
                                     </div>
                                 </div>
-                                <span className="text-xs text-unbox-grey shrink-0">✎</span>
+                                <Pencil size={12} className="text-ink-60 shrink-0" aria-hidden="true" />
                             </button>
                         </div>
 
                         {/* ── Password Change ── */}
                         {(currentUser?.role === 'owner' || currentUser?.role === 'senior_admin') && (
                             <div className="border-t border-unbox-light pt-4">
-                                <div className="text-xs font-semibold text-unbox-grey uppercase tracking-wider mb-3">Безопасность</div>
+                                <div className="text-xs font-semibold text-ink-60 uppercase tracking-wider mb-3">Безопасность</div>
                                 <button
                                     // Excel #46 — «Сбросить пароль» (админ задаёт новый без старого).
                                     // Аудит 29.09: окно со скрытым полем и показом пароля один раз
                                     // вместо двух prompt() с паролем открытым текстом.
                                     onClick={() => setIsResetPasswordOpen(true)}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
                                 >
-                                    <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                                    <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
                                         <Shield size={14} />
                                     </div>
                                     <div className="flex-1">
                                         <div className="text-sm font-medium text-unbox-dark">Сбросить пароль</div>
-                                        <div className="text-[10px] text-unbox-grey">Админ-override без старого пароля. Записывается в журнал.</div>
+                                        <div className="text-caption text-ink-60">Админ-override без старого пароля. Записывается в журнал.</div>
                                     </div>
                                 </button>
 
                                 {/* Change email (Excel #47) — senior_admin/owner only */}
                                 {(currentUser?.role === 'senior_admin' || currentUser?.role === 'owner') && (
                                     <button
-                                        onClick={async () => {
-                                            const next = prompt(
-                                                `Текущий email: ${user.email}\n\nВведите новый email:`,
-                                                user.email || '',
-                                            );
-                                            if (!next) return;
-                                            const trimmed = next.trim().toLowerCase();
-                                            if (trimmed === (user.email || '').toLowerCase()) {
-                                                toast.error('Этот email уже установлен');
-                                                return;
-                                            }
-                                            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-                                                toast.error('Неверный формат email');
-                                                return;
-                                            }
-                                            const ok = window.confirm(
-                                                `Изменить email пользователя?\n\n${user.email} → ${trimmed}\n\n` +
-                                                'Все связанные записи (брони, waitlist, транзакции) будут обновлены автоматически.\n\n' +
-                                                'Продолжить?',
-                                            );
-                                            if (!ok) return;
-                                            try {
-                                                const { usersApi } = await import('../../api/users');
-                                                await usersApi.changeEmail(user.id, trimmed);
-                                                // Refresh the users store BEFORE navigating to the new URL.
-                                                // Without this the destination page does
-                                                // `users.find(u => u.email === <new>)` against a stale
-                                                // store containing the old email — it'd render
-                                                // "Клиент не найден" until a manual reload, exactly
-                                                // the bug admins reported when changing email.
-                                                await fetchUsers();
-                                                toast.success(`Email изменён на ${trimmed}`);
-                                                navigate(`/admin/users/${encodeURIComponent(trimmed)}`, { replace: true });
-                                            } catch (err: any) {
-                                                toast.error(err.response?.data?.detail || 'Ошибка смены email');
-                                            }
-                                        }}
-                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-purple-50 border border-dashed border-purple-200 transition-colors text-left"
+                                        onClick={() => setEditField('email')}
+                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
                                     >
-                                        <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
+                                        <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
                                             <Shield size={14} />
                                         </div>
                                         <div className="flex-1">
                                             <div className="text-sm font-medium text-unbox-dark">Изменить email</div>
-                                            <div className="text-[10px] text-unbox-grey">Каскадно обновляет брони, waitlist и транзакции</div>
+                                            <div className="text-caption text-ink-60">Каскадно обновляет брони, waitlist и транзакции</div>
                                         </div>
                                     </button>
                                 )}
@@ -874,50 +848,33 @@ export function AdminUserDetails() {
                                     each other, nobody can archive owner). */}
                                 <button
                                     onClick={async () => {
-                                        const isArchived = !!user.archivedAt;
-                                        if (isArchived) {
-                                            const ok = window.confirm(
-                                                `Восстановить пользователя ${user.email} из архива?\n\n` +
-                                                'Сможет снова входить на сайт и будет видим в обычных списках.',
-                                            );
-                                            if (!ok) return;
-                                            try {
-                                                const { usersApi } = await import('../../api/users');
-                                                await usersApi.unarchiveUser(user.id);
-                                                toast.success('Пользователь восстановлен');
-                                                await useUserStore.getState().fetchUsers();
-                                            } catch (err: any) {
-                                                toast.error(err.response?.data?.detail || 'Не удалось восстановить');
-                                            }
-                                        } else {
-                                            const reason = prompt(
-                                                `Архивировать пользователя ${user.email}?\n\n` +
-                                                'Не сможет входить на сайт. Вся история (брони, оплаты, бонусы) сохраняется.\n' +
-                                                'Можно восстановить в любой момент.\n\n' +
-                                                'Опционально: укажите причину (для аудита):',
-                                                '',
-                                            );
-                                            if (reason === null) return; // cancelled
-                                            try {
-                                                const { usersApi } = await import('../../api/users');
-                                                await usersApi.archiveUser(user.id, reason.trim() || undefined);
-                                                toast.success('Пользователь отправлен в архив');
-                                                await useUserStore.getState().fetchUsers();
-                                            } catch (err: any) {
-                                                toast.error(err.response?.data?.detail || 'Не удалось архивировать');
-                                            }
+                                        if (!user.archivedAt) { setEditField('archive'); return; }
+                                        const ok = await confirm({
+                                            title: 'Вернуть из архива?',
+                                            body: `${user.email} снова сможет входить на сайт и появится в обычных списках.`,
+                                            confirmLabel: 'Вернуть из архива',
+                                            cancelLabel: 'Оставить в архиве',
+                                        });
+                                        if (!ok) return;
+                                        try {
+                                            const { usersApi } = await import('../../api/users');
+                                            await usersApi.unarchiveUser(user.id);
+                                            toast.success('Пользователь восстановлен');
+                                            await useUserStore.getState().fetchUsers();
+                                        } catch (err: any) {
+                                            toast.error(err.response?.data?.detail || 'Не удалось восстановить');
                                         }
                                     }}
-                                    className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-amber-50 border border-dashed border-amber-200 transition-colors text-left"
+                                    className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
                                 >
-                                    <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                                    <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
                                         <Shield size={14} />
                                     </div>
                                     <div className="flex-1">
                                         <div className="text-sm font-medium text-unbox-dark">
                                             {user.archivedAt ? 'Восстановить из архива' : 'Архивировать пользователя'}
                                         </div>
-                                        <div className="text-[10px] text-unbox-grey">
+                                        <div className="text-caption text-ink-60">
                                             {user.archivedAt
                                                 ? `В архиве с ${safeFormat(user.archivedAt, 'd.MM.yyyy', undefined, '—')}`
                                                 : 'Заблокирует вход, сохранит всю историю. Обратимо.'}
@@ -931,14 +888,14 @@ export function AdminUserDetails() {
                                         // Аудит 29.09: раньше email дубликата вводили вслепую в prompt().
                                         // Теперь поиск + предпросмотр обоих аккаунтов до подтверждения.
                                         onClick={() => setIsMergeOpen(true)}
-                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-indigo-50 border border-dashed border-indigo-200 transition-colors text-left"
+                                        className="mt-2 w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-ink-05 border border-dashed border-ink-20 transition-colors text-left"
                                     >
-                                        <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                                        <div className="w-7 h-7 rounded-full bg-sunken flex items-center justify-center text-ink-80 shrink-0">
                                             <Shield size={14} />
                                         </div>
                                         <div className="flex-1">
                                             <div className="text-sm font-medium text-unbox-dark">Слить с аккаунтом</div>
-                                            <div className="text-[10px] text-unbox-grey">Объединить дубликаты (TG-placeholder + сайт)</div>
+                                            <div className="text-caption text-ink-60">Объединить дубликаты (TG-placeholder + сайт)</div>
                                         </div>
                                     </button>
                                 )}
@@ -963,9 +920,9 @@ export function AdminUserDetails() {
                                         <h3 className="font-bold text-unbox-dark">
                                             {adminPickerType === 'responsible' ? 'Ответственный менеджер' : 'Кто привлёк клиента'}
                                         </h3>
-                                        <p className="text-xs text-unbox-grey mt-0.5">{user.name}</p>
+                                        <p className="text-xs text-ink-60 mt-0.5">{user.name}</p>
                                     </div>
-                                    <button onClick={() => setAdminPickerType(null)} className="p-1 rounded-lg hover:bg-unbox-light text-unbox-grey">
+                                    <button onClick={() => setAdminPickerType(null)} className="p-1 rounded-lg hover:bg-unbox-light text-ink-60">
                                         <X size={16} />
                                     </button>
                                 </div>
@@ -982,11 +939,11 @@ export function AdminUserDetails() {
                                             'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors text-left',
                                             (adminPickerType === 'responsible' ? !user.responsibleAdminId : !user.attractedByAdminId)
                                                 ? 'bg-unbox-light text-unbox-dark font-medium'
-                                                : 'text-unbox-grey hover:bg-unbox-light/50'
+                                                : 'text-ink-60 hover:bg-unbox-light/50'
                                         )}
                                     >
                                         <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
-                                            <UserCircle size={16} className="text-gray-400" />
+                                            <UserCircle size={16} className="text-ink-60" />
                                         </div>
                                         {adminPickerType === 'responsible' ? 'Не назначен' : 'Не указан'}
                                     </button>
@@ -995,7 +952,7 @@ export function AdminUserDetails() {
                                     {adminUsers.map(admin => {
                                         const currentId = adminPickerType === 'responsible' ? user.responsibleAdminId : user.attractedByAdminId;
                                         const isSelected = currentId === admin.id;
-                                        const avatarBg = adminPickerType === 'responsible' ? 'bg-unbox-green' : 'bg-amber-400';
+                                        const avatarBg = adminPickerType === 'responsible' ? 'bg-unbox-green' : 'bg-ink-60';
                                         return (
                                             <button
                                                 key={admin.id}
@@ -1020,7 +977,7 @@ export function AdminUserDetails() {
                                                 </div>
                                                 <div className="min-w-0 flex-1">
                                                     <div className="truncate">{admin.name}</div>
-                                                    <div className={clsx('text-[10px] truncate', isSelected ? 'text-white/70' : 'text-unbox-grey')}>
+                                                    <div className={clsx('text-caption truncate', isSelected ? 'text-white/70' : 'text-ink-60')}>
                                                         {admin.role === 'owner' ? 'Владелец' : admin.role === 'senior_admin' ? 'Ст. Администратор' : 'Администратор'}
                                                     </div>
                                                 </div>
@@ -1053,25 +1010,25 @@ export function AdminUserDetails() {
                         <div className="space-y-6 animate-in fade-in duration-300">
                             {/* CRM Access — показываем ВВЕРХУ если есть запрос требующий действия */}
                             {crmAccess && ['pending', 'expired', 'rejected'].includes(crmAccess.accessStatus) && (
-                                <Card className={clsx("p-5 border-2", crmAccess.accessStatus === 'pending' ? 'border-amber-300 bg-amber-50/30' : 'border-red-200 bg-red-50/20')}>
+                                <Card className={clsx("p-5 border-2", crmAccess.accessStatus === 'pending' ? 'border-[color:var(--status-pending-fg)] bg-[color:var(--status-pending-bg)]' : 'border-[color:var(--status-danger-bg)] bg-[color:var(--status-danger-bg)]')}>
                                     <div className="flex items-center justify-between mb-4">
                                         <h3 className="font-bold text-base flex items-center gap-2">
-                                            <KeyRound size={18} className={crmAccess.accessStatus === 'pending' ? 'text-amber-600' : 'text-red-500'} />
+                                            <KeyRound size={18} className={crmAccess.accessStatus === 'pending' ? 'text-[color:var(--status-pending-fg)]' : 'text-[color:var(--status-danger-fg)]'} />
                                             Запрос на Psy-CRM
                                         </h3>
                                         {crmAccess.accessStatus === 'pending' && (
-                                            <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold uppercase flex items-center gap-1 animate-pulse">
+                                            <span className="px-2.5 py-1 rounded-full bg-[color:var(--status-pending-bg)] text-[color:var(--status-pending-fg)] text-caption font-bold uppercase flex items-center gap-1 animate-pulse">
                                                 <Clock size={12} />
                                                 Ожидает решения
                                             </span>
                                         )}
                                         {crmAccess.accessStatus === 'expired' && (
-                                            <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-600 text-[11px] font-bold uppercase">
+                                            <span className="px-2.5 py-1 rounded-full bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger-fg)] text-caption font-bold uppercase">
                                                 Истёк
                                             </span>
                                         )}
                                         {crmAccess.accessStatus === 'rejected' && (
-                                            <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-600 text-[11px] font-bold uppercase">
+                                            <span className="px-2.5 py-1 rounded-full bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger-fg)] text-caption font-bold uppercase">
                                                 Отклонён
                                             </span>
                                         )}
@@ -1079,19 +1036,19 @@ export function AdminUserDetails() {
                                     <div className="space-y-3">
                                         {crmAccess.profession && (
                                             <div className="text-sm">
-                                                <span className="text-unbox-grey">Профессия:</span>{' '}
+                                                <span className="text-ink-60">Профессия:</span>{' '}
                                                 <span className="font-medium">{crmAccess.profession}</span>
                                             </div>
                                         )}
                                         {crmAccess.message && (
                                             <div className="text-sm">
-                                                <span className="text-unbox-grey">Сообщение:</span>{' '}
-                                                <span className="text-gray-700">{crmAccess.message}</span>
+                                                <span className="text-ink-60">Сообщение:</span>{' '}
+                                                <span className="text-ink-80">{crmAccess.message}</span>
                                             </div>
                                         )}
                                         {crmAccess.submittedAt && (
-                                            <div className="text-xs text-unbox-grey">
-                                                Подано: {safeFormat(crmAccess.submittedAt, 'd MMMM yyyy, HH:mm', ru, '—')}
+                                            <div className="text-xs text-ink-60">
+                                                Подано: {formatDayMonth(crmAccess.submittedAt, { withYear: 'auto' })}, {formatTime(crmAccess.submittedAt)}
                                             </div>
                                         )}
                                         <div className="flex flex-wrap gap-2 pt-2">
@@ -1108,7 +1065,7 @@ export function AdminUserDetails() {
                                                     <button
                                                         onClick={() => handleCrmReject()}
                                                         disabled={crmActionLoading}
-                                                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-50 text-red-600 text-sm font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors"
+                                                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger-fg)] text-sm font-semibold hover:bg-[color:var(--status-danger-bg)] disabled:opacity-50 transition-colors"
                                                     >
                                                         <XCircle size={14} />
                                                         Отклонить
@@ -1133,7 +1090,7 @@ export function AdminUserDetails() {
                             <Card className="p-6">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="font-bold text-lg flex items-center gap-2">
-                                        <CreditCard size={20} className="text-unbox-grey" />
+                                        <CreditCard size={20} className="text-ink-60" />
                                         Финансы и Статистика
                                     </h3>
                                     <div className="flex gap-2">
@@ -1151,12 +1108,12 @@ export function AdminUserDetails() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {/* 1. Общая сумма оплат (Real Money In) */}
                                     <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
-                                        <div className="text-sm text-unbox-grey mb-1">Общая сумма оплат</div>
+                                        <div className="text-sm text-ink-60 mb-1">Общая сумма оплат</div>
                                         <div className="text-2xl font-bold">
-                                            {totalPaid !== null ? totalPaid.toFixed(2) : '—'} ₾
+                                            {totalPaid !== null ? formatGel(totalPaid) : '—'}
                                         </div>
                                         <div
-                                            className="text-xs text-unbox-grey mt-1 flex items-center gap-1.5 cursor-pointer group/balance"
+                                            className="text-xs text-ink-60 mt-1 flex items-center gap-1.5 cursor-pointer group/balance"
                                             // Право finance.balance_correction (решение владельца 27.08):
                                             // без него бэк вернёт 403 — не дразним кликабельностью.
                                             onClick={() => {
@@ -1168,17 +1125,17 @@ export function AdminUserDetails() {
                                             }}
                                             title="Скорректировать баланс (вручную, с указанием причины)"
                                         >
-                                            <Wallet size={11} className="text-unbox-grey/70 group-hover/balance:text-unbox-green transition-colors" />
-                                            <span>Баланс: <span className="font-semibold border-b border-dashed border-unbox-light group-hover/balance:border-unbox-green group-hover/balance:text-unbox-green transition-colors">{user.balance} ₾</span></span>
+                                            <Wallet size={11} className="text-ink-60 group-hover/balance:text-unbox-green transition-colors" />
+                                            <span>Баланс: <span className="font-semibold border-b border-dashed border-unbox-light group-hover/balance:border-unbox-green group-hover/balance:text-unbox-green transition-colors">{formatGel(user.balance)}</span></span>
                                         </div>
                                         {/* Credit Limit UI */}
                                         <div
-                                            className="text-xs text-unbox-grey mt-1 flex items-center gap-1 group/limit cursor-pointer"
+                                            className="text-xs text-ink-60 mt-1 flex items-center gap-1 group/limit cursor-pointer"
                                             onClick={() => setIsEditLimitOpen(true)}
                                         >
                                             Кредитный лимит:
-                                            <span className="font-semibold text-unbox-grey border-b border-dashed border-unbox-light group-hover/limit:border-blue-400 group-hover/limit:text-unbox-green transition-colors">
-                                                {user.creditLimit || 0} ₾
+                                            <span className="font-semibold text-ink-60 border-b border-dashed border-unbox-light group-hover/limit:border-ink group-hover/limit:text-unbox-green transition-colors">
+                                                {formatGel(user.creditLimit || 0)}
                                             </span>
                                             <div className="bg-unbox-light/50 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
@@ -1188,60 +1145,60 @@ export function AdminUserDetails() {
 
                                     {/* 2. Всего забронировано часов */}
                                     <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
-                                        <div className="text-sm text-unbox-grey mb-1">Всего часов</div>
+                                        <div className="text-sm text-ink-60 mb-1">Всего часов</div>
                                         <div className="text-2xl font-bold">
                                             {bookingsLoading ? '…' : userBookings
                                                 .filter(b => b.status === 'completed' || b.status === 'confirmed')
                                                 .reduce((sum, b) => sum + (b.duration / 60), 0)
                                                 .toFixed(1)} ч
                                         </div>
-                                        <div className="text-xs text-unbox-grey mt-1">
+                                        <div className="text-xs text-ink-60 mt-1">
                                             {bookingsLoading ? '…' : sortedBookings.length} бронирований
                                         </div>
                                     </div>
 
                                     {/* 3. Средний чек */}
                                     <div className="bg-unbox-light/30 rounded-xl p-4 border border-unbox-light">
-                                        <div className="text-sm text-unbox-grey mb-1">Средний чек</div>
+                                        <div className="text-sm text-ink-60 mb-1">Средний чек</div>
                                         <div className="text-2xl font-bold">
                                             {(() => {
                                                 const completed = userBookings.filter(b => b.status === 'completed');
-                                                if (completed.length === 0) return '0';
+                                                if (completed.length === 0) return formatGel(0);
                                                 const totalValue = completed.reduce((sum, b) => sum + b.finalPrice, 0);
-                                                return (totalValue / completed.length).toFixed(0);
-                                            })()} ₾
+                                                return formatGel(totalValue / completed.length, { fraction: 0 });
+                                            })()}
                                         </div>
-                                        <div className="text-xs text-unbox-grey mt-1">за посещение</div>
+                                        <div className="text-xs text-ink-60 mt-1">за посещение</div>
                                     </div>
 
                                     {/* 5. Активный абонемент */}
-                                    <div className={clsx("rounded-xl p-4 border relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-3", user.subscription ? "bg-purple-50 border-purple-100" : "bg-unbox-light/30 border-unbox-light")}>
+                                    <div className={clsx("rounded-xl p-4 border relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-3", user.subscription ? "bg-sunken border-ink-10" : "bg-unbox-light/30 border-unbox-light")}>
                                         <div className="relative z-10 flex justify-between items-start">
                                             <div>
                                                 {/* Заголовок следует РЕАЛЬНОМУ статусу. Раньше здесь было
                                                     жёстко зашито «Активный абонемент», и у завершённого
                                                     выходило «Активный» рядом с плашкой «ЗАВЕРШЁН». */}
-                                                <div className="text-sm text-unbox-grey mb-1">
+                                                <div className="text-sm text-ink-60 mb-1">
                                                     {SUB_TITLE[subscriptionLifecycle(user.subscription as any)]}
                                                 </div>
                                                 {user.subscription ? (
                                                     <>
-                                                        <div className="text-xl font-bold text-purple-900 mb-1">{user.subscription.name}</div>
-                                                        <div className="text-sm text-purple-700 font-mono">
+                                                        <div className="text-xl font-bold text-ink-80 mb-1">{user.subscription.name}</div>
+                                                        <div className="text-sm text-ink-80 font-mono">
                                                             {subscriptionLifecycle(user.subscription as any) === 'completed'
                                                                 ? <>Использовано: <b>{(user.subscription.totalHours + (user.subscription.bonusHours || 0)) - user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч</>
                                                                 : <>Остаток: <b>{user.subscription.remainingHours}</b> / {user.subscription.totalHours + (user.subscription.bonusHours || 0)} ч</>}
                                                         </div>
                                                         <button
                                                             onClick={() => setIsTopupOpen(o => !o)}
-                                                            className="mt-2 flex items-center gap-1 text-xs text-purple-600 hover:text-purple-900 underline"
+                                                            className="mt-2 flex items-center gap-1 text-xs text-ink-80 hover:text-ink underline"
                                                         >
                                                             <PackagePlus size={11} />
                                                             Пополнить часы
                                                         </button>
                                                     </>
                                                 ) : (
-                                                    <div className="text-unbox-grey italic">Отсутствует</div>
+                                                    <div className="text-ink-60 italic">Отсутствует</div>
                                                 )}
                                             </div>
                                             {user.subscription && (
@@ -1249,19 +1206,19 @@ export function AdminUserDetails() {
                                                     {(() => {
                                                         const badge = subscriptionBadge(user.subscription as any);
                                                         return (
-                                                            <div className={clsx("px-2 py-0.5 rounded text-[10px] font-bold uppercase mb-2 inline-block", badge.cls)}>
+                                                            <div className={clsx("px-2 py-0.5 rounded text-caption font-bold uppercase mb-2 inline-block", badge.cls)}>
                                                                 {badge.label}
                                                             </div>
                                                         );
                                                     })()}
-                                                    <div className="text-xs text-purple-600">
+                                                    <div className="text-xs text-ink-80">
                                                         {isEditingExpiry ? (
                                                             <div className="flex items-center gap-1.5 mt-1">
                                                                 <input
                                                                     type="date"
                                                                     value={editExpiryDate}
                                                                     onChange={e => setEditExpiryDate(e.target.value)}
-                                                                    className="rounded border border-purple-300 px-1.5 py-0.5 text-xs focus:outline-none focus:border-purple-500"
+                                                                    className="rounded border border-ink-20 px-1.5 py-0.5 text-xs focus:outline-none focus:border-ink"
                                                                 />
                                                                 <button
                                                                     onClick={() => {
@@ -1271,15 +1228,17 @@ export function AdminUserDetails() {
                                                                         toast.success('Дата абонемента обновлена');
                                                                         setIsEditingExpiry(false);
                                                                     }}
-                                                                    className="text-green-700 hover:text-green-900 font-bold text-xs"
+                                                                    className="text-[color:var(--status-ok-fg)] hover:text-ink font-bold text-xs"
+                                                                    aria-label="Сохранить дату"
                                                                 >
-                                                                    ✓
+                                                                    <Check size={14} aria-hidden="true" />
                                                                 </button>
                                                                 <button
                                                                     onClick={() => setIsEditingExpiry(false)}
-                                                                    className="text-gray-400 hover:text-gray-600 text-xs"
+                                                                    className="text-ink-60 hover:text-ink text-xs"
+                                                                    aria-label="Не менять дату"
                                                                 >
-                                                                    ✕
+                                                                    <X size={14} aria-hidden="true" />
                                                                 </button>
                                                             </div>
                                                         ) : (
@@ -1289,7 +1248,7 @@ export function AdminUserDetails() {
                                                                     if (iso) setEditExpiryDate(iso);
                                                                     setIsEditingExpiry(true);
                                                                 }}
-                                                                className="hover:text-purple-900 underline decoration-dotted"
+                                                                className="hover:text-ink underline decoration-dotted"
                                                             >
                                                                 до {safeFormat(user.subscription.expiryDate, 'd.MM.yyyy', undefined, '—')}
                                                             </button>
@@ -1306,18 +1265,19 @@ export function AdminUserDetails() {
                                                         return (
                                                             <div className="mt-2 space-y-1">
                                                                 {sub.isFrozen && (
-                                                                    <div className={clsx('text-xs font-medium', over ? 'text-amber-700' : 'text-blue-700')}>
+                                                                    <div className={clsx('text-xs font-medium inline-flex items-start gap-1', over ? 'text-[color:var(--status-pending-fg)]' : 'text-[color:var(--status-info-fg)]')}>
+                                                                        {over && <AlertTriangle size={12} className="shrink-0 mt-0.5" aria-hidden="true" />}
                                                                         {over
-                                                                            ? `⚠ Пауза закончилась ${safeFormat(sub.frozenUntil, 'd.MM')}, но не снята — брони идут с баланса, а не часами`
+                                                                            ? `Пауза закончилась ${safeFormat(sub.frozenUntil, 'd.MM')}, но не снята — брони идут с баланса, а не часами`
                                                                             : `На паузе до ${safeFormat(sub.frozenUntil, 'd.MM')} — брони идут с баланса`}
                                                                     </div>
                                                                 )}
                                                                 {used ? (
-                                                                    <div className="text-xs text-unbox-grey">Пауза по этому абонементу уже использована</div>
+                                                                    <div className="text-xs text-ink-60">Пауза по этому абонементу уже использована</div>
                                                                 ) : (
                                                                     <button
                                                                         onClick={toggleFreeze}
-                                                                        className={clsx('text-xs underline hover:text-purple-900', over ? 'text-amber-800 font-semibold' : 'text-purple-800')}
+                                                                        className={clsx('text-xs underline hover:text-ink', over ? 'text-[color:var(--status-pending-fg)] font-semibold' : 'text-ink-80')}
                                                                     >
                                                                         {sub.isFrozen ? 'Снять паузу' : 'Поставить на паузу (7 дней, один раз)'}
                                                                     </button>
@@ -1331,27 +1291,27 @@ export function AdminUserDetails() {
 
                                         {/* ── Topup inline form ─────────────────────────── */}
                                         {isTopupOpen && (
-                                            <div className="relative z-10 mt-4 border-t border-purple-100 pt-4">
-                                                <div className="text-xs font-semibold text-purple-800 mb-3">Пополнение абонемента</div>
+                                            <div className="relative z-10 mt-4 border-t border-ink-10 pt-4">
+                                                <div className="text-xs font-semibold text-ink-80 mb-3">Пополнение абонемента</div>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div>
-                                                        <label className="text-[11px] text-unbox-grey block mb-1">Часов</label>
+                                                        <label className="text-caption text-ink-60 block mb-1">Часов</label>
                                                         <input
                                                             type="number"
                                                             value={topupForm.hours}
                                                             onChange={e => setTopupForm(f => ({ ...f, hours: e.target.value }))}
-                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            className="w-full rounded-lg border border-ink-10 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-ink"
                                                             min="1"
                                                             placeholder="10"
                                                         />
                                                     </div>
                                                     <div>
-                                                        <label className="text-[11px] text-unbox-grey block mb-1">Сумма (₾)</label>
+                                                        <label className="text-caption text-ink-60 block mb-1">Сумма (₾)</label>
                                                         <input
                                                             type="number"
                                                             value={topupForm.amount}
                                                             onChange={e => setTopupForm(f => ({ ...f, amount: e.target.value }))}
-                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            className="w-full rounded-lg border border-ink-10 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-ink"
                                                             min="0"
                                                             placeholder="150"
                                                         />
@@ -1359,11 +1319,11 @@ export function AdminUserDetails() {
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3 mt-2">
                                                     <div>
-                                                        <label className="text-[11px] text-unbox-grey block mb-1">Способ оплаты</label>
+                                                        <label className="text-caption text-ink-60 block mb-1">Способ оплаты</label>
                                                         <select
                                                             value={topupForm.payment_method}
                                                             onChange={e => setTopupForm(f => ({ ...f, payment_method: e.target.value }))}
-                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            className="w-full rounded-lg border border-ink-10 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-ink"
                                                         >
                                                             <option value="cash">Наличные</option>
                                                             <option value="card">Карта</option>
@@ -1371,12 +1331,12 @@ export function AdminUserDetails() {
                                                         </select>
                                                     </div>
                                                     <div>
-                                                        <label className="text-[11px] text-unbox-grey block mb-1">Заметка</label>
+                                                        <label className="text-caption text-ink-60 block mb-1">Заметка</label>
                                                         <input
                                                             type="text"
                                                             value={topupForm.note}
                                                             onChange={e => setTopupForm(f => ({ ...f, note: e.target.value }))}
-                                                            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-purple-400"
+                                                            className="w-full rounded-lg border border-ink-10 bg-white px-3 py-1.5 text-sm focus:outline-none focus:border-ink"
                                                             placeholder="необязательно"
                                                         />
                                                     </div>
@@ -1384,14 +1344,14 @@ export function AdminUserDetails() {
                                                 <div className="flex gap-2 mt-3">
                                                     <button
                                                         onClick={() => setIsTopupOpen(false)}
-                                                        className="flex-1 py-2 text-sm rounded-xl border border-purple-200 text-purple-700 hover:bg-purple-50 transition-colors"
+                                                        className="flex-1 py-2 text-sm rounded-xl border border-ink-10 text-ink-80 hover:bg-ink-05 transition-colors"
                                                     >
                                                         Отмена
                                                     </button>
                                                     <button
                                                         onClick={handleTopup}
                                                         disabled={topupSaving || !topupForm.hours || !topupForm.amount}
-                                                        className="flex-1 py-2 text-sm rounded-xl bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+                                                        className="flex-1 py-2 text-sm rounded-xl bg-ink text-white hover:bg-ink-80 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
                                                     >
                                                         {topupSaving && <Loader2 size={14} className="animate-spin" />}
                                                         Подтвердить
@@ -1411,15 +1371,15 @@ export function AdminUserDetails() {
                                 <Card className="p-5">
                                     <div className="flex items-center justify-between mb-4">
                                         <h3 className="font-bold text-base flex items-center gap-2">
-                                            <KeyRound size={18} className="text-unbox-grey" />
+                                            <KeyRound size={18} className="text-ink-60" />
                                             Доступ к Psy-CRM
                                         </h3>
                                         {crmAccess.permanent ? (
-                                            <span className="px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 text-[11px] font-bold uppercase">
+                                            <span className="px-2.5 py-1 rounded-full bg-sunken text-ink-80 text-caption font-bold uppercase">
                                                 Постоянный
                                             </span>
                                         ) : (
-                                            <span className="px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-[11px] font-bold uppercase flex items-center gap-1">
+                                            <span className="px-2.5 py-1 rounded-full bg-[color:var(--status-ok-bg)] text-[color:var(--status-ok-fg)] text-caption font-bold uppercase flex items-center gap-1">
                                                 <CheckCircle2 size={12} />
                                                 Активен
                                             </span>
@@ -1428,18 +1388,18 @@ export function AdminUserDetails() {
                                     <div className="space-y-3">
                                         {crmAccess.profession && (
                                             <div className="text-sm">
-                                                <span className="text-gray-500">Профессия:</span>{' '}
-                                                <span className="font-medium text-gray-900">{crmAccess.profession}</span>
+                                                <span className="text-ink-60">Профессия:</span>{' '}
+                                                <span className="font-medium text-ink">{crmAccess.profession}</span>
                                             </div>
                                         )}
                                         {!crmAccess.permanent && crmAccess.expiresAt && (
-                                            <div className="flex items-center gap-2 text-sm bg-green-50 rounded-lg px-3 py-2">
-                                                <CalendarClock size={14} className="text-green-600" />
-                                                <span className="text-green-800">
+                                            <div className="flex items-center gap-2 text-sm bg-[color:var(--status-ok-bg)] rounded-lg px-3 py-2">
+                                                <CalendarClock size={14} className="text-[color:var(--status-ok-fg)]" />
+                                                <span className="text-[color:var(--status-ok-fg)]">
                                                     Действует до{' '}
-                                                    <b>{safeFormat(crmAccess.expiresAt, 'd MMMM yyyy', ru, '—')}</b>
+                                                    <b>{formatDayMonth(crmAccess.expiresAt, { withYear: 'auto' })}</b>
                                                     {crmAccess.daysRemaining !== null && (
-                                                        <span className="text-green-600 ml-1">({crmAccess.daysRemaining} дн.)</span>
+                                                        <span className="text-[color:var(--status-ok-fg)] ml-1">({crmAccess.daysRemaining} дн.)</span>
                                                     )}
                                                 </span>
                                             </div>
@@ -1449,7 +1409,7 @@ export function AdminUserDetails() {
                                                 <button
                                                     onClick={() => handleCrmApprove(30)}
                                                     disabled={crmActionLoading}
-                                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-semibold hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sunken text-ink-80 text-sm font-semibold hover:bg-ink-05 disabled:opacity-50 transition-colors"
                                                 >
                                                     {crmActionLoading ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
                                                     Продлить на 30 дней
@@ -1476,7 +1436,7 @@ export function AdminUserDetails() {
                                     </div>
                                     <div className="flex-1 overflow-y-auto max-h-[400px]">
                                         {sortedBookings.length === 0 && (
-                                            <div className="p-8 text-center text-unbox-grey text-sm">История пуста</div>
+                                            <div className="p-8 text-center text-ink-60 text-sm">История пуста</div>
                                         )}
                                         {sortedBookings.map(item => (
                                             <div
@@ -1488,15 +1448,15 @@ export function AdminUserDetails() {
                                                     <div className="font-medium text-sm group-hover:text-unbox-green transition-colors">
                                                         {RESOURCES.find(r => r.id === item.resourceId)?.name || 'Кабинет'}
                                                     </div>
-                                                    <div className="text-xs text-unbox-grey">
-                                                        {safeFormat(item.date, 'd MMM yyyy', ru, '—')} · {item.startTime}
+                                                    <div className="text-xs text-ink-60">
+                                                        {formatDayMonth(item.date, { withYear: 'auto' })} · {item.startTime}
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className={clsx("font-bold text-sm", item.status === 'cancelled' ? 'text-unbox-grey line-through' : '')}>
-                                                        -{item.finalPrice} ₾
+                                                    <div className={clsx("font-bold text-sm", item.status === 'cancelled' ? 'text-ink-60 line-through' : '')}>
+                                                        {formatGel(-item.finalPrice)}
                                                     </div>
-                                                    <div className="text-[10px] text-unbox-grey uppercase">{item.status}</div>
+                                                    <div className="text-caption text-ink-60">{statusLabel('booking', item.status, 'staff')}</div>
                                                 </div>
                                             </div>
                                         ))}
@@ -1552,19 +1512,19 @@ export function AdminUserDetails() {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {/* 1. Общая сумма оплат (Real Money In) */}
                                 <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
-                                    <div className="text-sm text-unbox-grey mb-1">Общая сумма оплат</div>
+                                    <div className="text-sm text-ink-60 mb-1">Общая сумма оплат</div>
                                     <div className="text-2xl font-bold">
-                                        {totalPaid !== null ? totalPaid.toFixed(2) : '—'} ₾
+                                        {totalPaid !== null ? formatGel(totalPaid) : '—'}
                                     </div>
-                                    <div className="text-xs text-unbox-grey mt-1">Баланс: {user.balance} ₾</div>
+                                    <div className="text-xs text-ink-60 mt-1">Баланс: {formatGel(user.balance)}</div>
                                     {/* Credit Limit UI */}
                                     <div
-                                        className="text-xs text-unbox-grey mt-1 flex items-center gap-1 group/limit cursor-pointer"
+                                        className="text-xs text-ink-60 mt-1 flex items-center gap-1 group/limit cursor-pointer"
                                         onClick={() => setIsEditLimitOpen(true)}
                                     >
                                         Кредитный лимит:
-                                        <span className="font-semibold text-unbox-grey border-b border-dashed border-unbox-light group-hover/limit:border-blue-400 group-hover/limit:text-unbox-green transition-colors">
-                                            {user.creditLimit || 0} ₾
+                                        <span className="font-semibold text-ink-60 border-b border-dashed border-unbox-light group-hover/limit:border-ink group-hover/limit:text-unbox-green transition-colors">
+                                            {formatGel(user.creditLimit || 0)}
                                         </span>
                                         <div className="bg-unbox-light/50 p-0.5 rounded opacity-0 group-hover/limit:opacity-100 transition-opacity">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
@@ -1574,30 +1534,30 @@ export function AdminUserDetails() {
 
                                 {/* 2. Всего забронировано часов */}
                                 <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
-                                    <div className="text-sm text-unbox-grey mb-1">Всего часов</div>
+                                    <div className="text-sm text-ink-60 mb-1">Всего часов</div>
                                     <div className="text-2xl font-bold">
                                         {bookingsLoading ? '…' : userBookings
                                             .filter(b => b.status === 'completed' || b.status === 'confirmed')
                                             .reduce((sum, b) => sum + (b.duration / 60), 0)
                                             .toFixed(1)} ч
                                     </div>
-                                    <div className="text-xs text-unbox-grey mt-1">
+                                    <div className="text-xs text-ink-60 mt-1">
                                         {bookingsLoading ? '…' : sortedBookings.length} бронирований
                                     </div>
                                 </div>
 
                                 {/* 3. Средний чек */}
                                 <div className="bg-white rounded-xl p-4 border border-unbox-light shadow-sm">
-                                    <div className="text-sm text-unbox-grey mb-1">Средний чек</div>
+                                    <div className="text-sm text-ink-60 mb-1">Средний чек</div>
                                     <div className="text-2xl font-bold">
                                         {(() => {
                                             const completed = userBookings.filter(b => b.status === 'completed');
-                                            if (completed.length === 0) return '0';
+                                            if (completed.length === 0) return formatGel(0);
                                             const totalValue = completed.reduce((sum, b) => sum + b.finalPrice, 0);
-                                            return (totalValue / completed.length).toFixed(0);
-                                        })()} ₾
+                                            return formatGel(totalValue / completed.length, { fraction: 0 });
+                                        })()}
                                     </div>
-                                    <div className="text-xs text-unbox-grey mt-1">за посещение</div>
+                                    <div className="text-xs text-ink-60 mt-1">за посещение</div>
                                 </div>
                             </div>
 
@@ -1626,5 +1586,162 @@ export function AdminUserDetails() {
                 </div>
             </div>
         </div>
+    );
+}
+
+const ROLE_LABEL: Record<string, string> = {
+    owner: 'Владелец',
+    senior_admin: 'Старший админ',
+    admin: 'Администратор',
+    specialist: 'Специалист',
+    user: 'Клиент',
+};
+
+// ── Правка полей клиента: шторка с полем вместо prompt() (wave 1) ──────────
+type EditField = 'phone' | 'telegram' | 'email' | 'archive';
+
+function UserFieldSheets({ user, field, onClose, updateUserById, afterEmailChange }: {
+    user: { id: string; email: string; phone?: string; telegramId?: string };
+    field: EditField | null;
+    onClose: () => void;
+    updateUserById: (email: string, data: any) => void | Promise<void>;
+    afterEmailChange: (next: string) => Promise<void>;
+}) {
+    const [value, setValue] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    useEffect(() => {
+        if (!field) return;
+        setError(null);
+        setBusy(false);
+        setValue(field === 'phone' ? (user.phone || '') : field === 'telegram' ? (user.telegramId || '') : field === 'email' ? (user.email || '') : '');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [field]);
+
+    const save = async () => {
+        const trimmed = value.trim();
+        setError(null);
+        if (field === 'phone') {
+            if (trimmed && !/^[+\d\s()-]+$/.test(trimmed)) {
+                setError('Только цифры, пробелы и + ( ) -');
+                return;
+            }
+            updateUserById(user.email, { phone: trimmed || undefined });
+            onClose();
+            return;
+        }
+        if (field === 'telegram') {
+            if (!trimmed) {
+                updateUserById(user.email, { telegramId: '' });
+                onClose();
+                return;
+            }
+            // Чистый числовой chat_id сохраняем как есть.
+            if (/^-?\d+$/.test(trimmed)) {
+                updateUserById(user.email, { telegramId: trimmed });
+                toast.success('Telegram ID сохранён');
+                onClose();
+                return;
+            }
+            // Иначе — @username: бэкенд узнаёт chat_id через Telegram getChat.
+            // Если бот ещё не общался с человеком — бэкенд объяснит, что сделать.
+            setBusy(true);
+            try {
+                const resp = await api.post<{ chat_id: string; name?: string | null }>(
+                    '/telegram/resolve-username',
+                    { username: trimmed },
+                );
+                const chatId = resp.data.chat_id;
+                updateUserById(user.email, { telegramId: chatId });
+                toast.success(
+                    resp.data.name
+                        ? `Привязан Telegram: ${resp.data.name} (${chatId})`
+                        : `Привязан Telegram ID ${chatId}`,
+                );
+                onClose();
+            } catch (e: any) {
+                setError(e?.response?.data?.detail || 'Не удалось распознать @username');
+            } finally {
+                setBusy(false);
+            }
+            return;
+        }
+        if (field === 'email') {
+            const next = trimmed.toLowerCase();
+            if (next === (user.email || '').toLowerCase()) {
+                setError('Этот email уже установлен');
+                return;
+            }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
+                setError('Проверьте адрес: нужен вид name@mail.com');
+                return;
+            }
+            setBusy(true);
+            try {
+                await usersApi.changeEmail(user.id, next);
+                toast.success(`Email изменён на ${next}`);
+                onClose();
+                await afterEmailChange(next);
+            } catch (err: any) {
+                setError(err?.response?.data?.detail || 'Не удалось сменить email');
+            } finally {
+                setBusy(false);
+            }
+            return;
+        }
+        if (field === 'archive') {
+            setBusy(true);
+            try {
+                await usersApi.archiveUser(user.id, trimmed || undefined);
+                toast.success('Пользователь отправлен в архив');
+                onClose();
+                await useUserStore.getState().fetchUsers();
+            } catch (err: any) {
+                setError(err?.response?.data?.detail || 'Не удалось архивировать');
+            } finally {
+                setBusy(false);
+            }
+        }
+    };
+
+    const cfg: Record<EditField, { title: string; description?: string; label: string; hint?: string; kind: InputKind; action: string; danger?: boolean; optional?: boolean; placeholder?: string }> = {
+        phone: { title: 'Телефон клиента', label: 'Телефон', hint: 'Например, +995 555 12 34 56. Пусто — удалить номер.', kind: 'phone', action: 'Сохранить телефон', placeholder: '+995 555 12 34 56' },
+        telegram: { title: 'Telegram клиента', label: '@username или Telegram ID', hint: 'Пусто — отвязать Telegram.', kind: 'text', action: 'Сохранить Telegram', placeholder: '@username' },
+        email: { title: 'Изменить email', description: `Сейчас: ${user.email}. Брони, лист ожидания и операции перейдут на новый адрес автоматически.`, label: 'Новый email', kind: 'email', action: 'Изменить email' },
+        archive: { title: 'Архивировать пользователя?', description: `${user.email} не сможет входить на сайт. Брони, оплаты и бонусы сохранятся, вернуть из архива можно в любой момент.`, label: 'Причина (для журнала)', kind: 'text', action: 'Архивировать', danger: true, optional: true },
+    };
+    const c = field ? cfg[field] : null;
+
+    return (
+        <Sheet
+            open={!!field}
+            onClose={onClose}
+            title={c?.title ?? ''}
+            description={c?.description}
+            width={460}
+            footer={c ? (
+                <>
+                    <UiButton variant={c.danger ? 'danger' : 'primary'} block loading={busy} onClick={save}>
+                        {c.action}
+                    </UiButton>
+                    <UiButton variant="secondary" block onClick={onClose}>
+                        Отмена
+                    </UiButton>
+                </>
+            ) : undefined}
+        >
+            {c && (
+                <Field label={c.label} hint={c.hint} error={error} optional={c.optional}>
+                    <Input
+                        kind={c.kind}
+                        value={value}
+                        placeholder={c.placeholder}
+                        onChange={(e) => { setValue(e.target.value); if (error) setError(null); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void save(); } }}
+                        autoFocus
+                    />
+                </Field>
+            )}
+        </Sheet>
     );
 }

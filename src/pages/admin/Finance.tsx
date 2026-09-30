@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, X, Sun } from 'lucide-react';
+import { Plus, Clock, ChevronLeft, ChevronRight, CalendarDays, X, Sun, Check, AlertTriangle } from 'lucide-react';
 import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth,
     startOfDay, endOfDay, addDays, addWeeks, addMonths, format,
@@ -23,6 +23,9 @@ import type { CashboxTransaction } from '../../api/cashbox';
 import clsx from 'clsx';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { formatBatumi } from '../../utils/dateUtils';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { STATUS } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 
 type Tab = 'transactions' | 'categories' | 'shifts';
 type PeriodMode = 'day' | 'week' | 'month' | 'custom';
@@ -279,7 +282,7 @@ function GHFSection({ number, title, children }: { number: string; title: string
     return (
         <section style={{ marginBottom: 40 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, borderTop: `2px solid ${GH.ink}`, paddingTop: 16, marginBottom: 20 }}>
-                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.14em', color: GH.ink60, minWidth: 32 }}>{number}</div>
+                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, minWidth: 32 }}>{number}</div>
                 <h2 style={{ fontFamily: GH_SANS, fontSize: 'clamp(20px, 2.4vw, 30px)', fontWeight: 800, letterSpacing: '-0.01em', color: GH.ink, margin: 0 }}>{title}</h2>
             </div>
             <div>{children}</div>
@@ -289,10 +292,11 @@ function GHFSection({ number, title, children }: { number: string; title: string
 
 function GridHouseAdminFinance(p: GHAFProps) {
     const currentUser = useUserStore(s => s.currentUser);
+    const { confirm } = useConfirmDialog();
     const inkBtn: React.CSSProperties = {
         fontFamily: GH_MONO,
-        fontSize: 11,
-        letterSpacing: '0.16em',
+        fontSize: 12,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         background: GH.ink,
         color: GH.paper,
@@ -302,8 +306,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
     };
     const outlineBtn: React.CSSProperties = {
         fontFamily: GH_MONO,
-        fontSize: 11,
-        letterSpacing: '0.16em',
+        fontSize: 12,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         background: 'transparent',
         color: GH.ink,
@@ -348,7 +352,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                 {/* HEAD */}
                 <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 24, marginBottom: 32 }}>
                     <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 12 }}>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 12 }}>
                             Раздел · Финансы
                         </div>
                         <h1 style={{ fontFamily: GH_SANS, fontSize: 'clamp(28px, 4.5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 0.95, margin: 0 }}>
@@ -367,14 +371,15 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 title="Вчерашняя смена была закрыта."
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 10,
-                                    letterSpacing: '0.18em',
+                                    fontSize: 12,
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     color: GH.ink60,
                                     whiteSpace: 'nowrap',
                                 }}
                             >
-                                ✓ Вчера закрыта
+                                <Check size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                Вчера закрыта
                             </span>
                         ) : (
                             <button
@@ -382,8 +387,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 title="Вчерашняя смена не была закрыта. Нажмите, чтобы закрыть."
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 10,
-                                    letterSpacing: '0.14em',
+                                    fontSize: 12,
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     background: GH.ink,
                                     color: GH.paper,
@@ -392,7 +397,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                     cursor: 'pointer',
                                 }}
                             >
-                                ⚠ Вчера не закрыта · закрыть →
+                                <AlertTriangle size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                Вчера не закрыта · закрыть →
                             </button>
                         )}
 
@@ -422,25 +428,28 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                         disabled={shiftOpen}
                                         title={
                                             shiftOpen
-                                                ? 'Смена уже открыта — кнопка заблокирована'
+                                                ? 'Смена уже открыта'
                                                 : 'Зафиксировать начало рабочей смены'
                                         }
+                                        // Аудит X4-M2: открытая смена была погашенной кнопкой
+                                        // (контраст 1.4:1) — теперь это зелёный статус «Смена открыта».
                                         style={{
                                             fontFamily: GH_MONO,
-                                            fontSize: 10,
-                                            letterSpacing: '0.16em',
+                                            fontSize: 12,
+                                            letterSpacing: '0.06em',
                                             textTransform: 'uppercase',
-                                            background: 'transparent',
-                                            color: shiftOpen ? GH.ink30 : GH.ink,
+                                            background: shiftOpen ? STATUS.ok.bg : 'transparent',
+                                            color: shiftOpen ? STATUS.ok.fg : GH.ink,
                                             border: 'none',
                                             borderRight: `1px solid ${GH.ink}`,
                                             padding: '10px 14px',
-                                            cursor: shiftOpen ? 'not-allowed' : 'pointer',
-                                            opacity: shiftOpen ? 0.55 : 1,
+                                            cursor: shiftOpen ? 'default' : 'pointer',
                                         }}
                                     >
-                                        <Sun size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                                        {shiftOpen ? 'Открыта' : 'Открыть'}
+                                        {shiftOpen
+                                            ? <Check size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                            : <Sun size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />}
+                                        {shiftOpen ? 'Смена открыта' : 'Открыть смену'}
                                     </button>
                                 );
                             })()}
@@ -450,9 +459,9 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 title="Филиал для закрытия смены"
                                 style={{
                                     padding: '10px 28px 10px 14px',
-                                    fontSize: 10,
+                                    fontSize: 12,
                                     fontFamily: GH_MONO,
-                                    letterSpacing: '0.14em',
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     border: 'none',
                                     borderRight: `1px solid ${GH.ink}`,
@@ -474,8 +483,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 onClick={() => p.setShowCloseChecklist(true)}
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 10,
-                                    letterSpacing: '0.16em',
+                                    fontSize: 12,
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     background: 'transparent',
                                     color: GH.ink,
@@ -499,8 +508,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 title="Корректировка остатка на счёте"
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 10,
-                                    letterSpacing: '0.14em',
+                                    fontSize: 12,
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     background: 'transparent',
                                     color: GH.ink60,
@@ -525,19 +534,21 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                         toast.info(`За неделю с ${preview.week_start} начислять нечего`);
                                         return;
                                     }
-                                    const ok = window.confirm(
-                                        `Начислить недельные кредиты за неделю с ${preview.week_start}?\n\n` +
-                                        `${preview.users_credited} клиент(ов), всего ${preview.total_credited} ₾.\n` +
-                                        `Деньги зачислятся на их балансы (повторно — не начислит).`
-                                    );
+                                    const ok = await confirm({
+                                        title: `Начислить недельные кредиты за неделю с ${preview.week_start}?`,
+                                        body: `${preview.users_credited} клиент(ов), всего ${formatGel(preview.total_credited)}. `
+                                            + 'Деньги зачислятся на их балансы; повторно за эту неделю не начислим.',
+                                        confirmLabel: `Начислить ${formatGel(preview.total_credited)}`,
+                                        cancelLabel: 'Не начислять',
+                                    });
                                     if (!ok) return;
                                     const real = await pricingApi.runWeeklyRebate(false);
-                                    toast.success(`Начислено ${real.total_credited} ₾ · ${real.users_credited} клиент(ов)`);
+                                    toast.success(`Начислено ${formatGel(real.total_credited)} · ${real.users_credited} клиент(ов)`);
                                 } catch (e: any) {
                                     toast.error(e?.response?.data?.detail || 'Ошибка перерасчёта');
                                 }
                             }}
-                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 11, background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink}` }}
+                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 12, background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink}` }}
                             title="Начислить недельные кредиты за завершившуюся неделю (cron делает это автоматически по понедельникам)"
                         >
                             Недельные кредиты
@@ -547,7 +558,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
 
                         <button
                             onClick={() => p.setShowAddTx(true)}
-                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 11 }}
+                            style={{ ...inkBtn, padding: '10px 18px', fontSize: 12 }}
                         >
                             <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Новая операция
@@ -577,8 +588,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                     onClick={() => { p.setPeriodMode(t.id); p.setPeriodOffset(0); }}
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 10,
-                                        letterSpacing: '0.12em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         padding: '10px 12px',
                                         background: p.periodMode === t.id ? GH.ink : 'transparent',
@@ -599,15 +610,17 @@ function GridHouseAdminFinance(p: GHAFProps) {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <button
                                     onClick={() => p.setPeriodOffset((o: number) => o - 1)}
+                                    aria-label="Предыдущий период"
                                     style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                 >
                                     <ChevronLeft size={14} />
                                 </button>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', minWidth: 140, textAlign: 'center' }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', minWidth: 140, textAlign: 'center' }}>
                                     {p.period.label}
                                 </span>
                                 <button
                                     onClick={() => p.canGoNext && p.setPeriodOffset((o: number) => o + 1)}
+                                    aria-label="Следующий период"
                                     disabled={!p.canGoNext}
                                     style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: p.canGoNext ? 'pointer' : 'not-allowed', opacity: p.canGoNext ? 1 : 0.3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                 >
@@ -641,8 +654,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 onChange={e => p.setSelectedBranch(e.target.value)}
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 11,
-                                    letterSpacing: '0.14em',
+                                    fontSize: 12,
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     background: 'transparent',
                                     color: GH.ink,
@@ -672,8 +685,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                     onClick={() => p.setTab(t.id)}
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 10,
-                                        letterSpacing: '0.14em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         padding: '12px 16px',
                                         background: active ? GH.ink : 'transparent',
@@ -703,8 +716,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                             onClick={() => p.setTxType(t.id)}
                                             style={{
                                                 fontFamily: GH_MONO,
-                                                fontSize: 10,
-                                                letterSpacing: '0.12em',
+                                                fontSize: 12,
+                                                letterSpacing: '0.06em',
                                                 textTransform: 'uppercase',
                                                 padding: '8px 12px',
                                                 background: active ? GH.ink : 'transparent',
@@ -721,7 +734,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                                 })}
                             </div>
                             {p.filtered.length > 0 && (
-                                <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', color: GH.ink60, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                                     {p.filtered.length} операций · {p.period.label}
                                 </span>
                             )}
@@ -744,7 +757,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                 </GHFSection>
 
                 {/* Footer */}
-                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 32, display: 'flex', justifyContent: 'space-between', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 20, marginTop: 32, display: 'flex', justifyContent: 'space-between', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                     <span>Unbox · Касса · {new Date().getFullYear()}</span>
                     <span>{p.period.label}</span>
                 </div>
@@ -788,7 +801,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                     >
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 24 }}>
                             <div>
-                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
+                                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
                                     Действие · Корректировка
                                 </div>
                                 <h3 style={{ fontFamily: GH_SANS, fontSize: 28, fontWeight: 800, letterSpacing: '-0.01em', margin: 0 }}>
@@ -805,13 +818,13 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         </p>
 
                         <div style={{ marginBottom: 20 }}>
-                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
+                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
                                 Счёт
                             </label>
                             <select
                                 value={p.corrAccount}
                                 onChange={e => p.setCorrAccount(e.target.value)}
-                                style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}
+                                style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}
                             >
                                 <option value="cash">Наличные</option>
                                 <option value="card_tbc">Карта TBC</option>
@@ -820,13 +833,13 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         </div>
 
                         <div style={{ marginBottom: 20 }}>
-                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
+                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
                                 Филиал
                             </label>
                             <select
                                 value={p.corrBranch}
                                 onChange={e => p.setCorrBranch(e.target.value)}
-                                style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}
+                                style={{ ...hairlineInput, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}
                             >
                                 <option value="">Общая касса (все филиалы)</option>
                                 {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
@@ -834,8 +847,8 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         </div>
 
                         <div style={{ marginBottom: 20 }}>
-                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
-                                Фактический остаток · GEL
+                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
+                                Фактический остаток · ₾
                             </label>
                             <input
                                 type="number"
@@ -847,7 +860,7 @@ function GridHouseAdminFinance(p: GHAFProps) {
                         </div>
 
                         <div style={{ marginBottom: 24 }}>
-                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
+                            <label style={{ display: 'block', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 }}>
                                 Причина *
                             </label>
                             <textarea

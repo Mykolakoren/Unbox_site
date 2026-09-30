@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router-d
 import {
     LayoutDashboard, Calendar, Users, Clock, Box,
     BookOpen, ClipboardList, LogOut, Menu, X, ChevronDown, Shield, Wallet, UsersRound, Star, Wrench,
-    CreditCard, Gift, UserCircle, Newspaper, BarChart3,
+    CreditCard, Gift, UserCircle, Newspaper, BarChart3, CalendarDays, ExternalLink,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUserStore } from '../../store/userStore';
@@ -28,6 +28,11 @@ const NAV_ITEMS = [
 ];
 
 const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
+
+// Тёплый фон боковой панели Grid House. Своего токена пока нет (запрос
+// в needs_foundation волны 1) — держим значения в одном месте, а не в 8.
+const SIDEBAR_BG = '#F0ECDD';
+const SIDEBAR_BG_NARROW = '#F3EFE2';
 
 export function AdminLayout() {
     const location = useLocation();
@@ -111,12 +116,12 @@ export function AdminLayout() {
                     </Link>
 
                     {/* Admin badge */}
-                    <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-unbox-green/20 text-unbox-green text-[10px] font-bold uppercase tracking-wider border border-unbox-green/30 shrink-0">
+                    <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-unbox-green/20 text-unbox-green text-caption font-bold uppercase tracking-wider border border-unbox-green/30 shrink-0">
                         Admin
                     </span>
                     <Link
                         to="/"
-                        className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white/50 hover:text-white/90 hover:bg-white/10 transition-all shrink-0"
+                        className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-caption font-medium text-white/50 hover:text-white/90 hover:bg-white/10 transition-all shrink-0"
                     >
                         На сайт
                     </Link>
@@ -196,7 +201,7 @@ export function AdminLayout() {
                                             </Link>
                                             <button
                                                 onClick={handleLogout}
-                                                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors w-full text-left mt-0.5"
+                                                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[color:var(--status-danger-fg)] hover:bg-[color:var(--status-danger-bg)] transition-colors w-full text-left mt-0.5"
                                             >
                                                 <LogOut size={14} />
                                                 Выйти
@@ -336,8 +341,8 @@ function GridHouseAdminShell({
                 style={{
                     width: narrow ? 280 : 260,
                     minWidth: narrow ? 280 : 260,
-                    background: narrow ? '#F3EFE2' : '#F0ECDD',
-                    backgroundColor: narrow ? '#F3EFE2' : '#F0ECDD',
+                    background: narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG,
+                    backgroundColor: narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG,
                     borderRight: narrow ? `2px solid ${GH.ink}` : hairline,
                     position: narrow ? 'fixed' : 'sticky',
                     top: 0,
@@ -356,14 +361,14 @@ function GridHouseAdminShell({
                     <Link to="/" style={{ fontSize: 24, fontWeight: 700, color: GH.ink, textDecoration: 'none', letterSpacing: '-0.01em' }}>
                         Unbox
                     </Link>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginTop: 6 }}>
                         Админ · Контроль
                     </div>
                 </div>
 
                 {/* User */}
                 <div style={{ padding: '18px 24px', borderBottom: hairline }}>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
                         Сессия · {roleLabel}
                     </div>
                     <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>
@@ -399,7 +404,7 @@ function GridHouseAdminShell({
                                 justifyContent: 'center',
                                 gap: 4,
                                 padding: '10px 0',
-                                background: narrow ? '#F3EFE2' : '#F0ECDD',
+                                background: narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG,
                                 color: GH.ink60,
                                 textDecoration: 'none',
                                 transition: 'color 0.12s, background 0.12s',
@@ -409,15 +414,15 @@ function GridHouseAdminShell({
                                 e.currentTarget.style.color = GH.ink;
                             }}
                             onMouseLeave={e => {
-                                e.currentTarget.style.background = narrow ? '#F3EFE2' : '#F0ECDD';
+                                e.currentTarget.style.background = narrow ? SIDEBAR_BG_NARROW : SIDEBAR_BG;
                                 e.currentTarget.style.color = GH.ink60;
                             }}
                         >
                             <Icon size={16} />
                             <span style={{
                                 fontFamily: GH_MONO,
-                                fontSize: 9,
-                                letterSpacing: '0.08em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                             }}>
                                 {label}
@@ -450,8 +455,8 @@ function GridHouseAdminShell({
                                 <div
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
-                                        letterSpacing: '0.12em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         fontVariantNumeric: 'tabular-nums',
                                         opacity: active ? 0.5 : 0.45,
                                     }}
@@ -531,9 +536,9 @@ function GridHouseAdminShell({
                                 onClick={() => setMobileOpen(true)}
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 11,
+                                    fontSize: 12,
                                     fontWeight: 600,
-                                    letterSpacing: '0.14em',
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     color: GH.paper,
                                     background: GH.ink,
@@ -542,10 +547,11 @@ function GridHouseAdminShell({
                                     cursor: 'pointer',
                                 }}
                             >
-                                ☰ Меню
+                                <Menu size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                Меню
                             </button>
                         )}
-                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 }}>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                             {String((activeIndex < 0 ? 0 : activeIndex) + 1).padStart(2, '0')} · {activeItem?.label ?? 'Раздел'}
                         </div>
                     </div>
@@ -560,8 +566,8 @@ function GridHouseAdminShell({
                             title="Открыть Google Calendar в новой вкладке"
                             style={{
                                 fontFamily: GH_MONO,
-                                fontSize: 10,
-                                letterSpacing: '0.14em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                                 color: GH.ink60,
                                 textDecoration: 'none',
@@ -578,10 +584,12 @@ function GridHouseAdminShell({
                                 (e.currentTarget as HTMLAnchorElement).style.color = GH.ink60;
                             }}
                         >
-                            📅 G-Cal ↗
+                            <CalendarDays size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                            Google Календарь
+                            <ExternalLink size={12} aria-hidden="true" style={{ verticalAlign: 'middle', marginLeft: 6 }} />
                         </a>
                         <NotificationBell variant="light" />
-                        <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink30 }}>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                             Unbox · Панель управления
                         </div>
                     </div>
@@ -602,8 +610,8 @@ function footerBtnStyle(color: string, border: string): React.CSSProperties {
         padding: '14px 24px',
         textAlign: 'left',
         fontFamily: GH_MONO,
-        fontSize: 11,
-        letterSpacing: '0.14em',
+        fontSize: 12,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         color,
         background: 'transparent',

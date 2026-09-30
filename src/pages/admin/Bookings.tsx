@@ -10,7 +10,16 @@ import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { BookingHistoryItem } from '../../store/types';
-import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button } from '../../components/ui/Button';
+import { Field, TextArea } from '../../components/ui/Field';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { STATUS } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 import { AdminCancelBookingModal, seriesTailOf, type CancelScope, type SeriesTail } from '../../components/admin/AdminCancelBookingModal';
 import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
 import { ruCountWord } from '../../utils/plural';
@@ -52,8 +61,8 @@ function bookingBucket(ms: number, now: Date = new Date()): 'today' | 'upcoming'
 // component; consolidating up here so they're easier to find.
 const ghabMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
-    letterSpacing: '0.18em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase' as const,
 };
 const ghabHairline = `1px solid ${GH.ink10}`;
@@ -61,8 +70,8 @@ const ghabHairline = `1px solid ${GH.ink10}`;
 // Card-style action button used in list view (per-booking action row).
 const ghActionBtn = (color: string, borderColor: string): React.CSSProperties => ({
     fontFamily: GH_MONO,
-    fontSize: 9,
-    letterSpacing: '0.1em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase' as const,
     background: 'transparent',
     color,
@@ -74,8 +83,8 @@ const ghActionBtn = (color: string, borderColor: string): React.CSSProperties =>
 // Underlined-text style button used inside the dense table view.
 const ghTableLinkBtn = (color: string): React.CSSProperties => ({
     fontFamily: GH_MONO,
-    fontSize: 10,
-    letterSpacing: '0.1em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase' as const,
     background: 'transparent',
     color,
@@ -100,8 +109,9 @@ export function AdminBookings() {
     // list mode if explicitly requested.
     const [viewMode, setViewMode] = useState<ViewMode>(viewFromQuery === 'list' ? 'list' : 'grid');
 
-    // Modal state for replacing native confirm/prompt
-    const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void; destructive?: boolean }>({ open: false, title: '', message: '', onConfirm: () => {} });
+    // Подтверждения — общее окно с кнопками-действиями (wave 1), вместо
+    // своего ConfirmationModal с «Да, отменить».
+    const { confirm } = useConfirmDialog();
     // Правка цены — своё окно (BookingPriceModal): принимает «22,5», показывает,
     // сколько вернётся или спишется с баланса клиента.
     const [priceBooking, setPriceBooking] = useState<BookingHistoryItem | null>(null);
@@ -240,30 +250,35 @@ export function AdminBookings() {
     };
 
     // Excel #67: same button toggles. Previously the modal always said
-    // "выставить на переаренду" and the toast always said "выставлен" — even
-    // when the user was actually trying to remove a re-rent listing. Now we
-    // branch on current state and await so the toast reflects what actually
-    // happened (or what failed).
-    const handleReRent = (bookingId: string) => {
+    // «выставить» and the toast always said «выставлен» — even when the user
+    // was actually trying to remove the listing. Now we branch on current
+    // state and await so the toast reflects what actually happened.
+    // Wave 1: функция называется «Пересдать» (решение владельца).
+    const handleReRent = async (bookingId: string) => {
         const booking = bookings.find(b => b.id === bookingId);
         const isCurrentlyListed = !!booking?.isReRentListed;
-        setConfirmModal({
-            open: true,
-            title: isCurrentlyListed ? 'Снять с переаренды' : 'Переаренда',
-            message: isCurrentlyListed
-                ? 'Снять этот слот с переаренды? Бронь снова будет видна только владельцу.'
-                : 'Выставить этот слот на переаренду? Если другой пользователь забронирует, текущая бронь будет отменена с 50% возвратом.',
-            onConfirm: async () => {
-                try {
-                    await listForReRent(bookingId);
-                    toast.success(isCurrentlyListed ? 'Слот снят с переаренды' : 'Слот выставлен на переаренду');
-                    // Make sure the chessboard view also picks up the new flag.
-                    useUserStore.getState().fetchAllBookings();
-                } catch {
-                    // listForReRent already toasts the error
-                }
-            },
-        });
+        const ok = await confirm(isCurrentlyListed
+            ? {
+                title: 'Снять с пересдачи?',
+                body: 'Бронь останется за клиентом, другие её больше не увидят.',
+                confirmLabel: 'Снять с пересдачи',
+                cancelLabel: 'Оставить',
+            }
+            : {
+                title: 'Пересдать бронь?',
+                body: 'Время увидят другие. Если его займут, эту бронь отменим и вернём клиенту 50%.',
+                confirmLabel: 'Пересдать',
+                cancelLabel: 'Не пересдавать',
+            });
+        if (!ok) return;
+        try {
+            await listForReRent(bookingId);
+            toast.success(isCurrentlyListed ? 'Бронь снята с пересдачи' : 'Бронь на пересдаче');
+            // Make sure the chessboard view also picks up the new flag.
+            useUserStore.getState().fetchAllBookings();
+        } catch {
+            // listForReRent already toasts the error
+        }
     };
 
     // Excel #28 — restore the lost "Продлить" action for admins. Теперь с
@@ -286,25 +301,23 @@ export function AdminBookings() {
         const client = users.find(u => u.email === b.userId || u.id === b.userId);
         return subscriptionLifecycle(client?.subscription as any) === 'active';
     };
-    const handleToSubscription = (bookingId: string) => {
-        setConfirmModal({
-            open: true,
-            title: 'Списать с абонемента',
-            message: 'Перевести эту бронь на списание с абонемента? '
-                + 'Деньги вернутся на баланс клиента, а часы спишутся с его абонемента.',
-            destructive: false,
-            onConfirm: async () => {
-                setConvertingId(bookingId);
-                try {
-                    await bookingsApi.convertToSubscription(bookingId);
-                    toast.success('Бронь переведена на абонемент');
-                    useUserStore.getState().fetchAllBookings();
-                } catch (e: any) {
-                    toast.error(e?.response?.data?.detail || 'Не удалось перевести на абонемент');
-                }
-                setConvertingId(null);
-            },
+    const handleToSubscription = async (bookingId: string) => {
+        const ok = await confirm({
+            title: 'Списать с абонемента?',
+            body: 'Деньги за эту бронь вернутся на баланс клиента, а часы спишутся с его абонемента.',
+            confirmLabel: 'Списать с абонемента',
+            cancelLabel: 'Оставить как есть',
         });
+        if (!ok) return;
+        setConvertingId(bookingId);
+        try {
+            await bookingsApi.convertToSubscription(bookingId);
+            toast.success('Бронь переведена на абонемент');
+            useUserStore.getState().fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось перевести на абонемент');
+        }
+        setConvertingId(null);
     };
 
     // Excel #59 — "Перенести" navigates to the grid view with this booking
@@ -330,36 +343,25 @@ export function AdminBookings() {
         setApprovingId(null);
     };
 
-    const handleReject = async (bookingId: string) => {
-        // Reason — короткий текст для клиента (придёт в TG/in-app),
-        // объясняет почему слот недоступен. window.prompt — самый
-        // лёгкий способ без отдельного modal (UI уже использует prompt
-        // для других похожих случаев). Пустая причина → бэкенд
-        // автоматически подставит «Слот недоступен».
-        const reason = window.prompt(
-            'Причина отклонения (будет отправлена клиенту):',
-            ''
-        );
-        if (reason === null) return; // Cancel — ничего не делаем
-        setConfirmModal({
-            open: true,
-            title: 'Отклонить бронь',
-            message: reason.trim()
-                ? `Отклонить с причиной «${reason.trim()}»? Клиент получит уведомление, средства не списываются.`
-                : 'Отклонить горячую бронь без причины? Клиент получит общее уведомление «Слот недоступен».',
-            destructive: true,
-            onConfirm: async () => {
-                setRejectingId(bookingId);
-                try {
-                    await bookingsApi.rejectBooking(bookingId, reason.trim() || undefined);
-                    toast.success('Бронь отклонена, клиент уведомлён');
-                    useUserStore.getState().fetchAllBookings();
-                } catch (e: any) {
-                    toast.error(e?.response?.data?.detail || 'Ошибка при отклонении');
-                }
-                setRejectingId(null);
-            },
-        });
+    // Отклонение горячей брони. Причина — короткий текст для клиента (придёт
+    // в TG/in-app). Раньше — window.prompt и затем ещё одно окно «Вы
+    // уверены?»; теперь одна шторка с полем и кнопкой «Отклонить бронь».
+    // Пустая причина → бэкенд сам подставит «Слот недоступен».
+    const [rejectFor, setRejectFor] = useState<string | null>(null);
+    const handleReject = (bookingId: string) => setRejectFor(bookingId);
+    const submitReject = async (reason: string) => {
+        const bookingId = rejectFor;
+        if (!bookingId) return;
+        setRejectingId(bookingId);
+        try {
+            await bookingsApi.rejectBooking(bookingId, reason.trim() || undefined);
+            toast.success('Бронь отклонена, клиент уведомлён');
+            setRejectFor(null);
+            useUserStore.getState().fetchAllBookings();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.detail || 'Не удалось отклонить бронь');
+        }
+        setRejectingId(null);
     };
 
     // Shared modals rendered in both variants
@@ -372,14 +374,11 @@ export function AdminBookings() {
                 bookingLabel={cancelModal.label}
                 series={cancelModal.series}
             />
-            <ConfirmationModal
-                isOpen={confirmModal.open}
-                onClose={() => setConfirmModal(p => ({ ...p, open: false }))}
-                onConfirm={confirmModal.onConfirm}
-                title={confirmModal.title}
-                message={confirmModal.message}
-                isDestructive={confirmModal.destructive}
-                confirmLabel={confirmModal.destructive ? 'Да, отменить' : 'Подтвердить'}
+            <RejectBookingSheet
+                open={!!rejectFor}
+                busy={!!rejectFor && rejectingId === rejectFor}
+                onClose={() => setRejectFor(null)}
+                onSubmit={submitReject}
             />
             <BookingPriceModal
                 booking={priceBooking}
@@ -491,15 +490,16 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
             .map(v => ({ value: v, label: statusLabel('booking', v, 'staff') })),
     ];
 
-    // Подписи статусов — из общего словаря, как в CRM и мобильной админке.
-    const statusText = (s: string) => statusLabel('booking', s, 'staff');
+    // Статусы в строках — общий StatusBadge (слова из src/design/statuses.ts).
+    // Нужен, чтобы отличить «ещё грузим» от «броней нет».
+    const bookingsStatus = useUserStore(s => s.bookingsStatus);
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
             {/* ── Compact header — title + inline KPIs on one row, then
                 action cluster on the right (+ Бронь · Список / Шахматка). */}
             <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: narrow ? 12 : 16, marginBottom: narrow ? 14 : 20 }}>
-                <p style={{ ...ghabMono, color: GH.ink30, marginBottom: narrow ? 6 : 8 }}>ADMIN · BOOKINGS</p>
+                <p style={{ ...ghabMono, color: GH.ink60, marginBottom: narrow ? 6 : 8 }}>Админка · брони</p>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: narrow ? 12 : 24, flexWrap: 'wrap' }}>
                     {/* LEFT: title + inline KPIs */}
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: narrow ? 16 : 28, flexWrap: 'wrap' }}>
@@ -519,20 +519,20 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 22 : 28, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
                                     {totalFmt}
                                 </span>
-                                <span style={{ ...ghabMono, color: GH.ink30 }}>ВСЕГО</span>
+                                <span style={{ ...ghabMono, color: GH.ink60 }}>ВСЕГО</span>
                             </div>
                             <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
                                 <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: GH.accent }}>
                                     {String(activeCount).padStart(3, '0')}
                                 </span>
-                                <span style={{ ...ghabMono, color: GH.ink30 }}>АКТИВ</span>
+                                <span style={{ ...ghabMono, color: GH.ink60 }}>АКТИВ</span>
                             </div>
                             {pendingCount > 0 && (
                                 <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: GH.danger }}>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: narrow ? 16 : 18, fontWeight: 600, color: STATUS.pending.fg }}>
                                         {String(pendingCount).padStart(3, '0')}
                                     </span>
-                                    <span style={{ ...ghabMono, color: GH.ink30 }}>ОЖИДАЕТ</span>
+                                    <span style={{ ...ghabMono, color: GH.ink60 }}>ЖДУТ ПОДТВЕРЖДЕНИЯ</span>
                                 </div>
                             )}
                         </div>
@@ -547,8 +547,8 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                 border: ghabHairline,
                                 cursor: 'pointer',
                                 fontFamily: GH_MONO,
-                                fontSize: narrow ? 9 : 10,
-                                letterSpacing: '0.14em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                                 background: GH.ink,
                                 color: GH.paper,
@@ -564,8 +564,8 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         border: 'none',
                                         cursor: 'pointer',
                                         fontFamily: GH_MONO,
-                                        fontSize: narrow ? 9 : 10,
-                                        letterSpacing: '0.14em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         background: viewMode === m ? GH.ink : 'transparent',
                                         color: viewMode === m ? GH.paper : GH.ink60,
@@ -638,9 +638,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         onClick={() => setFilterStatus(o.value)}
                                         style={{
                                             fontFamily: GH_MONO,
-                                            fontSize: narrow ? 9 : 10,
+                                            fontSize: 12,
                                             fontWeight: 600,
-                                            letterSpacing: '0.12em',
+                                            letterSpacing: '0.06em',
                                             textTransform: 'uppercase',
                                             padding: narrow ? '8px 10px' : '10px 14px',
                                             background: active ? GH.ink : 'transparent',
@@ -672,9 +672,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         onClick={() => setTimeFilter(o.value)}
                                         style={{
                                             fontFamily: GH_MONO,
-                                            fontSize: narrow ? 9 : 10,
+                                            fontSize: 12,
                                             fontWeight: 600,
-                                            letterSpacing: '0.12em',
+                                            letterSpacing: '0.06em',
                                             textTransform: 'uppercase',
                                             padding: narrow ? '8px 10px' : '10px 14px',
                                             background: active ? GH.ink : 'transparent',
@@ -694,30 +694,30 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                     </div>
 
                     {filteredBookings.length === 0 ? (
-                        <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghabHairline, padding: '80px 24px', textAlign: 'center' }}>
-                            <div style={{ ...ghabMono, color: GH.ink30, marginBottom: 14 }}>EMPTY</div>
-                            <h2
-                                style={{
-                                    fontSize: 'clamp(28px, 3.5vw, 42px)',
-                                    fontWeight: 800,
-                                    letterSpacing: '-0.02em',
-                                    lineHeight: 1.1,
-                                    margin: 0,
-                                }}
-                            >
-                                Броней не найдено.
-                            </h2>
+                        // Загрузка ≠ ошибка ≠ пусто: пока брони не пришли — силуэты,
+                        // упало — полоса с «Повторить», и только потом «не нашли».
+                        <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghabHairline, padding: bookings.length === 0 && bookingsStatus !== 'ready' ? '16px 0' : '48px 24px' }}>
+                            {bookings.length === 0 && bookingsStatus === 'error' ? (
+                                <ErrorBar
+                                    message="Не удалось загрузить брони"
+                                    onRetry={() => useUserStore.getState().fetchAllBookings()}
+                                />
+                            ) : bookings.length === 0 && bookingsStatus !== 'ready' ? (
+                                <SkeletonList count={4} label="Загружаем брони" />
+                            ) : (
+                                <EmptyState
+                                    title="Броней не найдено"
+                                    hint={search || filterStatus !== 'all' || timeFilter !== 'all'
+                                        ? 'Измените поиск или фильтры.'
+                                        : 'Новые брони появятся здесь.'}
+                                />
+                            )}
                         </div>
                     ) : narrow ? (
                         /* ── Mobile card list ── */
                         <div style={{ borderTop: `2px solid ${GH.ink}` }}>
                             {filteredBookings.map((booking, idx) => {
                                 const resourceName = RESOURCES.find((r) => r.id === booking.resourceId)?.name || booking.resourceId;
-                                const statusColor =
-                                    booking.status === 'confirmed' ? GH.ink
-                                    : booking.status === 'pending_approval' ? GH.danger
-                                    : booking.status === 're-rented' ? GH.accent
-                                    : GH.ink30;
                                 return (
                                     <div
                                         key={booking.id}
@@ -732,26 +732,17 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         {/* Top row: index, date, status, price */}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                                <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                                                     {String(idx + 1).padStart(3, '0')}
                                                 </span>
-                                                <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
+                                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
                                                     {format(booking.date, 'dd.MM')} · {booking.startTime}
                                                 </span>
                                             </div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                                                <span
-                                                    style={{
-                                                        fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
-                                                        letterSpacing: '0.1em', textTransform: 'uppercase' as const,
-                                                        padding: '3px 6px', color: statusColor,
-                                                        border: `1px solid ${statusColor}`,
-                                                    }}
-                                                >
-                                                    {statusText(booking.status)}
-                                                </span>
+                                                <StatusBadge kind="booking" status={booking.status} audience="staff" />
                                                 <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 700, color: GH.ink, fontVariantNumeric: 'tabular-nums' }}>
-                                                    {booking.paymentMethod === 'subscription' ? 'Абон.' : `${booking.finalPrice}₾`}
+                                                    {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
                                                 </span>
                                             </div>
                                         </div>
@@ -775,9 +766,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         onClick={() => handleApprove(booking.id)}
                                                         disabled={approvingId === booking.id}
                                                         style={{
-                                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
-                                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
-                                                            padding: '6px 12px', background: GH.ink, color: GH.paper,
+                                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+                                                            padding: '6px 12px', minHeight: 44, background: GH.ink, color: GH.paper,
                                                             border: 'none', cursor: 'pointer',
                                                             display: 'inline-flex', alignItems: 'center', gap: 4,
                                                         }}
@@ -789,9 +780,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         onClick={() => handleReject(booking.id)}
                                                         disabled={rejectingId === booking.id}
                                                         style={{
-                                                            fontFamily: GH_MONO, fontSize: 9, fontWeight: 600,
-                                                            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
-                                                            padding: '6px 12px', background: 'transparent', color: GH.danger,
+                                                            fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
+                                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+                                                            padding: '6px 12px', minHeight: 44, background: 'transparent', color: GH.danger,
                                                             border: `1px solid ${GH.danger}`, cursor: 'pointer',
                                                             display: 'inline-flex', alignItems: 'center', gap: 4,
                                                         }}
@@ -804,7 +795,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                 <>
                                                     <button
                                                         onClick={() => handleMove(booking.id)}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                         title="Перенести бронь — откроется шахматка"
                                                     >
                                                         Перенести
@@ -812,7 +803,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     <button
                                                         onClick={() => handleExtend(booking.id)}
                                                         disabled={extendingId === booking.id}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                         title="Продлить бронь — выбрать время"
                                                     >
                                                         {extendingId === booking.id ? '...' : 'Продлить'}
@@ -820,7 +811,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     {bookingBucket(bookingStartMs(booking)) === 'today' && (
                                                         <button
                                                             onClick={() => handleAddExtras(booking.id)}
-                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                             title="Дозаказ — добавить кофе и т.п."
                                                         >
                                                             + Доп
@@ -830,7 +821,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         <button
                                                             onClick={() => handleToSubscription(booking.id)}
                                                             disabled={convertingId === booking.id}
-                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                             title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
                                                         >
                                                             {convertingId === booking.id ? '...' : 'На абонемент'}
@@ -838,22 +829,22 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                     >
                                                         Цена
                                                     </button>
                                                     <button
                                                         onClick={() => handleReRent(booking.id)}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
-                                                        title={booking.isReRentListed ? 'Снять с переаренды' : 'Поставить на переаренду'}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
+                                                        title={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать: отдать время другим, клиенту вернём 50%'}
                                                     >
-                                                        {booking.isReRentListed ? 'Снять с переаренды' : 'Пересдать'}
+                                                        {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                                                     </button>
                                                     <button
                                                         onClick={() => handleCancel(booking.id)}
-                                                        style={ghActionBtn(GH.danger, `${GH.danger}30`)}
+                                                        style={{ ...ghActionBtn(GH.danger, `${GH.danger}30`), minHeight: 44 }}
                                                     >
-                                                        Отмена
+                                                        Отменить
                                                     </button>
                                                 </>
                                             )}
@@ -867,14 +858,14 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     <button
                                                         onClick={() => handleExtend(booking.id)}
                                                         disabled={extendingId === booking.id}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                         title="Добить время по факту — клиент занимался дольше"
                                                     >
                                                         {extendingId === booking.id ? '...' : 'Продлить'}
                                                     </button>
                                                     <button
                                                         onClick={() => handleAddExtras(booking.id)}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                         title="Дозаказ — добавить кофе и т.п."
                                                     >
                                                         + Доп
@@ -883,7 +874,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         <button
                                                             onClick={() => handleToSubscription(booking.id)}
                                                             disabled={convertingId === booking.id}
-                                                            style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                            style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                             title="Списать с абонемента вместо баланса — деньги вернутся, спишутся часы"
                                                         >
                                                             {convertingId === booking.id ? '...' : 'На абонемент'}
@@ -891,7 +882,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     )}
                                                     <button
                                                         onClick={() => handleEditPrice(booking.id, booking.finalPrice)}
-                                                        style={ghActionBtn(GH.ink60, GH.ink10)}
+                                                        style={{ ...ghActionBtn(GH.ink60, GH.ink10), minHeight: 44 }}
                                                     >
                                                         Цена
                                                     </button>
@@ -920,7 +911,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                         key={i}
                                         style={{
                                             ...ghabMono,
-                                            color: GH.ink30,
+                                            color: GH.ink60,
                                             textAlign: i === 5 ? 'center' : i >= 6 ? 'right' : undefined,
                                         }}
                                     >
@@ -932,11 +923,6 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                             {/* ── Table rows ── */}
                             {filteredBookings.map((booking, idx) => {
                                 const resourceName = RESOURCES.find((r) => r.id === booking.resourceId)?.name || booking.resourceId;
-                                const statusColor =
-                                    booking.status === 'confirmed' ? GH.ink
-                                    : booking.status === 'pending_approval' ? GH.danger
-                                    : booking.status === 're-rented' ? GH.accent
-                                    : GH.ink30;
 
                                 return (
                                     <div
@@ -951,10 +937,10 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             minWidth: 1100,
                                         }}
                                     >
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.1em' }}>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.06em' }}>
                                             {String(idx + 1).padStart(3, '0')}
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                                             {format(new Date(booking.createdAt), 'dd.MM · HH:mm')}
                                         </div>
                                         <div
@@ -964,7 +950,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             <div style={{ fontSize: 14, fontWeight: 700, color: GH.ink, letterSpacing: '-0.005em' }}>
                                                 {getUserName(booking.userId)}
                                             </div>
-                                            <div style={{ ...ghabMono, color: GH.ink30, marginTop: 2 }}>{booking.userId}</div>
+                                            <div style={{ ...ghabMono, color: GH.ink60, marginTop: 2 }}>{booking.userId}</div>
                                         </div>
                                         <div>
                                             <div style={{ fontSize: 13, color: GH.ink, letterSpacing: '-0.005em' }}>{resourceName}</div>
@@ -981,22 +967,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                             </div>
                                         </div>
                                         <div style={{ textAlign: 'center' }}>
-                                            <span
-                                                style={{
-                                                    fontFamily: GH_MONO,
-                                                    fontSize: 10,
-                                                    fontWeight: 600,
-                                                    letterSpacing: '0.14em',
-                                                    textTransform: 'uppercase',
-                                                    padding: '4px 8px',
-                                                    color: statusColor,
-                                                    border: `1px solid ${statusColor}`,
-                                                }}
-                                            >
-                                                {statusText(booking.status)}
-                                            </span>
+                                            <StatusBadge kind="booking" status={booking.status} audience="staff" />
                                             {booking.isReRentListed && booking.status === 'confirmed' && (
-                                                <div style={{ ...ghabMono, color: GH.danger, marginTop: 4 }}>ПЕРЕАРЕНДА</div>
+                                                <div style={{ ...ghabMono, color: STATUS.pending.fg, marginTop: 4 }}>На пересдаче</div>
                                             )}
                                         </div>
                                         <div
@@ -1009,7 +982,7 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                 fontVariantNumeric: 'tabular-nums',
                                             }}
                                         >
-                                            {booking.paymentMethod === 'subscription' ? 'Абон.' : `${booking.finalPrice} ₾`}
+                                            {booking.paymentMethod === 'subscription' ? 'Абонемент' : formatGel(booking.finalPrice)}
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, flexWrap: 'wrap' }}>
                                             {booking.status === 'pending_approval' && (
@@ -1019,9 +992,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                         disabled={approvingId === booking.id}
                                                         style={{
                                                             fontFamily: GH_MONO,
-                                                            fontSize: 10,
+                                                            fontSize: 12,
                                                             fontWeight: 600,
-                                                            letterSpacing: '0.12em',
+                                                            letterSpacing: '0.06em',
                                                             textTransform: 'uppercase',
                                                             padding: '5px 8px',
                                                             background: GH.ink,
@@ -1033,17 +1006,17 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                             gap: 4,
                                                         }}
                                                     >
-                                                        {approvingId === booking.id ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
-                                                        OK
+                                                        {approvingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                                        Принять
                                                     </button>
                                                     <button
                                                         onClick={() => handleReject(booking.id)}
                                                         disabled={rejectingId === booking.id}
                                                         style={{
                                                             fontFamily: GH_MONO,
-                                                            fontSize: 10,
+                                                            fontSize: 12,
                                                             fontWeight: 600,
-                                                            letterSpacing: '0.12em',
+                                                            letterSpacing: '0.06em',
                                                             textTransform: 'uppercase',
                                                             padding: '5px 8px',
                                                             background: 'transparent',
@@ -1055,8 +1028,8 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                             gap: 4,
                                                         }}
                                                     >
-                                                        {rejectingId === booking.id ? <Loader2 size={10} className="animate-spin" /> : <X size={10} />}
-                                                        Откл.
+                                                        {rejectingId === booking.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                                                        Отклонить
                                                     </button>
                                                 </>
                                             )}
@@ -1065,9 +1038,9 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     <button
                                                         onClick={() => handleMove(booking.id)}
                                                         style={ghTableLinkBtn(GH.ink60)}
-                                                        title="Перенести"
+                                                        title="Перенести — откроется шахматка"
                                                     >
-                                                        Перен.
+                                                        Перенести
                                                     </button>
                                                     <button
                                                         onClick={() => handleExtend(booking.id)}
@@ -1105,15 +1078,15 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
                                                     <button
                                                         onClick={() => handleReRent(booking.id)}
                                                         style={ghTableLinkBtn(GH.ink60)}
-                                                        title={booking.isReRentListed ? 'Снять с переаренды' : 'Поставить на переаренду'}
+                                                        title={booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать: отдать время другим, клиенту вернём 50%'}
                                                     >
-                                                        {booking.isReRentListed ? 'Снять' : 'Пересд.'}
+                                                        {booking.isReRentListed ? 'Снять с пересдачи' : 'Пересдать'}
                                                     </button>
                                                     <button
                                                         onClick={() => handleCancel(booking.id)}
                                                         style={ghTableLinkBtn(GH.danger)}
                                                     >
-                                                        Отмена
+                                                        Отменить
                                                     </button>
                                                 </>
                                             )}
@@ -1165,8 +1138,52 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 16 }}>
-                <p style={{ ...ghabMono, color: GH.ink30 }}>UNBOX ADMIN · 2026</p>
+                <p style={{ ...ghabMono, color: GH.ink60 }}>Unbox · админка · 2026</p>
             </div>
         </div>
+    );
+}
+
+// Шторка «Отклонить бронь» — вместо window.prompt + второго окна «Вы уверены?».
+// Причина необязательна: пустую бэкенд заменит на «Слот недоступен».
+function RejectBookingSheet({ open, busy, onClose, onSubmit }: {
+    open: boolean;
+    busy: boolean;
+    onClose: () => void;
+    onSubmit: (reason: string) => void | Promise<void>;
+}) {
+    const [reason, setReason] = useState('');
+    useEffect(() => { if (open) setReason(''); }, [open]);
+    return (
+        <Sheet
+            open={open}
+            onClose={onClose}
+            title="Отклонить бронь?"
+            description="Клиент получит уведомление, деньги не списываются."
+            width={460}
+            footer={
+                <>
+                    <Button variant="danger" block loading={busy} onClick={() => onSubmit(reason)}>
+                        Отклонить бронь
+                    </Button>
+                    <Button variant="secondary" block onClick={onClose}>
+                        Оставить
+                    </Button>
+                </>
+            }
+        >
+            <Field
+                label="Причина для клиента"
+                optional
+                hint="Если оставить пустым, клиент увидит «Слот недоступен»."
+            >
+                <TextArea
+                    rows={3}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Например: кабинет на уборке"
+                />
+            </Field>
+        </Sheet>
     );
 }

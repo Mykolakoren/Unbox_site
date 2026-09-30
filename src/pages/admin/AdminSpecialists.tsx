@@ -25,6 +25,10 @@ import {
     rectSortingStrategy, useSortable, arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { STATUS } from '../../design/tokens';
+import { formatGel, formatDayMonth } from '../../utils/format';
 
 const CATEGORIES = [
     { value: '', label: 'Без категории' },
@@ -166,7 +170,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                             ? `Редактирование: ${specialist.firstName} ${specialist.lastName}`
                             : 'Новый специалист в каталог'}
                     </h3>
-                    <button onClick={onClose} className="text-unbox-dark/40 hover:text-unbox-dark">
+                    <button onClick={onClose} className="text-ink-60 hover:text-unbox-dark" aria-label="Закрыть">
                         <X size={18} />
                     </button>
                 </div>
@@ -186,7 +190,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                                 )}
                             </div>
                             <div className="flex-1">
-                                <label className="block text-xs text-unbox-grey mb-1">Фото профиля</label>
+                                <label className="block text-xs text-ink-60 mb-1">Фото профиля</label>
                                 <SpecialistPhotoUpload onUploaded={setPhotoUrl} />
                                 <input
                                     type="url"
@@ -195,50 +199,50 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                                     placeholder="…или вставьте ссылку https://..."
                                     className="w-full mt-2 px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                 />
-                                <div className="text-[10px] text-unbox-grey mt-1">jpg, png · до 2 МБ</div>
+                                <div className="text-caption text-ink-60 mt-1">jpg, png · до 2 МБ</div>
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <label className="block text-xs text-unbox-grey mb-1">Имя</label>
+                                <label className="block text-xs text-ink-60 mb-1">Имя</label>
                                 <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
                                     className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                             </div>
                             <div>
-                                <label className="block text-xs text-unbox-grey mb-1">Фамилия</label>
+                                <label className="block text-xs text-ink-60 mb-1">Фамилия</label>
                                 <input type="text" value={lastName} onChange={e => setLastName(e.target.value)}
                                     className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">Tagline (короткое описание)</label>
+                            <label className="block text-xs text-ink-60 mb-1">Короткое описание</label>
                             <input type="text" value={tagline} onChange={e => setTagline(e.target.value)} maxLength={150}
                                 className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                         </div>
 
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">Bio (подробное описание)</label>
+                            <label className="block text-xs text-ink-60 mb-1">Bio (подробное описание)</label>
                             <textarea value={bio} onChange={e => setBio(e.target.value)} rows={4}
                                 className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green resize-none" />
                         </div>
 
                         <div className="grid grid-cols-1 gap-2">
                             <div>
-                                <label className="block text-xs text-unbox-grey mb-1">Instagram</label>
+                                <label className="block text-xs text-ink-60 mb-1">Instagram</label>
                                 <input type="text" value={instagram} onChange={e => setInstagram(e.target.value)} maxLength={200}
                                     placeholder="@username или ссылка"
                                     className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                             </div>
                             <div>
-                                <label className="block text-xs text-unbox-grey mb-1">Telegram</label>
+                                <label className="block text-xs text-ink-60 mb-1">Telegram</label>
                                 <input type="text" value={telegram} onChange={e => setTelegram(e.target.value)} maxLength={200}
                                     placeholder="@username или ссылка"
                                     className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                             </div>
                             <div>
-                                <label className="block text-xs text-unbox-grey mb-1">Сайт</label>
+                                <label className="block text-xs text-ink-60 mb-1">Сайт</label>
                                 <input type="text" value={website} onChange={e => setWebsite(e.target.value)} maxLength={300}
                                     placeholder="https://…"
                                     className="w-full px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
@@ -253,7 +257,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                             {specializations.map(spec => (
                                 <span key={spec} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-unbox-green/10 text-unbox-green">
                                     {spec}
-                                    <button onClick={() => removeSpec(spec)} className="hover:text-red-500 transition-colors"><X size={10} /></button>
+                                    <button onClick={() => removeSpec(spec)} className="hover:text-[color:var(--status-danger-fg)] transition-colors" aria-label={`Убрать «${spec}»`}><X size={12} /></button>
                                 </span>
                             ))}
                         </div>
@@ -282,7 +286,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                             ))}
                         </div>
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">Базовая цена (₾)</label>
+                            <label className="block text-xs text-ink-60 mb-1">Базовая цена (₾)</label>
                             <input type="number" value={basePriceGel} onChange={e => setBasePriceGel(Number(e.target.value))} min={0} step={5}
                                 className="w-28 px-3 py-2 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green" />
                         </div>
@@ -293,7 +297,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                         <h4 className="text-sm font-semibold text-unbox-dark/60 uppercase tracking-wide">Настройки (только для админа)</h4>
 
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">Категория</label>
+                            <label className="block text-xs text-ink-60 mb-1">Категория</label>
                             <select value={category} onChange={e => setCategory(e.target.value)}
                                 className="w-full px-3 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm">
                                 {CATEGORIES.map(c => (
@@ -310,7 +314,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
 
                         {/* Плашки-маркеры */}
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">Плашки на карточке</label>
+                            <label className="block text-xs text-ink-60 mb-1">Плашки на карточке</label>
                             <div className="flex flex-col gap-2">
                                 {SPECIALIST_BADGES.map(b => (
                                     <label key={b.code} className="flex items-center gap-3 cursor-pointer">
@@ -328,7 +332,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
 
                         {/* Загруженные документы (диплом/сертификаты) */}
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">
+                            <label className="block text-xs text-ink-60 mb-1">
                                 Документы {documents.length > 0 ? `(${documents.length})` : '— не загружены'}
                             </label>
                             {documents.length > 0 && (
@@ -344,7 +348,7 @@ function EditModal({ specialist, onClose, onSaved }: EditModalProps) {
                         </div>
 
                         <div>
-                            <label className="block text-xs text-unbox-grey mb-1">Привязать к аккаунту</label>
+                            <label className="block text-xs text-ink-60 mb-1">Привязать к аккаунту</label>
                             <select value={userId} onChange={e => setUserId(e.target.value)}
                                 className="w-full px-3 py-2 rounded-lg border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green text-sm">
                                 <option value="">— не привязан —</option>
@@ -419,14 +423,14 @@ function CrmAccessRequests() {
     };
 
     if (loading) {
-        return <div className="text-center py-16 text-unbox-dark/40">Загрузка...</div>;
+        return <SkeletonList count={3} label="Загружаем запросы" />;
     }
 
     if (requests.length === 0) {
         return (
             <div className="text-center py-16">
-                <Clock size={48} className="mx-auto text-unbox-dark/20 mb-3" />
-                <p className="text-unbox-dark/40 text-sm">Нет активных запросов на доступ к CRM</p>
+                <Clock size={48} className="mx-auto text-ink-60 mb-3" />
+                <p className="text-ink-60 text-sm">Нет активных запросов на доступ к CRM</p>
             </div>
         );
     }
@@ -434,7 +438,7 @@ function CrmAccessRequests() {
     return (
         <div className="bg-white rounded-xl border border-unbox-light overflow-x-auto shadow-sm">
             <table className="w-full text-left">
-                <thead className="bg-unbox-light border-b border-unbox-light text-unbox-grey font-medium text-sm">
+                <thead className="bg-unbox-light border-b border-unbox-light text-ink-60 font-medium text-sm">
                     <tr>
                         <th className="p-4 pl-6">Пользователь</th>
                         <th className="p-4">Профессия</th>
@@ -457,19 +461,19 @@ function CrmAccessRequests() {
                                     )}
                                     <div>
                                         <div className="font-medium text-unbox-dark text-sm">{req.name}</div>
-                                        <div className="text-xs text-unbox-dark/40">{req.email}</div>
+                                        <div className="text-xs text-ink-60">{req.email}</div>
                                     </div>
                                 </div>
                             </td>
                             <td className="p-4 text-sm text-unbox-dark/70">{req.profession || '—'}</td>
                             <td className="p-4 text-sm text-unbox-dark/70 max-w-[200px] truncate">{req.message || '—'}</td>
-                            <td className="p-4 text-sm text-unbox-dark/50">
-                                {req.submittedAt ? new Date(req.submittedAt).toLocaleDateString('ru-RU') : '—'}
+                            <td className="p-4 text-sm text-ink-60">
+                                {req.submittedAt ? formatDayMonth(req.submittedAt, { withYear: 'auto' }) : '—'}
                             </td>
                             <td className="p-4 text-right pr-6">
                                 <div className="flex items-center justify-end gap-2">
                                     {processingId === req.userId ? (
-                                        <Loader2 size={18} className="animate-spin text-unbox-dark/40" />
+                                        <Loader2 size={18} className="animate-spin text-ink-60" />
                                     ) : (
                                         <>
                                             <button
@@ -481,7 +485,7 @@ function CrmAccessRequests() {
                                             </button>
                                             <button
                                                 onClick={() => handleReject(req.userId)}
-                                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 text-red-500 text-xs font-semibold hover:bg-red-100 transition-colors"
+                                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger-fg)] text-xs font-semibold hover:bg-[color:var(--status-danger-bg)] transition-colors"
                                             >
                                                 <XCircle size={14} />
                                                 Отклонить
@@ -530,15 +534,15 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                 a lock label instead. */}
             <div className="absolute top-2 left-2 z-10 flex items-center gap-1">
                 {specialist.isOwner ? (
-                    <span className="bg-unbox-dark text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm">
+                    <span className="bg-unbox-dark text-white text-caption font-bold px-2 py-1 rounded-lg shadow-sm">
                         Закреплено
                     </span>
                 ) : (
                     <>
                         <div {...listeners} className="bg-white/90 backdrop-blur-sm rounded-lg p-1.5 cursor-grab active:cursor-grabbing shadow-sm border border-white/50 hover:bg-white transition-colors">
-                            <GripVertical size={14} className="text-gray-400" />
+                            <GripVertical size={14} className="text-ink-60" />
                         </div>
-                        <span className="bg-white/90 backdrop-blur-sm text-[10px] font-bold text-unbox-dark/50 px-2 py-1 rounded-lg shadow-sm border border-white/50">
+                        <span className="bg-white/90 backdrop-blur-sm text-caption font-bold text-ink-60 px-2 py-1 rounded-lg shadow-sm border border-white/50">
                             #{(specialist.sortOrder ?? 0) + 1}
                         </span>
                     </>
@@ -548,8 +552,8 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
             {/* Visibility badge */}
             <div className="absolute top-2 right-2 z-10">
                 <span className={clsx(
-                    'text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm border border-white/50 backdrop-blur-sm',
-                    specialist.isVerified ? 'bg-green-500/90 text-white' : 'bg-red-400/90 text-white'
+                    'text-caption font-bold px-2 py-1 rounded-lg shadow-sm border border-white/50 backdrop-blur-sm',
+                    specialist.isVerified ? 'bg-[color:var(--status-ok-fg)] text-white' : 'bg-[color:var(--status-danger-fg)] text-white'
                 )}>
                     {specialist.isVerified ? 'Виден' : 'Скрыт'}
                 </span>
@@ -561,7 +565,7 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                     <img src={specialist.photoUrl} alt={`${specialist.firstName} ${specialist.lastName}`}
                         className="w-full h-full object-cover" />
                 ) : (
-                    <div className="w-full h-full flex items-center justify-center text-unbox-grey">
+                    <div className="w-full h-full flex items-center justify-center text-ink-60">
                         <User size={48} strokeWidth={1.5} />
                     </div>
                 )}
@@ -569,7 +573,7 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
 
             {/* Price Badge (like on public site) */}
             <div className="absolute top-[58%] right-3 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-sm font-bold text-unbox-dark border border-white/50">
-                от {specialist.basePriceGel} ₾
+                от {formatGel(specialist.basePriceGel)}
             </div>
 
             {/* Content */}
@@ -577,19 +581,19 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                 <h3 className="text-base font-bold text-unbox-dark leading-tight mb-1">
                     {specialist.firstName} {specialist.lastName}
                 </h3>
-                <p className="text-xs text-unbox-grey mb-3 line-clamp-2 border-l-2 border-unbox-green/30 pl-2">
+                <p className="text-xs text-ink-60 mb-3 line-clamp-2 border-l-2 border-unbox-green/30 pl-2">
                     {specialist.tagline}
                 </p>
 
                 {/* Formats */}
                 <div className="flex flex-wrap gap-1.5 mb-3">
                     {hasOnline && (
-                        <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 bg-unbox-light text-unbox-green rounded-md">
+                        <span className="flex items-center gap-1 text-caption font-medium px-2 py-0.5 bg-unbox-light text-unbox-green rounded-md">
                             <Video size={10} /> Онлайн
                         </span>
                     )}
                     {hasOffline && (
-                        <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 bg-unbox-light text-unbox-dark rounded-md">
+                        <span className="flex items-center gap-1 text-caption font-medium px-2 py-0.5 bg-unbox-light text-unbox-dark rounded-md">
                             <MapPin size={10} /> Офлайн
                         </span>
                     )}
@@ -607,10 +611,10 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                                 onClick={(e) => { e.stopPropagation(); onSpecClick?.(tag); }}
                                 title={isActive ? `Снять фильтр «${tag}»` : `Фильтровать по «${tag}»`}
                                 className={clsx(
-                                    'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
+                                    'text-caption px-2 py-0.5 rounded-full border transition-colors',
                                     isActive
                                         ? 'bg-unbox-dark text-white border-unbox-dark'
-                                        : 'bg-unbox-light/50 text-unbox-grey border-unbox-light hover:bg-unbox-light',
+                                        : 'bg-unbox-light/50 text-ink-60 border-unbox-light hover:bg-unbox-light',
                                     onSpecClick && 'cursor-pointer',
                                 )}
                             >
@@ -619,7 +623,7 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                         );
                     })}
                     {(specialist.specializations?.length ?? 0) > 2 && (
-                        <span className="text-[10px] px-2 py-0.5 bg-unbox-light/50 text-unbox-grey rounded-full border border-unbox-light">
+                        <span className="text-caption px-2 py-0.5 bg-unbox-light/50 text-ink-60 rounded-full border border-unbox-light">
                             +{specialist.specializations.length - 2}
                         </span>
                     )}
@@ -628,18 +632,18 @@ function SortablePreviewCard({ specialist, onEdit, onToggleVisibility, onDelete,
                 {/* Admin actions */}
                 <div className="flex items-center gap-1 pt-2 border-t border-gray-100">
                     <button onClick={onToggleVisibility} disabled={toggling}
-                        className={clsx('flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg transition-colors flex-1 justify-center',
-                            specialist.isVerified ? 'text-unbox-green bg-unbox-green/10 hover:bg-unbox-green/20' : 'text-gray-400 bg-gray-50 hover:bg-gray-100'
+                        className={clsx('flex items-center gap-1 text-caption font-medium px-2 py-1 rounded-lg transition-colors flex-1 justify-center',
+                            specialist.isVerified ? 'text-unbox-green bg-unbox-green/10 hover:bg-unbox-green/20' : 'text-ink-60 bg-gray-50 hover:bg-gray-100'
                         )}>
                         {toggling ? <Loader2 size={11} className="animate-spin" /> : specialist.isVerified ? <Eye size={11} /> : <EyeOff size={11} />}
                         {specialist.isVerified ? 'Виден' : 'Скрыт'}
                     </button>
                     <button onClick={onEdit}
-                        className="p-1.5 rounded-lg hover:bg-unbox-light transition-colors text-gray-400 hover:text-unbox-dark" title="Редактировать">
+                        className="p-1.5 rounded-lg hover:bg-unbox-light transition-colors text-ink-60 hover:text-unbox-dark" title="Редактировать" aria-label="Редактировать">
                         <Pencil size={13} />
                     </button>
                     <button onClick={onDelete} disabled={deleting}
-                        className="p-1.5 rounded-lg hover:bg-red-50 transition-colors text-gray-300 hover:text-red-500" title="Удалить">
+                        className="p-1.5 rounded-lg hover:bg-[color:var(--status-danger-bg)] transition-colors text-ink-60 hover:text-[color:var(--status-danger-fg)]" title="Удалить" aria-label="Удалить">
                         {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                     </button>
                 </div>
@@ -671,10 +675,10 @@ function SortableTableRow({ specialist, index, onEdit, onToggleVisibility, onDel
             {/* ── Drag handle + order ── */}
             <td className="p-2 pl-4 text-center">
                 <div className="flex items-center gap-1 justify-center">
-                    <div {...listeners} className="p-1 rounded cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
+                    <div {...listeners} className="p-1 rounded cursor-grab active:cursor-grabbing text-ink-60 hover:text-ink hover:bg-gray-100 transition-colors">
                         <GripVertical size={14} />
                     </div>
-                    <span className="text-[11px] text-unbox-dark/40 font-mono leading-none w-5">{index + 1}</span>
+                    <span className="text-caption text-ink-60 font-mono leading-none w-5">{index + 1}</span>
                 </div>
             </td>
 
@@ -690,7 +694,7 @@ function SortableTableRow({ specialist, index, onEdit, onToggleVisibility, onDel
                     )}
                     <div>
                         <div className="font-medium text-unbox-dark text-sm">{specialist.firstName} {specialist.lastName}</div>
-                        <div className="text-xs text-unbox-dark/40 truncate max-w-[180px]">{specialist.tagline}</div>
+                        <div className="text-xs text-ink-60 truncate max-w-[180px]">{specialist.tagline}</div>
                     </div>
                 </div>
             </td>
@@ -700,14 +704,14 @@ function SortableTableRow({ specialist, index, onEdit, onToggleVisibility, onDel
             <td className="p-4">
                 <div className="flex flex-wrap gap-1">
                     {(specialist.specializations ?? []).slice(0, 2).map((sp: string) => (
-                        <span key={sp} className="text-[10px] px-2 py-0.5 rounded-full bg-unbox-light text-unbox-dark/60">
+                        <span key={sp} className="text-caption px-2 py-0.5 rounded-full bg-unbox-light text-unbox-dark/60">
                             {sp}
                         </span>
                     ))}
                 </div>
             </td>
 
-            <td className="p-4 text-sm text-unbox-dark/70">от {specialist.basePriceGel} ₾</td>
+            <td className="p-4 text-sm text-unbox-dark/70">от {formatGel(specialist.basePriceGel)}</td>
 
             {/* ── Visibility toggle ── */}
             <td className="p-4">
@@ -717,7 +721,7 @@ function SortableTableRow({ specialist, index, onEdit, onToggleVisibility, onDel
                     className={clsx('flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors',
                         specialist.isVerified
                             ? 'text-unbox-green bg-unbox-green/10 hover:bg-unbox-green/20'
-                            : 'text-unbox-dark/40 bg-unbox-light hover:bg-unbox-dark/10'
+                            : 'text-ink-60 bg-unbox-light hover:bg-unbox-dark/10'
                     )}
                     title={specialist.isVerified ? 'Кликните чтобы скрыть' : 'Кликните чтобы показать'}
                 >
@@ -730,11 +734,11 @@ function SortableTableRow({ specialist, index, onEdit, onToggleVisibility, onDel
             <td className="p-4 text-right pr-6">
                 <div className="flex items-center justify-end gap-1">
                     <button onClick={onEdit}
-                        className="p-1.5 rounded-lg hover:bg-unbox-light transition-colors text-unbox-dark/40 hover:text-unbox-dark" title="Редактировать">
+                        className="p-1.5 rounded-lg hover:bg-unbox-light transition-colors text-ink-60 hover:text-unbox-dark" title="Редактировать" aria-label="Редактировать">
                         <Pencil size={14} />
                     </button>
                     <button onClick={onDelete} disabled={deleting}
-                        className="p-1.5 rounded-lg hover:bg-red-50 transition-colors text-unbox-dark/30 hover:text-red-500" title="Удалить">
+                        className="p-1.5 rounded-lg hover:bg-[color:var(--status-danger-bg)] transition-colors text-ink-60 hover:text-[color:var(--status-danger-fg)]" title="Удалить" aria-label="Удалить">
                         {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                     </button>
                 </div>
@@ -753,14 +757,14 @@ function DragOverlayCard({ specialist }: { specialist: SpecialistExtended }) {
                 {specialist.photoUrl ? (
                     <img src={specialist.photoUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
-                    <div className="w-full h-full flex items-center justify-center text-unbox-grey">
+                    <div className="w-full h-full flex items-center justify-center text-ink-60">
                         <User size={48} strokeWidth={1.5} />
                     </div>
                 )}
             </div>
             <div className="p-3">
                 <h3 className="text-sm font-bold text-unbox-dark">{specialist.firstName} {specialist.lastName}</h3>
-                <p className="text-[11px] text-unbox-grey line-clamp-1">{specialist.tagline}</p>
+                <p className="text-caption text-ink-60 line-clamp-1">{specialist.tagline}</p>
             </div>
         </div>
     );
@@ -778,7 +782,7 @@ function DragOverlayRow({ specialist }: { specialist: SpecialistExtended }) {
             )}
             <div>
                 <div className="font-medium text-unbox-dark text-sm">{specialist.firstName} {specialist.lastName}</div>
-                <div className="text-xs text-unbox-dark/40">{specialist.tagline}</div>
+                <div className="text-xs text-ink-60">{specialist.tagline}</div>
             </div>
         </div>
     );
@@ -825,22 +829,22 @@ function ApplicationsPanel({
                     : <div style={{ width: 36, height: 36, background: GH.ink10, borderRadius: '50%' }} />}
                 <div>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{s.firstName} {s.lastName}</div>
-                    <div style={{ ...ghaMono, fontSize: 9, color: GH.ink60 }}>{s.category || '—'}</div>
+                    <div style={{ ...ghaMono, fontSize: 12, color: GH.ink60 }}>{s.category || '—'}</div>
                 </div>
             </div>
             <div style={{ fontSize: 13, color: GH.ink60, lineHeight: 1.4 }}>
                 {s.tagline || <span style={{ fontStyle: 'italic' }}>—</span>}
             </div>
-            <div style={{ ...ghaMono, fontSize: 10 }}>
+            <div style={{ ...ghaMono, fontSize: 12 }}>
                 {(s.formats || []).length} формат{(s.formats || []).length === 1 ? '' : 'а'}
             </div>
             <div style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                {s.basePriceGel ? `${s.basePriceGel}₾` : '—'}
+                {s.basePriceGel ? formatGel(s.basePriceGel) : '—'}
             </div>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                 <button onClick={() => onEdit(s)}
                     style={{
-                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                         padding: '6px 10px', background: 'transparent', border: ghaHairline, cursor: 'pointer', color: GH.ink60,
                     }}>
                     Открыть
@@ -849,7 +853,7 @@ function ApplicationsPanel({
                     <>
                         <button onClick={() => act(s, 'reject')} disabled={busyId === s.id}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                                 padding: '6px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer',
                                 opacity: busyId === s.id ? 0.5 : 1,
                             }}>
@@ -857,7 +861,7 @@ function ApplicationsPanel({
                         </button>
                         <button onClick={() => act(s, 'approve')} disabled={busyId === s.id}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                                 padding: '6px 12px', background: GH.ink, border: 'none', color: GH.paper, cursor: 'pointer',
                                 opacity: busyId === s.id ? 0.5 : 1,
                             }}>
@@ -866,10 +870,10 @@ function ApplicationsPanel({
                     </>
                 ) : (
                     <span style={{
-                        ...ghaMono, fontSize: 9,
+                        ...ghaMono, fontSize: 12,
                         padding: '6px 10px',
-                        background: s.applicationStatus === 'approved' ? '#D1FAE5' : '#FEE2E2',
-                        color: s.applicationStatus === 'approved' ? '#065F46' : '#991B1B',
+                        background: s.applicationStatus === 'approved' ? STATUS.ok.bg : STATUS.danger.bg,
+                        color: s.applicationStatus === 'approved' ? STATUS.ok.fg : STATUS.danger.fg,
                     }}>
                         {s.applicationStatus === 'approved' ? 'Одобрено' : 'Отклонено'}
                     </span>
@@ -882,7 +886,7 @@ function ApplicationsPanel({
         <div>
             {pending.length === 0 && decided.length === 0 ? (
                 <div style={{ padding: '64px 0', textAlign: 'center' }}>
-                    <div style={{ ...ghaMono, color: GH.ink30 }}>Заявок пока нет</div>
+                    <div style={{ ...ghaMono, color: GH.ink60 }}>Заявок пока нет</div>
                     <div style={{ fontSize: 13, color: GH.ink60, marginTop: 8 }}>
                         Специалисты подают заявки через <code>/become-specialist</code>
                     </div>
@@ -930,6 +934,7 @@ export function AdminSpecialists() {
 
     const [deleting, setDeleting] = useState<string | null>(null);
     const [toggling, setToggling] = useState<string | null>(null);
+    const { confirm } = useConfirmDialog();
     const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
     const [activeId, setActiveId] = useState<string | null>(null);
     const [specFilter, setSpecFilter] = useState<string>('all');
@@ -972,7 +977,14 @@ export function AdminSpecialists() {
     };
 
     const handleDelete = async (s: SpecialistExtended) => {
-        if (!window.confirm(`Удалить анкету ${s.firstName} ${s.lastName}? Это действие необратимо.`)) return;
+        const ok = await confirm({
+            title: `Удалить анкету ${s.firstName} ${s.lastName}?`,
+            body: 'Анкета пропадёт из каталога и из админки. Вернуть её не получится — если нужно только спрятать, скройте её.',
+            confirmLabel: 'Удалить анкету',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
         setDeleting(s.id);
         try {
             await api.delete(`/specialists/admin/${s.id}`);
@@ -1067,7 +1079,7 @@ export function AdminSpecialists() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const ghaMono: React.CSSProperties = {
-    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const,
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
 };
 const ghaHairline = `1px solid ${GH.ink10}`;
 
@@ -1119,7 +1131,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* ── Head ── */}
             <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 20, marginBottom: 32 }}>
-                <p style={{ ...ghaMono, color: GH.ink30, marginBottom: 8 }}>ADMIN · SPECIALISTS</p>
+                <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 8 }}>Админка · специалисты</p>
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
                     <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0 }}>
                         Специалисты
@@ -1135,7 +1147,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                 style={{
                                     padding: '8px 16px', border: 'none', cursor: 'pointer',
                                     background: GH.ink, color: GH.paper,
-                                    fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em',
+                                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                     textTransform: 'uppercase', borderRadius: 8,
                                 }}>
                                 + Добавить специалиста
@@ -1145,7 +1157,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                 <button key={m} onClick={() => setViewMode(m)}
                                     style={{
                                         padding: '6px 16px', border: 'none', cursor: 'pointer',
-                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                         background: viewMode === m ? GH.ink : 'transparent',
                                         color: viewMode === m ? GH.paper : GH.ink60,
                                         borderTop: ghaHairline, borderBottom: ghaHairline,
@@ -1164,19 +1176,19 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
             {/* ── KPI strip ── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 32, marginBottom: 32, alignItems: 'end' }}>
                 <div>
-                    <p style={{ ...ghaMono, color: GH.ink30, marginBottom: 4 }}>ВСЕГО</p>
+                    <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 4 }}>ВСЕГО</p>
                     <span style={{ fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.03em' }}>
                         {specialists.length}
                     </span>
                 </div>
                 <div style={{ display: 'flex', gap: 28, paddingBottom: 6, flexWrap: 'wrap' }}>
                     <div>
-                        <p style={{ ...ghaMono, color: GH.ink30, marginBottom: 2 }}>ВИДИМЫХ</p>
+                        <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 2 }}>ВИДИМЫХ</p>
                         <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.accent }}>{verifiedCount}</span>
                     </div>
                     <div>
-                        <p style={{ ...ghaMono, color: GH.ink30, marginBottom: 2 }}>СКРЫТЫХ</p>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.ink30 }}>{hiddenCount}</span>
+                        <p style={{ ...ghaMono, color: GH.ink60, marginBottom: 2 }}>СКРЫТЫХ</p>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 600, color: GH.ink60 }}>{hiddenCount}</span>
                     </div>
                 </div>
             </div>
@@ -1197,7 +1209,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                 padding: '10px 20px', border: 'none', cursor: 'pointer',
                                 fontFamily: GH_SANS, fontSize: 13, fontWeight: 600,
                                 background: 'transparent',
-                                color: activeTab === tab ? GH.ink : GH.ink30,
+                                color: activeTab === tab ? GH.ink : GH.ink60,
                                 borderBottom: activeTab === tab ? `2px solid ${GH.ink}` : '2px solid transparent',
                                 marginBottom: -1,
                                 display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -1205,7 +1217,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                             {tab === 'specialists' ? 'Специалисты' : tab === 'crm-requests' ? 'Запросы CRM' : 'Заявки'}
                             {tab === 'applications' && pendingCount > 0 && (
                                 <span style={{
-                                    fontFamily: GH_MONO, fontSize: 10, fontWeight: 700,
+                                    fontFamily: GH_MONO, fontSize: 12, fontWeight: 700,
                                     background: GH.danger, color: GH.paper,
                                     padding: '2px 7px', borderRadius: 999,
                                     letterSpacing: '0.06em',
@@ -1235,7 +1247,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                             {['all', ...allSpecTags].map(tag => (
                                 <button key={tag} onClick={() => setSpecFilter(tag)}
                                     style={{
-                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                         padding: '4px 12px', border: ghaHairline, cursor: 'pointer',
                                         background: specFilter === tag ? GH.ink : 'transparent',
                                         color: specFilter === tag ? GH.paper : GH.ink60,
@@ -1246,15 +1258,12 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                         </div>
                     )}
                     {loading ? (
-                        <div style={{ textAlign: 'center', padding: '64px 0', color: GH.ink30 }}>
-                            <Loader2 size={24} className="animate-spin" style={{ margin: '0 auto 8px', display: 'block' }} />
-                            <p style={{ ...ghaMono }}>ЗАГРУЗКА…</p>
-                        </div>
+                        <SkeletonList count={4} label="Загружаем специалистов" />
                     ) : (
                         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
                             {viewMode === 'cards' ? (
                                 <>
-                                    <div style={{ ...ghaMono, color: GH.ink30, padding: '8px 0', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ ...ghaMono, color: GH.ink60, padding: '8px 0', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <GripVertical size={12} />
                                         ПЕРЕТАЩИТЕ ДЛЯ СОРТИРОВКИ
                                     </div>
@@ -1285,7 +1294,7 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
                                         minWidth: 700,
                                     }}>
                                         {['№', 'СПЕЦИАЛИСТ', 'КАТЕГОРИЯ', 'СПЕЦИАЛИЗАЦИИ', 'ЦЕНА', 'ПОКАЗ', ''].map((h, i) => (
-                                            <span key={i} style={{ ...ghaMono, color: GH.ink30, padding: '0 8px' }}>{h}</span>
+                                            <span key={i} style={{ ...ghaMono, color: GH.ink60, padding: '0 8px' }}>{h}</span>
                                         ))}
                                     </div>
                                     <SortableContext items={specialists.map(s => s.id)} strategy={verticalListSortingStrategy}>
@@ -1330,8 +1339,8 @@ function GridHouseAdminSpecialists(props: GHAdminSpecialistsProps) {
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 48, paddingTop: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghaMono, color: GH.ink30 }}>UNBOX ADMIN</span>
-                <span style={{ ...ghaMono, color: GH.ink30 }}>2026</span>
+                <span style={{ ...ghaMono, color: GH.ink60 }}>Unbox · админка</span>
+                <span style={{ ...ghaMono, color: GH.ink60 }}>2026</span>
             </div>
         </div>
     );
@@ -1370,10 +1379,10 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
         <div ref={setNodeRef} style={style} {...attributes}>
             {/* Drag + order */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-                <div {...listeners} style={{ cursor: 'grab', padding: 2, color: GH.ink30 }}>
+                <div {...listeners} style={{ cursor: 'grab', padding: 2, color: GH.ink60 }}>
                     <GripVertical size={13} />
                 </div>
-                <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>{index + 1}</span>
+                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{index + 1}</span>
             </div>
 
             {/* Name + avatar */}
@@ -1384,14 +1393,14 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
                     <div style={{
                         width: 32, height: 32, borderRadius: '50%', background: GH.ink5,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontFamily: GH_SANS, fontSize: 12, fontWeight: 700, color: GH.ink30, flexShrink: 0,
+                        fontFamily: GH_SANS, fontSize: 12, fontWeight: 700, color: GH.ink60, flexShrink: 0,
                     }}>
                         {specialist.firstName?.[0]}{specialist.lastName?.[0]}
                     </div>
                 )}
                 <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, color: GH.ink }}>{specialist.firstName} {specialist.lastName}</div>
-                    <div style={{ fontFamily: GH_SANS, fontSize: 11, color: GH.ink30, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{specialist.tagline}</div>
+                    <div style={{ fontFamily: GH_SANS, fontSize: 12, color: GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{specialist.tagline}</div>
                 </div>
             </div>
 
@@ -1414,7 +1423,7 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
                             onClick={(e) => { e.stopPropagation(); onSpecClick?.(sp); }}
                             title={isActive ? `Снять фильтр «${sp}»` : `Фильтровать по «${sp}»`}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.06em',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                 padding: '2px 6px',
                                 background: isActive ? GH.ink : GH.ink5,
                                 color: isActive ? GH.paper : GH.ink60,
@@ -1424,21 +1433,21 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
                     );
                 })}
                 {(specialist.specializations?.length ?? 0) > 2 && (
-                    <span style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink30 }}>+{specialist.specializations!.length - 2}</span>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>+{specialist.specializations!.length - 2}</span>
                 )}
             </div>
 
             {/* Price */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, padding: '0 8px' }}>{specialist.basePriceGel}₾</div>
+            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, padding: '0 8px' }}>{formatGel(specialist.basePriceGel)}</div>
 
             {/* Visibility toggle */}
             <div style={{ padding: '0 8px' }}>
                 <button onClick={onToggleVisibility} disabled={toggling}
                     style={{
                         border: 'none', cursor: 'pointer', padding: '3px 8px',
-                        fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                         background: specialist.isVerified ? 'rgba(71,109,107,0.12)' : GH.ink5,
-                        color: specialist.isVerified ? GH.accent : GH.ink30,
+                        color: specialist.isVerified ? GH.accent : GH.ink60,
                     }}>
                     {toggling ? '…' : specialist.isVerified ? 'ВКЛ' : 'ВЫКЛ'}
                 </button>
@@ -1446,12 +1455,12 @@ function GHSortableRow({ specialist, index, onEdit, onToggleVisibility, onDelete
 
             {/* Actions */}
             <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', padding: '0 4px' }}>
-                <button onClick={onEdit} title="Редактировать"
-                    style={{ border: 'none', cursor: 'pointer', padding: 4, background: 'transparent', color: GH.ink30, display: 'flex' }}>
+                <button onClick={onEdit} title="Редактировать" aria-label="Редактировать"
+                    style={{ border: 'none', cursor: 'pointer', padding: 4, background: 'transparent', color: GH.ink60, display: 'flex' }}>
                     <Pencil size={13} />
                 </button>
-                <button onClick={onDelete} disabled={deleting} title="Удалить"
-                    style={{ border: 'none', cursor: 'pointer', padding: 4, background: 'transparent', color: GH.ink30, display: 'flex' }}>
+                <button onClick={onDelete} disabled={deleting} title="Удалить" aria-label="Удалить"
+                    style={{ border: 'none', cursor: 'pointer', padding: 4, background: 'transparent', color: GH.ink60, display: 'flex' }}>
                     {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                 </button>
             </div>

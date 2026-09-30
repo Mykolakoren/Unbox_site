@@ -13,22 +13,25 @@ import {
     UserCheck,
     UserCircle,
     X,
+    Pencil,
 } from 'lucide-react';
 import { subDays, isAfter } from 'date-fns';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import type { User, Transaction } from '../../store/types';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { formatGel } from '../../utils/format';
+import { SkeletonList } from '../../components/ui/Skeleton';
 
 type PipelineStage = 'new' | 'active' | 'sleeping' | 'vip' | 'partner' | 'bad_client';
 
 const STAGE_CONFIG: Record<PipelineStage, { label: string; color: string; bg: string; border: string; dragOver: string }> = {
-    new:       { label: 'Новые',      color: 'text-emerald-700', bg: 'bg-emerald-50',    border: 'border-emerald-200', dragOver: 'bg-emerald-100 ring-2 ring-emerald-400' },
-    active:    { label: 'Активные',   color: 'text-blue-700',    bg: 'bg-blue-50',       border: 'border-blue-200',    dragOver: 'bg-blue-100 ring-2 ring-blue-400' },
-    vip:       { label: 'VIP',        color: 'text-purple-700',  bg: 'bg-purple-50',     border: 'border-purple-200',  dragOver: 'bg-purple-100 ring-2 ring-purple-400' },
-    partner:   { label: 'Партнёры',   color: 'text-amber-700',   bg: 'bg-amber-50',      border: 'border-amber-200',   dragOver: 'bg-amber-100 ring-2 ring-amber-400' },
-    sleeping:  { label: 'Спящие',     color: 'text-unbox-grey',  bg: 'bg-unbox-light/30', border: 'border-unbox-light', dragOver: 'bg-gray-100 ring-2 ring-gray-400' },
-    bad_client:{ label: 'Проблемные', color: 'text-red-700',     bg: 'bg-red-50',        border: 'border-red-200',     dragOver: 'bg-red-100 ring-2 ring-red-400' },
+    new:       { label: 'Новые',      color: 'text-ink-80', bg: 'bg-sunken', border: 'border-ink-10', dragOver: 'bg-sunken ring-2 ring-ink-20' },
+    active:    { label: 'Активные',   color: 'text-ink-80',    bg: 'bg-sunken',       border: 'border-ink-10',    dragOver: 'bg-sunken ring-2 ring-ink-20' },
+    vip:       { label: 'VIP',        color: 'text-ink-80',  bg: 'bg-sunken',     border: 'border-ink-10',  dragOver: 'bg-sunken ring-2 ring-ink-20' },
+    partner:   { label: 'Партнёры',   color: 'text-ink-80', bg: 'bg-sunken', border: 'border-ink-10', dragOver: 'bg-sunken ring-2 ring-ink-20' },
+    sleeping:  { label: 'Спящие',     color: 'text-ink-60',  bg: 'bg-unbox-light/30', border: 'border-unbox-light', dragOver: 'bg-gray-100 ring-2 ring-gray-400' },
+    bad_client:{ label: 'Проблемные', color: 'text-[color:var(--status-danger-fg)]',     bg: 'bg-[color:var(--status-danger-bg)]',        border: 'border-[color:var(--status-danger-bg)]',     dragOver: 'bg-[color:var(--status-danger-bg)] ring-2 ring-[color:var(--status-danger-fg)]' },
 };
 
 const ADMIN_ROLES = ['owner', 'senior_admin', 'admin'];
@@ -42,6 +45,12 @@ interface AdminPickerState {
 export function AdminCrm() {
         const { users, bookings, transactions, updateUserById } = useUserStore();
     const navigate = useNavigate();
+    // Аудит G8-02 / X5-07: при прямом открытии /admin/crm список клиентов
+    // никто не загружал, и экран показывал нули. Грузим сами, пока — силуэты.
+    const fetchUsers = useUserStore(s => s.fetchUsers);
+    useEffect(() => {
+        if (users.length === 0) fetchUsers();
+    }, [users.length, fetchUsers]);
     const [searchQuery, setSearchQuery] = useState('');
 
     // DnD state
@@ -238,6 +247,7 @@ export function AdminCrm() {
                 adminPicker={adminPicker} setAdminPicker={setAdminPicker}
                 handleAssignAdmin={handleAssignAdmin}
                 navigate={navigate}
+                loading={users.length === 0}
             />
         );
 }
@@ -274,15 +284,15 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
             <div className="p-2.5">
                 {/* Top row: drag handle + avatar + name */}
                 <div className="flex items-center gap-1.5">
-                    <GripVertical size={14} className="text-gray-300 group-hover:text-gray-400 shrink-0 cursor-grab active:cursor-grabbing" />
-                    <div className="w-7 h-7 rounded-full bg-unbox-light/70 flex items-center justify-center text-xs font-bold text-unbox-grey shrink-0">
+                    <GripVertical size={14} className="text-ink-60 group-hover:text-ink shrink-0 cursor-grab active:cursor-grabbing" />
+                    <div className="w-7 h-7 rounded-full bg-unbox-light/70 flex items-center justify-center text-xs font-bold text-ink-60 shrink-0">
                         {user.name?.[0]?.toUpperCase() ?? '?'}
                     </div>
                     <div className="min-w-0 flex-1">
                         <div className="text-xs font-semibold text-unbox-dark truncate group-hover:text-unbox-green transition-colors">
                             {user.name}
                         </div>
-                        <div className="text-[10px] text-unbox-grey truncate">
+                        <div className="text-caption text-ink-60 truncate">
                             {user.phone || user.email}
                         </div>
                     </div>
@@ -290,8 +300,8 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
 
                 {/* Balance */}
                 {user.balance !== 0 && (
-                    <div className={clsx('text-[10px] font-medium mt-1.5 pl-1', user.balance < 0 ? 'text-red-500' : 'text-green-600')}>
-                        Баланс: {user.balance.toFixed(0)} ₾
+                    <div className={clsx('text-caption font-medium mt-1.5 pl-1', user.balance < 0 ? 'text-[color:var(--status-danger-fg)]' : 'text-[color:var(--status-ok-fg)]')}>
+                        Баланс: {formatGel(user.balance, { fraction: 0 })}
                     </div>
                 )}
             </div>
@@ -304,20 +314,20 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
                     onClick={(e) => { e.stopPropagation(); onOpenAdminPicker('responsible'); }}
                     className="w-full flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-unbox-light/40 transition-colors text-left"
                 >
-                    <span className="text-[9px] text-unbox-grey shrink-0 w-7">Отв.</span>
+                    <span className="text-caption text-ink-60 shrink-0 w-7">Отв.</span>
                     {responsible ? (
                         <>
-                            <div className="w-4 h-4 rounded-full bg-unbox-green flex items-center justify-center text-[8px] font-bold text-white shrink-0">
+                            <div className="w-4 h-4 rounded-full bg-unbox-green flex items-center justify-center text-caption font-bold text-white shrink-0">
                                 {responsible.name?.[0]?.toUpperCase() ?? '?'}
                             </div>
-                            <span className="text-[10px] font-medium text-unbox-dark truncate flex-1">
+                            <span className="text-caption font-medium text-unbox-dark truncate flex-1">
                                 {responsible.name}
                             </span>
                         </>
                     ) : (
-                        <span className="text-[10px] text-gray-400 italic flex-1">не назначен</span>
+                        <span className="text-caption text-ink-60 italic flex-1">не назначен</span>
                     )}
-                    <span className="text-[9px] text-gray-300 shrink-0">✎</span>
+                    <Pencil size={12} className="text-ink-60 shrink-0" aria-hidden="true" />
                 </button>
 
                 {/* Attracted */}
@@ -326,20 +336,20 @@ function ClientCard({ user, isDragging, adminMap, onNavigate, onDragStart, onDra
                     onClick={(e) => { e.stopPropagation(); onOpenAdminPicker('attracted'); }}
                     className="w-full flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-unbox-light/40 transition-colors text-left"
                 >
-                    <span className="text-[9px] text-unbox-grey shrink-0 w-7">Привл.</span>
+                    <span className="text-caption text-ink-60 shrink-0 w-7">Привл.</span>
                     {attracted ? (
                         <>
-                            <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center text-[8px] font-bold text-white shrink-0">
+                            <div className="w-4 h-4 rounded-full bg-ink-60 flex items-center justify-center text-caption font-bold text-white shrink-0">
                                 {attracted.name?.[0]?.toUpperCase() ?? '?'}
                             </div>
-                            <span className="text-[10px] font-medium text-unbox-dark truncate flex-1">
+                            <span className="text-caption font-medium text-unbox-dark truncate flex-1">
                                 {attracted.name}
                             </span>
                         </>
                     ) : (
-                        <span className="text-[10px] text-gray-400 italic flex-1">не указан</span>
+                        <span className="text-caption text-ink-60 italic flex-1">не указан</span>
                     )}
-                    <span className="text-[9px] text-gray-300 shrink-0">✎</span>
+                    <Pencil size={12} className="text-ink-60 shrink-0" aria-hidden="true" />
                 </button>
             </div>
         </div>
@@ -367,8 +377,8 @@ function KpiCard({
         emerald: { bg: 'bg-unbox-light',    icon: 'text-unbox-green', text: 'text-unbox-dark' },
         indigo:  { bg: 'bg-unbox-light',    icon: 'text-unbox-dark',  text: 'text-unbox-dark' },
         purple:  { bg: 'bg-unbox-dark/10',  icon: 'text-unbox-dark',  text: 'text-unbox-dark' },
-        red:     { bg: 'bg-red-50',         icon: 'text-red-500',     text: 'text-red-600' },
-        gray:    { bg: 'bg-unbox-light/30', icon: 'text-unbox-grey',  text: 'text-unbox-grey' },
+        red:     { bg: 'bg-[color:var(--status-danger-bg)]',         icon: 'text-[color:var(--status-danger-fg)]',     text: 'text-[color:var(--status-danger-fg)]' },
+        gray:    { bg: 'bg-unbox-light/30', icon: 'text-ink-60',  text: 'text-ink-60' },
     };
     const c = colorClasses[color] || colorClasses.gray;
 
@@ -378,8 +388,8 @@ function KpiCard({
                 <Icon className={`w-4 h-4 ${c.icon}`} />
             </div>
             <div className={`text-xl font-bold ${c.text}`}>{value}</div>
-            <div className="text-xs text-unbox-grey">{label}</div>
-            {subtitle && <div className="text-[10px] text-unbox-grey mt-0.5">{subtitle}</div>}
+            <div className="text-xs text-ink-60">{label}</div>
+            {subtitle && <div className="text-caption text-ink-60 mt-0.5">{subtitle}</div>}
         </div>
     );
 }
@@ -389,6 +399,7 @@ function KpiCard({
 // ============================================================================
 
 type GHCrmProps = {
+    loading: boolean;
     analytics: any;
     pipeline: { stage: PipelineStage; clients: User[] }[];
     searchQuery: string; setSearchQuery: (v: string) => void;
@@ -417,7 +428,18 @@ const GH_STAGE_LABELS: Record<PipelineStage, string> = {
 };
 
 function GridHouseAdminCrm(p: GHCrmProps) {
-    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
+
+    if (p.loading) {
+        return (
+            <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
+                <div style={{ maxWidth: 1600, margin: '0 auto', padding: 'clamp(24px, 4vw, 48px)' }}>
+                    <div style={{ ...eyebrow, marginBottom: 24 }}>Раздел · CRM · 30 дней</div>
+                    <SkeletonList count={5} label="Загружаем клиентов" />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div style={{ minHeight: '100vh', background: GH.paper, color: GH.ink, fontFamily: GH_SANS }}>
@@ -435,7 +457,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                     {[
                         { label: 'Клиентов', value: p.analytics.totalClients, sub: null },
                         { label: 'Новых · 30д', value: p.analytics.newClients, sub: null },
-                        { label: 'Доход · 30д', value: `${p.analytics.monthlyRevenue.toFixed(0)} ₾`, sub: null },
+                        { label: 'Доход · 30д', value: formatGel(p.analytics.monthlyRevenue, { fraction: 0 }), sub: null },
                         { label: 'Бронирований', value: p.analytics.totalBookings, sub: `${p.analytics.cancelledBookings} отмен` },
                         { label: 'Абонементов', value: p.analytics.activeSubscriptions, sub: null },
                         { label: 'Должников', value: p.analytics.debtors.length, sub: null },
@@ -445,7 +467,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                             <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(28px, 3vw, 38px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1, color: k.label === 'Должников' && p.analytics.debtors.length > 0 ? GH.danger : GH.ink }}>
                                 {k.value}
                             </div>
-                            {k.sub && <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 6, textTransform: 'uppercase' }}>{k.sub}</div>}
+                            {k.sub && <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, marginTop: 6, textTransform: 'uppercase' }}>{k.sub}</div>}
                         </div>
                     ))}
                 </div>
@@ -500,7 +522,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                             >
                                 {/* Column head */}
                                 <div style={{ padding: '16px 12px', borderBottom: `2px solid ${GH.ink}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                    <span style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 700, color: GH.ink }}>
+                                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700, color: GH.ink }}>
                                         {String(colIdx + 1).padStart(2, '0')} · {GH_STAGE_LABELS[stage]}
                                     </span>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink }}>
@@ -515,8 +537,8 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                             padding: '24px 12px',
                                             border: `1px dashed ${isOver ? GH.ink60 : GH.ink10}`,
                                             fontFamily: GH_MONO,
-                                            fontSize: 10,
-                                            letterSpacing: '0.16em',
+                                            fontSize: 12,
+                                            letterSpacing: '0.06em',
                                             textTransform: 'uppercase',
                                             color: GH.ink60,
                                             textAlign: 'center',
@@ -539,7 +561,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                         ))
                                     )}
                                     {clients.length > 15 && (
-                                        <div style={{ textAlign: 'center', padding: '8px 0', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: GH.ink60 }}>
+                                        <div style={{ textAlign: 'center', padding: '8px 0', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                                             +{clients.length - 15} ещё
                                         </div>
                                     )}
@@ -585,10 +607,10 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                         </span>
                                         <div>
                                             <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink }}>{debtor.name}</div>
-                                            <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60, marginTop: 2 }}>{debtor.email}</div>
+                                            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, marginTop: 2 }}>{debtor.email}</div>
                                         </div>
                                         <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, textAlign: 'right' }}>
-                                            {debtor.balance.toFixed(0)} ₾
+                                            {formatGel(debtor.balance, { fraction: 0 })}
                                         </div>
                                         <ChevronRight size={16} color={GH.ink60} />
                                     </div>
@@ -653,7 +675,7 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                             textAlign: 'left',
                                         }}
                                     >
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', color: isSelected ? GH.paper : GH.ink60, paddingLeft: 12 }}>—</span>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: isSelected ? GH.paper : GH.ink60, paddingLeft: 12 }}>—</span>
                                         <span style={{ fontFamily: GH_SANS, fontSize: 14 }}>Не назначен</span>
                                         <span />
                                     </button>
@@ -683,12 +705,12 @@ function GridHouseAdminCrm(p: GHCrmProps) {
                                             textAlign: 'left',
                                         }}
                                     >
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: isSelected ? GH.paper : GH.ink60, paddingLeft: 12 }}>
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: isSelected ? GH.paper : GH.ink60, paddingLeft: 12 }}>
                                             {String(idx + 1).padStart(2, '0')}
                                         </span>
                                         <div>
                                             <div style={{ fontFamily: GH_SANS, fontSize: 14, fontWeight: 600 }}>{admin.name}</div>
-                                            <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: isSelected ? GH.paper : GH.ink60, marginTop: 2 }}>
+                                            <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: isSelected ? GH.paper : GH.ink60, marginTop: 2 }}>
                                                 {admin.role === 'owner' ? 'Владелец' : admin.role === 'senior_admin' ? 'Ст. Админ' : 'Админ'}
                                             </div>
                                         </div>
@@ -743,25 +765,25 @@ function GHClientCard({
             <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 8, alignItems: 'flex-start' }}>
                 <GripVertical size={12} color={GH.ink60} style={{ marginTop: 2, cursor: 'grab' }} />
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', marginBottom: 2 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', marginBottom: 2 }}>
                         №{String(index + 1).padStart(3, '0')}
                     </div>
                     <div style={{ fontFamily: GH_SANS, fontSize: 12, fontWeight: 700, color: GH.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {user.name}
                     </div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
                         {user.phone || user.email}
                     </div>
                     {user.balance !== 0 && (
                         <div style={{
                             fontFamily: GH_MONO,
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 700,
                             fontVariantNumeric: 'tabular-nums',
                             marginTop: 4,
                             color: user.balance < 0 ? GH.danger : GH.ink,
                         }}>
-                            {user.balance.toFixed(0)} ₾
+                            {formatGel(user.balance, { fraction: 0 })}
                         </div>
                     )}
                 </div>
@@ -782,8 +804,8 @@ function GHClientCard({
                         textAlign: 'left',
                     }}
                 >
-                    <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: GH.ink60 }}>Отв.</span>
-                    <span style={{ fontFamily: GH_SANS, fontSize: 10, color: responsible ? GH.ink : GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: responsible ? 'normal' : 'italic' }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>Отв.</span>
+                    <span style={{ fontFamily: GH_SANS, fontSize: 12, color: responsible ? GH.ink : GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: responsible ? 'normal' : 'italic' }}>
                         {responsible ? responsible.name : 'не назначен'}
                     </span>
                 </button>
@@ -801,8 +823,8 @@ function GHClientCard({
                         textAlign: 'left',
                     }}
                 >
-                    <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: GH.ink60 }}>Прив.</span>
-                    <span style={{ fontFamily: GH_SANS, fontSize: 10, color: attracted ? GH.ink : GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: attracted ? 'normal' : 'italic' }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>Прив.</span>
+                    <span style={{ fontFamily: GH_SANS, fontSize: 12, color: attracted ? GH.ink : GH.ink60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: attracted ? 'normal' : 'italic' }}>
                         {attracted ? attracted.name : 'не указан'}
                     </span>
                 </button>

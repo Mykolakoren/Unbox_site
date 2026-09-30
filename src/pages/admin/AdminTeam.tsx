@@ -4,14 +4,17 @@ import { toast } from 'sonner';
 import { teamApi, type TeamMember, type TeamMemberCreate } from '../../api/team';
 import { createPortal } from 'react-dom';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 /* ── Grid House module-scope constants (prefix: ght) ── */
 const ghtHairline = `1px solid ${GH.ink10}`;
 const ghtMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -109,7 +112,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
             <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                <button onClick={onClose} className="absolute top-4 right-4 text-ink-60 hover:text-ink" aria-label="Закрыть">
                     <X size={20} />
                 </button>
                 <h3 className="text-lg font-bold text-unbox-dark mb-5">
@@ -122,13 +125,13 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
                             {form.photo_url ? (
                                 <img src={form.photo_url} alt="" className="w-full h-full object-cover" />
                             ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-300 text-2xl font-bold">
+                                <div className="w-full h-full flex items-center justify-center text-ink-60 text-2xl font-bold">
                                     {form.name[0]?.toUpperCase() || '?'}
                                 </div>
                             )}
                         </div>
                         <div className="flex-1">
-                            <label className="block text-xs font-medium text-gray-600 mb-1">URL фото</label>
+                            <label className="block text-xs font-medium text-ink-80 mb-1">URL фото</label>
                             <input
                                 type="url"
                                 value={form.photo_url}
@@ -141,7 +144,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Имя *</label>
+                            <label className="block text-xs font-medium text-ink-80 mb-1">Имя *</label>
                             <input
                                 type="text"
                                 value={form.name}
@@ -152,7 +155,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Тип роли</label>
+                            <label className="block text-xs font-medium text-ink-80 mb-1">Тип роли</label>
                             <select
                                 value={form.role_type}
                                 onChange={e => set('role_type', e.target.value)}
@@ -166,7 +169,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">Должность (отображаемая) *</label>
+                        <label className="block text-xs font-medium text-ink-80 mb-1">Должность (отображаемая) *</label>
                         <input
                             type="text"
                             value={form.role}
@@ -178,7 +181,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">Bio (необязательно)</label>
+                        <label className="block text-xs font-medium text-ink-80 mb-1">Bio (необязательно)</label>
                         <textarea
                             value={form.bio}
                             onChange={e => set('bio', e.target.value)}
@@ -190,7 +193,7 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Порядок</label>
+                            <label className="block text-xs font-medium text-ink-80 mb-1">Порядок</label>
                             <input
                                 type="number"
                                 value={form.sort_order}
@@ -206,14 +209,14 @@ function MemberModal({ member, onClose, onSaved }: MemberModalProps) {
                                     onChange={e => set('is_active', e.target.checked)}
                                     className="w-4 h-4 accent-unbox-green"
                                 />
-                                <span className="text-sm text-gray-700">Активен</span>
+                                <span className="text-sm text-ink-80">Активен</span>
                             </label>
                         </div>
                     </div>
 
                     <div className="flex gap-3 pt-2">
                         <button type="button" onClick={onClose}
-                            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
+                            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-ink-80 text-sm font-medium hover:bg-gray-50">
                             Отмена
                         </button>
                         <button type="submit" disabled={saving}
@@ -232,6 +235,7 @@ export function AdminTeam() {
         const [members, setMembers] = useState<TeamMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [editMember, setEditMember] = useState<TeamMember | null | undefined>(undefined); // undefined = closed, null = new
+    const { confirm } = useConfirmDialog();
 
     const load = async () => {
         try {
@@ -247,7 +251,14 @@ export function AdminTeam() {
     useEffect(() => { load(); }, []);
 
     const handleDelete = async (m: TeamMember) => {
-        if (!confirm(`Удалить ${m.name}?`)) return;
+        const ok = await confirm({
+            title: `Удалить ${m.name} из команды?`,
+            body: 'Карточка пропадёт со страницы «Команда». Если нужно только спрятать — выключите её.',
+            confirmLabel: 'Удалить из команды',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
         try {
             await teamApi.delete(m.id);
             toast.success('Участник удалён');
@@ -274,9 +285,9 @@ export function AdminTeam() {
     };
     const ROLE_COLORS: Record<string, string> = {
         founder: 'bg-unbox-green/15 text-unbox-green',
-        senior_admin: 'bg-blue-50 text-blue-700',
-        admin: 'bg-gray-100 text-gray-600',
-        other: 'bg-gray-50 text-gray-500',
+        senior_admin: 'bg-sunken text-ink-80',
+        admin: 'bg-gray-100 text-ink-80',
+        other: 'bg-gray-50 text-ink-60',
     };
 
     return (
@@ -340,7 +351,7 @@ function GridHouseTeam({
                     </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ ...ghtMono, color: GH.ink30, fontSize: narrow ? 9 : 10 }}>
+                    <div style={{ ...ghtMono, color: GH.ink60, fontSize: 12 }}>
                         {narrow ? 'Показаны на сайте' : 'Карточки показываются на главной странице сайта'}
                     </div>
                     <button
@@ -349,9 +360,9 @@ function GridHouseTeam({
                             background: GH.ink,
                             color: GH.paper,
                             fontFamily: GH_MONO,
-                            fontSize: narrow ? 9 : 11,
+                            fontSize: 12,
                             fontWeight: 600,
-                            letterSpacing: '0.18em',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase' as const,
                             padding: narrow ? '10px 14px' : '14px 22px',
                             border: 'none',
@@ -369,13 +380,14 @@ function GridHouseTeam({
 
             {/* ── Content ── */}
             {loading ? (
-                <div style={{ padding: '120px 0', textAlign: 'center', ...ghtMono }}>
-                    Загрузка команды...
-                </div>
+                <SkeletonList count={4} label="Загружаем команду" />
             ) : members.length === 0 ? (
-                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghtHairline, padding: '80px 24px', textAlign: 'center' }}>
-                    <div style={{ ...ghtMono, marginBottom: 14 }}>→ Пусто</div>
-                    <h2 style={{ ...ghtH1, fontSize: 'clamp(28px, 3.5vw, 44px)' }}>Команда пока не собрана.</h2>
+                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: ghtHairline, padding: '48px 24px' }}>
+                    <EmptyState
+                        title="Команда пока не собрана"
+                        hint="Добавьте первого участника — он появится на странице «Команда»."
+                        action={{ label: 'Добавить участника', onClick: () => setEditMember(null) }}
+                    />
                 </div>
             ) : (
                 <div
@@ -426,7 +438,7 @@ function GridHouseTeam({
                                 <div style={{ position: 'absolute', top: 10, left: 12, ...ghtMono, color: GH.ink60, background: GH.paper, padding: '2px 6px', fontVariantNumeric: 'tabular-nums' }}>
                                     {String(idx + 1).padStart(2, '0')}
                                 </div>
-                                <div style={{ position: 'absolute', top: 10, right: 12, ...ghtMono, color: GH.ink30, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <div style={{ position: 'absolute', top: 10, right: 12, ...ghtMono, color: GH.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
                                     <GripVertical size={11} /> {m.sortOrder}
                                 </div>
                                 {!m.isActive && (
@@ -450,9 +462,9 @@ function GridHouseTeam({
                                     <span
                                         style={{
                                             fontFamily: GH_MONO,
-                                            fontSize: 10,
+                                            fontSize: 12,
                                             fontWeight: 600,
-                                            letterSpacing: '0.14em',
+                                            letterSpacing: '0.06em',
                                             textTransform: 'uppercase',
                                             padding: '4px 8px',
                                             color: m.roleType === 'founder' ? GH.paper : GH.ink,
@@ -559,7 +571,7 @@ function GridHouseTeam({
                         <div style={{ width: 44, height: 44, border: '2px dashed currentColor', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <Plus size={20} />
                         </div>
-                        <div style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                             → Добавить
                         </div>
                     </button>
@@ -568,8 +580,8 @@ function GridHouseTeam({
 
             {/* ── Footer ── */}
             <div style={{ borderTop: `2px solid ${GH.ink}`, marginTop: 40, padding: '18px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ ...ghtMono, color: GH.ink30 }}>UNBOX ADMIN · 2026</div>
-                <div style={{ ...ghtMono, color: GH.ink30, fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ ...ghtMono, color: GH.ink60 }}>Unbox · админка · 2026</div>
+                <div style={{ ...ghtMono, color: GH.ink60, fontVariantNumeric: 'tabular-nums' }}>
                     {total} участников
                 </div>
             </div>
