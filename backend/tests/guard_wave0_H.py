@@ -193,8 +193,13 @@ def test_mobile_screens_gate_booking():
 
 
 def test_desktop_wizard_gates_before_payment():
+    # Волна 2, шаг 0: мастер вынесен из App.tsx в свой файл, App только
+    # подключает его на /checkout.
     app = _read("src/App.tsx")
-    wizard = _fn_body(app, "function BookingWizard()", "\nimport { Toaster }")
+    assert "<BookingWizard />" in app and "components/Wizard/BookingWizard" in app, \
+        "/checkout больше не открывает мастер BookingWizard"
+    wizard = _fn_body(_read("src/components/Wizard/BookingWizard.tsx"),
+                      "function BookingWizard()", "\n}\n")
     i_gate = wizard.find("if (needsApplication)")
     i_board = wizard.find("<ChessboardStep")
     assert i_gate != -1 and i_board != -1 and i_gate < i_board, \

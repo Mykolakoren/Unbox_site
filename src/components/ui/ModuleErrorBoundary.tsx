@@ -1,5 +1,21 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { AlertTriangle, RotateCcw, Copy } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Copy, MessageCircle } from 'lucide-react';
+import { Button } from './Button';
+import { FONT, STATUS } from '../../design/tokens';
+import { useUserStore } from '../../store/userStore';
+
+/** Куда писать, если экран упал (тот же Telegram, что в SpecialistGate). */
+const ADMIN_CONTACT_URL = 'https://t.me/UnboxCenter';
+
+/** Админ/владелец — им показываем текст ошибки и стек (волна 2, X3-09). */
+function isStaffViewer(): boolean {
+  try {
+    const u = useUserStore.getState().currentUser as { role?: string | null; isAdmin?: boolean | null } | null;
+    return !!u && (u.role === 'owner' || u.role === 'senior_admin' || u.role === 'admin' || !!u.isAdmin);
+  } catch {
+    return false;
+  }
+}
 
 interface Props {
   children: ReactNode;
@@ -70,6 +86,15 @@ export class ModuleErrorBoundary extends Component<Props, State> {
     }
   }
 
+  handleReload = () => {
+    // Сбрасываем флаг авто-перезагрузки, чтобы следующий «устаревший бандл»
+    // снова мог перезагрузиться сам.
+    try {
+      sessionStorage.removeItem(`unbox_chunk_retry_${window.location.pathname}`);
+    } catch { /* noop */ }
+    window.location.reload();
+  };
+
   handleCopy = () => {
     const text = [
       `Module: ${this.props.moduleName || 'Unknown'}`,
@@ -92,49 +117,54 @@ export class ModuleErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       const stack = this.state.error?.stack || '';
       const componentStack = this.state.componentStack || '';
+      // Техподробности (текст ошибки, стек, копирование) — только в dev и
+      // админам: клиенту они ничего не говорят и пугают (X3-09).
+      const showDetails = import.meta.env.DEV || isStaffViewer();
       return (
-        <div className="flex flex-col items-center justify-center min-h-[300px] p-6">
-          <AlertTriangle className="w-12 h-12 text-amber-500 mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2 text-center">
-            {this.props.moduleName ? `Ошибка в модуле «${this.props.moduleName}»` : 'Произошла ошибка'}
-          </h3>
-          <p className="text-sm text-gray-700 mb-4 max-w-xl text-center font-medium">
-            {this.state.error?.message || 'Неизвестная ошибка'}
+        <div
+          role="alert"
+          className="flex flex-col items-center justify-center min-h-[300px] p-6 bg-paper text-ink"
+          style={{ fontFamily: FONT.sans }}
+        >
+          <AlertTriangle className="w-10 h-10 mb-4" style={{ color: STATUS.pending.fg }} aria-hidden="true" />
+          <h2 className="text-title font-semibold mb-2 text-center">Этот экран не загрузился</h2>
+          <p className="text-body text-ink-60 mb-6 max-w-md text-center">
+            Обновите страницу — обычно это помогает. Если не помогло, напишите администратору.
           </p>
-          {(stack || componentStack) && (
-            <details className="w-full max-w-3xl mb-4 text-left">
-              <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-700 select-none mb-2">
-                Показать стек (для отладки)
+          <div className="flex gap-2 flex-wrap justify-center">
+            <Button icon={<RotateCcw size={18} aria-hidden="true" />} onClick={this.handleReload}>
+              Обновить страницу
+            </Button>
+            <a
+              href={ADMIN_CONTACT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ui-btn ui-btn--secondary"
+            >
+              <MessageCircle size={18} aria-hidden="true" />
+              Написать администратору
+            </a>
+          </div>
+          {showDetails && (
+            <details className="w-full max-w-3xl mt-6 text-left">
+              <summary className="cursor-pointer text-caption text-ink-60 select-none mb-2">
+                Для администратора: {this.props.moduleName ? `раздел «${this.props.moduleName}», ` : ''}
+                {this.state.error?.message || 'без текста ошибки'}
               </summary>
-              <pre className="text-[10px] leading-snug bg-gray-50 border border-gray-200 rounded p-3 overflow-auto max-h-64 whitespace-pre-wrap break-all">
-                {stack}
-                {componentStack && '\n\n--- Component Stack ---' + componentStack}
-              </pre>
+              {(stack || componentStack) && (
+                <pre
+                  className="text-caption leading-snug bg-sunken border border-ink-10 p-3 overflow-auto max-h-64 whitespace-pre-wrap break-all mb-2"
+                  style={{ fontFamily: FONT.mono }}
+                >
+                  {stack}
+                  {componentStack && '\n\n--- Component Stack ---' + componentStack}
+                </pre>
+              )}
+              <Button variant="quiet" size="compact" icon={<Copy size={16} aria-hidden="true" />} onClick={this.handleCopy}>
+                Скопировать ошибку
+              </Button>
             </details>
           )}
-          <div className="flex gap-2 flex-wrap justify-center">
-            <button
-              onClick={() => {
-                // Clear the chunk-retry flag so the next stale-bundle
-                // event can auto-reload again.
-                try {
-                  sessionStorage.removeItem(`unbox_chunk_retry_${window.location.pathname}`);
-                } catch { /* noop */ }
-                this.setState({ hasError: false, error: null, componentStack: null });
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-800 transition-colors"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Попробовать снова
-            </button>
-            <button
-              onClick={this.handleCopy}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-            >
-              <Copy className="w-4 h-4" />
-              Скопировать ошибку
-            </button>
-          </div>
         </div>
       );
     }

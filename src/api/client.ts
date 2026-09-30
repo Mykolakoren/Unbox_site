@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { toast } from 'sonner';
-import { apiErrorMessage } from '../utils/errors';
+import {
+    apiErrorMessage, isNetworkError, isTimeoutError, markErrorToastShown,
+    NETWORK_ERROR_TEXT, SERVER_ERROR_TEXT, TIMEOUT_ERROR_TEXT,
+} from '../utils/errors';
 import { loginPathWithRedirect } from '../utils/loginRedirect';
 
 // API URL:
@@ -42,7 +45,11 @@ api.interceptors.request.use((config) => {
 const TOAST_DEDUP_WINDOW_MS = 4000;
 let _lastErrorToastAt = 0;
 let _lastErrorToastText = '';
-const showErrorToastOnce = (text: string, opts?: any) => {
+// Волна 2 (X5-04): ошибку помечаем «тост уже показан» (и при подавленном
+// повторе — такой же тост уже на экране), чтобы экран через toastApiError()
+// не показал второй — раньше без сети выходило «Network Error» + «Нет соединения».
+const showErrorToastOnce = (error: unknown, text: string, opts?: any) => {
+    markErrorToastShown(error);
     const now = Date.now();
     if (text === _lastErrorToastText && now - _lastErrorToastAt < TOAST_DEDUP_WINDOW_MS) {
         return;
@@ -85,23 +92,23 @@ api.interceptors.response.use(
         }
 
         if (status && status >= 500) {
-            if (!isReadOnly) showErrorToastOnce('Ошибка сервера. Попробуйте позже.');
+            if (!isReadOnly) showErrorToastOnce(error, SERVER_ERROR_TEXT);
         } else if (status === 422 && detail) {
             // Use shared helper so we never end up trying to render an
             // {message, conflicts} object as a React child (Minified
             // React error #31).
-            showErrorToastOnce(apiErrorMessage(error, 'Ошибка валидации данных'));
+            showErrorToastOnce(error, apiErrorMessage(error, 'Ошибка валидации данных'));
         } else if (status === 409 && detail) {
-            showErrorToastOnce(apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
-        } else if (!error.response && error.code === 'ECONNABORTED') {
+            showErrorToastOnce(error, apiErrorMessage(error, 'Конфликт данных'), { duration: 8000 });
+        } else if (isTimeoutError(error)) {
             // Timeout — пробрасываем юзеру только если это write. Для GET
             // тихо роняем, кэш на странице остаётся на месте.
-            if (!isReadOnly) showErrorToastOnce('Превышено время ожидания. Проверьте соединение.');
-        } else if (!error.response && error.message === 'Network Error') {
+            if (!isReadOnly) showErrorToastOnce(error, TIMEOUT_ERROR_TEXT);
+        } else if (isNetworkError(error)) {
             // Network errors могут быть «вы перешли в туннель / на лифте» —
             // тоже мешают на каждом фоновом fetch'е. Показываем только
             // на write-запросах.
-            if (!isReadOnly) showErrorToastOnce('Нет соединения с сервером.');
+            if (!isReadOnly) showErrorToastOnce(error, NETWORK_ERROR_TEXT);
         }
 
         return Promise.reject(error);
