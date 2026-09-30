@@ -14,7 +14,8 @@ import { RESOURCES } from '../../utils/data';
 import { crmApi } from '../../api/crm';
 import type { User } from '../../store/types';
 import type { BookingHistoryItem } from '../../store/types';
-import { statusLabel } from '../../design/statuses';
+import { getStatusDef, statusLabel } from '../../design/statuses';
+import { formatGel } from '../../utils/format';
 
 // ── Panel styles (post-Liquid Glass) ─────────────────────────────────────────
 const glassPanel: React.CSSProperties = {
@@ -70,17 +71,6 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
         return isBefore(bookingEnd, new Date());
     })();
 
-    const statusColors: Record<string, { bg: string; text: string; label: string }> = {
-        confirmed: { bg: 'rgba(71,109,107,0.12)', text: 'rgb(71,109,107)', label: statusLabel('booking', 'confirmed') },
-        completed: { bg: 'rgba(107,114,128,0.10)', text: 'rgb(107,114,128)', label: statusLabel('booking', 'completed') },
-        cancelled: { bg: 'rgba(239,68,68,0.10)', text: 'rgb(239,68,68)', label: statusLabel('booking', 'cancelled') },
-        'no_show': { bg: 'rgba(245,158,11,0.10)', text: 'rgb(245,158,11)', label: statusLabel('booking', 'no_show') },
-        rescheduled: { bg: 'rgba(99,102,241,0.10)', text: 'rgb(99,102,241)', label: statusLabel('booking', 'rescheduled') },
-        're-rented': { bg: 'rgba(168,85,247,0.10)', text: 'rgb(168,85,247)', label: statusLabel('booking', 're-rented') },
-    };
-
-    const st = statusColors[booking.status] ?? statusColors.confirmed;
-
     return (
         <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -96,7 +86,7 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
                 <div className="w-12 h-12 rounded-xl flex flex-col items-center justify-center shrink-0"
                     style={{ background: isPast ? 'rgba(107,114,128,0.08)' : 'rgba(71,109,107,0.10)', border: `1px solid ${isPast ? 'rgba(107,114,128,0.15)' : 'rgba(71,109,107,0.20)'}` }}
                 >
-                    <span className="text-[10px] font-bold uppercase leading-none" style={{ color: isPast ? 'rgb(107,114,128)' : 'rgb(71,109,107)' }}>
+                    <span className="text-caption font-bold uppercase leading-none" style={{ color: isPast ? 'rgb(107,114,128)' : 'rgb(71,109,107)' }}>
                         {format(parseUTC(booking.date), 'EEE', { locale: ru })}
                     </span>
                     <span className="text-lg font-black leading-none" style={{ color: isPast ? 'rgb(107,114,128)' : 'rgb(71,109,107)' }}>
@@ -110,13 +100,14 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
                         <span className="font-bold text-sm text-unbox-dark truncate">
                             {getResourceName(booking.resourceId)}
                         </span>
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                            style={{ background: st.bg, color: st.text }}
-                        >
-                            {st.label}
+                        {/* Статус — слово и цвет из общего словаря (statuses.ts,
+                            классы ui-badge как у StatusBadge); неизвестный код
+                            не выдаём за «Подтверждена». */}
+                        <span className={`ui-badge ui-badge--${getStatusDef('booking', booking.status).tone} shrink-0`}>
+                            {statusLabel('booking', booking.status)}
                         </span>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-unbox-dark/55">
+                    <div className="flex items-center gap-3 text-xs text-ink-60">
                         <span className="flex items-center gap-1">
                             <Clock size={11} />
                             {formatTimeRange(booking.startTime, booking.duration)}
@@ -131,9 +122,9 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
                 {/* Price */}
                 <div className="text-right shrink-0">
                     <div className="text-sm font-bold text-unbox-dark">
-                        {booking.finalPrice?.toFixed(0)} ₾
+                        {formatGel(booking.finalPrice, { fraction: 0 })}
                     </div>
-                    <div className="text-[10px] text-unbox-dark/40">
+                    <div className="text-caption text-ink-60">
                         {(booking.duration / 60).toFixed(1)}ч
                     </div>
                 </div>
@@ -243,7 +234,7 @@ export function SpecialistPortalHero({ user }: Props) {
                                 {firstName}, добро пожаловать!
                             </h1>
                             {isAdmin && (
-                                <span className="flex items-center gap-0.5 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                                <span className="flex items-center gap-0.5 text-caption font-bold px-1.5 py-0.5 rounded-full"
                                     style={{ background: 'rgba(71,109,107,0.15)', color: 'rgb(71,109,107)', border: '1px solid rgba(71,109,107,0.25)' }}
                                 >
                                     <CheckCircle2 size={9} />
@@ -251,22 +242,22 @@ export function SpecialistPortalHero({ user }: Props) {
                                 </span>
                             )}
                         </div>
-                        <p className="text-unbox-dark/50 text-xs sm:text-sm truncate">{user.email}</p>
+                        <p className="text-ink-60 text-xs sm:text-sm truncate">{user.email}</p>
                     </div>
 
                     {/* Quick stats */}
                     <div className="flex gap-2 shrink-0">
                         {[
                             { icon: CalendarDays, label: 'Брони', value: totalBookings },
-                            { icon: Wallet, label: 'Баланс', value: `${user.balance?.toFixed(0) ?? 0} ₾` },
+                            { icon: Wallet, label: 'Баланс', value: formatGel(user.balance ?? 0, { fraction: 0 }) },
                         ].map(s => (
                             <div key={s.label} className="flex flex-col items-center gap-0.5 rounded-xl sm:rounded-2xl px-2.5 sm:px-4 py-2 sm:py-2.5"
                                 style={{ background: 'rgba(71,109,107,0.06)', border: '1px solid rgba(71,109,107,0.12)' }}
                             >
-                                <s.icon size={12} className="text-unbox-dark/40 sm:hidden" />
-                                <s.icon size={14} className="text-unbox-dark/40 hidden sm:block mb-0.5" />
+                                <s.icon size={12} className="text-ink-60 sm:hidden" />
+                                <s.icon size={14} className="text-ink-60 hidden sm:block mb-0.5" />
                                 <span className="text-unbox-dark font-black text-sm sm:text-base leading-none">{s.value}</span>
-                                <span className="text-unbox-dark/35 text-[9px] sm:text-[10px]">{s.label}</span>
+                                <span className="text-ink-60 text-caption">{s.label}</span>
                             </div>
                         ))}
                     </div>
@@ -291,7 +282,7 @@ export function SpecialistPortalHero({ user }: Props) {
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={() => navigate(getMyBookingsPath(currentUser))}
-                            className="text-xs font-semibold px-3 py-1.5 rounded-xl text-unbox-dark/60 hover:text-unbox-dark transition-colors"
+                            className="text-xs font-semibold px-3 py-1.5 rounded-xl text-ink-60 hover:text-unbox-dark transition-colors"
                             style={{ background: 'rgba(255,255,255,0.60)', border: '1px solid rgba(255,255,255,0.80)' }}
                         >
                             Все брони
@@ -311,8 +302,8 @@ export function SpecialistPortalHero({ user }: Props) {
 
                 {upcomingBookings.length === 0 ? (
                     <div className="text-center py-8">
-                        <CalendarPlus size={36} className="mx-auto text-unbox-dark/20 mb-3" />
-                        <p className="text-unbox-dark/40 text-sm mb-3">Нет предстоящих бронирований</p>
+                        <CalendarPlus size={36} className="mx-auto text-ink-20 mb-3" />
+                        <p className="text-ink-60 text-sm mb-3">Нет предстоящих бронирований</p>
                         <motion.button
                             whileHover={{ scale: 1.03 }}
                             whileTap={{ scale: 0.97 }}
@@ -394,7 +385,7 @@ export function SpecialistPortalHero({ user }: Props) {
                     style={{ ...glassPanel, background: 'rgba(255,255,255,0.65)' }}
                 >
                     <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold text-unbox-dark/50 flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-ink-60 flex items-center gap-2">
                             <Clock size={14} />
                             Последние визиты
                         </h3>
@@ -403,15 +394,15 @@ export function SpecialistPortalHero({ user }: Props) {
                         {pastBookings.map(b => (
                             <div key={b.id} className="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-white/40 transition-colors">
                                 <div className="flex items-center gap-3">
-                                    <span className="text-xs text-unbox-dark/40 w-16">
+                                    <span className="text-xs text-ink-60 w-16">
                                         {format(parseUTC(b.date), 'd MMM', { locale: ru })}
                                     </span>
                                     <span className="text-sm text-unbox-dark/70 font-medium">
                                         {getResourceName(b.resourceId)}
                                     </span>
                                 </div>
-                                <span className="text-sm text-unbox-dark/50 font-semibold">
-                                    {b.finalPrice?.toFixed(0)} ₾
+                                <span className="text-sm text-ink-60 font-semibold">
+                                    {formatGel(b.finalPrice, { fraction: 0 })}
                                 </span>
                             </div>
                         ))}

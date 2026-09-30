@@ -74,7 +74,7 @@ export function CabinetsShowcaseSection() {
                 >
                     <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Локации</p>
                     <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Наши пространства</h2>
-                    <p className="mt-2 text-unbox-dark/50 text-sm">Кабинеты и капсулы в двух локациях Батуми</p>
+                    <p className="mt-2 text-ink-60 text-sm">Кабинеты и капсулы в двух локациях Батуми</p>
                 </motion.div>
 
                 {/* Main location cards — full showcase */}
@@ -117,7 +117,7 @@ export function CabinetsShowcaseSection() {
                                             {/* Gradient overlay with tagline */}
                                             <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
                                             <div className="absolute bottom-3 left-3">
-                                                <span className="text-white/80 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                                                <span className="text-white/80 text-caption font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full"
                                                     style={{ background: 'rgba(71,109,107,0.70)', backdropFilter: 'blur(8px)' }}>
                                                     {meta?.tagline}
                                                 </span>
@@ -160,7 +160,7 @@ export function CabinetsShowcaseSection() {
                                         <div className="flex items-start justify-between gap-4 mb-3">
                                             <div>
                                                 <h3 className="font-bold text-unbox-dark text-xl mb-1">{loc.name}</h3>
-                                                <div className="flex items-center gap-1.5 text-unbox-dark/45 text-xs">
+                                                <div className="flex items-center gap-1.5 text-ink-60 text-xs">
                                                     <MapPin size={12} />
                                                     {loc.address}
                                                 </div>
@@ -171,7 +171,7 @@ export function CabinetsShowcaseSection() {
                                         </div>
 
                                         {/* Description */}
-                                        <p className="text-unbox-dark/55 text-sm leading-relaxed mb-4 max-w-xl">
+                                        <p className="text-ink-60 text-sm leading-relaxed mb-4 max-w-xl">
                                             {meta?.description || loc.description}
                                         </p>
 
@@ -179,14 +179,14 @@ export function CabinetsShowcaseSection() {
                                         <div className="flex flex-wrap gap-2">
                                             {/* Resource counts */}
                                             {cabinetCount > 0 && (
-                                                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium text-unbox-dark/65"
+                                                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium text-ink-60"
                                                     style={{ background: 'rgba(71,109,107,0.08)', border: '1px solid rgba(71,109,107,0.16)' }}>
                                                     <Armchair size={12} className="text-unbox-green" />
                                                     {cabinetCount} {cabinetCount === 1 ? 'кабинет' : cabinetCount < 5 ? 'кабинета' : 'кабинетов'}
                                                 </span>
                                             )}
                                             {capsuleCount > 0 && (
-                                                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium text-unbox-dark/65"
+                                                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium text-ink-60"
                                                     style={{ background: 'rgba(71,109,107,0.08)', border: '1px solid rgba(71,109,107,0.16)' }}>
                                                     {capsuleCount} {capsuleCount === 1 ? 'капсула' : 'капсулы'}
                                                 </span>
@@ -196,9 +196,9 @@ export function CabinetsShowcaseSection() {
                                                 const Icon = h.icon;
                                                 return (
                                                     <span key={h.label}
-                                                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium text-unbox-dark/55"
+                                                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl font-medium text-ink-60"
                                                         style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.06)' }}>
-                                                        <Icon size={12} className="text-unbox-dark/40" />
+                                                        <Icon size={12} className="text-ink-60" />
                                                         {h.label}
                                                     </span>
                                                 );
@@ -236,20 +236,20 @@ export function CabinetsShowcaseSection() {
                                     >
                                         <div className="flex-1 min-w-0">
                                             <div className="font-bold text-unbox-dark text-sm mb-0.5">{loc.name}</div>
-                                            <div className="flex items-center gap-1 text-unbox-dark/40 text-xs mb-2">
+                                            <div className="flex items-center gap-1 text-ink-60 text-xs mb-2">
                                                 <MapPin size={10} />
                                                 {loc.address}
                                             </div>
-                                            <p className="text-unbox-dark/50 text-xs leading-relaxed">{meta?.description}</p>
+                                            <p className="text-ink-60 text-xs leading-relaxed">{meta?.description}</p>
                                             <div className="flex flex-wrap gap-1.5 mt-2">
                                                 {meta?.highlights.map(h => (
-                                                    <span key={h.label} className="text-[10px] px-2 py-0.5 rounded-lg text-unbox-dark/50 font-medium"
+                                                    <span key={h.label} className="text-caption px-2 py-0.5 rounded-lg text-ink-60 font-medium"
                                                         style={{ background: 'rgba(0,0,0,0.05)' }}>
                                                         {h.label}
                                                     </span>
                                                 ))}
                                                 {loc.features?.slice(0, 2).map((f: string) => (
-                                                    <span key={f} className="text-[10px] px-2 py-0.5 rounded-lg text-unbox-dark/50 font-medium"
+                                                    <span key={f} className="text-caption px-2 py-0.5 rounded-lg text-ink-60 font-medium"
                                                         style={{ background: 'rgba(0,0,0,0.05)' }}>
                                                         {f}
                                                     </span>

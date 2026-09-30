@@ -12,7 +12,7 @@ export function ReferralSection() {
             try {
                 await navigator.share({
                     title: 'Unbox — пространство для специалистов в Батуми',
-                    text: 'Знаешь психолога или терапевта в Батуми? Расскажи ему про Unbox — уютные кабинеты для практики.',
+                    text: 'Знаете психолога или терапевта в Батуми? Расскажите ему про Unbox — уютные кабинеты для практики.',
                     url: REFERRAL_URL,
                 });
             } catch {
@@ -46,11 +46,11 @@ export function ReferralSection() {
                 }}
             >
                 <div className="flex-1 text-center sm:text-left">
-                    <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Расскажи о нас</p>
+                    <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Расскажите о нас</p>
                     <h3 className="text-xl sm:text-2xl font-bold text-unbox-dark mb-2">
                         Ваш специалист ещё не знает об Unbox?
                     </h3>
-                    <p className="text-unbox-dark/55 text-sm leading-relaxed max-w-md">
+                    <p className="text-ink-60 text-sm leading-relaxed max-w-md">
                         Если ваш психолог работает в Батуми и ищет пространство для практики — поделитесь ссылкой. Комфортная среда помогает обоим.
                     </p>
                 </div>

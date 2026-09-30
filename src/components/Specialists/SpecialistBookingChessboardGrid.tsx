@@ -12,6 +12,9 @@ import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay } from 'dat
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '../../utils/errors';
+import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { COLOR } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 
 interface Props {
     specialistId: string;
@@ -20,21 +23,9 @@ interface Props {
     basePriceGel: number;
 }
 
-// ── Grid House tokens (локальные, не трогают index.css) ──
-const GH = {
-    ink: '#0F0F10',
-    paper: '#FAFAF7',
-    ink5: 'rgba(15,15,16,0.05)',
-    ink8: 'rgba(15,15,16,0.08)',
-    ink10: 'rgba(15,15,16,0.10)',
-    ink30: 'rgba(15,15,16,0.30)',
-    ink60: 'rgba(15,15,16,0.60)',
-    cellDead: '#F6F2E8',
-    accent: '#476D6B',
-};
-
-const SANS = '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+// ── Grid House tokens — общие (src/design/tokens.ts), без локальной копии ──
+const SANS = GH_SANS;
+const MONO = GH_MONO;
 
 // 30-минутный шаг, с 09:00 до 21:00
 const TIME_SLOTS = Array.from({ length: 24 }, (_, i) => {
@@ -202,8 +193,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 flexWrap: 'wrap',
                 alignItems: 'baseline',
                 fontFamily: MONO,
-                fontSize: '11px',
-                letterSpacing: '0.12em',
+                fontSize: '12px',
+                letterSpacing: '0.06em',
                 textTransform: 'uppercase',
                 color: GH.ink60,
                 marginBottom: '24px',
@@ -213,7 +204,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 const active = locationFilter === opt.value;
                 return (
                     <div key={opt.key} style={{ display: 'flex', alignItems: 'baseline' }}>
-                        {idx > 0 && <span style={{ padding: '0 12px', color: GH.ink30 }}>·</span>}
+                        {idx > 0 && <span aria-hidden style={{ padding: '0 12px', color: GH.ink30 /* декор: разделитель */ }}>·</span>}
                         <button
                             onClick={() => setLocationFilter(opt.value)}
                             style={{
@@ -256,8 +247,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 <div
                     style={{
                         fontFamily: MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.2em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         color: GH.ink60,
                         marginBottom: '14px',
@@ -270,16 +261,16 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                         { label: 'ДАТА', value: format(new Date(selectedSlot.date + 'T00:00'), 'EEEE, d MMMM', { locale: ru }), mono: false },
                         { label: 'ВРЕМЯ', value: `${selectedSlot.startTime} — ${selectedSlot.endTime}`, mono: true },
                         { label: 'ФОРМАТ', value: getLocationLabel(selectedSlot.locationId), mono: false },
-                        { label: 'СТОИМОСТЬ', value: `${basePriceGel} ₾`, mono: true, bold: true },
+                        { label: 'СТОИМОСТЬ', value: formatGel(basePriceGel), mono: true, bold: true },
                     ].map(({ label, value, mono, bold }) => (
                         <div key={label} style={{ display: 'contents' }}>
                             <div
                                 style={{
                                     color: GH.ink60,
                                     fontFamily: MONO,
-                                    fontSize: '10px',
+                                    fontSize: '12px',
                                     textTransform: 'uppercase',
-                                    letterSpacing: '0.15em',
+                                    letterSpacing: '0.06em',
                                 }}
                             >
                                 {label}
@@ -298,7 +289,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 </div>
                 <div
                     style={{
-                        fontSize: '11px',
+                        fontSize: '12px',
                         fontFamily: MONO,
                         color: GH.ink60,
                         marginTop: '20px',
@@ -316,8 +307,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 <div
                     style={{
                         fontFamily: MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.2em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         color: GH.ink60,
                         marginBottom: '14px',
@@ -336,8 +327,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                 style={{
                                     display: 'block',
                                     fontFamily: MONO,
-                                    fontSize: '10px',
-                                    letterSpacing: '0.2em',
+                                    fontSize: '12px',
+                                    letterSpacing: '0.06em',
                                     color: GH.ink60,
                                     marginBottom: '6px',
                                     textTransform: 'uppercase',
@@ -395,8 +386,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                         }}
                         style={{
                             fontFamily: MONO,
-                            fontSize: '11px',
-                            letterSpacing: '0.15em',
+                            fontSize: '12px',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             color: GH.ink60,
                             background: 'transparent',
@@ -441,8 +432,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                     <h3
                         style={{
                             fontFamily: MONO,
-                            fontSize: '11px',
-                            letterSpacing: '0.22em',
+                            fontSize: '12px',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             color: GH.ink,
                             margin: 0,
@@ -456,8 +447,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                             display: 'flex',
                             gap: '28px',
                             fontFamily: MONO,
-                            fontSize: '11px',
-                            letterSpacing: '0.15em',
+                            fontSize: '12px',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                         }}
                     >
@@ -485,11 +476,11 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 {filterRow}
 
                 {loading ? (
-                    <div style={{ fontFamily: MONO, fontSize: '11px', letterSpacing: '0.2em', color: GH.ink60, padding: '96px 0', textAlign: 'center' }}>
+                    <div style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '0.06em', color: GH.ink60, padding: '96px 0', textAlign: 'center' }}>
                         ЗАГРУЖАЮ
                     </div>
                 ) : slots.length === 0 ? (
-                    <div style={{ fontFamily: MONO, fontSize: '11px', letterSpacing: '0.2em', color: GH.ink60, padding: '96px 0', textAlign: 'center' }}>
+                    <div style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '0.06em', color: GH.ink60, padding: '96px 0', textAlign: 'center' }}>
                         НА ЭТОЙ НЕДЕЛЕ ВРЕМЕНИ НЕТ
                     </div>
                 ) : (
@@ -524,8 +515,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                 >
                                     <div
                                         style={{
-                                            fontSize: '10px',
-                                            letterSpacing: '0.2em',
+                                            fontSize: '12px',
+                                            letterSpacing: '0.06em',
                                             color: GH.ink60,
                                             fontWeight: isCurrentDay ? 600 : 400,
                                         }}
@@ -555,7 +546,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                         borderRight: `1px solid ${GH.ink10}`,
                                         borderBottom: `1px solid ${GH.ink10}`,
                                         fontFamily: MONO,
-                                        fontSize: '10px',
+                                        fontSize: '12px',
                                         color: GH.ink60,
                                         padding: '0 10px',
                                         display: 'flex',
@@ -583,7 +574,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                                 borderBottom: `1px solid ${GH.ink10}`,
                                                 height: '36px',
                                                 position: 'relative',
-                                                background: isSelected ? GH.ink : slot ? '#FFFFFF' : GH.cellDead,
+                                                background: isSelected ? GH.ink : slot ? COLOR.card : GH.cellDead,
                                                 cursor: slot ? 'pointer' : 'default',
                                                 transition: 'background 0.08s linear',
                                             }}
@@ -594,7 +585,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                             }}
                                             onMouseLeave={(e) => {
                                                 if (slot && !isSelected) {
-                                                    (e.currentTarget as HTMLDivElement).style.background = '#FFFFFF';
+                                                    (e.currentTarget as HTMLDivElement).style.background = COLOR.card;
                                                 }
                                             }}
                                             title={slot ? `${time} · ${getLocationLabel(slot.locationId)}` : undefined}
@@ -609,9 +600,9 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
                                                             fontFamily: MONO,
-                                                            fontSize: '11px',
+                                                            fontSize: '12px',
                                                             color: isSelected ? 'rgba(250,250,247,0.55)' : 'rgba(15,15,16,0.42)',
-                                                            letterSpacing: '0.1em',
+                                                            letterSpacing: '0.06em',
                                                             fontWeight: 500,
                                                             fontFeatureSettings: '"tnum"',
                                                         }}
@@ -624,7 +615,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                                             top: '3px',
                                                             right: '5px',
                                                             fontFamily: MONO,
-                                                            fontSize: '10px',
+                                                            fontSize: '12px',
                                                             color: isSelected ? GH.paper : GH.ink,
                                                             letterSpacing: '0.05em',
                                                             fontWeight: 600,
@@ -650,8 +641,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                             display: 'flex',
                             gap: '28px',
                             fontFamily: MONO,
-                            fontSize: '10px',
-                            letterSpacing: '0.15em',
+                            fontSize: '12px',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             color: GH.ink60,
                             alignItems: 'center',
@@ -659,7 +650,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                         }}
                     >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{ width: '14px', height: '14px', background: '#FFFFFF', border: `1px solid ${GH.ink10}` }} />
+                            <div style={{ width: '14px', height: '14px', background: COLOR.card, border: `1px solid ${GH.ink10}` }} />
                             <span>СВОБОДНО</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -670,7 +661,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                             <div style={{ width: '14px', height: '14px', background: GH.ink }} />
                             <span>ВЫБРАНО</span>
                         </div>
-                        <div style={{ marginLeft: 'auto', color: GH.ink30 }}>
+                        <div style={{ marginLeft: 'auto', color: GH.ink60 }}>
                             O · ОНЛАЙН&nbsp;&nbsp;&nbsp;1 · UNBOX ONE&nbsp;&nbsp;&nbsp;U · UNBOX UNI
                         </div>
                     </div>
@@ -700,8 +691,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 <div
                     style={{
                         fontFamily: MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.22em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         color: GH.ink,
                         fontWeight: 500,
@@ -712,8 +703,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                 <div
                     style={{
                         fontFamily: MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.15em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         color: GH.ink60,
                         marginTop: '4px',
                     }}
@@ -731,8 +722,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                     justifyContent: 'space-between',
                     marginBottom: '14px',
                     fontFamily: MONO,
-                    fontSize: '10px',
-                    letterSpacing: '0.15em',
+                    fontSize: '12px',
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                 }}
             >
@@ -778,7 +769,7 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                 cursor: 'pointer',
                             }}
                         >
-                            <span style={{ fontSize: '9px', letterSpacing: '0.2em', fontWeight: isCurrentDay ? 600 : 400 }}>
+                            <span style={{ fontSize: '12px', letterSpacing: '0.06em', fontWeight: isCurrentDay ? 600 : 400 }}>
                                 {DOW_LABELS[i]}
                             </span>
                             <span style={{ fontSize: '18px', fontWeight: isCurrentDay ? 600 : 400, fontFeatureSettings: '"tnum"' }}>
@@ -790,11 +781,11 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
             </div>
 
             {loading ? (
-                <div style={{ fontFamily: MONO, fontSize: '11px', letterSpacing: '0.2em', color: GH.ink60, padding: '64px 0', textAlign: 'center' }}>
+                <div style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '0.06em', color: GH.ink60, padding: '64px 0', textAlign: 'center' }}>
                     ЗАГРУЖАЮ
                 </div>
             ) : mobileDaySlots.length === 0 ? (
-                <div style={{ fontFamily: MONO, fontSize: '11px', letterSpacing: '0.2em', color: GH.ink60, padding: '64px 0', textAlign: 'center' }}>
+                <div style={{ fontFamily: MONO, fontSize: '12px', letterSpacing: '0.06em', color: GH.ink60, padding: '64px 0', textAlign: 'center' }}>
                     В ЭТОТ ДЕНЬ ВРЕМЕНИ НЕТ
                 </div>
             ) : (
@@ -830,8 +821,8 @@ export function SpecialistBookingChessboardGrid({ specialistId, formats, basePri
                                 <span
                                     style={{
                                         fontFamily: MONO,
-                                        fontSize: '10px',
-                                        letterSpacing: '0.18em',
+                                        fontSize: '12px',
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         color: isSelected ? 'rgba(250,250,247,0.7)' : GH.ink60,
                                     }}

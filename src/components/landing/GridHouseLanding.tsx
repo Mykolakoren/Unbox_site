@@ -22,6 +22,7 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import type { Specialist } from '../Specialists/SpecialistCard';
 import { getBadge } from '../../utils/specialistBadges';
 import type { Location } from '../../types/index';
+import { formatGel } from '../../utils/format';
 
 type VisitorMode = 'client' | 'specialist' | null;
 
@@ -43,10 +44,12 @@ const PAGE_BG: React.CSSProperties = {
     overflowX: 'hidden',
 };
 const HAIRLINE = `1px solid ${GH.ink10}`;
+// Wave 1: мелкие моно-подписи — 12 px (меньше нельзя), разрядка ≤ 0.06em,
+// чтобы строка не разъехалась после увеличения кегля.
 const MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
-    letterSpacing: '0.18em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     // Teal label experiment — swap back to GH.ink60 to revert.
     color: GH.label,
@@ -203,10 +206,10 @@ function GateColumn({
                 <div
                     style={{
                         fontFamily: GH_MONO,
-                        fontSize: 11,
-                        letterSpacing: '0.18em',
+                        fontSize: 12,
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
-                        opacity: 0.5,
+                        opacity: 0.6,
                         marginBottom: 24,
                     }}
                 >
@@ -240,8 +243,8 @@ function GateColumn({
             <div
                 style={{
                     fontFamily: GH_MONO,
-                    fontSize: 11,
-                    letterSpacing: '0.18em',
+                    fontSize: 12,
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                     marginTop: 48,
                     borderTop: `1px solid ${hover ? 'rgba(250,250,247,0.25)' : GH.ink10}`,
@@ -312,7 +315,8 @@ function Masthead({
                             padding: narrow ? '4px 8px' : '3px 10px',
                             cursor: 'pointer',
                             color: GH.ink60,
-                            fontSize: narrow ? 9 : 10,
+                            // На телефоне — палец должен попадать: 44 px в высоту.
+                            ...(narrow ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
                         }}
                     >
                         Режим: {modeLabel.toLowerCase()} ↔
@@ -349,7 +353,7 @@ function Masthead({
                     <NavDivider hideOnNarrow={narrow} />
                     {currentUser ? (
                         <>
-                            <NavLink to={getHomePath(currentUser)} label={currentUser.name ?? 'Кабинет'} />
+                            <NavLink to={getHomePath(currentUser)} label={currentUser.name ?? 'Кабинет'} touch={narrow} />
                             <NavDivider />
                             <button
                                 type="button"
@@ -364,13 +368,14 @@ function Masthead({
                                     border: 'none',
                                     padding: '4px 0',
                                     cursor: 'pointer',
+                                    ...(narrow ? { minHeight: 44 } : {}),
                                 }}
                             >
                                 Выйти
                             </button>
                         </>
                     ) : (
-                        <NavLink to="/login" label="Войти" accent />
+                        <NavLink to="/login" label="Войти" accent touch={narrow} />
                     )}
                 </nav>
             </div>
@@ -383,22 +388,26 @@ function NavLink({
     label,
     accent,
     hideOnNarrow,
+    touch,
 }: {
     to: string;
     label: string;
     accent?: boolean;
     hideOnNarrow?: boolean;
+    /** На телефоне — высота 44 px, чтобы палец попадал. */
+    touch?: boolean;
 }) {
     if (hideOnNarrow) return null;
     const isHash = to.startsWith('#') || to.includes('#');
     const baseStyle: React.CSSProperties = {
         ...MONO_LABEL,
         color: accent ? GH.ink : GH.ink60,
-        fontWeight: accent ? 700 : 400,
+        fontWeight: accent ? 600 : 400,
         padding: '4px 12px',
         textDecoration: 'none',
         whiteSpace: 'nowrap',
         cursor: 'pointer',
+        ...(touch ? { minHeight: 44, display: 'inline-flex', alignItems: 'center' } : {}),
     };
     if (isHash) {
         const handleClick = (e: React.MouseEvent) => {
@@ -429,7 +438,7 @@ function NavLink({
 
 function NavDivider({ hideOnNarrow }: { hideOnNarrow?: boolean }) {
     if (hideOnNarrow) return null;
-    return <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>;
+    return <span aria-hidden style={{ color: GH.ink30 /* декор: разделитель */, fontFamily: GH_MONO, fontSize: 12 }}>·</span>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -726,10 +735,10 @@ function CategoryCell({
             <div
                 style={{
                     fontFamily: GH_MONO,
-                    fontSize: 10,
-                    letterSpacing: '0.18em',
+                    fontSize: 12,
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
-                    opacity: isActive ? 0.6 : 0.5,
+                    opacity: isActive ? 0.7 : 0.6,
                 }}
             >
                 {num}
@@ -908,8 +917,8 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontFamily: GH_MONO,
-                            fontSize: 11,
-                            color: GH.ink30,
+                            fontSize: 12,
+                            color: GH.ink30, /* декор: заглушка без фото */
                         }}
                     >
                         —
@@ -926,7 +935,7 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                             if (!b) return null;
                             return (
                                 <span key={code} style={{
-                                    fontFamily: GH_MONO, fontSize: narrow ? 8 : 9, fontWeight: 700,
+                                    fontFamily: GH_MONO, fontSize: 12, fontWeight: 600,
                                     letterSpacing: '0.05em', textTransform: 'uppercase',
                                     padding: '2px 6px', color: b.fg, background: b.bg,
                                     border: `1px solid ${b.border}`, lineHeight: 1.3,
@@ -963,7 +972,7 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
 
             {/* Format (hidden on narrow) */}
             {!narrow && (
-                <div style={{ ...MONO_LABEL_INK, fontSize: 11 }}>{formatLabel}</div>
+                <div style={MONO_LABEL_INK}>{formatLabel}</div>
             )}
 
             {/* Price */}
@@ -976,7 +985,7 @@ function SpecialistRow({ specialist, num, narrow }: { specialist: Specialist; nu
                     fontVariantNumeric: 'tabular-nums',
                 }}
             >
-                {specialist.basePriceGel}&nbsp;₾
+                {formatGel(specialist.basePriceGel)}
             </div>
         </Link>
     );

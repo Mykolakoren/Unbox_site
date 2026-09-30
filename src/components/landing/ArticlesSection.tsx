@@ -52,9 +52,9 @@ export function ArticlesSection() {
                 <div className="inline-block px-6 py-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
                     <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Полезное</p>
                     <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Статьи и ресурсы</h2>
-                    <p className="mt-1.5 text-unbox-dark/60 text-sm">Психология простым языком</p>
+                    <p className="mt-1.5 text-ink-60 text-sm">Психология простым языком</p>
                 </div>
-                <button className="hidden sm:flex items-center gap-2 text-sm text-unbox-dark/60 hover:text-unbox-dark/80 transition-colors px-4 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <button className="hidden sm:flex items-center gap-2 text-sm text-ink-60 hover:text-unbox-dark/80 transition-colors px-4 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
                     Все статьи <ArrowRight size={14} />
                 </button>
             </motion.div>
@@ -72,13 +72,13 @@ export function ArticlesSection() {
                     >
                         <div className="flex items-center gap-2">
                             <BookOpen size={13} className="text-unbox-green/70" />
-                            <span className="text-[10px] font-semibold text-unbox-green uppercase tracking-wide">{a.tag}</span>
+                            <span className="text-caption font-semibold text-unbox-green uppercase tracking-wide">{a.tag}</span>
                         </div>
                         <div className="font-semibold text-unbox-dark text-sm leading-snug flex-1">
                             {a.title}
                         </div>
-                        <div className="text-unbox-dark/50 text-xs leading-relaxed line-clamp-2">{a.excerpt}</div>
-                        <div className="text-unbox-dark/30 text-xs mt-auto">{a.readMin} мин чтения</div>
+                        <div className="text-ink-60 text-xs leading-relaxed line-clamp-2">{a.excerpt}</div>
+                        <div className="text-ink-60 text-xs mt-auto">{a.readMin} мин чтения</div>
                     </motion.div>
                 ))}
             </div>

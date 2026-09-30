@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, MapPin, Video, Loader2, Check, X } from 'luc
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { formatGel } from '../../utils/format';
 import { apiErrorMessage } from '../../utils/errors';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
@@ -129,14 +130,14 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
         <div className="flex flex-wrap gap-2 mb-4">
             <button
                 onClick={() => setLocationFilter('all')}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${locationFilter === 'all' ? 'bg-unbox-green text-white' : 'bg-unbox-light text-unbox-dark/60 hover:bg-unbox-dark/10'}`}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${locationFilter === 'all' ? 'bg-unbox-green text-white' : 'bg-unbox-light text-ink-60 hover:bg-unbox-dark/10'}`}
             >
                 Все
             </button>
             {hasOnline && (
                 <button
                     onClick={() => setLocationFilter(null)}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${locationFilter === null ? 'bg-unbox-green text-white' : 'bg-unbox-light text-unbox-dark/60 hover:bg-unbox-dark/10'}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${locationFilter === null ? 'bg-unbox-green text-white' : 'bg-unbox-light text-ink-60 hover:bg-unbox-dark/10'}`}
                 >
                     <Video size={12} /> Онлайн
                 </button>
@@ -145,7 +146,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                 <button
                     key={loc.id}
                     onClick={() => setLocationFilter(loc.id)}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${locationFilter === loc.id ? 'bg-unbox-green text-white' : 'bg-unbox-light text-unbox-dark/60 hover:bg-unbox-dark/10'}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${locationFilter === loc.id ? 'bg-unbox-green text-white' : 'bg-unbox-light text-ink-60 hover:bg-unbox-dark/10'}`}
                 >
                     <MapPin size={12} /> {loc.name}
                 </button>
@@ -173,35 +174,35 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                     >
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="font-bold text-lg text-unbox-dark">Запись к {specialistName}</h3>
-                            <button onClick={() => setSelectedSlot(null)} className="text-unbox-dark/40 hover:text-unbox-dark">
+                            <button onClick={() => setSelectedSlot(null)} className="text-ink-60 hover:text-unbox-dark">
                                 <X size={18} />
                             </button>
                         </div>
 
                         <div className="bg-unbox-light/50 rounded-xl p-4 mb-5 space-y-1 text-sm">
                             <div className="flex justify-between">
-                                <span className="text-unbox-dark/60">Дата:</span>
+                                <span className="text-ink-60">Дата:</span>
                                 <span className="font-medium">{format(new Date(selectedSlot.date + 'T00:00'), 'EEEE, d MMMM', { locale: ru })}</span>
                             </div>
                             <div className="flex justify-between">
-                                <span className="text-unbox-dark/60">Время:</span>
+                                <span className="text-ink-60">Время:</span>
                                 <span className="font-medium">{selectedSlot.startTime} — {selectedSlot.endTime}</span>
                             </div>
                             <div className="flex justify-between">
-                                <span className="text-unbox-dark/60">Формат:</span>
+                                <span className="text-ink-60">Формат:</span>
                                 <span className="font-medium flex items-center gap-1">
                                     {selectedSlot.locationId ? <><MapPin size={12} /> {getLocationLabel(selectedSlot.locationId)}</> : <><Video size={12} /> Онлайн</>}
                                 </span>
                             </div>
                             <div className="flex justify-between">
-                                <span className="text-unbox-dark/60">Стоимость:</span>
-                                <span className="font-bold text-unbox-green">от {basePriceGel} ₾</span>
+                                <span className="text-ink-60">Стоимость:</span>
+                                <span className="font-bold text-unbox-green">от {formatGel(basePriceGel)}</span>
                             </div>
                         </div>
 
                         <div className="space-y-3 mb-5">
                             <div>
-                                <label className="block text-xs font-medium text-unbox-dark/60 mb-1">Ваше имя *</label>
+                                <label className="block text-xs font-medium text-ink-60 mb-1">Ваше имя *</label>
                                 <input
                                     type="text"
                                     value={bookingForm.name}
@@ -211,7 +212,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-unbox-dark/60 mb-1">Телефон</label>
+                                <label className="block text-xs font-medium text-ink-60 mb-1">Телефон</label>
                                 <PhoneInput
                                     value={bookingForm.phone}
                                     onChange={(v) => setBookingForm(f => ({ ...f, phone: v }))}
@@ -219,7 +220,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-unbox-dark/60 mb-1">Email</label>
+                                <label className="block text-xs font-medium text-ink-60 mb-1">Email</label>
                                 <input
                                     type="email"
                                     value={bookingForm.email}
@@ -239,7 +240,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                             {submitting ? 'Записываю...' : 'Записаться'}
                         </button>
 
-                        <p className="text-[10px] text-unbox-dark/40 text-center mt-3">
+                        <p className="text-caption text-ink-60 text-center mt-3">
                             Оплата производится напрямую специалисту
                         </p>
                     </motion.div>
@@ -284,10 +285,10 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                         ? 'bg-unbox-green text-white shadow-md'
                                         : isToday(day)
                                             ? 'bg-unbox-light text-unbox-green border border-unbox-green/40'
-                                            : 'bg-white text-unbox-grey border border-unbox-light/50'
+                                            : 'bg-white text-ink-60 border border-unbox-light/50'
                                 )}
                             >
-                                <span className="text-[9px] font-bold uppercase">{DOW_LABELS[weekDays.indexOf(day)]}</span>
+                                <span className="text-caption font-bold uppercase">{DOW_LABELS[weekDays.indexOf(day)]}</span>
                                 <span className="text-sm font-bold">{format(day, 'd')}</span>
                                 {daySlotsCount > 0 && (
                                     <div className={clsx(
@@ -301,7 +302,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                 </div>
 
                 {/* Date label */}
-                <div className="text-sm text-unbox-grey text-center">
+                <div className="text-sm text-ink-60 text-center">
                     {format(mobileDate, 'EEEE, d MMMM', { locale: ru })}
                 </div>
 
@@ -311,7 +312,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                         <Loader2 size={24} className="animate-spin text-unbox-green" />
                     </div>
                 ) : mobileDaySlots.length === 0 ? (
-                    <div className="text-center py-10 text-unbox-dark/40 text-sm">
+                    <div className="text-center py-10 text-ink-60 text-sm">
                         Нет свободного времени в этот день
                     </div>
                 ) : (
@@ -333,7 +334,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                             return (
                                                 <div
                                                     key={time}
-                                                    className="flex-1 flex items-center justify-center px-3 py-2.5 rounded-xl bg-gray-50 text-gray-300 min-h-[48px]"
+                                                    className="flex-1 flex items-center justify-center px-3 py-2.5 rounded-xl bg-gray-50 text-ink-30 min-h-[48px]"
                                                 >
                                                     <span className="text-sm font-bold tabular-nums">{time}</span>
                                                 </div>
@@ -403,11 +404,11 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
             {/* Chessboard */}
             <div className="bg-white rounded-2xl border border-unbox-light overflow-hidden shadow-sm">
                 {loading ? (
-                    <div className="flex items-center justify-center py-16 text-unbox-dark/40">
+                    <div className="flex items-center justify-center py-16 text-ink-60">
                         <Loader2 size={24} className="animate-spin" />
                     </div>
                 ) : slots.length === 0 ? (
-                    <div className="text-center py-12 text-unbox-dark/40 text-sm">
+                    <div className="text-center py-12 text-ink-60 text-sm">
                         Нет доступного времени на этой неделе
                     </div>
                 ) : (
@@ -415,11 +416,11 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                         <table className="w-full text-xs">
                             <thead>
                                 <tr className="border-b border-unbox-light">
-                                    <th className="p-2 text-left text-unbox-dark/40 w-16 sticky left-0 bg-white z-10"></th>
+                                    <th className="p-2 text-left text-ink-60 w-16 sticky left-0 bg-white z-10"></th>
                                     {weekDays.map((day, i) => (
-                                        <th key={i} className={`p-2 text-center min-w-[80px] ${isSameDay(day, new Date()) ? 'text-unbox-green font-bold' : 'text-unbox-dark/60'}`}>
+                                        <th key={i} className={`p-2 text-center min-w-[80px] ${isSameDay(day, new Date()) ? 'text-unbox-green font-bold' : 'text-ink-60'}`}>
                                             <div>{DOW_LABELS[i]}</div>
-                                            <div className="text-[10px]">{format(day, 'd MMM', { locale: ru })}</div>
+                                            <div className="text-caption">{format(day, 'd MMM', { locale: ru })}</div>
                                         </th>
                                     ))}
                                 </tr>
@@ -427,7 +428,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                             <tbody>
                                 {TIME_SLOTS.map(time => (
                                     <tr key={time} className="border-b border-unbox-light/50">
-                                        <td className="p-1.5 text-right text-unbox-dark/40 font-mono text-[10px] sticky left-0 bg-white z-10">{time}</td>
+                                        <td className="p-1.5 text-right text-ink-60 font-mono text-caption sticky left-0 bg-white z-10">{time}</td>
                                         {weekDays.map((day, i) => {
                                             const dateStr = format(day, 'yyyy-MM-dd');
                                             const key = `${dateStr}|${time}`;
@@ -439,7 +440,7 @@ export function SpecialistBookingChessboard({ specialistId, specialistName, form
                                                     {slot ? (
                                                         <button
                                                             onClick={() => setSelectedSlot(slot)}
-                                                            className={`w-full h-8 rounded-lg text-[10px] font-medium transition-all ${
+                                                            className={`w-full h-8 rounded-lg text-caption font-medium transition-all ${
                                                                 isSelected
                                                                     ? 'bg-unbox-green text-white shadow-md scale-105'
                                                                     : 'bg-unbox-green/10 text-unbox-green hover:bg-unbox-green/25 hover:scale-105'

@@ -2,6 +2,8 @@ import { motion } from 'framer-motion';
 import { Building2, Clock, Users, Shield, Wifi, Globe } from 'lucide-react';
 import { useState } from 'react';
 
+// Wave 1: цвет — только для статуса. Раньше у каждой карточки был свой
+// «радужный» акцент (фиолетовый, синий, янтарный…); теперь один бирюзовый.
 const BENEFITS = [
     {
         icon: Building2,
@@ -15,47 +17,47 @@ const BENEFITS = [
     {
         icon: Clock,
         title: 'Гибкое расписание',
-        desc: 'Бронируй почасово. Работай в удобное время без долгосрочных обязательств.',
+        desc: 'Бронируйте почасово. Работайте в удобное время без долгосрочных обязательств.',
         detail: 'Доступно 24/7. Отмена за 24 часа без штрафа.',
-        color: 'rgba(99,102,241,1)',
-        bg: 'rgba(99,102,241,0.08)',
-        bgHover: 'rgba(99,102,241,0.15)',
+        color: 'rgba(71,109,107,1)',
+        bg: 'rgba(71,109,107,0.10)',
+        bgHover: 'rgba(71,109,107,0.18)',
     },
     {
         icon: Users,
         title: 'Сообщество коллег',
         desc: 'Контакт с другими специалистами, совместные проекты и профессиональный обмен.',
         detail: 'Закрытый чат, совместные мероприятия и групповые супервизии.',
-        color: 'rgba(245,158,11,1)',
-        bg: 'rgba(245,158,11,0.08)',
-        bgHover: 'rgba(245,158,11,0.15)',
+        color: 'rgba(71,109,107,1)',
+        bg: 'rgba(71,109,107,0.10)',
+        bgHover: 'rgba(71,109,107,0.18)',
     },
     {
         icon: Globe,
         title: 'Онлайн и оффлайн',
-        desc: 'Принимай клиентов лично в кабинете или проводи сессии онлайн — как тебе удобно.',
+        desc: 'Принимайте клиентов лично в кабинете или проводите сессии онлайн — как вам удобно.',
         detail: 'Стабильный интернет, веб-камера и профессиональный фон включены.',
-        color: 'rgba(16,185,129,1)',
-        bg: 'rgba(16,185,129,0.08)',
-        bgHover: 'rgba(16,185,129,0.15)',
+        color: 'rgba(71,109,107,1)',
+        bg: 'rgba(71,109,107,0.10)',
+        bgHover: 'rgba(71,109,107,0.18)',
     },
     {
         icon: Shield,
         title: 'Безопасная среда',
         desc: 'Конфиденциальность, охрана, продуманная организация пространства.',
         detail: 'Отдельный вход, изолированные зоны ожидания, охрана 24/7.',
-        color: 'rgba(239,68,68,1)',
-        bg: 'rgba(239,68,68,0.07)',
-        bgHover: 'rgba(239,68,68,0.13)',
+        color: 'rgba(71,109,107,1)',
+        bg: 'rgba(71,109,107,0.10)',
+        bgHover: 'rgba(71,109,107,0.18)',
     },
     {
         icon: Wifi,
         title: 'Всё включено',
-        desc: 'Wi-Fi, чай, кофе, канцелярия. Ты просто приходишь и работаешь.',
-        detail: 'Никаких скрытых доплат. Цена аренды — всё что ты платишь.',
-        color: 'rgba(59,130,246,1)',
-        bg: 'rgba(59,130,246,0.08)',
-        bgHover: 'rgba(59,130,246,0.15)',
+        desc: 'Wi-Fi, чай, кофе, канцелярия. Вы просто приходите и работаете.',
+        detail: 'Никаких скрытых доплат. Цена аренды — всё, что вы платите.',
+        color: 'rgba(71,109,107,1)',
+        bg: 'rgba(71,109,107,0.10)',
+        bgHover: 'rgba(71,109,107,0.18)',
     },
 ];
 
@@ -120,7 +122,7 @@ function BenefitCard({ b, i }: { b: typeof BENEFITS[0]; i: number }) {
             {/* Text */}
             <div className="relative z-10">
                 <div className="font-bold text-unbox-dark text-sm mb-1.5">{b.title}</div>
-                <div className="text-unbox-dark/55 text-xs leading-relaxed">{b.desc}</div>
+                <div className="text-ink-60 text-xs leading-relaxed">{b.desc}</div>
 
                 {/* Detail — appears on hover */}
                 <motion.div
@@ -162,7 +164,7 @@ export function WhyUnboxSection() {
                 <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark leading-tight">
                     Пространство, созданное для практики
                 </h2>
-                <p className="mt-2 text-unbox-dark/55 text-sm max-w-lg mx-auto">
+                <p className="mt-2 text-ink-60 text-sm max-w-lg mx-auto">
                     Всё что нужно специалисту — в одном месте. Никакого лишнего шума.
                 </p>
             </motion.div>

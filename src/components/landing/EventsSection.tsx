@@ -63,7 +63,7 @@ export function EventsSection() {
                     <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Анонсы</p>
                     <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Ближайшие мероприятия</h2>
                 </div>
-                <button className="hidden sm:flex items-center gap-2 text-sm text-unbox-dark/60 hover:text-unbox-dark/80 transition-colors px-4 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <button className="hidden sm:flex items-center gap-2 text-sm text-ink-60 hover:text-unbox-dark/80 transition-colors px-4 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
                     Все события <ArrowRight size={14} />
                 </button>
             </motion.div>
@@ -80,10 +80,10 @@ export function EventsSection() {
                         style={glassCard}
                     >
                         <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-unbox-green/15 text-unbox-green">
+                            <span className="text-caption font-bold px-2 py-0.5 rounded-full bg-unbox-green/15 text-unbox-green">
                                 {ev.tag}
                             </span>
-                            <span className="flex items-center gap-1 text-[10px] text-unbox-dark/45">
+                            <span className="flex items-center gap-1 text-caption text-ink-60">
                                 {ev.format === 'online'
                                     ? <><Video size={9} /> Онлайн</>
                                     : <><MapPin size={9} /> Оффлайн</>
@@ -95,11 +95,11 @@ export function EventsSection() {
                             {ev.title}
                         </div>
 
-                        <div className="flex items-center gap-1.5 text-unbox-dark/45 text-xs mt-auto">
+                        <div className="flex items-center gap-1.5 text-ink-60 text-xs mt-auto">
                             <Calendar size={11} />
                             {ev.date} · {ev.time}
                         </div>
-                        <div className="text-unbox-dark/35 text-xs">{ev.location}</div>
+                        <div className="text-ink-60 text-xs">{ev.location}</div>
                     </motion.div>
                 ))}
             </div>

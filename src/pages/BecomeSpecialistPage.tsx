@@ -7,6 +7,7 @@ import { specialistsApi, type SpecialistProfile, type SpecialistApplicationPaylo
 import { api, API_URL } from '../api/client';
 import { compressImage } from '../utils/imageCompress';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { COLOR, STATUS } from '../design/tokens';
 import { markSpecialistApplicationSent } from '../hooks/useSpecialistApplication';
 import { getHomePath } from '../utils/userPaths';
 
@@ -32,8 +33,8 @@ const FORMATS: Array<{ id: string; label: string }> = [
 
 const ghMono: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
-    letterSpacing: '0.18em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -50,8 +51,8 @@ const inputStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 9,
-    letterSpacing: '0.18em',
+    fontSize: 12,
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
     marginBottom: 6,
@@ -187,16 +188,16 @@ export function BecomeSpecialistPage() {
     const statusBanner = (() => {
         if (!profile) return null;
         if (profile.isVerified) {
-            return { color: '#065F46', bg: '#D1FAE5', text: 'Профиль верифицирован — вы в каталоге.' };
+            return { color: STATUS.ok.fg, bg: STATUS.ok.bg, text: 'Профиль верифицирован — вы в каталоге.' };
         }
         if (status === 'pending') {
-            return { color: '#92400E', bg: '#FEF3C7', text: 'Заявка на рассмотрении у админа. Можно править — после правок снова уйдёт на проверку.' };
+            return { color: STATUS.pending.fg, bg: STATUS.pending.bg, text: 'Заявка на рассмотрении у админа. Можно править — после правок снова уйдёт на проверку.' };
         }
         if (status === 'rejected') {
-            return { color: '#991B1B', bg: '#FEE2E2', text: 'Заявка отклонена. Можете внести правки и отправить повторно.' };
+            return { color: STATUS.danger.fg, bg: STATUS.danger.bg, text: 'Заявка отклонена. Можете внести правки и отправить повторно.' };
         }
         if (status === 'approved' && !profile.isVerified) {
-            return { color: '#065F46', bg: '#D1FAE5', text: 'Заявка одобрена. Скоро появитесь в каталоге.' };
+            return { color: STATUS.ok.fg, bg: STATUS.ok.bg, text: 'Заявка одобрена. Скоро появитесь в каталоге.' };
         }
         return null;
     })();
@@ -229,7 +230,7 @@ export function BecomeSpecialistPage() {
                     border: `1px solid ${GH.ink10}`, background: GH.ink5,
                     padding: '16px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6, color: GH.ink,
                 }}>
-                    <div style={{ ...ghMono, fontSize: 11, letterSpacing: '0.08em', marginBottom: 8, color: GH.ink60 }}>
+                    <div style={{ ...ghMono, fontSize: 12, letterSpacing: '0.06em', marginBottom: 8, color: GH.ink60 }}>
                         О КАТАЛОГЕ СПЕЦИАЛИСТОВ
                     </div>
                     <p style={{ margin: '0 0 8px' }}>
@@ -272,15 +273,15 @@ export function BecomeSpecialistPage() {
                             current={form.photoUrl || ''}
                             onUploaded={(url) => setForm(f => ({ ...f, photoUrl: url }))}
                         />
-                        <div style={{ ...ghMono, fontSize: 9, marginTop: 4 }}>jpg, png · до 2 МБ. Можно оставить пустым — добавите позже.</div>
+                        <div style={{ ...ghMono, fontSize: 12, marginTop: 4 }}>jpg, png · до 2 МБ. Можно оставить пустым — добавите позже.</div>
                     </div>
 
                     {/* Документы — ОБЯЗАТЕЛЬНО (дипломы/сертификаты) */}
                     <div>
                         <label style={labelStyle}>
-                            Документы (диплом / сертификаты) <span style={{ color: '#DC2626' }}>*</span>
+                            Документы (диплом / сертификаты) <span style={{ color: STATUS.danger.fg }}>*</span>
                         </label>
-                        <div style={{ ...ghMono, fontSize: 10, color: GH.ink60, margin: '2px 0 8px' }}>
+                        <div style={{ ...ghMono, fontSize: 12, color: GH.ink60, margin: '2px 0 8px' }}>
                             Обязательно. Загрузите подтверждение образования. pdf, jpg, png · до 20 МБ.
                         </div>
                         {form.documents.length > 0 && (
@@ -294,7 +295,7 @@ export function BecomeSpecialistPage() {
                                             Документ {i + 1}
                                         </a>
                                         <button type="button" onClick={() => removeDocument(url)}
-                                            style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontSize: 12 }}>
+                                            style={{ background: 'none', border: 'none', color: STATUS.danger.fg, cursor: 'pointer', fontSize: 12 }}>
                                             удалить
                                         </button>
                                     </div>
@@ -335,7 +336,7 @@ export function BecomeSpecialistPage() {
                                 style={inputStyle} placeholder="Гештальт-терапия, КПТ, EMDR…" />
                             <button type="button" onClick={addSpec} style={{
                                 padding: '0 16px', border: `1px solid ${GH.ink}`, background: GH.ink, color: GH.paper,
-                                fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
                             }}>+ Добавить</button>
                         </div>
                         {form.specializations.length > 0 && (
@@ -382,7 +383,7 @@ export function BecomeSpecialistPage() {
                         marginTop: 12,
                         padding: '14px 24px',
                         background: GH.ink, color: GH.paper, border: 'none',
-                        fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase',
+                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                         cursor: submitting ? 'wait' : 'pointer',
                         opacity: submitting ? 0.6 : 1,
                     }}>
@@ -428,7 +429,7 @@ function DocumentUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
                 style={{
                     display: 'inline-flex', alignItems: 'center', gap: 8,
                     padding: '10px 16px', border: `1px solid ${GH.ink}`, background: GH.paper,
-                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                     cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1,
                 }}>
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
@@ -483,7 +484,7 @@ function ProfilePhotoUpload({ current, onUploaded }: { current: string; onUpload
                 disabled={busy}
                 style={{
                     flex: 1, padding: '12px 14px',
-                    background: '#0E0E0E', color: '#fff',
+                    background: COLOR.ink, color: COLOR.onInk,
                     border: 'none', cursor: busy ? 'wait' : 'pointer',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     fontWeight: 700, fontSize: 13, fontFamily: 'inherit',

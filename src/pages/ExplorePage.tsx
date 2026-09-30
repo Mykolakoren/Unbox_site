@@ -20,6 +20,7 @@ import { ContactSection } from '../components/landing/ContactSection';
 import { ClientHeroPanel } from '../components/landing/ClientHeroPanel';
 import { SelfTestsSection } from '../components/landing/SelfTestsSection';
 import { GridHouseLanding } from '../components/landing/GridHouseLanding';
+import { COLOR, SHADOW } from '../design/tokens';
 import { LogIn, LayoutDashboard, ChevronDown, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -130,16 +131,16 @@ function MobileBookFab({ visitorMode }: { visitorMode: 'client' | 'specialist' |
                 right: 16,
                 bottom: 'calc(16px + env(safe-area-inset-bottom))',
                 zIndex: 50,
-                background: '#1f2a37',
-                color: '#fff',
+                background: COLOR.ink,
+                color: COLOR.onInk,
                 padding: '14px 20px',
                 borderRadius: 999,
                 border: 'none',
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 fontSize: 14,
-                fontWeight: 700,
-                boxShadow: '0 6px 20px rgba(31,42,55,0.35), 0 1px 3px rgba(0,0,0,0.2)',
+                fontWeight: 600,
+                boxShadow: SHADOW.pop,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 8,

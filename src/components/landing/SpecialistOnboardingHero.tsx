@@ -80,7 +80,7 @@ export function SpecialistOnboardingHero({ onApply }: Props) {
                             style={{ background: 'rgba(71,109,107,0.08)', border: '1px solid rgba(71,109,107,0.16)' }}
                         >
                             <div className="text-xl font-black text-unbox-dark leading-none mb-1">{f.value}</div>
-                            <div className="text-unbox-dark/55 text-[10px] leading-tight whitespace-pre-line">{f.label}</div>
+                            <div className="text-ink-60 text-caption leading-tight whitespace-pre-line">{f.label}</div>
                         </div>
                     ))}
                 </div>
@@ -114,7 +114,7 @@ export function SpecialistOnboardingHero({ onApply }: Props) {
                 className="rounded-[24px] px-6 py-5"
                 style={glassStep}
             >
-                <p className="text-unbox-dark/45 text-[10px] font-bold uppercase tracking-widest mb-4">Как стать специалистом</p>
+                <p className="text-ink-60 text-caption font-bold uppercase tracking-[0.06em] mb-4">Как стать специалистом</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {STEPS.map((step, i) => {
                         const Icon = step.icon;
@@ -144,7 +144,7 @@ export function SpecialistOnboardingHero({ onApply }: Props) {
                                     <span className="text-unbox-green/50 text-xs font-black">{step.num}</span>
                                 </div>
                                 <div className="font-bold text-unbox-dark text-xs leading-tight">{step.title}</div>
-                                <div className="text-unbox-dark/60 text-[11px] leading-relaxed">{step.desc}</div>
+                                <div className="text-ink-60 text-caption leading-relaxed">{step.desc}</div>
                             </motion.div>
                         );
                     })}

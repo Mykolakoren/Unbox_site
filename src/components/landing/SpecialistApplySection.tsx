@@ -43,9 +43,9 @@ export function SpecialistApplySection() {
                 >
                     <div className="text-center mb-8">
                         <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Заявка</p>
-                        <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Начни работать в Unbox</h2>
-                        <p className="mt-2 text-unbox-dark/50 text-sm">
-                            Оставь заявку — мы свяжемся и расскажем об условиях
+                        <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Начните работать в Unbox</h2>
+                        <p className="mt-2 text-ink-60 text-sm">
+                            Оставьте заявку — мы свяжемся и расскажем об условиях
                         </p>
                     </div>
 
@@ -60,7 +60,7 @@ export function SpecialistApplySection() {
                                 <Check size={26} className="text-unbox-green" />
                             </div>
                             <div className="font-bold text-unbox-dark text-lg">Заявка отправлена!</div>
-                            <div className="text-unbox-dark/50 text-sm max-w-xs">
+                            <div className="text-ink-60 text-sm max-w-xs">
                                 Мы свяжемся с вами в ближайшее время. Если хотите ускорить — напишите в Telegram.
                             </div>
                         </motion.div>
@@ -68,7 +68,7 @@ export function SpecialistApplySection() {
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs text-unbox-dark/55 mb-1.5">Имя *</label>
+                                    <label className="block text-xs text-ink-60 mb-1.5">Имя *</label>
                                     <input
                                         type="text"
                                         value={form.name}
@@ -79,7 +79,7 @@ export function SpecialistApplySection() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-unbox-dark/55 mb-1.5">Telegram или телефон *</label>
+                                    <label className="block text-xs text-ink-60 mb-1.5">Telegram или телефон *</label>
                                     <input
                                         type="text"
                                         value={form.contact}
@@ -92,7 +92,7 @@ export function SpecialistApplySection() {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-unbox-dark/55 mb-1.5">Направление / специализация</label>
+                                <label className="block text-xs text-ink-60 mb-1.5">Направление / специализация</label>
                                 <input
                                     type="text"
                                     value={form.specialization}
@@ -104,7 +104,7 @@ export function SpecialistApplySection() {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-unbox-dark/55 mb-2">Предпочтительный формат работы</label>
+                                <label className="block text-xs text-ink-60 mb-2">Предпочтительный формат работы</label>
                                 <div className="flex flex-wrap gap-2">
                                     {FORMATS.map(fmt => (
                                         <button

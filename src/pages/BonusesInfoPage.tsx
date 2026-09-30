@@ -21,8 +21,8 @@ export function BonusesInfoPage() {
     };
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
-        fontSize: 11,
-        letterSpacing: '0.18em',
+        fontSize: 12,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         color: GH.ink60,
         marginBottom: 12,
@@ -31,7 +31,7 @@ export function BonusesInfoPage() {
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 920, margin: '0 auto', padding: '32px 24px 80px' }}>
             <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 24, marginBottom: 32 }}>
-                <p style={{ ...monoLabel, marginBottom: 8 }}>BONUS · DISCOUNTS</p>
+                <p style={{ ...monoLabel, marginBottom: 8 }}>Скидки · Бонусы</p>
                 <h1 style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1, margin: 0 }}>
                     Скидки и&nbsp;бонусы.
                 </h1>
@@ -55,7 +55,7 @@ export function BonusesInfoPage() {
                         </p>
                         {/* X3-02: срок приветственного часа — 15 дней
                             (auth.py WELCOME_BONUS_EXPIRY_DAYS), потом он сгорает. */}
-                        <p style={{ fontSize: 13, color: GH.ink30, margin: 0 }}>
+                        <p style={{ fontSize: 13, color: GH.ink60, margin: 0 }}>
                             Действует 15&nbsp;дней после регистрации. Применяется один раз, к&nbsp;первому бронированию через сайт.
                         </p>
                     </div>
@@ -131,7 +131,7 @@ export function BonusesInfoPage() {
                                     </div>
                                 ))}
                         </div>
-                        <p style={{ fontSize: 12, color: GH.ink30, marginTop: 8 }}>
+                        <p style={{ fontSize: 12, color: GH.ink60, marginTop: 8 }}>
                             Бонусы действуют 60&nbsp;дней с&nbsp;момента начисления.
                         </p>
                     </div>
@@ -171,13 +171,13 @@ export function BonusesInfoPage() {
                 </div>
             </section>
 
-            {/* Приведи друга */}
+            {/* Приведите коллегу */}
             <section style={sectionStyle}>
                 <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                     <Users size={28} style={{ color: GH.accent, marginTop: 4 }} />
                     <div style={{ flex: 1 }}>
                         <h2 style={{ fontSize: 'clamp(20px, 2.4vw, 28px)', fontWeight: 800, margin: 0, marginBottom: 8 }}>
-                            Приведи коллегу
+                            Приведите коллегу
                         </h2>
                         <p style={{ fontSize: 15, color: GH.ink60, margin: 0 }}>
                             Если по&nbsp;вашей рекомендации у&nbsp;нас начнёт работать другой специалист
@@ -192,7 +192,7 @@ export function BonusesInfoPage() {
                 </div>
             </section>
 
-            <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 16, fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
+            <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 16, fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>
                 Все скидки складываются по&nbsp;приоритету: подписка&nbsp;→ ручная корректировка →
                 прогрессивная неделя&nbsp;→ часы подряд. Применяется самая выгодная.
             </div>

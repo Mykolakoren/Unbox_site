@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { User, Video, MapPin, Tent, ArrowRight } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { getBadge } from '../../utils/specialistBadges';
+import { formatGel } from '../../utils/format';
 import {
     hasOnlineFormat, hasOfflineFormat,
     hasOfflineRoom as hasOfflineRoomFmt,
@@ -56,24 +57,24 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
                         <img src={specialist.photoUrl} alt={`${specialist.firstName} ${specialist.lastName}`}
                             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: GH.ink10 }}>
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: GH.ink10 /* декор: иконка-заглушка */ }}>
                             <User size={48} strokeWidth={1} />
                         </div>
                     )}
                     {/* Price */}
                     <div style={{
                         position: 'absolute', top: 0, right: 0,
-                        fontFamily: GH_MONO, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
+                        fontFamily: GH_MONO, fontSize: 12, fontWeight: 700, letterSpacing: '0.05em',
                         padding: '6px 10px', background: GH.paper, color: GH.ink,
                         borderLeft: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`,
                     }}>
-                        от {specialist.basePriceGel} ₾
+                        от {formatGel(specialist.basePriceGel)}
                     </div>
                     {/* Format badges */}
                     <div style={{ position: 'absolute', bottom: 0, left: 0, display: 'flex', gap: 0 }}>
                         {hasOnline && (
                             <span style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 padding: '5px 8px', background: GH.accent, color: GH.paper,
                                 display: 'flex', alignItems: 'center', gap: 4,
                             }}>
@@ -82,7 +83,7 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
                         )}
                         {hasOffline && (
                             <span style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 padding: '5px 8px', background: GH.ink, color: GH.paper,
                                 display: 'flex', alignItems: 'center', gap: 4,
                             }}>
@@ -102,7 +103,7 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
                                 if (!b) return null;
                                 return (
                                     <span key={code} style={{
-                                        fontFamily: GH_MONO, fontSize: 9, fontWeight: 700,
+                                        fontFamily: GH_MONO, fontSize: 12, fontWeight: 700,
                                         letterSpacing: '0.06em', textTransform: 'uppercase',
                                         padding: '3px 7px', color: b.fg, background: b.bg,
                                         border: `1px solid ${b.border}`,
@@ -121,7 +122,7 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
                     <div style={{ marginBottom: 14, flex: 1, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {specialist.specializations.slice(0, 3).map((tag, i) => (
                             <span key={i} style={{
-                                fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 padding: '3px 8px', border: `1px solid ${GH.ink10}`, color: GH.ink60,
                             }}>
                                 {tag}
@@ -129,7 +130,7 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
                         ))}
                         {specialist.specializations.length > 3 && (
                             <span style={{
-                                fontFamily: GH_MONO, fontSize: 9, padding: '3px 8px', color: GH.ink30,
+                                fontFamily: GH_MONO, fontSize: 12, padding: '3px 8px', color: GH.ink60,
                             }}>
                                 +{specialist.specializations.length - 3}
                             </span>
@@ -137,10 +138,10 @@ function GHCard({ specialist, hasOnline, hasOffline, hasOfflineRoom, hasOfflineC
                     </div>
                     {/* CTA */}
                     <div style={{ borderTop: `1px solid ${GH.ink10}`, paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.accent }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.accent }}>
                             Подробнее
                         </span>
-                        <ArrowRight size={14} style={{ color: GH.ink30 }} />
+                        <ArrowRight size={14} style={{ color: GH.ink30 /* декор: иконка */ }} />
                     </div>
                 </div>
             </div>

@@ -203,9 +203,9 @@ export function LoginPage() {
 const GH_HAIRLINE = `1px solid ${GH.ink10}`;
 const GH_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 11,
+    fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     color: GH.ink60,
 };
 
@@ -479,9 +479,9 @@ function GridHouseLoginPage({
                                     color: GH.paper,
                                     border: 'none',
                                     fontFamily: GH_MONO,
-                                    fontSize: 11,
+                                    fontSize: 12,
                                     textTransform: 'uppercase',
-                                    letterSpacing: '0.18em',
+                                    letterSpacing: '0.06em',
                                     fontWeight: 600,
                                     cursor: isLoading ? 'not-allowed' : 'pointer',
                                     opacity: isLoading ? 0.6 : 1,
@@ -582,9 +582,9 @@ function GridHouseLoginPage({
                                     border: 'none',
                                     color: GH.ink,
                                     fontFamily: GH_MONO,
-                                    fontSize: 11,
+                                    fontSize: 12,
                                     textTransform: 'uppercase',
-                                    letterSpacing: '0.18em',
+                                    letterSpacing: '0.06em',
                                     fontWeight: 600,
                                     cursor: 'pointer',
                                     padding: 0,
@@ -651,7 +651,7 @@ function GHField({
                     transition: 'border-color 0.15s ease',
                 }}
             >
-                <div style={{ color: GH.ink30, marginRight: 12, display: 'flex' }}>{icon}</div>
+                <div style={{ color: GH.ink60, marginRight: 12, display: 'flex' }}>{icon}</div>
                 {type === 'tel' ? (
                     <PhoneInput
                         value={value}

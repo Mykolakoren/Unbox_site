@@ -7,7 +7,8 @@ import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import {
     BadgeCheck, XCircle, Clock, Calendar as CalendarIcon, Key, Wifi, Repeat,
     LayoutList, LayoutGrid, ChevronLeft, ChevronRight, X, RefreshCw, GripVertical,
-    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw, Bell
+    User as UserIcon, Check, Pencil, Loader2, Plus, ArrowRight, AlertTriangle, RotateCcw, Bell,
+    Ticket, Gift, UserCheck,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format, addDays, addMinutes, setHours, setMinutes, startOfToday, isBefore,
@@ -41,6 +42,25 @@ import { tbilisiNow } from '../utils/dateUtils';
 // (Фаза 1 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md). Раньше каждая
 // бронь-страница имела свою копию, что создавало риск тонких отличий.
 import { parseUTC, safeFormat } from '../utils/bookingHelpers';
+import { confirmAction } from '../components/ui/ConfirmDialogProvider';
+import { Sheet } from '../components/ui/Sheet';
+import { Button as UiButton } from '../components/ui/Button';
+import { Field, Input } from '../components/ui/Field';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { formatGel, formatTime } from '../utils/format';
+import { ruCountWord } from '../utils/plural';
+
+/** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
+ *  пересдачу (флаг isReRentListed, не отдельный статус). Вид — как у
+ *  StatusBadge (ui-badge), тон «ждём»; слово утверждено владельцем. */
+function ReRentListedBadge({ className }: { className?: string }) {
+    return (
+        <span className={clsx('ui-badge ui-badge--pending', className)}>
+            <Repeat size={14} strokeWidth={2.25} aria-hidden="true" />
+            На пересдаче
+        </span>
+    );
+}
 
 const timeToMins = (t: string) => {
     const [h, m] = t.split(':').map(Number);
@@ -667,7 +687,7 @@ function BookingsChessboard({
                 pattern: recurringPattern,
             });
             const patternLabel = recurringPattern === 'weekly' ? 'еженедельно' : recurringPattern === 'biweekly' ? 'раз в 2 нед.' : 'раз в 4 нед.';
-            toast.success(`Серия создана: ${result.created} бронирований (${patternLabel}), ${result.totalCost?.toFixed(0) ?? 0} ₾`);
+            toast.success(`Серия создана: ${ruCountWord(result.created, ['бронь', 'брони', 'броней'])} (${patternLabel}), ${formatGel(result.totalCost ?? 0, { fraction: 0 })}`);
             setNewSlots([]);
             setRecurringPattern('');
             await useUserStore.getState().fetchBookings();
@@ -740,11 +760,14 @@ function BookingsChessboard({
             return;
         }
 
-        // Confirm
+        // Confirm — общее окно (кнопки называют действие), не системное confirm().
         const resName = RESOURCES.find(r => r.id === newRes)?.name || newRes;
-        const confirmed = window.confirm(
-            `Перенести бронь?\n${oldTime} → ${newTime}${oldRes !== newRes ? `\n${RESOURCES.find(r => r.id === oldRes)?.name} → ${resName}` : ''}`
-        );
+        const confirmed = await confirmAction({
+            title: 'Перенести бронь?',
+            body: `${formatTime(oldTime)} → ${formatTime(newTime)}${oldRes !== newRes ? ` · ${RESOURCES.find(r => r.id === oldRes)?.name} → ${resName}` : ''}`,
+            confirmLabel: 'Перенести',
+            cancelLabel: 'Оставить как было',
+        });
 
         if (confirmed) {
             const newDate = format(selectedDate, 'yyyy-MM-dd');
@@ -895,7 +918,7 @@ function BookingsChessboard({
             <div className="space-y-3 pb-28">
                 {/* Week nav */}
                 <div className="rounded-2xl border border-unbox-light/60 overflow-hidden" style={{ background: 'rgba(212,226,225,0.35)' }}>
-                    <div className="text-center text-xs font-semibold text-unbox-dark/60 pt-1.5 pb-0.5 capitalize">
+                    <div className="text-center text-xs font-semibold text-ink-60 pt-1.5 pb-0.5 capitalize">
                         {(() => {
                             const first = weekDays[0];
                             const last = weekDays[weekDays.length - 1];
@@ -906,7 +929,7 @@ function BookingsChessboard({
                         })()}
                     </div>
                     <div className="flex items-center gap-1 p-1 pt-0">
-                    <button onClick={() => { const n = subWeeks(weekStart, 1); setWeekStart(n); setSelectedDate(n); }} className="p-1.5 rounded-lg hover:bg-white text-unbox-grey">
+                    <button onClick={() => { const n = subWeeks(weekStart, 1); setWeekStart(n); setSelectedDate(n); }} className="p-1.5 rounded-lg hover:bg-white text-ink-60">
                         <ChevronLeft size={16} />
                     </button>
                     <div className="flex-1 grid grid-cols-7 gap-1">
@@ -921,13 +944,13 @@ function BookingsChessboard({
                                         "flex flex-col items-center py-2 rounded-xl transition-all text-xs relative",
                                         isSelected
                                             ? "bg-unbox-green text-white shadow-md"
-                                            : "bg-white text-unbox-grey border border-unbox-light/50"
+                                            : "bg-white text-ink-60 border border-unbox-light/50"
                                     )}
                                 >
-                                    <span className="text-[9px] font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
+                                    <span className="text-caption font-bold uppercase">{format(day, 'EEEEEE', { locale: ru })}</span>
                                     <span className="text-sm font-bold">
                                         {format(day, 'd')}
-                                        <span className="ml-0.5 text-[8px] font-medium uppercase opacity-70">
+                                        <span className="ml-0.5 text-caption font-medium uppercase opacity-70">
                                             {format(day, 'MMM', { locale: ru })}
                                         </span>
                                     </span>
@@ -936,7 +959,7 @@ function BookingsChessboard({
                             );
                         })}
                     </div>
-                    <button onClick={() => { const n = addWeeks(weekStart, 1); setWeekStart(n); setSelectedDate(n); }} className="p-1.5 rounded-lg hover:bg-white text-unbox-grey">
+                    <button onClick={() => { const n = addWeeks(weekStart, 1); setWeekStart(n); setSelectedDate(n); }} className="p-1.5 rounded-lg hover:bg-white text-ink-60">
                         <ChevronRight size={16} />
                     </button>
                     </div>
@@ -956,7 +979,7 @@ function BookingsChessboard({
                             {locGroups.map(({ loc, rooms }) => (
                                 <div key={loc.id} className="rounded-xl border border-unbox-light/40 bg-white/30 backdrop-blur-sm p-1.5">
                                     {mobileLocFilter === 'all' && (
-                                        <div className="text-[10px] font-bold text-unbox-grey uppercase tracking-wider px-2 pb-1">{loc.name}</div>
+                                        <div className="text-caption font-bold text-ink-60 uppercase tracking-wider px-2 pb-1">{loc.name}</div>
                                     )}
                                     <div className="flex gap-1 overflow-x-auto scrollbar-hide">
                                         {rooms.map(r => {
@@ -972,8 +995,8 @@ function BookingsChessboard({
                                                             : 'bg-white text-gray-500 border-gray-100'
                                                     )}
                                                 >
-                                                    <div className="font-bold whitespace-nowrap text-[11px]">{r.name}</div>
-                                                    <div className="text-[9px] opacity-70">{r.capacity} чел.</div>
+                                                    <div className="font-bold whitespace-nowrap text-caption">{r.name}</div>
+                                                    <div className="text-caption opacity-70">{r.capacity} чел.</div>
                                                 </button>
                                             );
                                         })}
@@ -989,9 +1012,9 @@ function BookingsChessboard({
                     <div className="flex items-center justify-between bg-unbox-green/10 border border-unbox-green/20 rounded-xl px-4 py-3">
                         <div>
                             <div className="text-sm font-bold text-unbox-dark">{mBlockStart} — {mBlockEnd}</div>
-                            <div className="text-xs text-unbox-grey">{mBlockDur} мин · {mobileRes.name}</div>
+                            <div className="text-xs text-ink-60">{mBlockDur} мин · {mobileRes.name}</div>
                         </div>
-                        <button onClick={() => setNewSlotRange(mobileRes.id, [])} className="p-1.5 rounded-lg bg-red-100 text-red-500">
+                        <button onClick={() => setNewSlotRange(mobileRes.id, [])} className="p-1.5 rounded-lg bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]">
                             <X size={14} />
                         </button>
                     </div>
@@ -999,9 +1022,9 @@ function BookingsChessboard({
 
                 {/* CRM mode hint */}
                 {crmMode && (
-                    <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2 text-sm">
-                        <CalendarIcon className="w-4 h-4 text-orange-500 shrink-0" />
-                        <span className="text-orange-800 text-xs">Выберите слот для <strong>{crmMode.clientName}</strong></span>
+                    <div className="flex items-center gap-2 bg-[var(--status-pending-bg)] border border-orange-200 rounded-xl px-3 py-2 text-sm">
+                        <CalendarIcon className="w-4 h-4 text-[var(--status-pending-fg)] shrink-0" />
+                        <span className="text-[var(--status-pending-fg)] text-xs">Выберите слот для <strong>{crmMode.clientName}</strong></span>
                     </div>
                 )}
 
@@ -1054,8 +1077,8 @@ function BookingsChessboard({
                                                     : 'bg-unbox-green/10 border-unbox-green/30 text-unbox-dark'
                                             )}
                                         >
-                                            <div className="text-[10px] font-bold tabular-nums">{myB.startTime}–{endTime}</div>
-                                            <div className="text-[10px] truncate">
+                                            <div className="text-caption font-bold tabular-nums">{myB.startTime}–{endTime}</div>
+                                            <div className="text-caption truncate">
                                                 {clientInfo?.name || usersMap?.get(myB.userId) || myB.userId.split('@')[0]}
                                             </div>
                                         </button>
@@ -1091,7 +1114,7 @@ function BookingsChessboard({
                                             key={time}
                                             onClick={() => {
                                                 if (isReRentAvail) {
-                                                    toast.info('Этот слот можно занять прямо сейчас — переаренда.');
+                                                    toast.info('Это время пересдают — его можно занять прямо сейчас.');
                                                     return;
                                                 }
                                                 openWaitlistFor(pubB);
@@ -1100,15 +1123,15 @@ function BookingsChessboard({
                                             className={clsx(
                                                 'flex-1 flex flex-col justify-center px-2.5 py-2 rounded-xl text-left min-h-[48px] active:scale-[0.97] transition-transform',
                                                 isReRentAvail
-                                                    ? 'bg-amber-50 border border-amber-300 border-dashed text-amber-700'
+                                                    ? 'bg-[var(--status-pending-bg)] border border-amber-300 border-dashed text-[var(--status-pending-fg)]'
                                                     : 'bg-gray-100 border border-gray-200 text-gray-500'
                                             )}
                                         >
                                             <div className="flex items-center justify-between gap-1">
-                                                <div className="text-[10px] font-bold tabular-nums">{pubB.startTime}–{endTime}</div>
-                                                {!isReRentAvail && <Bell size={11} className="text-orange-500 shrink-0" />}
+                                                <div className="text-caption font-bold tabular-nums">{pubB.startTime}–{endTime}</div>
+                                                {!isReRentAvail && <Bell size={11} className="text-[var(--status-pending-fg)] shrink-0" />}
                                             </div>
-                                            <div className="text-[10px] truncate">
+                                            <div className="text-caption truncate">
                                                 {isReRentAvail ? '↻ можно занять' : (pubName || 'Занято — тап чтобы следить')}
                                             </div>
                                         </button>
@@ -1134,13 +1157,13 @@ function BookingsChessboard({
                                         className={clsx(
                                             'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all min-h-[48px]',
                                             isPast
-                                                ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                                                ? 'bg-gray-50 text-ink-30 cursor-not-allowed'
                                                 : newSel
                                                     ? 'bg-unbox-green text-white shadow-sm'
                                                     : isCrmHint
                                                         ? 'text-unbox-dark active:scale-[0.97]'
                                                         : isPeakTime(time)
-                                                            ? 'bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]'
+                                                            ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border border-amber-200/60 active:scale-[0.97]'
                                                             : 'bg-white text-unbox-dark border border-unbox-light/40 active:scale-[0.97]'
                                         )}
                                         style={(!newSel && isCrmHint) ? {
@@ -1149,7 +1172,7 @@ function BookingsChessboard({
                                             outlineOffset: '-1px',
                                         } : undefined}
                                     >
-                                        <span className={clsx('text-sm font-bold tabular-nums', newSel ? 'text-white' : isPast ? 'text-gray-300' : 'text-unbox-dark')}>
+                                        <span className={clsx('text-sm font-bold tabular-nums', newSel ? 'text-white' : isPast ? 'text-ink-30' : 'text-unbox-dark')}>
                                             {time}
                                         </span>
                                         {newSel ? (
@@ -1194,7 +1217,7 @@ function BookingsChessboard({
                                         key={p.id}
                                         onClick={() => setRecurringPattern(p.id)}
                                         className={clsx(
-                                            'flex-1 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border',
+                                            'flex-1 py-1.5 rounded-lg text-caption font-semibold transition-colors border',
                                             recurringPattern === p.id
                                                 ? 'bg-unbox-green text-white border-unbox-green'
                                                 : 'border-gray-200 text-gray-500 hover:border-unbox-green'
@@ -1219,7 +1242,7 @@ function BookingsChessboard({
                                         max={recurringPattern === 'monthly' ? 24 : 52}
                                         className="w-14 px-2 py-1 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                     />
-                                    <span className="text-[11px] text-gray-500">
+                                    <span className="text-caption text-gray-500">
                                         повторений · {recurringPattern === 'monthly'
                                             ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                             : recurringPattern === 'biweekly'
@@ -1257,34 +1280,33 @@ function BookingsChessboard({
                                     <div className="font-bold text-unbox-dark">
                                         {activeBooking.crmClientId && clientMap.get(activeBooking.crmClientId)?.name || usersMap?.get(activeBooking.userId) || activeBooking.userId}
                                     </div>
-                                    <div className="text-xs text-unbox-grey">
+                                    <div className="text-xs text-ink-60">
                                         {activeBooking.startTime} · {activeBooking.duration / 60}ч · {resources.find(r => r.id === activeBooking.resourceId)?.name}
                                     </div>
                                 </div>
                                 <button onClick={() => setActiveBooking(null)} className="p-1"><X size={16} /></button>
                             </div>
                             <div className="text-sm mb-4">
-                                <span className={clsx(
-                                    'px-2 py-0.5 rounded-full text-xs font-medium',
-                                    activeBooking.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
-                                )}>
-                                    {activeBooking.status === 'confirmed' ? (activeBooking.isReRentListed ? '♻️ Переаренда' : '✅ Активно') : '☑️ Завершено'}
-                                </span>
-                                <span className="ml-2 text-unbox-grey">{activeBooking.finalPrice} ₾</span>
+                                {/* Статус — из общего словаря; «На пересдаче» — флаг
+                                    подтверждённой брони, выставленной на пересдачу. */}
+                                {activeBooking.status === 'confirmed' && activeBooking.isReRentListed
+                                    ? <ReRentListedBadge />
+                                    : <StatusBadge kind="booking" status={activeBooking.status} />}
+                                <span className="ml-2 text-ink-60">{formatGel(activeBooking.finalPrice)}</span>
                             </div>
                             {canModify(activeBooking) ? (
                                 <div className="space-y-2">
                                     <div className="grid grid-cols-3 gap-2">
                                         <button onClick={() => { onReschedule(activeBooking); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-unbox-light text-unbox-dark">Перенести</button>
-                                        <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-amber-50 text-amber-700">
+                                        <button onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
                                             {activeBooking.isReRentListed ? 'Снять' : 'Пересдать'}
                                         </button>
-                                        <button onClick={() => { onCancel(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-red-50 text-red-600">Отменить</button>
+                                        <button onClick={() => { onCancel(activeBooking.id); setActiveBooking(null); }} className="py-2.5 text-xs font-medium rounded-xl bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]">Отменить</button>
                                     </div>
                                     {activeBooking.duration >= 120 && !activeBooking.isReRentListed && (
                                         <button
                                             onClick={() => { setTrimBooking(activeBooking); setActiveBooking(null); }}
-                                            className="w-full py-2 text-xs font-medium rounded-xl bg-red-50 text-red-600"
+                                            className="w-full py-2 text-xs font-medium rounded-xl bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]"
                                         >
                                             Отменить часть
                                         </button>
@@ -1294,7 +1316,7 @@ function BookingsChessboard({
                                         ко всей брони прямо с телефона. */}
                                     {crmClients.length > 0 && activeBooking.status !== 'completed' && (
                                         <div className="flex items-center gap-2 pt-1">
-                                            <span className="text-[10px] text-unbox-grey uppercase tracking-wider font-semibold flex-shrink-0">Клиент CRM</span>
+                                            <span className="text-caption text-ink-60 uppercase tracking-wider font-semibold flex-shrink-0">Клиент CRM</span>
                                             <select
                                                 value={activeBooking.crmClientId || ''}
                                                 onChange={(e) => {
@@ -1334,23 +1356,23 @@ function BookingsChessboard({
                                 return endUTC < Date.now();
                             })() ? (
                                 // Same UX as desktop: show why cancel is gone
-                                // and offer переаренду as the alternative the
+                                // and offer «Пересдать» as the alternative the
                                 // client actually has in this window.
                                 <div className="space-y-2">
                                     {activeBooking.isReRentListed ? (
-                                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-center text-amber-700">
-                                            ♻️ Выставлено на переаренду
+                                        <div className="bg-[var(--status-pending-bg)] border border-amber-200 rounded-xl p-2.5 text-xs text-center text-[var(--status-pending-fg)] flex items-center justify-center gap-1.5">
+                                            <Repeat size={12} aria-hidden="true" /> На пересдаче
                                         </div>
                                     ) : (
                                         <>
-                                            <div className="text-[11px] text-unbox-grey text-center italic px-2">
+                                            <div className="text-caption text-ink-60 text-center italic px-2">
                                                 Менее 24ч до начала — самостоятельная отмена недоступна по правилам бронирования.
                                             </div>
                                             <button
                                                 onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }}
                                                 className="w-full py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
                                             >
-                                                ♻️ Выставить на переаренду
+                                                <span className="inline-flex items-center gap-1.5"><Repeat size={12} aria-hidden="true" /> Пересдать</span>
                                             </button>
                                         </>
                                     )}
@@ -1412,7 +1434,7 @@ function BookingsChessboard({
                 style={{ background: 'rgba(212,226,225,0.35)' }}>
                 <button
                     onClick={() => { const n = subWeeks(weekStart, 1); setWeekStart(n); setSelectedDate(n); }}
-                    className="p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark border border-transparent hover:border-unbox-light hover:shadow-sm"
+                    className="p-2 hover:bg-white rounded-xl transition-all text-ink-60 hover:text-unbox-dark border border-transparent hover:border-unbox-light hover:shadow-sm"
                 >
                     <ChevronLeft size={18} />
                 </button>
@@ -1428,10 +1450,10 @@ function BookingsChessboard({
                                     "flex flex-col items-center justify-center py-2.5 rounded-xl transition-all duration-200 text-sm relative",
                                     isSelected
                                         ? "bg-unbox-green text-white shadow-lg shadow-unbox-green/30 scale-[1.04]"
-                                        : "bg-white text-unbox-grey border border-unbox-light hover:border-unbox-green/40 hover:text-unbox-dark hover:shadow-sm"
+                                        : "bg-white text-ink-60 border border-unbox-light hover:border-unbox-green/40 hover:text-unbox-dark hover:shadow-sm"
                                 )}
                             >
-                                <span className={clsx("text-[10px] font-bold uppercase tracking-wider mb-1", isSelected ? "opacity-80" : "opacity-50")}>
+                                <span className={clsx("text-caption font-bold uppercase tracking-wider mb-1", isSelected ? "opacity-80" : "")}>
                                     {format(day, 'EEE', { locale: ru })}
                                 </span>
                                 {/* Day-number + month abbreviation so a week
@@ -1439,7 +1461,7 @@ function BookingsChessboard({
                                     isn't ambiguous. */}
                                 <span className="text-base font-bold leading-none">
                                     {format(day, 'd')}
-                                    <span className="ml-1 text-[10px] font-medium uppercase tracking-wider opacity-70">
+                                    <span className="ml-1 text-caption font-medium uppercase tracking-wider opacity-70">
                                         {format(day, 'MMM', { locale: ru })}
                                     </span>
                                 </span>
@@ -1455,7 +1477,7 @@ function BookingsChessboard({
                 </div>
                 <button
                     onClick={() => { const n = addWeeks(weekStart, 1); setWeekStart(n); setSelectedDate(n); }}
-                    className="p-2 hover:bg-white rounded-xl transition-all text-unbox-grey hover:text-unbox-dark border border-transparent hover:border-unbox-light hover:shadow-sm"
+                    className="p-2 hover:bg-white rounded-xl transition-all text-ink-60 hover:text-unbox-dark border border-transparent hover:border-unbox-light hover:shadow-sm"
                 >
                     <ChevronRight size={18} />
                 </button>
@@ -1480,10 +1502,10 @@ function BookingsChessboard({
                             </th>
                             {timeSlots.map(t => (
                                 <th key={t} className={clsx(
-                                    "p-2 text-center min-w-[56px] border-r border-unbox-light/40 text-[10px] uppercase font-bold",
+                                    "p-2 text-center min-w-[56px] border-r border-unbox-light/40 text-caption uppercase font-bold",
                                     isEveningSurcharge(t)
-                                        ? "text-violet-600 bg-violet-50/60"
-                                        : isPeakTime(t) ? "text-amber-600 bg-amber-50/40" : "text-unbox-dark/60"
+                                        ? "text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]"
+                                        : isPeakTime(t) ? "text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]" : "text-ink-60"
                                 )}
                                 title={isEveningSurcharge(t) ? 'Вечерний тариф — повышенная ставка' : undefined}
                                 >
@@ -1542,34 +1564,34 @@ function BookingsChessboard({
                                                     isCompleted
                                                         ? "bg-gray-200/80 text-gray-500"
                                                         : isReRent
-                                                            ? "bg-amber-50 border-2 border-dashed border-amber-400 text-amber-700"
+                                                            ? "bg-[var(--status-pending-bg)] border-2 border-dashed border-amber-400 text-[var(--status-pending-fg)]"
                                                             : canMod
                                                                 ? "bg-unbox-green hover:bg-unbox-green/90 text-white cursor-grab active:cursor-grabbing"
                                                                 : "bg-unbox-dark hover:bg-unbox-dark/90 text-white"
                                                 )}
                                             >
-                                                <span className="text-[10px] font-bold leading-none opacity-90 flex items-center gap-1">
-                                                    {/* Recurring marker — orange star ⭐ for series bookings.
+                                                <span className="text-caption font-bold leading-none opacity-90 flex items-center gap-1">
+                                                    {/* Recurring marker — иконка «Серия» (раньше звёздочка-эмодзи).
                                                         Visible to both owner and admin. */}
-                                                    {myB.recurringGroupId && <span className="text-orange-500" title="Постоянная бронь (серия)">⭐</span>}
+                                                    {myB.recurringGroupId && <Repeat size={10} aria-label="Серия" className="shrink-0" />}
                                                     {myB.startTime} · {myB.duration / 60}ч
-                                                    {isCompleted && ' ✓'}
+                                                    {isCompleted && <Check size={10} aria-label="Прошла" className="shrink-0" />}
                                                 </span>
                                                 {clientInfo ? (
-                                                    <span className="text-[9px] opacity-80 leading-none flex items-center gap-0.5 truncate max-w-full">
+                                                    <span className="text-caption opacity-80 leading-none flex items-center gap-0.5 truncate max-w-full">
                                                         <UserIcon size={8} className="shrink-0" />
                                                         <span className="truncate">
                                                             {clientInfo.aliasCode ? `${clientInfo.aliasCode} · ${clientInfo.name}` : clientInfo.name}
                                                         </span>
                                                     </span>
                                                 ) : (
-                                                    <span className="text-[9px] opacity-70 leading-none flex items-center gap-0.5 truncate max-w-full">
+                                                    <span className="text-caption opacity-70 leading-none flex items-center gap-0.5 truncate max-w-full">
                                                         <UserIcon size={8} className="shrink-0" />
                                                         <span className="truncate">{usersMap?.get(myB.userId) || myB.userId}</span>
                                                     </span>
                                                 )}
-                                                {isReRent && <span className="text-[8px] opacity-80 leading-none">♻️ переаренда</span>}
-                                                {!isCompleted && !isReRent && !canMod && <span className="text-[8px] opacity-60 leading-none">≤24ч</span>}
+                                                {isReRent && <span className="text-caption opacity-80 leading-none">на пересдаче</span>}
+                                                {!isCompleted && !isReRent && !canMod && <span className="text-caption opacity-60 leading-none">≤24ч</span>}
                                                 {canMod && <GripVertical size={10} className="absolute right-5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-30 transition-opacity" />}
                                                 {/* Edit button */}
                                                 <button
@@ -1613,7 +1635,7 @@ function BookingsChessboard({
                                         // when Кабинет 6/7/8/9 in the same branch frees.
                                         const handleWaitlistClick = () => {
                                             if (isReRentAvailable) {
-                                                toast.info('Слот доступен для переаренды — выберите его внизу шахматки.');
+                                                toast.info('Это время пересдают — выберите его внизу шахматки.');
                                                 return;
                                             }
                                             openWaitlistFor(pubB);
@@ -1628,24 +1650,24 @@ function BookingsChessboard({
                                                     className={clsx(
                                                         "absolute inset-[2px] rounded-xl flex flex-col items-start justify-center px-2 gap-0.5 cursor-pointer transition-colors group",
                                                         isReRentAvailable
-                                                            ? "bg-amber-50 border border-dashed border-amber-400 text-amber-800 hover:bg-amber-100"
+                                                            ? "bg-[var(--status-pending-bg)] border border-dashed border-amber-400 text-[var(--status-pending-fg)] hover:bg-[var(--status-pending-bg)]"
                                                             : "bg-gray-300/90 text-gray-600 hover:bg-gray-400/90"
                                                     )}
                                                     title={isReRentAvailable
-                                                        ? 'Доступно для переаренды'
+                                                        ? 'Время пересдают — его можно занять'
                                                         : 'Нажмите чтобы получить уведомление, когда слот освободится'}
                                                     onClick={handleWaitlistClick}
                                                 >
-                                                    <span className="text-[10px] font-bold leading-none">
+                                                    <span className="text-caption font-bold leading-none">
                                                         {pubB.startTime} · {pubB.duration / 60}ч
                                                     </span>
-                                                    <span className="text-[9px] opacity-80 leading-none">
+                                                    <span className="text-caption opacity-80 leading-none">
                                                         Занято
                                                     </span>
-                                                    {isReRentAvailable && <span className="text-[8px] font-medium leading-none">♻️ переаренда</span>}
+                                                    {isReRentAvailable && <span className="text-caption font-medium leading-none">на пересдаче</span>}
                                                     {!isReRentAvailable && (
-                                                        <span className="text-[8px] opacity-0 group-hover:opacity-90 leading-none transition-opacity">
-                                                            🔔 подписаться
+                                                        <span className="text-caption opacity-0 group-hover:opacity-90 leading-none transition-opacity">
+                                                            <Bell size={10} className="inline" aria-hidden="true" /> подписаться
                                                         </span>
                                                     )}
                                                 </div>
@@ -1700,14 +1722,14 @@ function BookingsChessboard({
                                                     else handleNewDragEnter(r.id, time);
                                                 }}
                                                 className={clsx(
-                                                    "w-full h-full flex items-center justify-center text-[9px] relative select-none touch-none transition-colors",
+                                                    "w-full h-full flex items-center justify-center text-caption relative select-none touch-none transition-colors",
                                                     isPast
                                                         ? "bg-black/[0.03]"
                                                         : newSel
                                                             ? "bg-unbox-green text-white z-10 cursor-grab shadow-sm"
                                                             : isPeakTime(time)
-                                                                ? "bg-amber-50/70 hover:bg-amber-100/60 text-amber-600/70 hover:text-amber-700 cursor-pointer"
-                                                                : "hover:bg-unbox-green/5 text-unbox-dark/50 hover:text-unbox-green cursor-pointer",
+                                                                ? "bg-[var(--status-pending-bg)] hover:bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] hover:text-[var(--status-pending-fg)] cursor-pointer"
+                                                                : "hover:bg-unbox-green/5 text-ink-60 hover:text-unbox-green cursor-pointer",
                                                     newSel && !isNewSingle && !isNewStart && "border-l border-white/20",
                                                     isNewStart && newSel && "rounded-l-lg",
                                                     isNewEnd && newSel && "rounded-r-lg"
@@ -1730,7 +1752,7 @@ function BookingsChessboard({
                                                             <button
                                                                 onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); setNewSlotRange(r.id, []); }}
                                                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); setNewSlotRange(r.id, []); }}
-                                                                className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:bg-red-600 hover:scale-110 transition-all z-50"
+                                                                className="absolute top-0.5 right-0.5 bg-[var(--status-danger-solid)] text-white rounded-full w-4 h-4 flex items-center justify-center shadow-md hover:bg-[var(--status-danger-fg)] hover:scale-110 transition-all z-50"
                                                                 title="Удалить"
                                                             >
                                                                 <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
@@ -1751,7 +1773,7 @@ function BookingsChessboard({
                                     <td className="sticky left-0 backdrop-blur-sm p-3 border-r border-unbox-light/40 z-10"
                                         style={{ background: 'rgba(212,226,225,0.50)' }}>
                                         <div className="font-bold text-unbox-dark text-xs">{r.name}</div>
-                                        <div className="text-[10px] text-unbox-grey">{r.capacity} чел.</div>
+                                        <div className="text-caption text-ink-60">{r.capacity} чел.</div>
                                     </td>
                                     {cells}
                                 </tr>
@@ -1770,11 +1792,11 @@ function BookingsChessboard({
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded bg-unbox-dark/80" />
-                    <span>До брони менее 24ч — можно выставить на переаренду</span>
+                    <span>До брони меньше 24 ч — можно пересдать</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 rounded border-2 border-dashed border-amber-400 bg-amber-50" />
-                    <span>Кабинет открыт для переаренды другим специалистам</span>
+                    <div className="w-3 h-3 rounded border-2 border-dashed border-amber-400 bg-[var(--status-pending-bg)]" />
+                    <span>Время на пересдаче — его можно занять</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 rounded bg-gray-200/80" />
@@ -1810,17 +1832,17 @@ function BookingsChessboard({
                                             <span>{hours}ч</span>
                                             <button
                                                 onClick={() => removeNewBlock(block)}
-                                                className="ml-1 hover:bg-red-100 rounded-full p-0.5 transition-colors"
+                                                className="ml-1 hover:bg-[var(--status-danger-bg)] rounded-full p-0.5 transition-colors"
                                                 title="Убрать этот период"
                                             >
-                                                <X size={10} className="text-red-500" />
+                                                <X size={10} className="text-[var(--status-danger-fg)]" />
                                             </button>
                                         </div>
                                     );
                                 })}
                                 {/* Time overlap warning */}
                                 {hasTimeOverlap && (
-                                    <div className="flex items-center gap-1.5 text-amber-600 text-xs font-medium">
+                                    <div className="flex items-center gap-1.5 text-[var(--status-pending-fg)] text-xs font-medium">
                                         <AlertTriangle size={14} className="shrink-0" />
                                         <span>Наложение по времени</span>
                                     </div>
@@ -1838,7 +1860,7 @@ function BookingsChessboard({
 
                         {/* Recurring pattern row */}
                         <div className="flex items-center gap-2">
-                            <Repeat size={14} className="text-gray-400 shrink-0" />
+                            <Repeat size={14} className="text-ink-60 shrink-0" />
                             <div className="flex gap-1.5">
                                 {([
                                     { id: '' as const, label: 'Разово' },
@@ -1873,7 +1895,7 @@ function BookingsChessboard({
                                         max={recurringPattern === 'monthly' ? 24 : 52}
                                         className="w-14 px-2 py-1 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                     />
-                                    <span className="text-xs text-gray-400 whitespace-nowrap">
+                                    <span className="text-xs text-ink-60 whitespace-nowrap">
                                         {recurringPattern === 'monthly'
                                             ? `≈ ${Math.round(recurringOccurrences * 4 / 4.3)} мес.`
                                             : recurringPattern === 'biweekly'
@@ -1892,12 +1914,12 @@ function BookingsChessboard({
                 <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowOverlapWarning(false)}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4 mx-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
-                                <AlertTriangle size={20} className="text-amber-600" />
+                            <div className="w-10 h-10 rounded-full bg-[var(--status-pending-bg)] flex items-center justify-center">
+                                <AlertTriangle size={20} className="text-[var(--status-pending-fg)]" />
                             </div>
                             <h3 className="font-bold text-lg">Наложение по времени</h3>
                         </div>
-                        <p className="text-sm text-unbox-grey">
+                        <p className="text-sm text-ink-60">
                             Вы выбрали слоты, которые пересекаются по времени в разных кабинетах. Вы уверены, что хотите продолжить?
                         </p>
                         <div className="flex gap-3">
@@ -1931,30 +1953,30 @@ function BookingsChessboard({
                             <div className="font-bold text-unbox-dark text-sm">
                                 {RESOURCES.find(r => r.id === activeBooking.resourceId)?.name || 'Кабинет'}
                             </div>
-                            <div className="text-xs text-unbox-grey mt-0.5">
+                            <div className="text-xs text-ink-60 mt-0.5">
                                 {format(parseUTC(activeBooking.date), 'd MMMM', { locale: ru })} · {activeBooking.startTime} – {minsToTime(timeToMins(activeBooking.startTime!) + activeBooking.duration)} · {activeBooking.duration / 60}ч
                             </div>
                             <div className="text-xs font-semibold mt-1">
                                 {activeBooking.paymentSource === 'credit' ? (
-                                    <span className="text-amber-600">Долг: {activeBooking.finalPrice} ₾</span>
+                                    <span className="text-[var(--status-danger-fg)]">Долг: {formatGel(activeBooking.finalPrice)}</span>
                                 ) : (
-                                    <span className="text-unbox-green">Оплачено: {activeBooking.finalPrice} ₾</span>
+                                    <span className="text-unbox-green">Оплачено: {formatGel(activeBooking.finalPrice)}</span>
                                 )}
                             </div>
                         </div>
                         <button onClick={() => setActiveBooking(null)} className="p-1 hover:bg-unbox-light rounded-lg transition-colors">
-                            <X size={14} className="text-unbox-grey" />
+                            <X size={14} className="text-ink-60" />
                         </button>
                     </div>
 
                     {/* CRM Client selector */}
                     {activeBooking.status !== 'completed' && (
                         <div className="border-t border-unbox-light/50 pt-3">
-                            <div className="text-[10px] text-unbox-grey uppercase tracking-wider mb-1.5 font-semibold">Клиент из CRM</div>
+                            <div className="text-caption text-ink-60 uppercase tracking-wider mb-1.5 font-semibold">Клиент из CRM</div>
                             {crmClients.length > 0 ? (
                                 <>
                                     <div className="flex items-center gap-2">
-                                        <UserIcon size={12} className="text-unbox-grey flex-shrink-0" />
+                                        <UserIcon size={12} className="text-ink-60 flex-shrink-0" />
                                         <select
                                             value={activeBooking.crmClientId || ''}
                                             onChange={(e) => {
@@ -1988,7 +2010,7 @@ function BookingsChessboard({
                                     )}
                                 </>
                             ) : (
-                                <Link to="/crm/clients" className="flex items-center gap-1.5 text-xs text-unbox-grey hover:text-unbox-green transition-colors" onClick={() => setActiveBooking(null)}>
+                                <Link to="/crm/clients" className="flex items-center gap-1.5 text-xs text-ink-60 hover:text-unbox-green transition-colors" onClick={() => setActiveBooking(null)}>
                                     <UserIcon size={12} />
                                     Добавьте клиентов в разделе «Мой CRM»
                                 </Link>
@@ -2014,7 +2036,7 @@ function BookingsChessboard({
                                 </button>
                                 <button
                                     onClick={() => { setActiveBooking(null); onCancel(activeBooking.id); }}
-                                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-red-100 text-red-500 text-xs font-semibold hover:bg-red-50 transition-all"
+                                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-red-100 text-[var(--status-danger-fg)] text-xs font-semibold hover:bg-[var(--status-danger-bg)] transition-all"
                                 >
                                     <X size={12} /> Отменить
                                 </button>
@@ -2042,14 +2064,14 @@ function BookingsChessboard({
                         </div>
                     ) : activeBooking.isReRentListed ? (
                         <div className="space-y-2 pt-1">
-                            <div className="bg-amber-50/80 rounded-xl p-2.5 text-xs text-center text-amber-700 border border-amber-200">
-                                ♻️ Выставлено на переаренду
+                            <div className="bg-[var(--status-pending-bg)] rounded-xl p-2.5 text-xs text-center text-[var(--status-pending-fg)] border border-amber-200 flex items-center justify-center gap-1.5">
+                                <Repeat size={12} aria-hidden="true" /> На пересдаче
                             </div>
                             <button
                                 onClick={() => { setActiveBooking(null); onCancelReRent(activeBooking.id); }}
-                                className="w-full py-2 rounded-xl border border-unbox-light text-unbox-grey text-xs font-semibold hover:bg-unbox-light transition-all"
+                                className="w-full py-2 rounded-xl border border-unbox-light text-ink-60 text-xs font-semibold hover:bg-unbox-light transition-all"
                             >
-                                Убрать с переаренды
+                                Снять с пересдачи
                             </button>
                         </div>
                     ) : (() => {
@@ -2062,19 +2084,25 @@ function BookingsChessboard({
                         return isPastBooking ? (
                             <div className="pt-1">
                                 <div className="bg-gray-50 rounded-xl p-2.5 text-xs text-center text-gray-500 border border-gray-200 font-medium">
-                                    ☑️ Бронирование завершено
+                                    <span className="inline-flex items-center gap-1.5"><Check size={12} aria-hidden="true" /> Бронь прошла</span>
                                 </div>
                             </div>
                         ) : (
                             <div className="flex flex-col gap-2 pt-1">
-                                <div className="text-[11px] text-unbox-grey text-center italic">
+                                <div className="text-caption text-ink-60 text-center italic">
                                     Менее 24ч до начала — бесплатная отмена недоступна
                                 </div>
                                 <button
                                     disabled={extending}
                                     onClick={async () => {
                                         if (extending) return;
-                                        if (!confirm('Продление менее чем за 24ч. Отмена этого действия будет платной и только через администратора. Продолжить?')) return;
+                                        const ok = await confirmAction({
+                                            title: 'Продлить на 30 минут?',
+                                            body: 'До начала меньше 24 часов. Отменить продление потом можно будет только через администратора, и это будет платно.',
+                                            confirmLabel: 'Продлить на 30 мин',
+                                            cancelLabel: 'Не продлевать',
+                                        });
+                                        if (!ok) return;
                                         setExtending(true);
                                         try {
                                             const updated = await bookingsApi.extendBooking(activeBooking.id, 30);
@@ -2095,7 +2123,7 @@ function BookingsChessboard({
                                     onClick={() => { setActiveBooking(null); onReRent(activeBooking.id); }}
                                     className="w-full py-2 rounded-xl border border-dashed border-unbox-green text-unbox-green text-xs font-semibold hover:bg-unbox-light transition-all"
                                 >
-                                    ♻️ Выставить на переаренду
+                                    <span className="inline-flex items-center gap-1.5"><Repeat size={12} aria-hidden="true" /> Пересдать</span>
                                 </button>
                             </div>
                         );
@@ -2387,13 +2415,13 @@ export function MyBookingsPage() {
 
         const refundText = booking.paymentMethod === 'subscription'
             ? `${booking.hoursDeducted || (booking.duration / 60)} ч. будут возвращены на ваш абонемент.`
-            : `${booking.finalPrice} ₾ будут возвращены на ваш баланс.`;
+            : `${formatGel(booking.finalPrice)} вернём на ваш баланс.`;
 
         setModalConfig({
             isOpen: true,
             title: 'Отменить бронирование?',
             message: (
-                <div className="space-y-2 text-sm text-unbox-grey">
+                <div className="space-y-2 text-sm text-ink-60">
                     <p>Это действие необратимо.</p>
                     <p className="font-medium text-unbox-dark bg-unbox-light/30 p-2 rounded-lg border border-unbox-light">{refundText}</p>
                 </div>
@@ -2408,7 +2436,7 @@ export function MyBookingsPage() {
                 } catch (error: any) {
                     const detail = error?.response?.data?.detail || 'Не удалось отменить бронирование';
                     // <24h hard-block: backend returns Russian text mentioning "24"
-                    // and "переаренду / администратором". Surface a sonner action
+                    // and «пересдать / администратором». Surface a sonner action
                     // button so the user can hop straight into Telegram with admin.
                     if (typeof detail === 'string' && /24\s*час/i.test(detail)) {
                         toast.error(detail, {
@@ -2429,16 +2457,16 @@ export function MyBookingsPage() {
     const handleReRent = (id: string) => {
         setModalConfig({
             isOpen: true,
-            title: 'Выставить на переаренду?',
+            title: 'Пересдать бронь?',
             message: (
                 <span>Если другой пользователь забронирует это время, вам вернется <b>50%</b> от стоимости бронирования на баланс.</span>
             ),
-            confirmLabel: 'Выставить',
+            confirmLabel: 'Пересдать',
             isDestructive: false,
             onConfirm: async () => {
                 try {
                     await bookingsApi.toggleReRent(id);
-                    toast.success('Время выставлено на переаренду.');
+                    toast.success('Бронь на пересдаче. Если время займут, вернём 50 % на баланс.');
                     refreshBookings();
                 } catch (err: any) {
                     toast.error(err.response?.data?.detail || 'Ошибка');
@@ -2450,7 +2478,7 @@ export function MyBookingsPage() {
     const handleCancelReRent = async (id: string) => {
         try {
             await bookingsApi.toggleReRent(id);
-            toast.success('Убрано с переаренды');
+            toast.success('Снято с пересдачи');
             refreshBookings();
         } catch (err: any) {
             toast.error(err.response?.data?.detail || 'Ошибка');
@@ -2556,10 +2584,10 @@ function SeriesView({
 
     if (grouped.length === 0) {
         return (
-            <div style={{ padding: '64px 16px', textAlign: 'center', color: GH.ink30 }}>
+            <div style={{ padding: '64px 16px', textAlign: 'center', color: GH.ink60 }}>
                 <div style={{ ...ghmbMono, marginBottom: 8 }}>ПОСТОЯННЫХ БРОНЕЙ НЕТ</div>
                 <div style={{ fontSize: 13 }}>
-                    Создайте серию из шахматки — несколько одинаковых слотов на ⭐
+                    Создайте серию из шахматки — несколько одинаковых слотов подряд по неделям
                 </div>
             </div>
         );
@@ -2580,7 +2608,7 @@ function SeriesView({
                             display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
                             paddingBottom: 6, borderBottom: `2px solid ${GH.ink}`,
                         }}>
-                            <span style={{ color: '#f97316' }}>⭐</span>
+                            <Repeat size={14} aria-label="Серия" style={{ color: GH.ink60, flexShrink: 0 }} />
                             <span style={{ fontSize: 14, fontWeight: 700 }}>
                                 {resource?.name || head.resourceId}
                             </span>
@@ -2605,7 +2633,7 @@ function SeriesView({
                             />
                         ))}
                         {items.length > 6 && (
-                            <div style={{ ...ghmbMono, color: GH.ink30, padding: '8px 0' }}>
+                            <div style={{ ...ghmbMono, color: GH.ink60, padding: '8px 0' }}>
                                 + ещё {items.length - 6} в этой серии
                             </div>
                         )}
@@ -2641,7 +2669,7 @@ function SeriesControls({
                 mode === 'until'
                     ? { untilDate: until, pattern }
                     : { addOccurrences: count, pattern });
-            toast.success(`Добавлено ${r.created} сессий${r.totalCost ? ` (+${r.totalCost.toFixed(0)} ₾)` : ''}`);
+            toast.success(`Добавлено ${ruCountWord(r.created, ['сессия', 'сессии', 'сессий'])}${r.totalCost ? ` (${formatGel(r.totalCost, { sign: true, fraction: 0 })})` : ''}`);
             setOpen(false);
             await onChanged();
         } catch (e: any) {
@@ -2720,16 +2748,16 @@ function SeriesControls({
 
 const seriesBtnInk: React.CSSProperties = {
     padding: '8px 14px', background: GH.ink, color: GH.paper, border: 'none',
-    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.06em', cursor: 'pointer',
+    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', cursor: 'pointer',
 };
 const seriesBtnGhost: React.CSSProperties = {
     padding: '8px 14px', background: 'transparent', color: GH.ink60,
-    border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 11,
+    border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 12,
     letterSpacing: '0.06em', cursor: 'pointer',
 };
 const seriesChip: React.CSSProperties = {
     padding: '6px 12px', border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO,
-    fontSize: 11, cursor: 'pointer',
+    fontSize: 12, cursor: 'pointer',
 };
 const seriesInput: React.CSSProperties = {
     padding: '8px 10px', border: `1px solid ${GH.ink10}`, fontFamily: 'inherit',
@@ -2803,20 +2831,30 @@ function BookingCard({
         ? (seriesInfoMap?.get(booking.recurringGroupId) ?? null)
         : null;
     const [extending, setExtending] = useState(false);
+    // Продление серии: число встреч — полем в шторке, а не системным prompt().
+    const [extendOpen, setExtendOpen] = useState(false);
+    const [extendCount, setExtendCount] = useState('4');
+    const [extendError, setExtendError] = useState<string | null>(null);
 
-    const handleExtend = async () => {
+    const handleExtend = () => {
         if (!booking.recurringGroupId) return;
-        const raw = window.prompt('На сколько встреч продлить серию?', '4');
-        if (!raw) return;
-        const n = parseInt(raw, 10);
+        setExtendCount('4');
+        setExtendError(null);
+        setExtendOpen(true);
+    };
+
+    const submitExtend = async () => {
+        if (!booking.recurringGroupId) return;
+        const n = parseInt(extendCount, 10);
         if (!Number.isFinite(n) || n < 1 || n > 52) {
-            toast.error('Введите число от 1 до 52');
+            setExtendError('Введите число от 1 до 52');
             return;
         }
         setExtending(true);
         try {
             const res = await bookingsApi.extendRecurringSeries(booking.recurringGroupId, n);
             toast.success(`Серия продлена: +${res?.created ?? n}`);
+            setExtendOpen(false);
             // Refresh the page-level map (one call) instead of refetching here.
             onSeriesChanged?.();
         } catch (e: any) {
@@ -2825,6 +2863,37 @@ function BookingCard({
             setExtending(false);
         }
     };
+    const extendN = parseInt(extendCount, 10);
+    const extendSheet = (
+        <Sheet
+            open={extendOpen}
+            onClose={() => { if (!extending) setExtendOpen(false); }}
+            title="Продлить серию"
+            description="Добавим встречи в тот же день недели и в то же время."
+            width={420}
+            footer={
+                <>
+                    <UiButton block loading={extending} onClick={submitExtend}>
+                        {Number.isFinite(extendN) && extendN >= 1 && extendN <= 52
+                            ? `Продлить на ${ruCountWord(extendN, ['встречу', 'встречи', 'встреч'])}`
+                            : 'Продлить серию'}
+                    </UiButton>
+                    <UiButton variant="secondary" block disabled={extending} onClick={() => setExtendOpen(false)}>
+                        Отмена
+                    </UiButton>
+                </>
+            }
+        >
+            <Field label="Сколько встреч добавить" hint="От 1 до 52" error={extendError ?? undefined}>
+                <Input
+                    kind="integer"
+                    value={extendCount}
+                    onChange={e => { setExtendCount(e.target.value.replace(/\D/g, '')); setExtendError(null); }}
+                    onKeyDown={e => { if (e.key === 'Enter') submitExtend(); }}
+                />
+            </Field>
+        </Sheet>
+    );
 
     return (
         <Card
@@ -2849,7 +2918,7 @@ function BookingCard({
                     <h3 className="text-sm sm:text-base font-semibold text-unbox-dark mb-0.5">
                         {RESOURCES.find(r => r.id === booking.resourceId)?.name || 'Кабинет'}
                     </h3>
-                    <div className="text-xs sm:text-sm text-unbox-grey mb-1">
+                    <div className="text-xs sm:text-sm text-ink-60 mb-1">
                         {booking.locationId === 'unbox_one' ? 'Unbox One' : 'Unbox Uni'} · {
                             booking.format === 'individual' ? 'Индивидуальный' :
                             booking.format === 'intervision' ? 'Интервизия' : 'Групповой'
@@ -2892,7 +2961,7 @@ function BookingCard({
                             {booking.extras.map((extraId: string) => {
                                 const extra = EXTRAS.find(e => e.id === extraId);
                                 return extra ? (
-                                    <span key={extraId} className="text-xs bg-unbox-light/50 px-2 py-1 rounded-md text-unbox-grey border border-unbox-light">
+                                    <span key={extraId} className="text-xs bg-unbox-light/50 px-2 py-1 rounded-md text-ink-60 border border-unbox-light">
                                         + {extra.name}
                                     </span>
                                 ) : null;
@@ -2900,24 +2969,10 @@ function BookingCard({
                         </div>
                     )}
                 </div>
-                <div className={clsx(
-                    "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1",
-                    {
-                        'bg-unbox-light text-unbox-dark': booking.status === 'confirmed' && !booking.isReRentListed,
-                        'bg-amber-50 text-amber-700 border border-amber-200': booking.isReRentListed && booking.status === 'confirmed',
-                        'bg-gray-100 text-gray-500': booking.status === 'completed',
-                        'bg-red-50 text-red-400': booking.status === 'cancelled',
-                        'bg-white border border-unbox-green text-unbox-green': booking.status === 're-rented',
-                        'bg-yellow-50 text-yellow-700 border border-yellow-200': booking.status === 'pending_approval',
-                    }
-                )}>
-                    {booking.status === 'confirmed' && booking.isReRentListed && <><RotateCcw size={12} /> На переаренде</>}
-                    {booking.status === 'confirmed' && !booking.isReRentListed && <><BadgeCheck size={12} /> Подтверждено</>}
-                    {booking.status === 'cancelled' && <><XCircle size={12} /> Отменено</>}
-                    {booking.status === 'completed' && <><Check size={12} /> Завершено</>}
-                    {booking.status === 're-rented' && '♻️ Пересдано'}
-                    {booking.status === 'pending_approval' && <><Clock size={12} /> Ожидает</>}
-                </div>
+                {/* Статус — слова и цвета из общего словаря (statuses.ts). */}
+                {booking.status === 'confirmed' && booking.isReRentListed
+                    ? <ReRentListedBadge className="shrink-0" />
+                    : <StatusBadge kind="booking" status={booking.status} className="shrink-0" />}
             </div>
 
             {/* Recurring-series strip — visible whenever this booking is part
@@ -2928,8 +2983,8 @@ function BookingCard({
                 series — admin-only series management lives in /admin. */}
             {booking.recurringGroupId && booking.status === 'confirmed' && !isPast && seriesInfo && (
                 <div className="mt-3 pt-3 border-t border-dashed border-unbox-light flex items-center justify-between gap-2 flex-wrap">
-                    <div className="text-xs text-unbox-grey flex items-center gap-1.5">
-                        <span className="text-orange-500" title="Постоянная бронь">⭐</span>
+                    <div className="text-xs text-ink-60 flex items-center gap-1.5">
+                        <Repeat size={12} aria-label="Постоянная бронь" className="shrink-0" />
                         <span>
                             Постоянная бронь · впереди&nbsp;
                             <span className="font-medium text-unbox-dark">{seriesInfo.futureCount}</span>
@@ -2959,11 +3014,11 @@ function BookingCard({
                 the ?series=<group_id> param from the Telegram reminder. Gives
                 the user a clear choice: продлить или ОК (завершится в срок). */}
             {isHighlighted && booking.recurringGroupId && booking.status === 'confirmed' && !isPast && (
-                <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                    <div className="text-sm font-bold text-amber-900 mb-1">
-                        ⭐ Серия подходит к концу
+                <div className="mt-3 p-3 rounded-lg bg-[var(--status-pending-bg)] border border-amber-200">
+                    <div className="text-sm font-bold text-[var(--status-pending-fg)] mb-1 flex items-center gap-1.5">
+                        <Repeat size={14} aria-hidden="true" /> Серия подходит к концу
                     </div>
-                    <div className="text-xs text-amber-800 mb-2">
+                    <div className="text-xs text-[var(--status-pending-fg)] mb-2">
                         Хотите продлить или пусть завершится в срок?
                     </div>
                     <div className="flex gap-2 flex-wrap">
@@ -2979,7 +3034,7 @@ function BookingCard({
                         <button
                             onClick={handleDismissSeriesReminder}
                             disabled={dismissing}
-                            className="text-xs px-3 py-1.5 rounded-md bg-white border border-amber-300 text-amber-900 font-semibold hover:bg-amber-100 transition-colors disabled:opacity-50"
+                            className="text-xs px-3 py-1.5 rounded-md bg-white border border-amber-300 text-[var(--status-pending-fg)] font-semibold hover:bg-[var(--status-pending-bg)] transition-colors disabled:opacity-50"
                         >
                             {dismissing ? 'Сохраняем…' : 'ОК, завершится в срок'}
                         </button>
@@ -2998,13 +3053,13 @@ function BookingCard({
                         <><span className="w-2 h-2 rounded-full bg-unbox-green" />Депозит</>
                     )}
                 </div>
-                <div className="text-unbox-grey">
+                <div className="text-ink-60">
                     {booking.paymentMethod === 'subscription' ? (
                         <span>{booking.hoursDeducted || (booking.duration / 60)} ч</span>
                     ) : (
                         <span>
                             {booking.paymentSource === 'credit' ? 'Долг: ' : ''}
-                            <span className="font-bold text-unbox-dark">{booking.finalPrice} ₾</span>
+                            <span className="font-bold text-unbox-dark">{formatGel(booking.finalPrice)}</span>
                         </span>
                     )}
                 </div>
@@ -3014,15 +3069,15 @@ function BookingCard({
             {booking.status === 'confirmed' && !isPast && (
                 <div className="mt-3 pt-3 border-t border-unbox-light">
                     {booking.isReRentListed ? (
-                        <div className="text-center text-sm text-amber-600 font-medium py-1">
-                            ✨ На переаренде
+                        <div className="text-center text-sm text-[var(--status-pending-fg)] font-medium py-1 flex items-center justify-center gap-1.5">
+                            <Repeat size={14} aria-hidden="true" /> На пересдаче
                         </div>
                     ) : canMod ? (
                         <div className="flex gap-2">
                             <Button variant="outline" size="sm" className="flex-1" onClick={() => onEdit(booking)}>
                                 Перенести
                             </Button>
-                            <Button variant="ghost" size="sm" className="flex-1 text-unbox-grey hover:text-red-600 hover:bg-red-50" onClick={() => onCancel(booking.id)}>
+                            <Button variant="ghost" size="sm" className="flex-1 text-ink-60 hover:text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]" onClick={() => onCancel(booking.id)}>
                                 Отменить
                             </Button>
                         </div>
@@ -3033,7 +3088,7 @@ function BookingCard({
                                     <div className="flex items-center gap-1.5">
                                         <Key className="w-3.5 h-3.5 text-unbox-green shrink-0" />
                                         <div>
-                                            <div className="text-[9px] uppercase font-bold text-unbox-green">Код двери</div>
+                                            <div className="text-caption uppercase font-bold text-unbox-green">Код двери</div>
                                             {/* Static per-center code (one physical lock per branch).
                                                 Used to render `#XXXX` derived from booking id, but
                                                 that confused users since the lock is actually the
@@ -3049,22 +3104,22 @@ function BookingCard({
                                     <div className="flex items-center gap-1.5">
                                         <Wifi className="w-3.5 h-3.5 text-unbox-green shrink-0" />
                                         <div>
-                                            <div className="text-[9px] uppercase font-bold text-unbox-green">Wi-Fi</div>
+                                            <div className="text-caption uppercase font-bold text-unbox-green">Wi-Fi</div>
                                             <div className="text-xs font-mono font-bold text-unbox-dark">unboxyourself</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <div className="text-[10px] text-center text-unbox-grey italic">
+                            <div className="text-caption text-center text-ink-60 italic">
                                 Менее 24ч до начала. Бесплатная отмена недоступна.
                             </div>
                             {booking.isReRentListed ? (
-                                <div className="bg-unbox-light text-unbox-dark border border-unbox-green/30 p-3 rounded-lg text-sm text-center font-medium">
-                                    ♻️ Выставлено на переаренду
+                                <div className="bg-unbox-light text-unbox-dark border border-unbox-green/30 p-3 rounded-lg text-sm text-center font-medium flex items-center justify-center gap-1.5">
+                                    <Repeat size={14} aria-hidden="true" /> На пересдаче
                                 </div>
                             ) : (
                                 <Button variant="outline" size="sm" className="w-full border-dashed border-unbox-green text-unbox-green hover:bg-unbox-light" onClick={() => onReRent(booking.id)}>
-                                    ♻️ Выставить на переаренду
+                                    <Repeat size={14} aria-hidden="true" /> Пересдать
                                 </Button>
                             )}
                         </div>
@@ -3073,13 +3128,14 @@ function BookingCard({
             )}
 
             {(() => {
-                // Show the "переарендован" badge when:
+                // Show the «Пересдана» badge when:
                 //  • old status='re-rented' rows (legacy), OR
                 //  • status='cancelled' + cancellation_reason flags it as
                 //    auto-cancelled-due-to-rerent (current backend path).
                 const reason = (booking as any).cancellationReason || '';
                 const isAutoRerent = booking.status === 'cancelled'
-                    && /re-rent|переаренд/i.test(reason);
+                    // Сервер пишет причину по-старому (re-rent / «переаренд…») — ищем все слова.
+                    && /re-rent|переаренд|пересда/i.test(reason);
                 if (booking.status !== 're-rented' && !isAutoRerent) return null;
 
                 // Refund amount: parse from reason string ("· 18.00GEL"),
@@ -3089,13 +3145,13 @@ function BookingCard({
                 const ts = (booking as any).updatedAt;
                 return (
                     <div className="mt-4 pt-4 border-t border-unbox-light">
-                        <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm border border-green-100 flex flex-col items-center gap-1">
-                            <span className="font-semibold">♻️ Слот переарендован</span>
-                            <span className="text-base font-bold text-green-800">
-                                Возвращено 50% · +{refunded.toFixed(2)} ₾
+                        <div className="bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] p-3 rounded-lg text-sm border border-green-100 flex flex-col items-center gap-1">
+                            <span className="font-semibold inline-flex items-center gap-1.5"><Repeat size={14} aria-hidden="true" /> Бронь пересдана</span>
+                            <span className="text-base font-bold text-[var(--status-ok-fg)]">
+                                Возвращено 50% · {formatGel(refunded, { sign: true })}
                             </span>
                             {ts && (
-                                <span className="text-[11px] text-green-700/80 font-mono">
+                                <span className="text-caption text-[var(--status-ok-fg)] font-mono">
                                     {safeFormat(ts, 'd MMM yyyy, HH:mm', { locale: ru })}
                                 </span>
                             )}
@@ -3115,9 +3171,10 @@ function BookingCard({
             {/* Дата создания брони — внизу карточки, маленьким серым.
                 Раньше была сверху и сбивала с толку (клиенты путали её с
                 датой самой брони, которая теперь жирной строкой сверху). */}
-            <div className="mt-3 pt-2 text-[10px] text-unbox-grey/70">
+            <div className="mt-3 pt-2 text-caption text-ink-60">
                 Бронь создана {safeFormat(booking.createdAt, 'd MMM yyyy, HH:mm', { locale: ru })}
             </div>
+            {extendSheet}
         </Card>
     );
 }
@@ -3330,30 +3387,30 @@ function CrmQuickBookingModal({
                 <div className="flex items-start justify-between">
                     <div>
                         <h3 className="font-bold text-lg">Забронировать кабинет</h3>
-                        <p className="text-sm text-unbox-grey mt-0.5">для сессии с <span className="font-medium text-unbox-dark">{crmMode.clientName}</span></p>
+                        <p className="text-sm text-ink-60 mt-0.5">для сессии с <span className="font-medium text-unbox-dark">{crmMode.clientName}</span></p>
                     </div>
                     <button onClick={onClose} className="p-1 hover:bg-unbox-light rounded-lg">
-                        <X className="w-5 h-5 text-unbox-grey" />
+                        <X className="w-5 h-5 text-ink-60" />
                     </button>
                 </div>
 
                 <div className="bg-unbox-light/50 rounded-xl p-3 space-y-1.5 text-sm">
                     <div className="flex justify-between">
-                        <span className="text-unbox-grey">Кабинет</span>
+                        <span className="text-ink-60">Кабинет</span>
                         <span className="font-medium">{resource?.name || slot.resId}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span className="text-unbox-grey">Дата</span>
+                        <span className="text-ink-60">Дата</span>
                         <span className="font-medium">{format(slot.date, 'd MMMM yyyy', { locale: ru })}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span className="text-unbox-grey">Время</span>
+                        <span className="text-ink-60">Время</span>
                         <span className="font-medium">{slot.time} — {endTime}</span>
                     </div>
                 </div>
 
                 <div>
-                    <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Длительность</label>
+                    <label className="text-xs font-medium text-ink-60 mb-1.5 block">Длительность</label>
                     <div className="flex gap-2">
                         {/* 50-min option removed — was confusing alongside the
                             standard 60/90/120 set. Therapy sessions that need
@@ -3366,7 +3423,7 @@ function CrmQuickBookingModal({
                                 className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                                     duration === d
                                         ? 'bg-unbox-green text-white border-unbox-green'
-                                        : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                        : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                 }`}
                             >
                                 {d === 120 ? '2ч' : `${d}м`}
@@ -3377,7 +3434,7 @@ function CrmQuickBookingModal({
 
                 {availableFormats.length > 1 && (
                     <div>
-                        <label className="text-xs font-medium text-unbox-grey mb-1.5 block">Формат</label>
+                        <label className="text-xs font-medium text-ink-60 mb-1.5 block">Формат</label>
                         <div className="flex gap-2">
                             {availableFormats.map(f => (
                                 <button
@@ -3386,7 +3443,7 @@ function CrmQuickBookingModal({
                                     className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                                         chosenFormat === f
                                             ? 'bg-unbox-green text-white border-unbox-green'
-                                            : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                            : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                     }`}
                                 >
                                     {fmtLabel(f)}
@@ -3401,7 +3458,7 @@ function CrmQuickBookingModal({
                         <button
                             type="button"
                             onClick={() => setExtrasOpen(o => !o)}
-                            className="w-full flex items-center justify-between text-xs font-medium text-unbox-grey mb-1.5 hover:text-unbox-dark transition-colors"
+                            className="w-full flex items-center justify-between text-xs font-medium text-ink-60 mb-1.5 hover:text-unbox-dark transition-colors"
                         >
                             <span>
                                 Дополнительные услуги
@@ -3424,13 +3481,13 @@ function CrmQuickBookingModal({
                                         className={`px-2.5 py-2 rounded-xl text-xs font-medium border text-left transition-colors ${
                                             active
                                                 ? 'bg-unbox-green text-white border-unbox-green'
-                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                                : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                         }`}
                                     >
                                         <div className="flex items-center justify-between gap-1">
                                             <span className="truncate">{e.name}</span>
-                                            <span className={`text-[10px] shrink-0 ${active ? 'text-white/80' : e.price === 0 ? 'text-unbox-green' : 'text-unbox-grey'}`}>
-                                                {e.price === 0 ? 'бесплатно' : `+${e.price}₾`}
+                                            <span className={`text-caption shrink-0 ${active ? 'text-white/80' : e.price === 0 ? 'text-unbox-green' : 'text-ink-60'}`}>
+                                                {e.price === 0 ? 'бесплатно' : formatGel(e.price, { sign: true })}
                                             </span>
                                         </div>
                                     </button>
@@ -3470,10 +3527,10 @@ function CrmQuickBookingModal({
                                         key={p.id}
                                         type="button"
                                         onClick={() => setRecurringPattern(p.id)}
-                                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium border transition-colors ${
+                                        className={`flex-1 py-1.5 rounded-lg text-caption font-medium border transition-colors ${
                                             recurringPattern === p.id
                                                 ? 'bg-unbox-green text-white border-unbox-green'
-                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-green/50'
+                                                : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-green/50'
                                         }`}
                                     >
                                         {p.label}
@@ -3489,10 +3546,10 @@ function CrmQuickBookingModal({
                                         key={m.id}
                                         type="button"
                                         onClick={() => setRecurringMode(m.id)}
-                                        className={`flex-1 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                                        className={`flex-1 py-1 rounded-lg text-caption font-medium border transition-colors ${
                                             recurringMode === m.id
                                                 ? 'bg-unbox-dark text-white border-unbox-dark'
-                                                : 'bg-white border-unbox-light text-unbox-grey hover:border-unbox-dark/50'
+                                                : 'bg-white border-unbox-light text-ink-60 hover:border-unbox-dark/50'
                                         }`}
                                     >
                                         {m.label}
@@ -3512,7 +3569,7 @@ function CrmQuickBookingModal({
                                         max={recurringPattern === 'monthly' ? 24 : 52}
                                         className="w-16 px-2 py-1.5 rounded-lg border border-unbox-light text-sm text-center focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                     />
-                                    <span className="text-xs text-unbox-grey">повторений</span>
+                                    <span className="text-xs text-ink-60">повторений</span>
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-2">
@@ -3523,7 +3580,7 @@ function CrmQuickBookingModal({
                                         onChange={e => setRecurringUntil(e.target.value)}
                                         className="px-2 py-1.5 rounded-lg border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green"
                                     />
-                                    <span className="text-xs text-unbox-grey">≈ {effectiveOccurrences} {effectiveOccurrences === 1 ? 'бронь' : 'броней'}</span>
+                                    <span className="text-xs text-ink-60">≈ {effectiveOccurrences} {effectiveOccurrences === 1 ? 'бронь' : 'броней'}</span>
                                 </div>
                             )}
                         </div>
@@ -3545,7 +3602,7 @@ function CrmQuickBookingModal({
                         />
                         <div className="flex-1 text-sm">
                             <div className="font-medium text-unbox-dark">Списать из абонемента</div>
-                            <div className="text-xs text-unbox-grey mt-0.5">
+                            <div className="text-xs text-ink-60 mt-0.5">
                                 {enoughHoursOnSub
                                     ? `Осталось ${currentUser?.subscription?.remainingHours ?? 0} ч · спишется ${hoursForSub} ч`
                                     : `Недостаточно часов (нужно ${hoursForSub} ч, осталось ${currentUser?.subscription?.remainingHours ?? 0} ч)`
@@ -3557,31 +3614,31 @@ function CrmQuickBookingModal({
 
                 {pricing && (
                     <div className="bg-unbox-light/70 rounded-xl p-3 space-y-1 text-sm">
-                        <div className="flex justify-between text-unbox-grey">
+                        <div className="flex justify-between text-ink-60">
                             <span>Кабинет ({duration} мин, {fmtLabel(chosenFormat)})</span>
-                            <span>{pricing.basePrice.toFixed(0)} ₾</span>
+                            <span>{formatGel(pricing.basePrice, { fraction: 0 })}</span>
                         </div>
                         {pricing.extrasPrice > 0 && (
-                            <div className="flex justify-between text-unbox-grey">
+                            <div className="flex justify-between text-ink-60">
                                 <span>Доп. опции</span>
-                                <span>+{pricing.extrasPrice.toFixed(0)} ₾</span>
+                                <span>{formatGel(pricing.extrasPrice, { sign: true, fraction: 0 })}</span>
                             </div>
                         )}
                         {pricing.discountAmount > 0 && (
                             <div className="flex justify-between text-unbox-green">
                                 <span>Скидка</span>
-                                <span>−{pricing.discountAmount.toFixed(0)} ₾</span>
+                                <span>−{formatGel(pricing.discountAmount, { fraction: 0 })}</span>
                             </div>
                         )}
                         {pricing.peakSlotCount > 0 && !useSubscription && (
-                            <div className="text-[11px] text-amber-600">⏱ Вечерний тариф применён</div>
+                            <div className="text-caption text-[var(--status-pending-fg)] flex items-center gap-1"><Clock size={12} aria-hidden="true" /> Вечерний тариф применён</div>
                         )}
                         <div className="flex justify-between font-bold text-unbox-dark pt-1.5 border-t border-unbox-light">
                             <span>Итого</span>
                             <span>
                                 {useSubscription && enoughHoursOnSub
-                                    ? <>{hoursForSub} ч из абонемента{pricing.subscriptionPeakDebt > 0 ? ` + ${pricing.subscriptionPeakDebt.toFixed(0)} ₾ за вечер` : ''}</>
-                                    : `${pricing.finalPrice.toFixed(0)} ₾`
+                                    ? <>{hoursForSub} ч из абонемента{pricing.subscriptionPeakDebt > 0 ? ` + ${formatGel(pricing.subscriptionPeakDebt, { fraction: 0 })} за вечер` : ''}</>
+                                    : formatGel(pricing.finalPrice, { fraction: 0 })
                                 }
                             </span>
                         </div>
@@ -3629,7 +3686,7 @@ function CrmQuickBookingModal({
    Grid House — MyBookingsPage
    ═══════════════════════════════════════════════════════════════ */
 
-const ghmbMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghmbMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const };
 const ghmbHairline = `1px solid ${GH.ink10}`;
 
 interface GridHouseMyBookingsProps {
@@ -3694,7 +3751,7 @@ function GridHouseMyBookings({
         <div style={{ fontFamily: GH_SANS, color: GH.ink, paddingBottom: 80 }}>
             {/* Header */}
             <div style={{ padding: '24px 16px 0' }}>
-                <div style={{ ...ghmbMono, color: GH.ink30, marginBottom: 8 }}>МОИ БРОНИРОВАНИЯ</div>
+                <div style={{ ...ghmbMono, color: GH.ink60, marginBottom: 8 }}>МОИ БРОНИРОВАНИЯ</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                     <div>
                         <h1 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
@@ -3704,7 +3761,7 @@ function GridHouseMyBookings({
                             <span style={{ fontFamily: GH_MONO, fontSize: 13, color: GH.ink60 }}>
                                 {upcomingBookings.length} активных
                             </span>
-                            <span style={{ fontFamily: GH_MONO, fontSize: 13, color: GH.ink30 }}>
+                            <span style={{ fontFamily: GH_MONO, fontSize: 13, color: GH.ink60 }}>
                                 {pastBookings.length} прошедших
                             </span>
                         </div>
@@ -3750,14 +3807,14 @@ function GridHouseMyBookings({
                             };
                         return <>
                             <button onClick={() => navigate('/subscriptions')} style={baseBtn}>
-                                🎫 {isMobile ? 'Абонемент' : 'Оформить абонемент'}
+                                <Ticket size={14} aria-hidden="true" /> {isMobile ? 'Абонемент' : 'Оформить абонемент'}
                             </button>
                             <button onClick={() => navigate('/dashboard/bonuses')} style={baseBtn}>
-                                🎁 {isMobile ? 'Бонусы' : 'Скидки и бонусы'}
+                                <Gift size={14} aria-hidden="true" /> {isMobile ? 'Бонусы' : 'Скидки и бонусы'}
                             </button>
                             {!isStaffOrSpecialist && (
                                 <button onClick={() => navigate('/become-specialist')} style={baseBtn}>
-                                    ✨ {isMobile ? 'Стать спецом' : 'Стать специалистом Unbox'}
+                                    <UserCheck size={14} aria-hidden="true" /> {isMobile ? 'Специалистам' : 'Стать специалистом Unbox'}
                                 </button>
                             )}
                         </>;
@@ -3770,9 +3827,10 @@ function GridHouseMyBookings({
                         onClick={() => setViewMode('list')}
                         style={{
                             padding: '10px 20px', fontWeight: 600, fontSize: 13, fontFamily: GH_SANS,
+                            ...(isMobile ? { minHeight: 44 } : {}),
                             border: 'none', cursor: 'pointer',
                             borderBottom: viewMode === 'list' ? `2px solid ${GH.ink}` : '2px solid transparent',
-                            color: viewMode === 'list' ? GH.ink : GH.ink30,
+                            color: viewMode === 'list' ? GH.ink : GH.ink60,
                             background: 'transparent', marginBottom: -2,
                         }}
                     >
@@ -3782,9 +3840,10 @@ function GridHouseMyBookings({
                         onClick={() => setViewMode('grid')}
                         style={{
                             padding: '10px 20px', fontWeight: 600, fontSize: 13, fontFamily: GH_SANS,
+                            ...(isMobile ? { minHeight: 44 } : {}),
                             border: 'none', cursor: 'pointer',
                             borderBottom: viewMode === 'grid' ? `2px solid ${GH.ink}` : '2px solid transparent',
-                            color: viewMode === 'grid' ? GH.ink : GH.ink30,
+                            color: viewMode === 'grid' ? GH.ink : GH.ink60,
                             background: 'transparent', marginBottom: -2,
                         }}
                     >
@@ -3798,9 +3857,10 @@ function GridHouseMyBookings({
                         onClick={() => setViewMode('series')}
                         style={{
                             padding: '10px 20px', fontWeight: 600, fontSize: 13, fontFamily: GH_SANS,
+                            ...(isMobile ? { minHeight: 44 } : {}),
                             border: 'none', cursor: 'pointer',
                             borderBottom: viewMode === 'series' ? `2px solid ${GH.ink}` : '2px solid transparent',
-                            color: viewMode === 'series' ? GH.ink : GH.ink30,
+                            color: viewMode === 'series' ? GH.ink : GH.ink60,
                             background: 'transparent', marginBottom: -2,
                         }}
                     >
@@ -3818,10 +3878,10 @@ function GridHouseMyBookings({
                                     value={mobileLocFilter}
                                     onChange={(e) => setMobileLocFilter(e.target.value)}
                                     style={{
-                                        padding: '4px 8px', fontSize: 11, fontWeight: 600, fontFamily: GH_MONO,
-                                        letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+                                        padding: '4px 8px', fontSize: 12, fontWeight: 600, fontFamily: GH_MONO,
+                                        letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                                         border: ghmbHairline, background: GH.paper, color: GH.ink,
-                                        cursor: 'pointer', maxWidth: 140,
+                                        cursor: 'pointer', maxWidth: 140, minHeight: 44,
                                     }}
                                 >
                                     <option value="all">Все филиалы</option>
@@ -3835,11 +3895,11 @@ function GridHouseMyBookings({
                                         key={loc.id}
                                         onClick={() => setMobileLocFilter(loc.id)}
                                         style={{
-                                            padding: '4px 10px', fontSize: 10, fontWeight: 600, fontFamily: GH_MONO,
-                                            letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                                            padding: '4px 10px', fontSize: 12, fontWeight: 600, fontFamily: GH_MONO,
+                                            letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                                             border: mobileLocFilter === loc.id ? `1px solid ${GH.ink}` : ghmbHairline,
                                             background: mobileLocFilter === loc.id ? GH.ink : 'transparent',
-                                            color: mobileLocFilter === loc.id ? GH.paper : GH.ink30, cursor: 'pointer',
+                                            color: mobileLocFilter === loc.id ? GH.paper : GH.ink60, cursor: 'pointer',
                                         }}
                                     >
                                         {loc.name}
@@ -3884,7 +3944,7 @@ function GridHouseMyBookings({
                         <div style={{ marginBottom: 12, padding: '10px 16px', border: `1px solid ${GH.accent}30`, background: 'rgba(71,109,107,0.04)', display: 'flex', alignItems: 'center', gap: 8 }}>
                             <CalendarIcon size={14} style={{ color: GH.accent }} />
                             <span style={{ fontSize: 13 }}>Выберите слот для сессии с <b>{crmMode.clientName}</b></span>
-                            <button onClick={() => setCrmMode(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: GH.ink30 }}>
+                            <button onClick={() => setCrmMode(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
                                 <X size={14} />
                             </button>
                         </div>
@@ -3911,7 +3971,7 @@ function GridHouseMyBookings({
                 <div style={{ padding: '16px' }}>
                     {upcomingBookings.length > 0 && (
                         <div style={{ marginBottom: 32 }}>
-                            <div style={{ ...ghmbMono, color: GH.ink30, marginBottom: 12 }}>АКТИВНЫЕ</div>
+                            <div style={{ ...ghmbMono, color: GH.ink60, marginBottom: 12 }}>АКТИВНЫЕ</div>
                             {upcomingBookings.map(b => (
                                 <BookingCard
                                     key={b.id} booking={b}
@@ -3928,7 +3988,7 @@ function GridHouseMyBookings({
                     )}
                     {pastBookings.length > 0 && (
                         <div>
-                            <div style={{ ...ghmbMono, color: GH.ink30, marginBottom: 12 }}>ПРОШЕДШИЕ</div>
+                            <div style={{ ...ghmbMono, color: GH.ink60, marginBottom: 12 }}>ПРОШЕДШИЕ</div>
                             {pastBookings.map(b => (
                                 <BookingCard
                                     key={b.id} booking={b}
@@ -3988,8 +4048,8 @@ function GridHouseMyBookings({
 
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px', margin: '32px 16px 0', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghmbMono, color: GH.ink30 }}>UNBOX · 2026</span>
-                <span style={{ ...ghmbMono, color: GH.ink10 }}>GRID HOUSE</span>
+                <span style={{ ...ghmbMono, color: GH.ink60 }}>UNBOX · 2026</span>
+                <span style={{ ...ghmbMono, color: GH.ink60 }}>Батуми · Грузия</span>
             </footer>
         </div>
     );

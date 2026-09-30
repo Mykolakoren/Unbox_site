@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { specialistsApi, type AvailableSlot } from '../../api/specialists';
 import { GH, GH_MONO, GH_SANS } from '../../hooks/useDesignFlag';
+import { formatDayMonth, formatTime } from '../../utils/format';
 
 interface Props {
     specialistId: string;
@@ -56,8 +57,7 @@ export function NextAvailableSlots({ specialistId, count = 5, onPickSlot }: Prop
         const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
         if (d.getTime() === today.getTime()) return 'Сегодня';
         if (d.getTime() === tomorrow.getTime()) return 'Завтра';
-        const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-        return `${d.getDate()} ${months[d.getMonth()]}`;
+        return formatDayMonth(iso);
     };
 
     return (
@@ -74,8 +74,8 @@ export function NextAvailableSlots({ specialistId, count = 5, onPickSlot }: Prop
             <div
                 style={{
                     fontFamily: GH_MONO,
-                    fontSize: 10,
-                    letterSpacing: '0.18em',
+                    fontSize: 12,
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                     color: GH.ink60,
                     marginBottom: 12,
@@ -109,15 +109,15 @@ export function NextAvailableSlots({ specialistId, count = 5, onPickSlot }: Prop
                     >
                         <span style={{
                             fontFamily: GH_MONO,
-                            fontSize: 10,
-                            letterSpacing: '0.12em',
+                            fontSize: 12,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             color: GH.ink60,
                         }}>
                             {fmt(s.date)}
                         </span>
                         <span style={{ fontSize: 15, fontWeight: 700 }}>
-                            {s.startTime}
+                            {formatTime(s.startTime)}
                         </span>
                     </button>
                 ))}

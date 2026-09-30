@@ -3,6 +3,7 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { SUBSCRIPTION_PLANS } from '../utils/data';
+import { formatGel } from '../utils/format';
 
 // ── Standard Prices ──────────────────────────────────────────────────────────
 const STANDARD_PRICES = [
@@ -30,7 +31,6 @@ const SUBSCRIPTIONS = [
         bonuses: [],
         color: 'from-slate-50 to-gray-100',
         borderColor: 'border-gray-200',
-        accentColor: 'text-gray-600',
         badge: null,
         popular: false,
     },
@@ -52,7 +52,6 @@ const SUBSCRIPTIONS = [
         bonuses: [],
         color: 'from-sky-50 to-blue-50',
         borderColor: 'border-sky-200',
-        accentColor: 'text-sky-600',
         badge: null,
         popular: false,
     },
@@ -80,7 +79,6 @@ const SUBSCRIPTIONS = [
         ],
         color: 'from-emerald-50 to-teal-50',
         borderColor: 'border-emerald-300',
-        accentColor: 'text-emerald-600',
         badge: 'Популярный',
         popular: true,
     },
@@ -110,7 +108,6 @@ const SUBSCRIPTIONS = [
         ],
         color: 'from-amber-50 to-orange-50',
         borderColor: 'border-amber-300',
-        accentColor: 'text-amber-600',
         badge: 'Максимум',
         popular: false,
     },
@@ -136,7 +133,6 @@ const SUBSCRIPTIONS = [
         ],
         color: 'from-violet-50 to-purple-50',
         borderColor: 'border-violet-300',
-        accentColor: 'text-violet-600',
         badge: 'Группы',
         popular: false,
     },
@@ -168,7 +164,7 @@ export function SubscriptionsPage() {
    Grid House — SubscriptionsPage
    ═══════════════════════════════════════════════════════════════ */
 
-const ghsubMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghsubMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const };
 const ghsubHairline = `1px solid ${GH.ink10}`;
 
 function GridHouseSubscriptions() {
@@ -182,7 +178,7 @@ function GridHouseSubscriptions() {
                 <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
                         <Link to="/" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: GH.ink, textDecoration: 'none' }}>Unbox</Link>
-                        <span style={{ ...ghsubMono, color: GH.label, fontSize: 9 }}>ТАРИФЫ</span>
+                        <span style={{ ...ghsubMono, color: GH.label, fontSize: 12 }}>ТАРИФЫ</span>
                     </div>
                     <nav style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <button onClick={() => navigate(-1)} style={{ ...ghsubMono, color: GH.label, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0' }}>← Назад</button>
@@ -217,8 +213,8 @@ function GridHouseSubscriptions() {
                         textDecoration: 'none',
                         color: GH.ink,
                         fontFamily: GH_MONO,
-                        fontSize: 11,
-                        letterSpacing: '0.18em',
+                        fontSize: 12,
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                     }}
                 >
@@ -234,9 +230,9 @@ function GridHouseSubscriptions() {
                         <div key={i} style={{ padding: '20px 16px', borderRight: i < STANDARD_PRICES.length - 1 ? ghsubHairline : 'none' }}>
                             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{p.label}</div>
                             <div style={{ fontFamily: GH_MONO, fontSize: 28, fontWeight: 700, color: GH.ink }}>
-                                {p.price} <span style={{ fontSize: 14, color: GH.ink30 }}>{p.unit}</span>
+                                {p.price} <span style={{ fontSize: 14, color: GH.ink60 }}>{p.unit}</span>
                             </div>
-                            <div style={{ fontSize: 12, color: GH.ink30, marginTop: 4 }}>{p.desc}</div>
+                            <div style={{ fontSize: 12, color: GH.ink60, marginTop: 4 }}>{p.desc}</div>
                         </div>
                     ))}
                 </div>
@@ -254,7 +250,7 @@ function GridHouseSubscriptions() {
                     return (
                     <div key={plan.id} style={{ border: plan.popular ? `2px solid ${GH.ink}` : ghsubHairline, padding: 24, display: 'flex', flexDirection: 'column' }}>
                         {plan.badge && (
-                            <span style={{ ...ghsubMono, color: plan.popular ? GH.accent : GH.ink30, fontSize: 9, marginBottom: 8 }}>
+                            <span style={{ ...ghsubMono, color: plan.popular ? GH.accent : GH.ink60, fontSize: 12, marginBottom: 8 }}>
                                 {plan.badge.toUpperCase()}
                             </span>
                         )}
@@ -263,25 +259,25 @@ function GridHouseSubscriptions() {
 
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
                             <span style={{ fontFamily: GH_MONO, fontSize: 36, fontWeight: 700 }}>{plan.price}</span>
-                            <span style={{ fontSize: 14, color: GH.ink30 }}>₾</span>
+                            <span style={{ fontSize: 14, color: GH.ink60 }}>₾</span>
                             {plan.fullPrice > plan.price && (
-                                <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink30, textDecoration: 'line-through' }}>
-                                    {plan.fullPrice} ₾
+                                <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, textDecoration: 'line-through' }}>
+                                    {formatGel(plan.fullPrice)}
                                 </span>
                             )}
                         </div>
                         {/* Эффективная цена за час — ключевой аргумент выгоды */}
                         <div style={{ fontFamily: GH_MONO, fontSize: 13, color: GH.ink60, marginBottom: 16 }}>
-                            ≈ {perHour} ₾/час <span style={{ color: GH.ink30 }}>· стандарт {stdBase}</span>
+                            ≈ {formatGel(perHour)}/час <span style={{ color: GH.ink60 }}>· стандарт {formatGel(stdBase)}</span>
                         </div>
                         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-                            <span style={{ ...ghsubMono, fontSize: 9, color: GH.accent, padding: '2px 8px', border: `1px solid ${GH.accent}30` }}>
+                            <span style={{ ...ghsubMono, fontSize: 12, color: GH.accent, padding: '2px 8px', border: `1px solid ${GH.accent}30` }}>
                                 −{plan.discount}%
                             </span>
-                            <span style={{ ...ghsubMono, fontSize: 9, color: GH.ink30, padding: '2px 8px', border: ghsubHairline }}>
+                            <span style={{ ...ghsubMono, fontSize: 12, color: GH.ink60, padding: '2px 8px', border: ghsubHairline }}>
                                 {plan.hours} ЧАСОВ
                             </span>
-                            <span style={{ ...ghsubMono, fontSize: 9, color: GH.ink30, padding: '2px 8px', border: ghsubHairline }}>
+                            <span style={{ ...ghsubMono, fontSize: 12, color: GH.ink60, padding: '2px 8px', border: ghsubHairline }}>
                                 {plan.duration.toUpperCase()}
                             </span>
                         </div>
@@ -295,11 +291,11 @@ function GridHouseSubscriptions() {
                             ))}
                             {plan.bonuses.length > 0 && (
                                 <div style={{ marginTop: 12 }}>
-                                    <div style={{ ...ghsubMono, color: GH.label, fontSize: 9, marginBottom: 6 }}>БОНУСЫ</div>
+                                    <div style={{ ...ghsubMono, color: GH.label, fontSize: 12, marginBottom: 6 }}>БОНУСЫ</div>
                                     {plan.bonuses.map((b, j) => (
                                         <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
                                             <Gift size={10} style={{ color: GH.accent, marginTop: 3, flexShrink: 0 }} />
-                                            <span style={{ fontSize: 12, color: GH.ink30 }}>{b}</span>
+                                            <span style={{ fontSize: 12, color: GH.ink60 }}>{b}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -365,7 +361,7 @@ function GridHouseSubscriptions() {
                                 </strong>
                             </div>
                         ))}
-                        <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', fontStyle: 'italic', lineHeight: 1.5 }}>
+                        <p style={{ fontSize: 12, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic', lineHeight: 1.5 }}>
                             Все остальные часы — по стандартному тарифу.
                         </p>
                     </div>
@@ -392,7 +388,7 @@ function GridHouseSubscriptions() {
                                 </strong>
                             </div>
                         ))}
-                        <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', fontStyle: 'italic', lineHeight: 1.5 }}>
+                        <p style={{ fontSize: 12, color: GH.ink60, margin: '12px 0 0', fontStyle: 'italic', lineHeight: 1.5 }}>
                             Разорванные или параллельные брони в разных кабинетах в эту скидку не складываются.
                         </p>
                     </div>
@@ -419,7 +415,7 @@ function GridHouseSubscriptions() {
                                 <div style={{ fontFamily: GH_MONO, fontSize: 22, fontWeight: 700 }}>15 дней</div>
                             </div>
                         </div>
-                        <p style={{ fontSize: 11, color: GH.ink30, margin: '12px 0 0', lineHeight: 1.5 }}>
+                        <p style={{ fontSize: 12, color: GH.ink60, margin: '12px 0 0', lineHeight: 1.5 }}>
                             Срок ограничен — успейте попробовать пространство в первые две недели.
                             Списание FIFO (в первую очередь сгорает то, что начислено раньше).
                         </p>
@@ -481,7 +477,7 @@ function GridHouseSubscriptions() {
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ ...ghsubMono, color: GH.label }}>UNBOX · 2026</span>
-                <span style={{ ...ghsubMono, color: GH.ink10 }}>GRID HOUSE</span>
+                <span style={{ ...ghsubMono, color: GH.ink60 }}>Батуми · Грузия</span>
             </footer>
             </div>
         </div>
@@ -601,7 +597,7 @@ function EffectivePriceChart() {
                 тариф. Кредит тратится на любые будущие брони.
             </div>
 
-            <p style={{ fontSize: 11, color: GH.ink30, marginTop: 12, lineHeight: 1.5 }}>
+            <p style={{ fontSize: 12, color: GH.ink60, marginTop: 12, lineHeight: 1.5 }}>
                 Профи+ включает 2 бонусных часа сверх основных 40 — эффективная
                 скидка ~24%, не «голые» 20% из карточки. «Групповой мастер»
                 считается по групповой ставке (35 ₾/ч). Скидки за длительность
@@ -640,11 +636,11 @@ function PriceScale({
                 paddingBottom: 6,
                 borderBottom: `1px solid ${GH.ink}`,
             }}>
-                <div style={{ ...ghsubMono, color: GH.ink, fontSize: 11, letterSpacing: '0.14em' }}>
+                <div style={{ ...ghsubMono, color: GH.ink, fontSize: 12, letterSpacing: '0.06em' }}>
                     {title}
                 </div>
-                <div style={{ ...ghsubMono, color: GH.ink60, fontSize: 10 }}>
-                    база {baseRate} ₾/час
+                <div style={{ ...ghsubMono, color: GH.ink60, fontSize: 12 }}>
+                    база {formatGel(baseRate)}/час
                 </div>
             </div>
 
@@ -679,11 +675,11 @@ function PriceScale({
                                 </div>
                                 {(p.subtitle !== undefined
                                     ? p.subtitle
-                                    : (p.hours > 1 ? `${p.hours} ч · ${p.price} ₾` : null)) && (
-                                    <div style={{ fontSize: 11, color: GH.ink30, marginTop: 2 }}>
+                                    : (p.hours > 1 ? `${p.hours} ч · ${formatGel(p.price)}` : null)) && (
+                                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 2 }}>
                                         {p.subtitle !== undefined
                                             ? p.subtitle
-                                            : `${p.hours} ч · ${p.price} ₾`}
+                                            : `${p.hours} ч · ${formatGel(p.price)}`}
                                     </div>
                                 )}
                             </div>
@@ -693,7 +689,7 @@ function PriceScale({
                                 height: 18,
                                 background: `${GH.ink10}`,
                                 overflow: 'hidden',
-                            }} title={`База: ${p.ref} ₾/ч · реально: ${perHour.toFixed(2)} ₾/ч`}>
+                            }} title={`База: ${formatGel(p.ref)}/ч · реально: ${formatGel(perHour)}/ч`}>
                                 <div style={{
                                     position: 'absolute',
                                     left: 0, top: 0, bottom: 0,
@@ -719,16 +715,16 @@ function PriceScale({
                                     color: GH.ink,
                                     letterSpacing: '-0.01em',
                                 }}>
-                                    {perHour.toFixed(perHour % 1 === 0 ? 0 : 1)}
-                                    <span style={{ fontSize: 11, color: GH.ink30, marginLeft: 4 }}>
-                                        ₾/час
+                                    {formatGel(Math.round(perHour * 10) / 10)}
+                                    <span style={{ fontSize: 12, color: GH.ink60, marginLeft: 2 }}>
+                                        /час
                                     </span>
                                 </div>
                                 {savingPct > 0 && (
                                     <div style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 10,
-                                        letterSpacing: '0.08em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         color: GH.accent,
                                         marginTop: 2,
                                     }}>

@@ -37,7 +37,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
                 <h1 className="text-2xl sm:text-3xl font-black text-unbox-dark leading-tight mb-3">
                     Найдите своего<br />специалиста в Батуми
                 </h1>
-                <p className="text-unbox-dark/55 text-sm leading-relaxed max-w-sm">
+                <p className="text-ink-60 text-sm leading-relaxed max-w-sm">
                     Психологи, терапевты, коучи и педагоги — очно в кабинете или онлайн. Просто выберите и запишитесь.
                 </p>
             </div>
@@ -49,7 +49,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
                     return (
                         <span
                             key={b.label}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-unbox-dark/65"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-ink-60"
                             style={{ background: 'rgba(71,109,107,0.08)', border: '1px solid rgba(71,109,107,0.16)' }}
                         >
                             <Icon size={12} className="text-unbox-green" />
@@ -61,7 +61,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
 
             {/* Category filter */}
             <div>
-                <p className="text-unbox-dark/40 text-[11px] font-semibold uppercase tracking-wider mb-2.5">Выбрать категорию</p>
+                <p className="text-ink-60 text-caption font-semibold uppercase tracking-wider mb-2.5">Выбрать категорию</p>
                 <div className="flex flex-wrap gap-2">
                     {CATEGORIES.map(cat => {
                         const Icon = cat.icon;
@@ -78,7 +78,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
                                 } : {
                                     background: 'rgba(0,0,0,0.05)',
                                     border: '1px solid rgba(0,0,0,0.07)',
-                                    color: 'rgba(44,50,64,0.65)',
+                                    color: 'var(--color-ink-60)',
                                 }}
                             >
                                 <Icon size={13} />
@@ -89,7 +89,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
                     {activeCategory && (
                         <button
                             onClick={() => onCategorySelect(null)}
-                            className="px-3 py-1.5 rounded-xl text-xs font-medium text-unbox-dark/35 hover:text-unbox-dark transition-colors"
+                            className="px-3 py-1.5 rounded-xl text-xs font-medium text-ink-60 hover:text-unbox-dark transition-colors"
                             style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.06)' }}
                         >
                             Сбросить
@@ -101,7 +101,7 @@ export function ClientHeroPanel({ activeCategory, onCategorySelect, onScrollToSp
             {/* CTA */}
             <button
                 onClick={onScrollToSpecialists}
-                className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl font-bold text-sm text-white bg-[#476D6B] hover:bg-unbox-dark transition-all active:scale-[0.98] shadow-lg shadow-unbox-green/20 cursor-pointer"
+                className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl font-bold text-sm text-white bg-unbox-green hover:bg-unbox-dark transition-all active:scale-[0.98] shadow-lg shadow-unbox-green/20 cursor-pointer"
             >
                 Смотреть специалистов
                 <ArrowRight size={15} />

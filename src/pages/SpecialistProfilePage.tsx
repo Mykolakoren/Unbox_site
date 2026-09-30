@@ -1,7 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Video, MapPin, Calendar, CheckCircle, Instagram, Send, Globe } from 'lucide-react';
+import { ArrowLeft, Video, MapPin, Calendar, CheckCircle, Check, Instagram, Send, Globe } from 'lucide-react';
 import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import { Card } from '../components/ui/Card';
 import { api } from '../api/client';
@@ -16,6 +16,7 @@ import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { StructuredText } from '../components/StructuredText';
 import { hasOnlineFormat, hasOfflineFormat } from '../utils/specialistFormat';
 import { getBadge } from '../utils/specialistBadges';
+import { formatGel } from '../utils/format';
 
 /** Нормализует контакт (@handle или ссылка) в {href, label} для профиля. */
 function normalizeContact(
@@ -94,7 +95,7 @@ export function SpecialistProfilePage() {
         return (
             <div className="min-h-screen bg-unbox-light/30 flex flex-col items-center justify-center p-6 text-center">
                 <h2 className="text-2xl font-bold text-unbox-dark mb-4">Упс!</h2>
-                <p className="text-unbox-grey mb-8">{error}</p>
+                <p className="text-ink-60 mb-8">{error}</p>
                 <Link to="/specialists">
                     <Button>Вернуться к списку</Button>
                 </Link>
@@ -128,8 +129,8 @@ export function SpecialistProfilePage() {
         const isNarrow = isNarrowGH;
         const monoLabel: React.CSSProperties = {
             fontFamily: MONO,
-            fontSize: '10px',
-            letterSpacing: '0.2em',
+            fontSize: '12px',
+            letterSpacing: '0.06em',
             textTransform: 'uppercase',
             color: GH.ink60,
             fontWeight: 500,
@@ -164,8 +165,8 @@ export function SpecialistProfilePage() {
                         padding: '14px 0',
                         marginBottom: '56px',
                         fontFamily: MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.2em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         color: GH.ink60,
                         gap: '16px',
@@ -174,7 +175,7 @@ export function SpecialistProfilePage() {
                         <Link to="/#specialists" style={{ color: GH.ink, textDecoration: 'none' }}>
                             ← К СПИСКУ СПЕЦИАЛИСТОВ
                         </Link>
-                        <span style={{ color: GH.ink30 }}>
+                        <span style={{ color: GH.ink60 }}>
                             UNBOX · СПЕЦИАЛИСТ
                         </span>
                     </div>
@@ -229,7 +230,7 @@ export function SpecialistProfilePage() {
                                             fontFamily: SANS,
                                             fontSize: '96px',
                                             fontWeight: 700,
-                                            color: GH.ink30,
+                                            color: GH.ink30, /* декор: монограмма вместо фото */
                                         }}>
                                             {specialist.firstName[0]}
                                         </div>
@@ -242,13 +243,16 @@ export function SpecialistProfilePage() {
                                     display: 'flex',
                                     justifyContent: 'space-between',
                                     fontFamily: MONO,
-                                    fontSize: '9px',
-                                    letterSpacing: '0.18em',
+                                    fontSize: '12px',
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     color: GH.ink60,
                                 }}>
-                                    <span>ID · {specialist.id.slice(0, 6).toUpperCase()}</span>
-                                    <span>✓ ПРОВЕРЕН UNBOX</span>
+                                    {/* Wave 1: убран служебный «ID · B02F83» — клиенту он ни о чём не говорит. */}
+                                    <span />
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                        <Check size={14} aria-hidden="true" /> Проверен Unbox
+                                    </span>
                                 </figcaption>
                             </figure>
 
@@ -273,13 +277,13 @@ export function SpecialistProfilePage() {
                                         marginTop: '6px',
                                         letterSpacing: '-0.03em',
                                     }}>
-                                        {specialist.basePriceGel} ₾
+                                        {formatGel(specialist.basePriceGel)}
                                     </div>
                                 </div>
                                 <div style={{
                                     ...monoLabel,
                                     textAlign: 'right',
-                                    color: GH.ink30,
+                                    color: GH.ink60,
                                 }}>
                                     {specialist.sessionDurationMin ?? 50}<br />МИН
                                 </div>
@@ -317,8 +321,8 @@ export function SpecialistProfilePage() {
                                 >
                                     <span style={{
                                         fontFamily: MONO,
-                                        fontSize: '9px',
-                                        letterSpacing: '0.25em',
+                                        fontSize: '12px',
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase',
                                         opacity: 0.55,
                                     }}>
@@ -339,10 +343,10 @@ export function SpecialistProfilePage() {
                                 marginTop: '14px',
                                 marginBottom: 0,
                                 fontFamily: MONO,
-                                fontSize: '9px',
-                                letterSpacing: '0.12em',
+                                fontSize: '12px',
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
-                                color: GH.ink30,
+                                color: GH.ink60,
                                 lineHeight: 1.7,
                             }}>
                                 Доступные слоты — ниже на странице.
@@ -354,7 +358,7 @@ export function SpecialistProfilePage() {
 
                             {/* Name + tagline */}
                             <header style={{ marginBottom: '72px' }}>
-                                <div style={monoLabel}>СПЕЦИАЛИСТ · 01</div>
+                                <div style={monoLabel}>Специалист</div>
                                 {((specialist as any).badges || []).length > 0 && (
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
                                         {((specialist as any).badges as string[]).map(code => {
@@ -362,7 +366,7 @@ export function SpecialistProfilePage() {
                                             if (!b) return null;
                                             return (
                                                 <span key={code} style={{
-                                                    fontFamily: MONO, fontSize: 11, fontWeight: 700,
+                                                    fontFamily: MONO, fontSize: 12, fontWeight: 700,
                                                     letterSpacing: '0.06em', textTransform: 'uppercase',
                                                     padding: '5px 10px', color: b.fg, background: b.bg,
                                                     border: `1px solid ${b.border}`,
@@ -500,11 +504,11 @@ export function SpecialistProfilePage() {
                                         }}>
                                             <span style={{
                                                 fontFamily: MONO,
-                                                fontSize: '10px',
-                                                color: GH.ink30,
+                                                fontSize: '12px',
+                                                color: GH.ink60,
                                                 flexShrink: 0,
                                                 width: '22px',
-                                                letterSpacing: '0.1em',
+                                                letterSpacing: '0.06em',
                                             }}>
                                                 {String(idx + 1).padStart(2, '0')}
                                             </span>
@@ -570,8 +574,8 @@ export function SpecialistProfilePage() {
                         borderTop: `1px solid ${GH.ink}`,
                         paddingTop: '20px',
                         fontFamily: MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.2em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         color: GH.ink60,
                     }}>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Loader2, Filter, X } from 'lucide-react';
+import { Search, Filter, X } from 'lucide-react';
 import { SpecialistCard } from '../components/Specialists/SpecialistCard';
 import type { Specialist } from '../components/Specialists/SpecialistCard';
 import { hasOnlineFormat, hasOfflineFormat } from '../utils/specialistFormat';
@@ -9,6 +9,9 @@ import { useUserStore } from '../store/userStore';
 import { api } from '../api/client';
 import { Layout } from '../components/Layout';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { ruCountWord } from '../utils/plural';
+import { Skeleton } from '../components/ui/Skeleton';
+import { ErrorBar } from '../components/ui/ErrorBar';
 
 const FORMAT_FILTERS = [
     { key: 'all', label: 'Все' },
@@ -33,19 +36,21 @@ export function SpecialistsPage() {
     // string = filter specialists whose `specializations[]` includes it.
     const [specFilter, setSpecFilter] = useState<string | null>(null);
 
-    useEffect(() => {
-        const fetchSpecialists = async () => {
-            try {
-                const res = await api.get('/specialists');
-                setSpecialists(res.data);
-            } catch (err: any) {
-                console.error("Failed to fetch specialists:", err);
-                setError(err.response?.data?.detail || "Не удалось загрузить список специалистов.");
-            } finally {
-                setIsLoading(false);
-            }
-        };
+    const fetchSpecialists = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const res = await api.get('/specialists');
+            setSpecialists(res.data);
+        } catch (err: any) {
+            console.error("Failed to fetch specialists:", err);
+            setError(err.response?.data?.detail || "Не удалось загрузить список специалистов.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
+    useEffect(() => {
         fetchSpecialists();
     }, []);
 
@@ -105,7 +110,7 @@ export function SpecialistsPage() {
 
         <GridHouseSpecialistsPage
             specialists={specialists} filteredSpecialists={filteredSpecialists}
-            isLoading={isLoading} error={error}
+            isLoading={isLoading} error={error} onRetry={fetchSpecialists}
             searchQuery={searchQuery} setSearchQuery={setSearchQuery}
             formatFilter={formatFilter} setFormatFilter={setFormatFilter}
             roleFilter={roleFilter} setRoleFilter={setRoleFilter}
@@ -121,7 +126,7 @@ export function SpecialistsPage() {
    Grid House — SpecialistsPage
    ═══════════════════════════════════════════════════════════════ */
 
-const ghspMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghspMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const };
 const ghspHairline = `1px solid ${GH.ink10}`;
 
 interface GridHouseSpecialistsPageProps {
@@ -129,6 +134,7 @@ interface GridHouseSpecialistsPageProps {
     filteredSpecialists: Specialist[];
     isLoading: boolean;
     error: string | null;
+    onRetry: () => void;
     searchQuery: string;
     setSearchQuery: (q: string) => void;
     formatFilter: string;
@@ -142,7 +148,7 @@ interface GridHouseSpecialistsPageProps {
 }
 
 function GridHouseSpecialistsPage({
-    specialists, filteredSpecialists, isLoading, error,
+    specialists, filteredSpecialists, isLoading, error, onRetry,
     searchQuery, setSearchQuery, formatFilter, setFormatFilter,
     roleFilter, setRoleFilter, roleFilters,
     specFilter, setSpecFilter, allSpecializations,
@@ -154,12 +160,14 @@ function GridHouseSpecialistsPage({
     // logo + current page + login on phones (the full nav overflowed
     // 375 px viewports — same bug we just fixed in the landing header).
     const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 760);
+    // На телефоне фильтры — не ниже 44 px, чтобы палец попадал.
+    const touch: React.CSSProperties = narrow ? { minHeight: 44 } : {};
     useEffect(() => {
         const h = () => setNarrow(window.innerWidth < 760);
         window.addEventListener('resize', h);
         return () => window.removeEventListener('resize', h);
     }, []);
-    const dot = <span aria-hidden style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 10 }}>·</span>;
+    const dot = <span aria-hidden style={{ color: GH.ink30 /* декор: разделитель */, fontFamily: GH_MONO, fontSize: 12 }}>·</span>;
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, minHeight: '100vh', background: GH.paper }}>
@@ -203,7 +211,7 @@ function GridHouseSpecialistsPage({
 
             {/* ── Content ── */}
             <div style={{ maxWidth: 1200, margin: '0 auto', padding: '48px clamp(16px, 4vw, 24px) 0' }}>
-                <div style={{ ...ghspMono, color: GH.ink30, marginBottom: 8 }}>СПЕЦИАЛИСТЫ</div>
+                <div style={{ ...ghspMono, color: GH.ink60, marginBottom: 8 }}>СПЕЦИАЛИСТЫ</div>
                 <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 8px' }}>
                     Наши специалисты
                 </h1>
@@ -214,7 +222,7 @@ function GridHouseSpecialistsPage({
                 {/* Search + filters */}
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
                     <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 0 }}>
-                        <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: GH.ink30 }} />
+                        <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: GH.ink60 }} />
                         <input
                             type="text"
                             placeholder="Поиск по имени, запросу или методу..."
@@ -228,7 +236,8 @@ function GridHouseSpecialistsPage({
                         {searchQuery && (
                             <button
                                 onClick={() => setSearchQuery('')}
-                                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: GH.ink30 }}
+                                aria-label="Очистить поиск"
+                                style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: GH.ink60, width: 40, height: 40, display: 'grid', placeItems: 'center' }}
                             >
                                 <X size={14} />
                             </button>
@@ -239,7 +248,9 @@ function GridHouseSpecialistsPage({
                             <button
                                 key={f.key}
                                 onClick={() => setFormatFilter(f.key)}
+                                aria-pressed={formatFilter === f.key}
                                 style={{
+                                    ...touch,
                                     padding: '8px 12px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
                                     border: formatFilter === f.key ? `1px solid ${GH.ink}` : ghspHairline,
                                     background: formatFilter === f.key ? GH.ink : 'transparent',
@@ -259,7 +270,9 @@ function GridHouseSpecialistsPage({
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
                         <button
                             onClick={() => setRoleFilter('all')}
+                            aria-pressed={roleFilter === 'all'}
                             style={{
+                                ...touch,
                                 padding: '6px 12px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
                                 border: roleFilter === 'all' ? `1px solid ${GH.accent}` : ghspHairline,
                                 background: roleFilter === 'all' ? GH.accent : 'transparent',
@@ -272,7 +285,9 @@ function GridHouseSpecialistsPage({
                             <button
                                 key={role}
                                 onClick={() => setRoleFilter(role)}
+                                aria-pressed={roleFilter === role}
                                 style={{
+                                    ...touch,
                                     padding: '6px 12px', fontSize: 12, fontWeight: 600, fontFamily: GH_SANS, cursor: 'pointer',
                                     border: roleFilter === role ? `1px solid ${GH.accent}` : ghspHairline,
                                     background: roleFilter === role ? GH.accent : 'transparent',
@@ -294,34 +309,36 @@ function GridHouseSpecialistsPage({
                         all={allSpecializations}
                         value={specFilter}
                         onChange={setSpecFilter}
+                        touch={touch}
                     />
                 )}
 
                 <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ ...ghspMono, color: GH.ink30 }}>
-                        {filteredSpecialists.length === specialists.length
-                            ? `${specialists.length} СПЕЦИАЛИСТОВ`
-                            : `${filteredSpecialists.length} ИЗ ${specialists.length}`
-                        }
-                    </span>
+                    {/* Счётчик — только после ответа сервера (не «0 специалистов» во время загрузки). */}
+                    {!isLoading && !error && (
+                        <span style={{ ...ghspMono, color: GH.ink60 }}>
+                            {filteredSpecialists.length === specialists.length
+                                ? ruCountWord(specialists.length, ['специалист', 'специалиста', 'специалистов'])
+                                : `${filteredSpecialists.length} из ${specialists.length}`
+                            }
+                        </span>
+                    )}
                 </div>
             </div>
 
             {/* Grid */}
             <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 clamp(16px, 4vw, 24px)', paddingBottom: 80 }}>
                 {isLoading ? (
-                    <div style={{ textAlign: 'center', padding: '80px 0', color: GH.ink30 }}>
-                        <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-                        <p style={{ fontSize: 13 }}>Загрузка специалистов...</p>
+                    <div role="status" aria-busy="true" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 20 }}>
+                        <span className="sr-only">Загружаем специалистов…</span>
+                        {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={420} radius={0} />)}
                     </div>
                 ) : error ? (
-                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.danger, fontSize: 14 }}>
-                        {error}
-                    </div>
+                    <ErrorBar message={error} onRetry={onRetry} />
                 ) : filteredSpecialists.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink30 }}>
+                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink60 }}>
                         <p style={{ fontSize: 15, fontWeight: 600 }}>Ничего не найдено</p>
-                        <p style={{ fontSize: 13, color: GH.ink30 }}>Попробуйте изменить параметры поиска</p>
+                        <p style={{ fontSize: 13, color: GH.ink60 }}>Попробуйте изменить параметры поиска</p>
                     </div>
                 ) : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 20 }}>
@@ -334,8 +351,8 @@ function GridHouseSpecialistsPage({
 
             {/* Footer */}
             <footer style={{ maxWidth: 1200, margin: '0 auto', borderTop: `2px solid ${GH.ink}`, padding: '16px clamp(16px, 4vw, 24px)', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghspMono, color: GH.ink30 }}>UNBOX · 2026</span>
-                <span style={{ ...ghspMono, color: GH.ink10 }}>GRID HOUSE</span>
+                <span style={{ ...ghspMono, color: GH.ink60 }}>UNBOX · 2026</span>
+                <span style={{ ...ghspMono, color: GH.ink60 }}>Батуми · Грузия</span>
             </footer>
         </div>
     );
@@ -351,9 +368,11 @@ function GridHouseSpecialistsPage({
  * is shown inline as a chip so the user always sees the filter state. When
  * expanded, the full tag cloud appears.
  */
-function SpecFilterCompact({ all, value, onChange }: {
+function SpecFilterCompact({ all, value, onChange, touch = {} }: {
     all: string[];
     value: string | null;
+    /** На телефоне — minHeight 44. */
+    touch?: React.CSSProperties;
     onChange: (s: string | null) => void;
 }) {
     const [open, setOpen] = useState(false);
@@ -366,8 +385,9 @@ function SpecFilterCompact({ all, value, onChange }: {
                 <button
                     onClick={() => setOpen(o => !o)}
                     style={{
+                        ...touch,
                         padding: '4px 10px',
-                        fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                        fontSize: 12, fontFamily: GH_MONO, letterSpacing: '0.06em',
                         cursor: 'pointer',
                         border: ghspHairline,
                         background: 'transparent',
@@ -382,8 +402,9 @@ function SpecFilterCompact({ all, value, onChange }: {
                     <button
                         onClick={() => onChange(null)}
                         style={{
+                            ...touch,
                             padding: '4px 10px',
-                            fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                            fontSize: 12, fontFamily: GH_MONO, letterSpacing: '0.06em',
                             cursor: 'pointer',
                             border: `1px solid ${GH.ink}`,
                             background: GH.ink,
@@ -407,8 +428,9 @@ function SpecFilterCompact({ all, value, onChange }: {
                                 key={spec}
                                 onClick={() => onChange(active ? null : spec)}
                                 style={{
+                                    ...touch,
                                     padding: '4px 10px',
-                                    fontSize: 11, fontFamily: GH_MONO, letterSpacing: '0.08em',
+                                    fontSize: 12, fontFamily: GH_MONO, letterSpacing: '0.06em',
                                     cursor: 'pointer',
                                     border: active ? `1px solid ${GH.ink}` : ghspHairline,
                                     background: active ? GH.ink : 'transparent',

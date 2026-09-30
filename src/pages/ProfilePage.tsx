@@ -10,6 +10,8 @@ import { api } from '../api/client';
 import { apiErrorMessage } from '../utils/errors';
 import { hasPermission } from '../utils/permissions';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { COLOR, STATUS } from '../design/tokens';
+import { formatGel } from '../utils/format';
 
 export function ProfilePage() {
     const { currentUser, updateUser } = useUserStore();
@@ -72,7 +74,7 @@ function useTelegramConnect() {
                 const cu = useUserStore.getState().currentUser;
                 if (cu?.telegramId && /^\d+$/.test(cu.telegramId)) {
                     stopPolling();
-                    toast.success('✅ Telegram подключён!');
+                    toast.success('Telegram подключён');
                 }
             }, 2000);
         } catch (e) {
@@ -138,7 +140,7 @@ function ChangePasswordSection() {
                 <div>
                     <label className="block text-sm font-medium mb-2">Текущий пароль</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
                         <input
                             type={showCurrent ? 'text' : 'password'}
                             className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
@@ -147,7 +149,7 @@ function ChangePasswordSection() {
                             required
                             placeholder="Введите текущий пароль"
                         />
-                        <button type="button" onClick={() => setShowCurrent(!showCurrent)} className="absolute right-3 top-1/2 -translate-y-1/2 text-unbox-grey hover:text-unbox-dark">
+                        <button type="button" onClick={() => setShowCurrent(!showCurrent)} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-60 hover:text-unbox-dark">
                             {showCurrent ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                     </div>
@@ -155,7 +157,7 @@ function ChangePasswordSection() {
                 <div>
                     <label className="block text-sm font-medium mb-2">Новый пароль</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
                         <input
                             type={showNew ? 'text' : 'password'}
                             className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
@@ -165,7 +167,7 @@ function ChangePasswordSection() {
                             minLength={6}
                             placeholder="Минимум 6 символов"
                         />
-                        <button type="button" onClick={() => setShowNew(!showNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-unbox-grey hover:text-unbox-dark">
+                        <button type="button" onClick={() => setShowNew(!showNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-60 hover:text-unbox-dark">
                             {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                     </div>
@@ -173,7 +175,7 @@ function ChangePasswordSection() {
                 <div>
                     <label className="block text-sm font-medium mb-2">Подтвердите пароль</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
                         <input
                             type="password"
                             className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
@@ -184,7 +186,7 @@ function ChangePasswordSection() {
                         />
                     </div>
                     {confirmPassword && newPassword !== confirmPassword && (
-                        <p className="text-xs text-red-500 mt-1">Пароли не совпадают</p>
+                        <p className="text-xs mt-1" style={{ color: STATUS.danger.fg }}>Пароли не совпадают</p>
                     )}
                 </div>
                 <div className="pt-2">
@@ -211,7 +213,7 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
         return (
             <div className="flex items-center gap-2">
                 <div className="relative flex-1">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
                     <input
                         type="email"
                         className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light bg-gray-50 text-unbox-dark"
@@ -224,7 +226,7 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
                     className="shrink-0 p-3 rounded-xl border border-unbox-light hover:bg-unbox-light/50 transition-colors"
                     title="Изменить email"
                 >
-                    <Pencil size={16} className="text-unbox-grey" />
+                    <Pencil size={16} className="text-ink-60" />
                 </button>
             </div>
         );
@@ -261,11 +263,11 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
             <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-unbox-dark">Смена email</span>
                 <button onClick={() => { setEditing(false); setPassword(''); }} className="p-1 hover:bg-gray-100 rounded-lg">
-                    <X size={16} className="text-unbox-grey" />
+                    <X size={16} className="text-ink-60" />
                 </button>
             </div>
             <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
                 <input
                     type="email"
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
@@ -276,7 +278,7 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
                 />
             </div>
             <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-unbox-grey" size={18} />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" size={18} />
                 <input
                     type={showPw ? 'text' : 'password'}
                     className="w-full pl-10 pr-10 py-3 rounded-xl border border-unbox-light focus:outline-none focus:ring-2 focus:ring-unbox-green"
@@ -284,7 +286,7 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Текущий пароль для подтверждения"
                 />
-                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-unbox-grey hover:text-unbox-dark">
+                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-60 hover:text-unbox-dark">
                     {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
             </div>
@@ -312,7 +314,7 @@ function ChangeEmailInline({ currentEmail }: { currentEmail: string }) {
    Grid House — ProfilePage
    ═══════════════════════════════════════════════════════════════ */
 
-const ghpMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghpMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const };
 const ghpHairline = `1px solid ${GH.ink10}`;
 const ghpInput: React.CSSProperties = {
     width: '100%', padding: '12px 0', fontSize: 14, fontFamily: GH_SANS,
@@ -359,15 +361,15 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
         return (
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 10,
-                padding: '12px 14px', border: `1px solid ${GH.ink10}`, background: '#F0FDF4',
+                padding: '12px 14px', border: `1px solid ${GH.ink10}`, background: STATUS.ok.bg,
             }}>
-                <CheckCircle2 size={18} color="#16A34A" />
+                <CheckCircle2 size={18} color={STATUS.ok.fg} />
                 <span style={{ fontSize: 13, color: GH.ink }}>Подключено — уведомления активны</span>
                 <button
                     type="button"
                     onClick={() => onChange('')}
                     style={{
-                        marginLeft: 'auto', fontSize: 11, fontFamily: GH_MONO,
+                        marginLeft: 'auto', fontSize: 12, fontFamily: GH_MONO,
                         color: GH.ink60, background: 'transparent', border: 'none',
                         textDecoration: 'underline', cursor: 'pointer',
                     }}
@@ -385,8 +387,9 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                 onClick={isConnecting ? cancel : connect}
                 style={{
                     width: '100%', padding: '12px 16px',
-                    background: isConnecting ? GH.ink10 : '#26A5E4',
-                    color: isConnecting ? GH.ink60 : '#fff',
+                    // Wave 1: без «телеграм-синего» — главная кнопка чернилами, как везде.
+                    background: isConnecting ? GH.ink10 : GH.ink,
+                    color: isConnecting ? GH.ink60 : COLOR.onInk,
                     fontWeight: 700, fontSize: 13, fontFamily: GH_SANS,
                     border: 'none', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -408,10 +411,10 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                 <div style={{
                     marginTop: 12,
                     padding: 14,
-                    background: '#FFF7E6',
-                    border: '1px solid #F2C94C',
+                    background: STATUS.pending.bg,
+                    border: `1px solid ${STATUS.pending.fg}33`,
                 }}>
-                    <div style={{ ...ghpMono, fontSize: 9, color: '#8A5A00', marginBottom: 6 }}>
+                    <div style={{ ...ghpMono, fontSize: 12, color: STATUS.pending.fg, marginBottom: 6 }}>
                         НЕ СРАБОТАЛО? SAFARI-ОБХОД
                     </div>
                     <div style={{ fontSize: 12, color: GH.ink, lineHeight: 1.55, marginBottom: 10 }}>
@@ -430,7 +433,7 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                         display: 'flex',
                         alignItems: 'stretch',
                         gap: 0,
-                        background: '#fff',
+                        background: COLOR.card,
                         border: '1px solid ' + GH.ink10,
                     }}>
                         <code style={{
@@ -453,10 +456,10 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                             style={{
                                 padding: '0 14px',
                                 background: GH.ink,
-                                color: '#fff',
+                                color: COLOR.onInk,
                                 fontFamily: GH_MONO,
-                                fontSize: 10,
-                                letterSpacing: '0.08em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase' as const,
                                 border: 'none',
                                 cursor: 'pointer',
@@ -467,7 +470,7 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                             Копировать
                         </button>
                     </div>
-                    <div style={{ fontSize: 11, color: GH.ink60, marginTop: 8, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 8, lineHeight: 1.5 }}>
                         Бот ответит «Готово, Telegram подключён» — и эта страница
                         тоже подтянет привязку через пару секунд.
                     </div>
@@ -475,7 +478,7 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
             )}
 
             <div style={{ marginTop: 12 }}>
-                <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 4, fontSize: 9 }}>
+                <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 4, fontSize: 12 }}>
                     ИЛИ ВРУЧНУЮ — ЧИСЛОВОЙ CHAT_ID
                 </label>
                 <input
@@ -488,7 +491,7 @@ function GridHouseTelegramConnect({ value, onChange }: { value: string; onChange
                     onChange={(e) => setDraft(e.target.value)}
                     onBlur={commit}
                 />
-                <div style={{ fontSize: 11, color: GH.ink60, marginTop: 6, lineHeight: 1.5 }}>
+                <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6, lineHeight: 1.5 }}>
                     Узнать своё число — напишите{' '}
                     <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer"
                        style={{ color: GH.ink, textDecoration: 'underline' }}>
@@ -596,7 +599,7 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* Header */}
             <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
-                <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 8 }}>ПРОФИЛЬ</div>
+                <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 8 }}>ПРОФИЛЬ</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
                     <div style={{
                         width: 56, height: 56, borderRadius: '50%', overflow: 'hidden',
@@ -614,11 +617,11 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                             {currentUser.name}
                         </h1>
                         <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
-                            <span style={{ ...ghpMono, color: GH.ink30, fontSize: 10 }}>
+                            <span style={{ ...ghpMono, color: GH.ink60, fontSize: 12 }}>
                                 {currentUser.email}
                             </span>
-                            <span style={{ ...ghpMono, color: GH.ink30, fontSize: 10 }}>
-                                БАЛАНС: {currentUser.balance?.toFixed(1)} ₾
+                            <span style={{ ...ghpMono, color: GH.ink60, fontSize: 12 }}>
+                                БАЛАНС: {formatGel(currentUser.balance ?? 0)}
                             </span>
                         </div>
                     </div>
@@ -628,13 +631,13 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
             {/* Subscription */}
             {currentUser.subscription ? (
                 <div style={{ marginBottom: 32, paddingBottom: 24, borderBottom: ghpHairline }}>
-                    <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 12 }}>АБОНЕМЕНТ</div>
+                    <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 12 }}>АБОНЕМЕНТ</div>
                     <SubscriptionCard user={currentUser} />
                 </div>
             ) : (
                 <div style={{ marginBottom: 32, paddingBottom: 24, borderBottom: ghpHairline }}>
-                    <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 12 }}>АБОНЕМЕНТ</div>
-                    <div style={{ padding: 16, border: ghpHairline, color: GH.ink30, fontSize: 13, textAlign: 'center' }}>
+                    <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 12 }}>АБОНЕМЕНТ</div>
+                    <div style={{ padding: 16, border: ghpHairline, color: GH.ink60, fontSize: 13, textAlign: 'center' }}>
                         Нет активного абонемента
                     </div>
                 </div>
@@ -642,10 +645,10 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
 
             {/* Edit fields */}
             <div style={{ maxWidth: 480, marginBottom: 32 }}>
-                <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 20 }}>ЛИЧНЫЕ ДАННЫЕ</div>
+                <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 20 }}>ЛИЧНЫЕ ДАННЫЕ</div>
 
                 <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>ИМЯ</label>
+                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>ИМЯ</label>
                     <input
                         type="text"
                         style={ghpInput}
@@ -658,12 +661,12 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                 </div>
 
                 <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>EMAIL</label>
+                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>EMAIL</label>
                     <ChangeEmailInline currentEmail={currentUser.email} />
                 </div>
 
                 <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>ТЕЛЕФОН</label>
+                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>ТЕЛЕФОН</label>
                     <PhoneInput
                         style={ghpInput}
                         value={phone}
@@ -674,7 +677,7 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
                 </div>
 
                 <div style={{ marginBottom: 20 }}>
-                    <label style={{ ...ghpMono, color: GH.ink30, display: 'block', marginBottom: 6 }}>TELEGRAM</label>
+                    <label style={{ ...ghpMono, color: GH.ink60, display: 'block', marginBottom: 6 }}>TELEGRAM</label>
                     <GridHouseTelegramConnect
                         value={currentUser.telegramId || ''}
                         onChange={saveTelegram}
@@ -706,7 +709,7 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
             {/* Admin access */}
             {(isAdmin || hasPermission(currentUser, 'admin.access')) && (
                 <div style={{ borderTop: ghpHairline, paddingTop: 24, marginBottom: 32 }}>
-                    <div style={{ ...ghpMono, color: GH.ink30, marginBottom: 12 }}>АДМИНИСТРИРОВАНИЕ</div>
+                    <div style={{ ...ghpMono, color: GH.ink60, marginBottom: 12 }}>АДМИНИСТРИРОВАНИЕ</div>
                     <p style={{ fontSize: 14, color: GH.ink60, marginBottom: 16 }}>
                         Вам доступна панель администратора для управления бронированиями и клиентами.
                     </p>
@@ -724,8 +727,8 @@ function GridHouseProfilePage({ currentUser, updateUser, isAdmin }: GridHousePro
 
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghpMono, color: GH.ink30 }}>UNBOX · 2026</span>
-                <span style={{ ...ghpMono, color: GH.ink10 }}>GRID HOUSE</span>
+                <span style={{ ...ghpMono, color: GH.ink60 }}>UNBOX · 2026</span>
+                <span style={{ ...ghpMono, color: GH.ink60 }}>Батуми · Грузия</span>
             </footer>
         </div>
     );

@@ -34,7 +34,7 @@ export function SelfTestsSection({ onScrollToSpecialists }: Props) {
                         <div className="inline-block px-6 py-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
                             <p className="text-unbox-green text-xs font-bold uppercase tracking-widest mb-2">Самопознание</p>
                             <h2 className="text-2xl sm:text-3xl font-bold text-unbox-dark">Психологические тесты</h2>
-                            <p className="mt-2 text-unbox-dark/60 text-sm max-w-md mx-auto">
+                            <p className="mt-2 text-ink-60 text-sm max-w-md mx-auto">
                                 Пройдите проверенные тесты и получите расшифровку за несколько минут
                             </p>
                         </div>
@@ -55,12 +55,12 @@ export function SelfTestsSection({ onScrollToSpecialists }: Props) {
                                 <div>
                                     <div className="text-3xl mb-2">{test.emoji}</div>
                                     <div className="font-bold text-unbox-dark text-sm leading-snug">{test.name}</div>
-                                    <div className="text-xs text-unbox-dark/45 mt-1">
+                                    <div className="text-xs text-ink-60 mt-1">
                                         {test.questionCount} вопросов · {test.duration}
                                     </div>
                                 </div>
 
-                                <p className="text-xs text-unbox-dark/55 leading-relaxed flex-1">{test.description}</p>
+                                <p className="text-xs text-ink-60 leading-relaxed flex-1">{test.description}</p>
 
                                 {/* Actions */}
                                 <div className="flex flex-col gap-2">
@@ -73,7 +73,7 @@ export function SelfTestsSection({ onScrollToSpecialists }: Props) {
                                     </button>
                                     <button
                                         onClick={() => navigate(`/tests/${test.id}`)}
-                                        className="text-xs text-unbox-dark/40 hover:text-unbox-green transition-colors py-1"
+                                        className="text-xs text-ink-60 hover:text-unbox-green transition-colors py-1"
                                     >
                                         Открыть полный тест →
                                     </button>
@@ -86,7 +86,7 @@ export function SelfTestsSection({ onScrollToSpecialists }: Props) {
                         initial={{ opacity: 0 }}
                         whileInView={{ opacity: 1 }}
                         viewport={{ once: true }}
-                        className="text-center text-xs text-unbox-dark/30 mt-8"
+                        className="text-center text-xs text-ink-60 mt-8"
                     >
                         Тесты носят информационный характер и не заменяют консультацию специалиста
                     </motion.p>

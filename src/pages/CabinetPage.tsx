@@ -18,6 +18,8 @@ import { ArrowLeft, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MinimalLayout } from '../components/MinimalLayout';
 import { RESOURCES, LOCATIONS, CABINET_SERVICES } from '../utils/data';
 import { useBookingStore } from '../store/bookingStore';
+import { COLOR } from '../design/tokens';
+import { formatGel } from '../utils/format';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 
 export function CabinetPage() {
@@ -56,7 +58,7 @@ export function CabinetPage() {
     const facts: Array<[string, string]> = [
         ['ПЛОЩАДЬ',     `${resource.area} м²`],
         ['ВМЕСТИМОСТЬ', `до ${resource.capacity} чел.`],
-        ['СТАВКА',      `${resource.hourlyRate} ₾/ч${resource.groupRate ? ` · группа ${resource.groupRate} ₾/ч` : ''}`],
+        ['СТАВКА',      `${formatGel(resource.hourlyRate)}/ч${resource.groupRate ? ` · группа ${formatGel(resource.groupRate)}/ч` : ''}`],
         ['ФОРМАТЫ',     (resource.formats ?? ['individual']).map(formatLabel).join(' · ')],
     ];
 
@@ -85,7 +87,7 @@ export function CabinetPage() {
                     <div style={{
                         maxWidth: 1280, margin: '0 auto',
                         display: 'flex', alignItems: 'center', gap: 12,
-                        fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.18em',
+                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                     }}>
                         <Link to="/" style={{ color: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
@@ -157,8 +159,8 @@ export function CabinetPage() {
                                     }}
                                     className="cabinet-fact-row">
                                         <dt style={{
-                                            fontFamily: GH_MONO, fontSize: 10,
-                                            letterSpacing: '0.18em', textTransform: 'uppercase',
+                                            fontFamily: GH_MONO, fontSize: 12,
+                                            letterSpacing: '0.06em', textTransform: 'uppercase',
                                             color: GH.ink60,
                                         }}>{label}</dt>
                                         <dd style={{
@@ -184,8 +186,8 @@ export function CabinetPage() {
                             {services.length > 0 && (
                                 <div style={{ marginTop: 24 }}>
                                     <div style={{
-                                        fontFamily: GH_MONO, fontSize: 10,
-                                        letterSpacing: '0.18em', textTransform: 'uppercase',
+                                        fontFamily: GH_MONO, fontSize: 12,
+                                        letterSpacing: '0.06em', textTransform: 'uppercase',
                                         color: GH.ink60, marginBottom: 8,
                                     }}>
                                         Оборудование
@@ -196,7 +198,7 @@ export function CabinetPage() {
                                                 padding: '4px 10px',
                                                 border: `1px solid ${GH.ink}`,
                                                 fontFamily: GH_MONO,
-                                                fontSize: 11,
+                                                fontSize: 12,
                                                 letterSpacing: '0.04em',
                                             }}>{s}</span>
                                         ))}
@@ -370,7 +372,7 @@ function Lightbox({ photos, index, onClose, onNav }: {
                 aria-label="Закрыть"
                 style={{
                     position: 'absolute', top: 16, right: 16,
-                    background: 'none', border: 'none', color: '#fff',
+                    background: 'none', border: 'none', color: COLOR.onInk,
                     cursor: 'pointer', padding: 8,
                 }}
             >
@@ -401,7 +403,7 @@ function Lightbox({ photos, index, onClose, onNav }: {
             />
             <div style={{
                 position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-                color: '#fff', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.18em',
+                color: COLOR.onInk, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.18em',
             }}>
                 {String(index + 1).padStart(2, '0')} / {String(photos.length).padStart(2, '0')}
             </div>
@@ -414,7 +416,7 @@ function navButtonStyle(side: 'left' | 'right'): React.CSSProperties {
         position: 'absolute', top: '50%',
         transform: 'translateY(-50%)',
         [side]: 16,
-        background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff',
+        background: 'rgba(255,255,255,0.1)', border: 'none', color: COLOR.onInk,
         cursor: 'pointer', padding: 12,
         display: 'grid', placeItems: 'center',
     } as React.CSSProperties;
@@ -435,8 +437,8 @@ function SiblingCabinets({ currentId, locationId }: { currentId: string; locatio
         }}>
             <div style={{ maxWidth: 1280, margin: '0 auto' }}>
                 <div style={{
-                    fontFamily: GH_MONO, fontSize: 10,
-                    letterSpacing: '0.18em', textTransform: 'uppercase',
+                    fontFamily: GH_MONO, fontSize: 12,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
                     color: GH.ink60, marginBottom: 16,
                 }}>
                     Другие кабинеты в этом центре
@@ -469,11 +471,11 @@ function SiblingCabinets({ currentId, locationId }: { currentId: string; locatio
                             <div style={{ padding: 14 }}>
                                 <div style={{ fontWeight: 700, fontSize: 16 }}>{r.name}</div>
                                 <div style={{
-                                    fontFamily: GH_MONO, fontSize: 11,
-                                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                                    fontFamily: GH_MONO, fontSize: 12,
+                                    letterSpacing: '0.06em', textTransform: 'uppercase',
                                     color: GH.ink60, marginTop: 4,
                                 }}>
-                                    {r.area} м² · до {r.capacity} чел. · {r.hourlyRate} ₾/ч
+                                    {r.area} м² · до {r.capacity} чел. · {formatGel(r.hourlyRate)}/ч
                                 </div>
                             </div>
                         </Link>

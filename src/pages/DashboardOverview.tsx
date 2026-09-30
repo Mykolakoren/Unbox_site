@@ -11,10 +11,11 @@ import { QuickActionsStrip } from '../components/ui/QuickActionsStrip';
 import { LegacyButton as Button } from '../components/ui/LegacyButton';
 import { DiscountProgress } from '../components/Dashboard/DiscountProgress';
 import { RESOURCES } from '../utils/data';
-import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { bonusesApi, type Bonus } from '../api/bonuses';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { STATUS } from '../design/tokens';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { formatDayMonth, formatGel, formatMoney, formatTimeRange } from '../utils/format';
 import {
     DndContext,
     closestCenter,
@@ -164,7 +165,7 @@ function SortableBlock({
             {isEditing && (
                 <button
                     onClick={(e) => { e.stopPropagation(); onToggleSize(); }}
-                    className="absolute -bottom-2 -right-2 z-30 w-8 h-8 rounded-xl bg-white text-unbox-grey shadow-lg border border-gray-200 flex items-center justify-center hover:bg-unbox-green hover:text-white hover:border-unbox-green transition-all"
+                    className="absolute -bottom-2 -right-2 z-30 w-8 h-8 rounded-xl bg-white text-ink-60 shadow-lg border border-gray-200 flex items-center justify-center hover:bg-unbox-green hover:text-white hover:border-unbox-green transition-all"
                     title={blockSize === 'full' ? 'Сделать половину' : 'На всю ширину'}
                 >
                     {blockSize === 'full' ? (
@@ -322,276 +323,30 @@ export function DashboardOverview() {
 
     const recentTransactions = getTransactionsByUser(currentUser.id).slice(0, 5);
 
-    const statusConfig: Record<string, { label: string; color: string }> = {
-        confirmed: { label: 'Активно', color: 'bg-emerald-50 text-emerald-700' },
-        completed: { label: 'Завершено', color: 'bg-blue-50 text-blue-700' },
-        cancelled: { label: 'Отменено', color: 'bg-red-50 text-red-600' },
-        no_show: { label: 'Неявка', color: 'bg-amber-50 text-amber-700' },
-        're-rented': { label: 'Пересдано', color: 'bg-purple-50 text-purple-700' },
-        rescheduled: { label: 'Перенесено', color: 'bg-sky-50 text-sky-700' },
+    // Статусы броней — из общего словаря (StatusBadge). Раньше здесь была своя
+    // карта без pending_approval, и бронь «ждём подтверждения» показывалась
+    // как «Активно» (X3-copy-tone-M2).
+
+    const transactionTypeConfig: Record<string, { label: string; icon: typeof ArrowDownCircle }> = {
+        deposit: { label: 'Пополнение', icon: ArrowDownCircle },
+        booking_payment: { label: 'Оплата бронирования', icon: CreditCard },
+        refund: { label: 'Возврат', icon: RotateCcw },
+        manual_correction: { label: 'Корректировка', icon: Pencil },
+        subscription_purchase: { label: 'Покупка абонемента', icon: Receipt },
+        expense: { label: 'Расход', icon: CreditCard },
     };
 
-    const transactionTypeConfig: Record<string, { label: string; icon: typeof ArrowDownCircle; color: string }> = {
-        deposit: { label: 'Пополнение', icon: ArrowDownCircle, color: 'text-green-600' },
-        booking_payment: { label: 'Оплата бронирования', icon: CreditCard, color: 'text-blue-600' },
-        refund: { label: 'Возврат', icon: RotateCcw, color: 'text-amber-600' },
-        manual_correction: { label: 'Корректировка', icon: Pencil, color: 'text-purple-600' },
-        subscription_purchase: { label: 'Покупка абонемента', icon: Receipt, color: 'text-indigo-600' },
-        expense: { label: 'Расход', icon: CreditCard, color: 'text-red-600' },
-    };
-
-    const formatBookingDate = (dateValue: Date | string) => {
-        try {
-            const d = typeof dateValue === 'string' ? new Date(dateValue) : dateValue;
-            return format(d, 'd MMM yyyy', { locale: ru });
-        } catch {
-            return String(dateValue);
-        }
-    };
+    // «29 сентября» (год — только если не текущий), общий форматтер.
+    const formatBookingDate = (dateValue: Date | string) =>
+        formatDayMonth(dateValue, { withYear: 'auto', fallback: String(dateValue) });
 
     // ── Block Renderers ──────────────────────────────────────────────────────
 
     const activeBonuses = bonuses.filter(b => b.status === 'active');
     const totalBonusHours = activeBonuses.reduce((sum, b) => sum + (b.quantity || 0), 0);
 
-    const renderBlock = (blockId: BlockId) => {
-        switch (blockId) {
-            case 'bonuses':
-                if (activeBonuses.length === 0) {
-                    return (
-                        <div className="p-6 rounded-2xl relative overflow-hidden" style={glassStyle}>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center">
-                                    <Gift size={20} className="text-gray-300" />
-                                </div>
-                                <div>
-                                    <div className="text-sm font-medium text-unbox-grey">Бонусы</div>
-                                    <div className="text-xs text-gray-400">Нет активных бонусов</div>
-                                </div>
-                            </div>
-                        </div>
-                    );
-                }
-                return (
-                    <div className="p-6 rounded-2xl relative overflow-hidden" style={glassStyle}>
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-amber-100/40 to-transparent rounded-bl-full" />
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <div className="text-sm text-unbox-grey font-medium mb-1 flex items-center gap-1.5">
-                                    <Gift size={14} className="text-amber-500" />
-                                    Ваши бонусы
-                                </div>
-                                <div className="text-3xl font-bold text-amber-600">
-                                    {totalBonusHours} {totalBonusHours === 1 ? 'час' : totalBonusHours < 5 ? 'часа' : 'часов'}
-                                </div>
-                                <div className="text-xs text-unbox-grey mt-0.5">
-                                    бесплатной аренды
-                                </div>
-                            </div>
-                            <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
-                                <Gift size={24} className="text-amber-500" />
-                            </div>
-                        </div>
-                        <div className="space-y-1.5">
-                            {activeBonuses.map(b => (
-                                <div key={b.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-amber-50/60">
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-medium text-amber-800 truncate">
-                                            {b.description || 'Бонусный час'}
-                                        </div>
-                                        {b.expiresAt && (
-                                            <div className="text-[11px] text-amber-600/70">
-                                                до {format(new Date(b.expiresAt), 'd MMM yyyy', { locale: ru })}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="text-sm font-bold text-amber-600 flex-shrink-0 ml-2">
-                                        {b.quantity}ч
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                );
-
-            case 'balance':
-                return (
-                    <div className="p-6 rounded-2xl relative overflow-hidden" style={glassStyle}>
-                        <div className="flex justify-between items-start mb-6">
-                            <div>
-                                <div className="text-sm text-unbox-grey font-medium mb-1">
-                                    {isNegative ? 'Текущая задолженность' : 'Текущий баланс'}
-                                </div>
-                                <div className={`text-4xl font-bold ${isNegative ? 'text-red-500' : 'text-green-600'}`}>
-                                    {currentUser.balance.toFixed(2)} {'\u20BE'}
-                                </div>
-                                {isNegative && (
-                                    <div className="text-xs text-red-400 mt-1 font-medium">
-                                        Кредитный лимит: {currentUser.creditLimit} {'\u20BE'}
-                                    </div>
-                                )}
-                            </div>
-                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isNegative ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}>
-                                <Wallet size={24} />
-                            </div>
-                        </div>
-                        {isNegative && (
-                            <div className="space-y-2">
-                                <div className="flex justify-between text-xs font-medium">
-                                    <span className="text-unbox-grey">Использовано кредита</span>
-                                    <span className={availableCredit < 50 ? 'text-red-500' : 'text-unbox-dark'}>
-                                        Доступно: {availableCredit.toFixed(2)} {'\u20BE'}
-                                    </span>
-                                </div>
-                                <div className="w-full bg-unbox-light/50 rounded-full h-2 overflow-hidden">
-                                    <div
-                                        className={`h-full rounded-full ${availableCredit < 50 ? 'bg-red-500' : 'bg-unbox-green'}`}
-                                        style={{ width: `${usagePercent}%` }}
-                                    />
-                                </div>
-                            </div>
-                        )}
-                        {!isNegative && (
-                            <div className="flex items-center gap-2 text-sm text-green-600 font-medium bg-green-50 px-3 py-1.5 rounded-lg w-fit">
-                                <TrendingUp size={16} />
-                                <span>Активный депозит</span>
-                            </div>
-                        )}
-                    </div>
-                );
-
-            case 'discount':
-                return <DiscountProgress />;
-
-            case 'quickActions':
-                return (
-                    <div className="p-6 rounded-2xl flex flex-col justify-center gap-4" style={glassStyle}>
-                        <h3 className="font-bold text-lg">Быстрые действия</h3>
-                        <div>
-                            <Button onClick={() => navigate('/dashboard/bookings')} className="w-full justify-start py-6" size="lg">
-                                <Plus className="mr-2" />
-                                Новое бронирование
-                            </Button>
-                        </div>
-                    </div>
-                );
-
-            case 'bookings':
-                return (
-                    <div className="p-6 rounded-2xl" style={glassStyle}>
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-bold text-lg flex items-center gap-2">
-                                <Calendar size={20} className="text-unbox-green" />
-                                История бронирований
-                            </h3>
-                            {recentBookings.length > 0 && (
-                                <button
-                                    onClick={() => navigate('/dashboard/bookings')}
-                                    className="text-sm text-unbox-green hover:underline font-medium"
-                                >
-                                    Все &rarr;
-                                </button>
-                            )}
-                        </div>
-                        {recentBookings.length === 0 ? (
-                            <p className="text-unbox-grey text-sm py-4 text-center">У вас пока нет бронирований</p>
-                        ) : (
-                            <div className="space-y-2">
-                                {recentBookings.map(b => {
-                                    const resource = RESOURCES.find(r => r.id === b.resourceId);
-                                    const status = statusConfig[b.status] || { label: b.status, color: 'bg-gray-100 text-gray-600' };
-                                    return (
-                                        <div key={b.id} className="flex items-center justify-between py-3 px-4 rounded-xl bg-white/40 hover:bg-white/60 transition-colors">
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div className="w-10 h-10 rounded-lg bg-unbox-green/10 flex items-center justify-center flex-shrink-0">
-                                                    <Calendar size={18} className="text-unbox-green" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <div className="font-medium text-sm truncate">
-                                                        {resource?.name || 'Кабинет'} &middot; {formatBookingDate(b.date)}
-                                                    </div>
-                                                    <div className="text-xs text-unbox-grey flex items-center gap-1">
-                                                        <Clock size={12} />
-                                                        {b.startTime || '\u2014'} &middot; {b.duration ? `${b.duration / 60}ч` : '\u2014'}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-3 flex-shrink-0">
-                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                                                    {status.label}
-                                                </span>
-                                                <span className="font-semibold text-sm w-16 text-right">
-                                                    {b.finalPrice?.toFixed(0) ?? '\u2014'} {'\u20BE'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                );
-
-            case 'payments':
-                return (
-                    <div className="p-6 rounded-2xl" style={glassStyle}>
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-bold text-lg flex items-center gap-2">
-                                <Wallet size={20} className="text-unbox-green" />
-                                История платежей
-                            </h3>
-                        </div>
-                        {recentTransactions.length === 0 ? (
-                            <p className="text-unbox-grey text-sm py-4 text-center">Платежей пока нет</p>
-                        ) : (
-                            <div className="space-y-2">
-                                {recentTransactions.map(t => {
-                                    const config = transactionTypeConfig[t.type] || { label: t.type, icon: CreditCard, color: 'text-gray-600' };
-                                    const TxIcon = config.icon;
-                                    const isPositive = t.type === 'deposit' || t.type === 'refund';
-                                    return (
-                                        <div key={t.id} className="flex items-center justify-between py-3 px-4 rounded-xl bg-white/40 hover:bg-white/60 transition-colors">
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-50">
-                                                    <TxIcon size={18} className={config.color} />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <div className="font-medium text-sm truncate">{config.label}</div>
-                                                    <div className="text-xs text-unbox-grey">
-                                                        {t.description || format(new Date(t.date), 'd MMM yyyy, HH:mm', { locale: ru })}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-3 flex-shrink-0">
-                                                <span className="text-xs text-unbox-grey capitalize">
-                                                    {t.paymentMethod === 'cash' ? 'Наличные' :
-                                                     t.paymentMethod === 'tbc' ? 'TBC' :
-                                                     t.paymentMethod === 'bog' ? 'BOG' :
-                                                     t.paymentMethod === 'balance' ? 'Баланс' :
-                                                     t.paymentMethod === 'card' ? 'Карта' :
-                                                     t.paymentMethod === 'transfer' ? 'Перевод' :
-                                                     t.paymentMethod === 'admin_adjustment' ? 'Админ' :
-                                                     t.paymentMethod}
-                                                </span>
-                                                <span className={`font-semibold text-sm w-20 text-right ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
-                                                    {isPositive ? '+' : '\u2212'}{Math.abs(t.amount).toFixed(0)} {t.currency === 'GEL' ? '\u20BE' : t.currency}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                );
-
-            default:
-                return null;
-        }
-    };
-
-    // Visible block order for rendering
-    const visibleOrder = isEditing ? blockOrder : blockOrder.filter(id => !hiddenBlocks.has(id));
+    // Wave 1: старый renderBlock (стеклянные карточки, «Активно», гривна/эмодзи)
+    // не рендерился с перехода на Grid House — удалён, чтобы не править мёртвый код.
 
     // ── Grid House design flag — rollback-safe variant ──
     return (
@@ -606,7 +361,6 @@ export function DashboardOverview() {
             totalBonusHours={totalBonusHours}
             recentBookings={recentBookings}
             recentTransactions={recentTransactions}
-            statusConfig={statusConfig}
             transactionTypeConfig={transactionTypeConfig}
             formatBookingDate={formatBookingDate}
             navigate={navigate}
@@ -619,7 +373,7 @@ export function DashboardOverview() {
    Grid House — DashboardOverview
    ═══════════════════════════════════════════════════════════════ */
 
-const ghdoMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const };
+const ghdoMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const };
 const ghdoHairline = `1px solid ${GH.ink10}`;
 
 interface GridHouseDashboardOverviewProps {
@@ -632,8 +386,7 @@ interface GridHouseDashboardOverviewProps {
     totalBonusHours: number;
     recentBookings: any[];
     recentTransactions: any[];
-    statusConfig: Record<string, { label: string; color: string }>;
-    transactionTypeConfig: Record<string, { label: string; icon: any; color: string }>;
+    transactionTypeConfig: Record<string, { label: string; icon: any }>;
     formatBookingDate: (d: Date | string) => string;
     navigate: ReturnType<typeof useNavigate>;
 }
@@ -647,22 +400,15 @@ function useGHNarrow(bp = 768) {
 function GridHouseDashboardOverview({
     currentUser, isNegative, creditLimit, availableCredit, usagePercent: _usagePercent,
     activeBonuses, totalBonusHours, recentBookings, recentTransactions,
-    statusConfig, transactionTypeConfig, formatBookingDate, navigate,
+    transactionTypeConfig, formatBookingDate, navigate,
 }: GridHouseDashboardOverviewProps) {
     const narrow = useGHNarrow();
-    const ghStatusColor = (status: string) => {
-        const map: Record<string, string> = {
-            confirmed: GH.accent, completed: GH.ink60, cancelled: GH.danger,
-            no_show: '#B8862F', 're-rented': GH.ink30, rescheduled: GH.ink60,
-        };
-        return map[status] || GH.ink30;
-    };
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink }}>
             {/* Header */}
             <div style={{ paddingBottom: 24, borderBottom: `2px solid ${GH.ink}`, marginBottom: 32 }}>
-                <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>МОЙ КАБИНЕТ</div>
+                <div style={{ ...ghdoMono, color: GH.ink60, marginBottom: 8 }}>МОЙ КАБИНЕТ</div>
                 <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 42px)', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
                     Обзор
                 </h1>
@@ -675,15 +421,17 @@ function GridHouseDashboardOverview({
             <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 0, borderTop: ghdoHairline, marginBottom: 32 }}>
                 {/* Balance — в лари (₾). До 29.09 тут по ошибке стоял знак гривны (G3-04) */}
                 <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 0', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
-                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БАЛАНС</div>
+                    <div style={{ ...ghdoMono, color: GH.ink60, marginBottom: 8 }}>БАЛАНС</div>
                     <div style={{
                         fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700,
                         color: isNegative ? GH.danger : GH.ink, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
                     }}>
+                        {/* Формат оставлен прежним: его проверяет сторож wave0_I
+                            (test_dashboard_money_in_lari); toLocaleString('ru-RU') даёт те же «1 250 ₾». */}
                         {currentUser.balance?.toLocaleString('ru-RU') || '0'} ₾
                     </div>
                     {creditLimit > 0 && (
-                        <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
+                        <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6 }}>
                             Кредит: {availableCredit.toLocaleString('ru-RU')} ₾ из {creditLimit.toLocaleString('ru-RU')} ₾
                         </div>
                     )}
@@ -691,22 +439,22 @@ function GridHouseDashboardOverview({
 
                 {/* Bonuses */}
                 <div style={{ padding: narrow ? '16px 0' : '20px 20px 20px 20px', borderRight: narrow ? 'none' : ghdoHairline, borderBottom: narrow ? ghdoHairline : 'none' }}>
-                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>БОНУСЫ</div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1, color: activeBonuses.length > 0 ? GH.accent : GH.ink30 }}>
+                    <div style={{ ...ghdoMono, color: GH.ink60, marginBottom: 8 }}>БОНУСЫ</div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1, color: activeBonuses.length > 0 ? GH.accent : GH.ink60 }}>
                         {totalBonusHours}
                     </div>
-                    <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
+                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6 }}>
                         {activeBonuses.length > 0 ? 'часов бесплатной аренды' : 'нет активных бонусов'}
                     </div>
                 </div>
 
                 {/* Discount */}
                 <div style={{ padding: narrow ? '16px 0' : '20px 0 20px 20px' }}>
-                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 8 }}>СКИДКА</div>
+                    <div style={{ ...ghdoMono, color: GH.ink60, marginBottom: 8 }}>СКИДКА</div>
                     <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, lineHeight: 1 }}>
                         {currentUser.discountPercent || 0}%
                     </div>
-                    <div style={{ fontSize: 12, color: GH.ink30, marginTop: 6 }}>
+                    <div style={{ fontSize: 12, color: GH.ink60, marginTop: 6 }}>
                         текущий уровень
                     </div>
                 </div>
@@ -735,7 +483,7 @@ function GridHouseDashboardOverview({
                                 style={{
                                     padding: '8px 16px', background: GH.paper, color: GH.ink,
                                     border: 'none', cursor: 'pointer',
-                                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+                                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                     fontWeight: 700,
                                 }}
                             >
@@ -761,7 +509,7 @@ function GridHouseDashboardOverview({
             <QuickActionsStrip
                 actions={[
                     { label: 'Оформить абонемент', sub: 'Выгоднее почасовой аренды', path: '/subscriptions', icon: CalendarPlus },
-                    { label: 'Получить бонусы', sub: 'Приведи друга — бонус обоим', path: '/dashboard/bonuses', icon: Gift },
+                    { label: 'Получить бонусы', sub: 'Приведите друга — бонус обоим', path: '/dashboard/bonuses', icon: Gift },
                     { label: 'Стать специалистом', sub: 'Заявка в публичный каталог', path: '/become-specialist', icon: UserCheck },
                 ]}
                 heading="Что дальше"
@@ -771,26 +519,23 @@ function GridHouseDashboardOverview({
             <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: narrow ? 24 : 32 }}>
                 {/* Recent bookings */}
                 <div>
-                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>БЛИЖАЙШИЕ БРОНИРОВАНИЯ</div>
+                    <div style={{ ...ghdoMono, color: GH.ink60, marginBottom: 12 }}>БЛИЖАЙШИЕ БРОНИРОВАНИЯ</div>
                     {recentBookings.length === 0 ? (
-                        <div style={{ padding: 24, border: ghdoHairline, color: GH.ink30, fontSize: 13, textAlign: 'center' }}>
+                        <div style={{ padding: 24, border: ghdoHairline, color: GH.ink60, fontSize: 13, textAlign: 'center' }}>
                             Нет бронирований
                         </div>
                     ) : (
                         <div style={{ border: ghdoHairline }}>
                             {recentBookings.map((b, i) => {
-                                const sc = statusConfig[b.status] || statusConfig.confirmed;
                                 const resName = RESOURCES.find(r => r.id === b.resourceId)?.name || b.resourceId;
                                 return (
                                     <div key={i} style={{ padding: '14px 16px', borderBottom: i < recentBookings.length - 1 ? ghdoHairline : 'none' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                             <div style={{ fontSize: 14, fontWeight: 600 }}>{resName}</div>
-                                            <span style={{ ...ghdoMono, fontSize: 9, color: ghStatusColor(b.status), padding: '2px 8px', border: `1px solid ${ghStatusColor(b.status)}30`, flexShrink: 0 }}>
-                                                {sc.label.toUpperCase()}
-                                            </span>
+                                            <StatusBadge kind="booking" status={b.status} className="shrink-0" />
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30 }}>
-                                            {formatBookingDate(b.date)} · {b.startTime}–{b.endTime}
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>
+                                            {formatBookingDate(b.date)} · {formatTimeRange(b.startTime, b.endTime)}
                                         </div>
                                     </div>
                                 );
@@ -801,9 +546,9 @@ function GridHouseDashboardOverview({
 
                 {/* Recent transactions */}
                 <div>
-                    <div style={{ ...ghdoMono, color: GH.ink30, marginBottom: 12 }}>ПОСЛЕДНИЕ ПЛАТЕЖИ</div>
+                    <div style={{ ...ghdoMono, color: GH.ink60, marginBottom: 12 }}>ПОСЛЕДНИЕ ПЛАТЕЖИ</div>
                     {recentTransactions.length === 0 ? (
-                        <div style={{ padding: 24, border: ghdoHairline, color: GH.ink30, fontSize: 13, textAlign: 'center' }}>
+                        <div style={{ padding: 24, border: ghdoHairline, color: GH.ink60, fontSize: 13, textAlign: 'center' }}>
                             Нет транзакций
                         </div>
                     ) : (
@@ -814,12 +559,12 @@ function GridHouseDashboardOverview({
                                     <div key={i} style={{ padding: '12px 16px', borderBottom: i < recentTransactions.length - 1 ? ghdoHairline : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div>
                                             <div style={{ fontSize: 13, fontWeight: 600 }}>{tc.label}</div>
-                                            <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink30, marginTop: 2 }}>
+                                            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, marginTop: 2 }}>
                                                 {formatBookingDate(t.createdAt)}
                                             </div>
                                         </div>
-                                        <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, color: t.amount >= 0 ? GH.accent : GH.danger }}>
-                                            {t.amount >= 0 ? '+' : ''}{t.amount?.toLocaleString('ru-RU')} {!t.currency || t.currency === 'GEL' ? '₾' : t.currency}
+                                        <span style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 700, color: t.amount >= 0 ? STATUS.ok.fg : GH.danger }}>
+                                            {formatMoney(t.amount, { currency: t.currency || 'GEL', sign: true })}
                                         </span>
                                     </div>
                                 );
@@ -831,8 +576,8 @@ function GridHouseDashboardOverview({
 
             {/* Footer */}
             <footer style={{ borderTop: `2px solid ${GH.ink}`, padding: '16px 0', marginTop: 48, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ ...ghdoMono, color: GH.ink30 }}>UNBOX · 2026</span>
-                <span style={{ ...ghdoMono, color: GH.ink10 }}>GRID HOUSE</span>
+                <span style={{ ...ghdoMono, color: GH.ink60 }}>UNBOX · 2026</span>
+                <span style={{ ...ghdoMono, color: GH.ink60 }}>Батуми · Грузия</span>
             </footer>
         </div>
     );

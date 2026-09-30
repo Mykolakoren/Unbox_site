@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Loader2, ArrowLeft } from 'lucide-react';
-import { format as fmtDate, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { ArrowLeft } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { COLOR } from '../../design/tokens';
+import { formatDayMonth } from '../../utils/format';
+import { Skeleton, SkeletonText } from '../../components/ui/Skeleton';
 import { StructuredText } from '../../components/StructuredText';
 import { postsApi, type Post } from '../../api/posts';
 
@@ -12,11 +13,11 @@ import { postsApi, type Post } from '../../api/posts';
  * Шаблон GH (masthead + обложка-герой + StructuredText). Для статьи —
  * мини-карточка автора со ссылкой на /specialists/:id. Owner 2026-06-13.
  */
-const ghMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' };
+const ghMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' };
 
 function safeDate(iso?: string | null): string {
     if (!iso) return '';
-    try { return fmtDate(parseISO(iso), 'd MMMM yyyy', { locale: ru }); } catch { return ''; }
+    return formatDayMonth(iso, { withYear: true, fallback: '' });
 }
 
 export function PostDetailPage() {
@@ -57,11 +58,14 @@ export function PostDetailPage() {
 
             <div style={{ maxWidth: 760, margin: '0 auto', padding: '40px clamp(16px, 4vw, 24px) 80px' }}>
                 {loading ? (
-                    <div style={{ textAlign: 'center', padding: '80px 0', color: GH.ink30 }}>
-                        <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+                    <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                        <span className="sr-only">Загружаем…</span>
+                        <Skeleton height={14} width="30%" />
+                        <Skeleton height={40} width="80%" />
+                        <SkeletonText lines={5} />
                     </div>
                 ) : error || !post ? (
-                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink30 }}>
+                    <div style={{ textAlign: 'center', padding: '60px 0', color: GH.ink60 }}>
                         <p style={{ fontSize: 15, fontWeight: 600 }}>{error || 'Пост не найден'}</p>
                         <Link to={backTo} style={{ color: GH.accent, fontSize: 14 }}>← {backLabel}</Link>
                     </div>
@@ -88,7 +92,7 @@ export function PostDetailPage() {
                         {isArticle && post.authorSpecialistId && (
                             <Link
                                 to={`/specialists/${post.authorSpecialistId}`}
-                                style={{ marginTop: 40, display: 'flex', alignItems: 'center', gap: 14, padding: 16, border: `1px solid ${GH.ink10}`, background: '#fff', textDecoration: 'none', color: GH.ink }}
+                                style={{ marginTop: 40, display: 'flex', alignItems: 'center', gap: 14, padding: 16, border: `1px solid ${GH.ink10}`, background: COLOR.card, textDecoration: 'none', color: GH.ink }}
                             >
                                 {post.authorPhotoUrl ? (
                                     <img src={post.authorPhotoUrl} alt={post.authorName || ''} style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover' }} />
@@ -96,7 +100,7 @@ export function PostDetailPage() {
                                     <div style={{ width: 48, height: 48, borderRadius: '50%', background: GH.cellDead }} />
                                 )}
                                 <div>
-                                    <div style={{ ...ghMono, color: GH.ink30, fontSize: 9, marginBottom: 2 }}>АВТОР</div>
+                                    <div style={{ ...ghMono, color: GH.ink60, fontSize: 12, marginBottom: 2 }}>АВТОР</div>
                                     <div style={{ fontWeight: 700, fontSize: 15 }}>{post.authorName || 'Специалист Unbox'}</div>
                                     <div style={{ fontSize: 12, color: GH.accent }}>Профиль и запись →</div>
                                 </div>
