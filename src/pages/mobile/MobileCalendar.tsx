@@ -12,6 +12,7 @@ import type { BookingHistoryItem } from '../../store/types';
 import { COLOR } from '../../design/tokens';
 import { formatDateLabel, formatDayMonth } from '../../utils/format';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { tbilisiNow } from '../../utils/dateUtils';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 
@@ -236,6 +237,9 @@ export function MobileCalendar() {
                                 isOwnBooking={isOwnBooking}
                                 onTapOwn={(b) => setOpenBooking(b)}
                                 onTapEmpty={quickBook}
+                                // Прошедшие часы не подписываем «+ Свободно»:
+                                // вчера — весь день, сегодня — до текущего времени.
+                                freeFromMin={dayOffset < 0 ? Infinity : dayOffset === 0 ? tbilisiNow().totalMins : 0}
                             />
                         </div>
                     </>
@@ -306,11 +310,13 @@ export function MobileCalendar() {
 }
 
 /** Vertical timeline grid — 1 hour = HOUR_PX. Free hours are tappable. */
-function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
+function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty, freeFromMin }: {
     bookings: { b: BookingHistoryItem; startMin: number; endMin: number }[];
     isOwnBooking: (b: BookingHistoryItem) => boolean;
     onTapOwn: (b: BookingHistoryItem) => void;
     onTapEmpty: (hour: number) => void;
+    /** С какой минуты дня часы ещё впереди (подпись «+ Свободно»). */
+    freeFromMin: number;
 }) {
     const totalHours = DAY_END - DAY_START;
     const totalHeight = totalHours * HOUR_PX;
@@ -329,7 +335,8 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
                 const hour = DAY_START + i;
                 // «+ Свободно» — только если весь час свободен: при брони
                 // с :30 подпись вводила бы в заблуждение.
-                const free = !bookings.some(x => x.startMin < (hour + 1) * 60 && x.endMin > hour * 60);
+                const free = hour * 60 >= freeFromMin
+                    && !bookings.some(x => x.startMin < (hour + 1) * 60 && x.endMin > hour * 60);
                 return (
                     <button
                         key={hour}

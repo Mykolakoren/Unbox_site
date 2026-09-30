@@ -247,8 +247,8 @@ function GridHouseSubscriptions() {
                     )}
                     <p style={{ fontSize: 16, color: GH.ink80, maxWidth: 620, margin: 0, lineHeight: 1.5 }}>
                         Абонемент — пакет часов, с которым час выходит дешевле.
-                        Без абонемента — оплата по часам: кабинет <span className="num">20 ₾</span>,
-                        группа <span className="num">35 ₾</span>, капсула <span className="num">10 ₾</span>.
+                        Без абонемента — оплата по часам: кабинет <span className="num">{formatGel(20)}</span>,
+                        группа <span className="num">{formatGel(35)}</span>, капсула <span className="num">{formatGel(10)}</span>.
                     </p>
                 </div>
 
