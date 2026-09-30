@@ -18,6 +18,7 @@ import { parseUTC } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { statusLabel } from '../../design/statuses';
 
 /** «GEL» → «₾» для текста в окнах подтверждения. */
 function currencySymbol(code?: string): string {
@@ -32,12 +33,10 @@ const STATUS_COLORS: Record<string, string> = {
     CANCELLED_THERAPIST: 'bg-orange-100 text-orange-700',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-    PLANNED: 'Запланирована',
-    COMPLETED: 'Завершена',
-    CANCELLED_CLIENT: 'Отмена (клиент)',
-    CANCELLED_THERAPIST: 'Отмена (терапевт)',
-};
+// Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(
+    ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
+);
 
 // Тот же хук, что в DashboardOverview/LoginPage: карточка клиента была
 // единственным экраном CRM совсем без мобильной ветки — двухколоночная

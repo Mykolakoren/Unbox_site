@@ -395,6 +395,24 @@ def test_motion_config_reduced_motion():
     assert '<MotionConfig reducedMotion="user">' in app, "framer-motion не уважает «уменьшить движение»"
 
 
+def test_booking_and_session_labels_come_from_one_dictionary():
+    """Ревью 30.09: CRM уже брала подписи из src/design/statuses.ts, а админка и
+    мобильная админка держали свои копии («Ожидает»/«Завершена»/«Не пришёл») —
+    одна бронь называлась по-разному на соседних экранах."""
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    files = [
+        "src/pages/admin/Bookings.tsx", "src/pages/admin/Dashboard.tsx",
+        "src/pages/mobile/admin/MobileAdminBookings.tsx",
+        "src/components/landing/SpecialistPortalHero.tsx",
+        "src/pages/crm/CrmDashboard.tsx", "src/pages/crm/CrmSessions.tsx", "src/pages/crm/CrmClientDetail.tsx",
+    ]
+    for f in files:
+        src = open(os.path.join(root, f), encoding="utf-8").read()
+        assert "statusLabel(" in src, f"{f}: подписи статусов не из общего словаря"
+        for old in ("'Ожидает'", "'Завершена'", "'Не пришёл'", "'Актив'"):
+            assert old not in src, f"{f}: снова своя подпись статуса {old}"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

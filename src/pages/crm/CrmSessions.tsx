@@ -31,6 +31,7 @@ import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
 import { toGel } from '../../utils/currency';
 import { parseUTC } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { statusLabel } from '../../design/statuses';
 
 const STATUS_COLORS: Record<string, string> = {
     PLANNED: 'bg-blue-100 text-blue-700 border-blue-200',
@@ -39,12 +40,10 @@ const STATUS_COLORS: Record<string, string> = {
     CANCELLED_THERAPIST: 'bg-orange-100 text-orange-700 border-orange-200',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-    PLANNED: 'Запланирована',
-    COMPLETED: 'Завершена',
-    CANCELLED_CLIENT: 'Отмена (клиент)',
-    CANCELLED_THERAPIST: 'Отмена (терапевт)',
-};
+// Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(
+    ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
+);
 
 /** Parse a CRM session's date string.
  *

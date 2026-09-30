@@ -16,6 +16,7 @@ import { BookingPriceModal } from '../../components/admin/BookingPriceModal';
 import { ruCountWord } from '../../utils/plural';
 import { ExtendBookingModal, AddExtrasModal } from '../../components/admin/BookingTodayEditModals';
 import { subscriptionLifecycle } from '../../utils/subscription';
+import { statusLabel } from '../../design/statuses';
 
 type ViewMode = 'list' | 'grid';
 type TimeFilter = 'all' | 'today' | 'upcoming' | 'completed';
@@ -486,18 +487,12 @@ function GridHouseAdminBookings(props: GHAdminBookingsProps) {
 
     const statusOptions = [
         { value: 'all', label: 'Все' },
-        { value: 'pending_approval', label: 'Ожидает' },
-        { value: 'confirmed', label: 'Актив' },
-        { value: 'cancelled', label: 'Отмена' },
-        { value: 're-rented', label: 'Пересд.' },
+        ...(['pending_approval', 'confirmed', 'cancelled', 're-rented'] as const)
+            .map(v => ({ value: v, label: statusLabel('booking', v, 'staff') })),
     ];
 
-    const statusText = (s: string) =>
-        s === 'confirmed' ? 'Актив'
-        : s === 'cancelled' ? 'Отмена'
-        : s === 're-rented' ? 'Пересд.'
-        : s === 'pending_approval' ? 'Ожидает'
-        : s;
+    // Подписи статусов — из общего словаря, как в CRM и мобильной админке.
+    const statusText = (s: string) => statusLabel('booking', s, 'staff');
 
     return (
         <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>

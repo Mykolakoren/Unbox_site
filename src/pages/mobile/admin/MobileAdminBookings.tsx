@@ -7,6 +7,7 @@ import { useUserStore } from '../../../store/userStore';
 import { RESOURCES, LOCATIONS } from '../../../utils/data';
 import type { BookingHistoryItem } from '../../../store/types';
 import { AdminBookingSheets, getAdminUserName } from './bookingSheets';
+import { statusLabel } from '../../../design/statuses';
 
 /**
  * Mobile admin — bookings overview.
@@ -437,20 +438,20 @@ function Chip({ active, onClick, label }: { active: boolean; onClick: () => void
 function StatusBadge({ status }: { status: string }) {
     const map: Record<string, { bgVar: string; fgVar: string; label: string; icon?: any }> = {
         // Активные/будущие — выраженный цвет, иконка ок (это операционный state)
-        confirmed:        { bgVar: '--status-ok-bg',      fgVar: '--status-ok-fg',      label: 'Подтверждена', icon: Check },
-        pending_approval: { bgVar: '--status-pending-bg', fgVar: '--status-pending-fg', label: 'Ожидает',      icon: Clock },
+        confirmed:        { bgVar: '--status-ok-bg',      fgVar: '--status-ok-fg',      label: statusLabel('booking', 'confirmed', 'staff'), icon: Check },
+        pending_approval: { bgVar: '--status-pending-bg', fgVar: '--status-pending-fg', label: statusLabel('booking', 'pending_approval', 'staff'),      icon: Clock },
 
         // Завершённые/неактивные — мутный тон, без иконок. Они в прошлом,
         // не должны кричать.
-        completed:        { bgVar: '--status-muted-bg',   fgVar: '--status-muted-fg',   label: 'Завершена' },
-        cancelled:        { bgVar: '--status-muted-bg',   fgVar: '--status-danger-fg',  label: 'Отменена' },
-        're-rented':      { bgVar: '--status-muted-bg',   fgVar: '--status-info-fg',    label: 'Пересдана' },
-        rescheduled:      { bgVar: '--status-muted-bg',   fgVar: '--status-muted-fg',   label: 'Перенесена' },
+        completed:        { bgVar: '--status-muted-bg',   fgVar: '--status-muted-fg',   label: statusLabel('booking', 'completed', 'staff') },
+        cancelled:        { bgVar: '--status-muted-bg',   fgVar: '--status-danger-fg',  label: statusLabel('booking', 'cancelled', 'staff') },
+        're-rented':      { bgVar: '--status-muted-bg',   fgVar: '--status-info-fg',    label: statusLabel('booking', 're-rented', 'staff') },
+        rescheduled:      { bgVar: '--status-muted-bg',   fgVar: '--status-muted-fg',   label: statusLabel('booking', 'rescheduled', 'staff') },
         // No-show — единственный «прошедший» статус с тревожным тоном,
         // потому что это требует реакции админа (списать как штраф?).
-        no_show:          { bgVar: '--status-warn-bg',    fgVar: '--status-warn-fg',    label: 'Не пришёл',    icon: AlertTriangle },
+        no_show:          { bgVar: '--status-warn-bg',    fgVar: '--status-warn-fg',    label: statusLabel('booking', 'no_show', 'staff'),    icon: AlertTriangle },
     };
-    const s = map[status] || { bgVar: '--status-muted-bg', fgVar: '--status-muted-fg', label: status };
+    const s = map[status] || { bgVar: '--status-muted-bg', fgVar: '--status-muted-fg', label: statusLabel('booking', status, 'staff') };
     const Icon = s.icon;
     return (
         <span style={{

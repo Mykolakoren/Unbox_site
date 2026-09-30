@@ -8,6 +8,7 @@ import { hasCompletedTour } from '../OnboardingTour';
 import { MobileCrmTour, CRM_TOUR_PREFIX } from './MobileCrmTour';
 import { NotificationsBell } from '../NotificationsBell';
 import { loginPathWithRedirect } from '../../../utils/loginRedirect';
+import { forceUnlockScroll } from '../useScrollLock';
 // Wave 1: шрифт IBM Plex и общие токены, как в клиентской оболочке /m.
 import { COLOR, FONT, TEXT, Z } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
@@ -27,6 +28,11 @@ export function MobileCrmLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
     const navigate = useNavigate();
     const location = useLocation();
+    // Страховка, как в MobileLayout: при смене экрана снимаем лок прокрутки,
+    // если шторка не сняла его сама (лок держит и html, и body).
+    useEffect(() => {
+        forceUnlockScroll();
+    }, [location.pathname]);
     const [tourOpen, setTourOpen] = useState(false);
     useTouchDensity();
 

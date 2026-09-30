@@ -7,6 +7,7 @@ import { MobileAdminTour, ADMIN_TOUR_PREFIX } from './MobileAdminTour';
 import { NotificationsBell } from '../NotificationsBell';
 import { Z_TABBAR } from './sheetLayers';
 import { loginPathWithRedirect } from '../../../utils/loginRedirect';
+import { forceUnlockScroll } from '../useScrollLock';
 // Wave 1: шрифт IBM Plex и общие токены, как в клиентской оболочке /m.
 import { COLOR, FONT, TEXT } from '../../../design/tokens';
 import { useTouchDensity } from '../../../hooks/useTouchDensity';
@@ -24,6 +25,11 @@ export function MobileAdminLayout() {
     const { currentUser, fetchCurrentUser } = useUserStore();
     const navigate = useNavigate();
     const location = useLocation();
+    // Страховка, как в MobileLayout: при смене экрана снимаем лок прокрутки,
+    // если шторка не сняла его сама (лок держит и html, и body).
+    useEffect(() => {
+        forceUnlockScroll();
+    }, [location.pathname]);
     const [tourOpen, setTourOpen] = useState(false);
     useTouchDensity();
 

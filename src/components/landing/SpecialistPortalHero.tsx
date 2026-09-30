@@ -14,6 +14,7 @@ import { RESOURCES } from '../../utils/data';
 import { crmApi } from '../../api/crm';
 import type { User } from '../../store/types';
 import type { BookingHistoryItem } from '../../store/types';
+import { statusLabel } from '../../design/statuses';
 
 // ── Panel styles (post-Liquid Glass) ─────────────────────────────────────────
 const glassPanel: React.CSSProperties = {
@@ -70,12 +71,12 @@ function BookingCard({ booking }: { booking: BookingHistoryItem }) {
     })();
 
     const statusColors: Record<string, { bg: string; text: string; label: string }> = {
-        confirmed: { bg: 'rgba(71,109,107,0.12)', text: 'rgb(71,109,107)', label: 'Подтверждена' },
-        completed: { bg: 'rgba(107,114,128,0.10)', text: 'rgb(107,114,128)', label: 'Завершена' },
-        cancelled: { bg: 'rgba(239,68,68,0.10)', text: 'rgb(239,68,68)', label: 'Отменена' },
-        'no_show': { bg: 'rgba(245,158,11,0.10)', text: 'rgb(245,158,11)', label: 'Не пришёл' },
-        rescheduled: { bg: 'rgba(99,102,241,0.10)', text: 'rgb(99,102,241)', label: 'Перенесена' },
-        're-rented': { bg: 'rgba(168,85,247,0.10)', text: 'rgb(168,85,247)', label: 'Пересдана' },
+        confirmed: { bg: 'rgba(71,109,107,0.12)', text: 'rgb(71,109,107)', label: statusLabel('booking', 'confirmed') },
+        completed: { bg: 'rgba(107,114,128,0.10)', text: 'rgb(107,114,128)', label: statusLabel('booking', 'completed') },
+        cancelled: { bg: 'rgba(239,68,68,0.10)', text: 'rgb(239,68,68)', label: statusLabel('booking', 'cancelled') },
+        'no_show': { bg: 'rgba(245,158,11,0.10)', text: 'rgb(245,158,11)', label: statusLabel('booking', 'no_show') },
+        rescheduled: { bg: 'rgba(99,102,241,0.10)', text: 'rgb(99,102,241)', label: statusLabel('booking', 'rescheduled') },
+        're-rented': { bg: 'rgba(168,85,247,0.10)', text: 'rgb(168,85,247)', label: statusLabel('booking', 're-rented') },
     };
 
     const st = statusColors[booking.status] ?? statusColors.confirmed;

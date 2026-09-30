@@ -13,6 +13,7 @@ import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 // format() без русской локали. Теперь общие форматтеры.
 import { formatDayMonth, formatMonthLabel } from '../../utils/format';
 import type { BookingHistoryItem, User as AppUser } from '../../store/types';
+import { statusLabel } from '../../design/statuses';
 
 
 export function AdminDashboard() {
@@ -339,7 +340,7 @@ function GridHouseAdminDashboard({
                     {recentBookings.map((b, i) => {
                         const clientName = users.find(u => u.email === b.userId)?.name || b.userId;
                         const statusColor = b.status === 'confirmed' ? GH.accent : b.status === 'cancelled' ? GH.ink30 : b.status === 're-rented' ? GH.ink : GH.ink60;
-                        const statusText = b.status === 'confirmed' ? 'Подтв.' : b.status === 'cancelled' ? 'Отмен.' : b.status === 're-rented' ? 'Пересд.' : b.status;
+                        const statusText = statusLabel('booking', b.status, 'staff');
                         if (narrow) {
                             return (
                                 <button

@@ -395,7 +395,7 @@ function ActionRow({
 }: { label: string; sub?: string; icon: React.ReactNode; tone?: 'ok' | 'danger'; busy?: boolean; onClick: () => void }) {
     const bgVar = tone === 'danger' ? '--status-danger-bg'
         : tone === 'ok' ? '--status-ok-bg'
-        : '--color-surface';
+        : '--color-sunken';
     const fgVar = tone === 'danger' ? '--status-danger-solid'
         : tone === 'ok' ? '--status-ok-fg'
         : '--color-ink';
