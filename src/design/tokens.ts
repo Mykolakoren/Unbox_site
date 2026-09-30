@@ -27,6 +27,9 @@ export const COLOR = {
     ink08: 'rgba(15,15,16,0.08)',
     ink05: 'rgba(15,15,16,0.05)',
     onInk: '#FAFAF7',   // текст на тёмном
+    overlay: 'rgba(15,15,16,0.45)', // затемнение фона под шторкой/окном
+    sidebar: '#F0ECDD',       // боковая панель админки
+    sidebarNarrow: '#F3EFE2', // она же в узком виде
     // Бирюза Unbox — только «выбрано», фокус и главная кнопка.
     accent: '#476D6B',
     accentHover: '#3B5B59',
@@ -39,17 +42,19 @@ export const COLOR = {
 
 /** Статусы — единственные цвета со смыслом. fg на своём bg ≥ 4.5:1.
  *  ok — оплачено/подтверждено, pending — ждём, danger — долг/отмена/опасно,
- *  info — нейтрально-информационное (запланировано), muted — прошло. */
+ *  info — нейтрально-информационное (запланировано), muted — прошло,
+ *  warn — «внимание» (не деньги: например, оранжевый результат теста). */
 export const STATUS = {
     ok: { bg: '#E6F4EA', fg: '#1B6E36' },
     pending: { bg: '#FEF3C7', fg: '#8A5A00' },
     danger: { bg: '#FEE2E2', fg: '#991B1B' },
     info: { bg: '#DBEAFE', fg: '#1E40AF' },
     muted: { bg: '#EEEEEE', fg: '#555555' },
+    warn: { bg: '#FFEDD5', fg: '#7C2D12' },
     dangerSolid: '#C8253A', // заливка опасной кнопки
 } as const;
 
-export type StatusTone = 'ok' | 'pending' | 'danger' | 'info' | 'muted';
+export type StatusTone = 'ok' | 'pending' | 'danger' | 'info' | 'muted' | 'warn';
 
 export const FONT = {
     sans: '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -93,6 +98,7 @@ export const Z = {
     nav: 100,
     sheetBackdrop: 200,
     sheet: 201,
+    tour: 300,   // экскурсия /m: фон tour, подсветка tour+1, карточка tour+2
     dialog: 10050,
     toast: 10100,
     tooltip: 10200,

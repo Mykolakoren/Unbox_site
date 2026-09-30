@@ -143,16 +143,17 @@ def test_ts_mirror_matches_css():
         "ink20": "--color-ink-20", "ink10": "--color-ink-10", "ink08": "--color-ink-08", "ink05": "--color-ink-05",
         "accent": "--color-accent", "accentHover": "--color-accent-hover", "accentInk": "--color-accent-ink",
         "accentSoft": "--color-accent-soft", "onAccent": "--color-on-accent", "unboxGrey": "--color-unbox-grey",
+        "overlay": "--color-overlay", "sidebar": "--color-sidebar", "sidebarNarrow": "--color-sidebar-narrow",
     }
     for key, css_name in pairs.items():
         assert _norm(ts_val(key)) == _norm(t[css_name]), f"COLOR.{key} ≠ {css_name} ({ts_val(key)} vs {t[css_name]})"
-    for tone in ("ok", "pending", "danger", "info", "muted"):
+    for tone in ("ok", "pending", "danger", "info", "muted", "warn"):
         m = re.search(rf"{tone}: \{{ bg: '([^']+)', fg: '([^']+)' \}}", ts)
         assert m, f"в tokens.ts нет STATUS.{tone}"
         assert _norm(m.group(1)) == _norm(t[f"--status-{tone}-bg"]), f"STATUS.{tone}.bg ≠ css"
         assert _norm(m.group(2)) == _norm(t[f"--status-{tone}-fg"]), f"STATUS.{tone}.fg ≠ css"
     zmap = {"dropdown": "dropdown", "sticky": "sticky", "nav": "nav", "sheetBackdrop": "sheet-backdrop",
-            "sheet": "sheet", "dialog": "dialog", "toast": "toast", "tooltip": "tooltip"}
+            "sheet": "sheet", "tour": "tour", "dialog": "dialog", "toast": "toast", "tooltip": "tooltip"}
     for key, css_key in zmap.items():
         m = re.search(rf"\b{key}: (\d+),", ts)
         assert m and int(m.group(1)) == int(t[f"--z-{css_key}"]), f"Z.{key} ≠ --z-{css_key}"

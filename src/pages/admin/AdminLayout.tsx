@@ -12,6 +12,7 @@ import { NotificationBell } from '../../components/admin/NotificationBell';
 import { hasPermission } from '../../utils/permissions';
 import { loginPathWithRedirect } from '../../utils/loginRedirect';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { COLOR } from '../../design/tokens';
 
 const NAV_ITEMS = [
     { path: '/admin',             icon: LayoutDashboard, label: 'Дашборд',       exact: true },
@@ -31,8 +32,8 @@ const ADMIN_ROLES = ['admin', 'senior_admin', 'owner'];
 
 // Тёплый фон боковой панели Grid House. Своего токена пока нет (запрос
 // в needs_foundation волны 1) — держим значения в одном месте, а не в 8.
-const SIDEBAR_BG = '#F0ECDD';
-const SIDEBAR_BG_NARROW = '#F3EFE2';
+const SIDEBAR_BG = COLOR.sidebar;
+const SIDEBAR_BG_NARROW = COLOR.sidebarNarrow;
 
 export function AdminLayout() {
     const location = useLocation();

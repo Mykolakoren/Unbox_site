@@ -2,7 +2,7 @@ import { useLayoutEffect, useState } from 'react';
 import { useScrollLock } from './useScrollLock';
 import { ArrowRight, Calendar, CheckCircle2, Compass, Home, Search, Smartphone, User as UserIcon, X } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { COLOR, FONT } from '../../design/tokens';
+import { COLOR, FONT, Z } from '../../design/tokens';
 
 /**
  * First-visit onboarding tour for /m.
@@ -176,7 +176,7 @@ export function OnboardingTour({
             style={{
                 position: 'fixed',
                 inset: 0,
-                zIndex: 300,
+                zIndex: Z.tour,
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
@@ -209,7 +209,7 @@ export function OnboardingTour({
                     alignItems: 'center',
                     gap: 6,
                     backdropFilter: 'blur(4px)',
-                    zIndex: 302,
+                    zIndex: Z.tour + 2,
                 }}
             >
                 <X size={14} /> Пропустить
@@ -231,7 +231,7 @@ export function OnboardingTour({
                     flexDirection: 'column',
                     gap: 14,
                     animation: 'tourSlideUp 280ms ease-out',
-                    zIndex: 302,
+                    zIndex: Z.tour + 2,
                     // Lift the card above the bottom-tab bar so spotlight on a
                     // tab is still visible above the card. The card sits at
                     // the very bottom of the viewport; with tabs ~72px tall,
@@ -439,7 +439,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                     position: 'fixed',
                     inset: 0,
                     background: `${COLOR.ink}BF`,
-                    zIndex: 301,
+                    zIndex: Z.tour + 1,
                 }}
             />
         );
@@ -456,7 +456,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                     position: 'fixed',
                     inset: 0,
                     background: 'transparent',
-                    zIndex: 301,
+                    zIndex: Z.tour + 1,
                 }}
             />
             <div
@@ -473,7 +473,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                     // size cap (200vmax) ensures coverage on any device.
                     boxShadow: `0 0 0 200vmax ${COLOR.ink}BF, 0 0 0 3px ${COLOR.onInk}E6`,
                     transition: 'top 200ms ease, left 200ms ease, width 200ms ease, height 200ms ease',
-                    zIndex: 301,
+                    zIndex: Z.tour + 1,
                 }}
             />
         </>

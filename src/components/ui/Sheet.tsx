@@ -35,6 +35,8 @@ export interface SheetProps {
     /** Заголовок обязателен — по нему экранный диктор называет окно. */
     title: ReactNode;
     description?: ReactNode;
+    /** Небольшое действие в шапке рядом с крестиком (например, «Прочитать все»). */
+    headerAction?: ReactNode;
     children?: ReactNode;
     /** Подвал с действиями. Первой ставьте главную кнопку. */
     footer?: ReactNode;
@@ -72,7 +74,7 @@ const FOCUSABLE = [
 ].join(',');
 
 function SheetPanel({
-    onClose, title, description, children, footer,
+    onClose, title, description, headerAction, children, footer,
     mode = 'auto', layer = 'sheet', width, dismissible = true,
     initialFocus, role = 'dialog', className,
 }: SheetProps) {
@@ -198,6 +200,7 @@ function SheetPanel({
                                 <h2 id={titleId} className="ui-sheet__title">{title}</h2>
                                 {description && <p id={descId} className="ui-sheet__desc">{description}</p>}
                             </div>
+                            {headerAction && <div className="ui-sheet__action">{headerAction}</div>}
                             {dismissible && (
                                 <button type="button" className="ui-sheet__close" onClick={onClose} aria-label="Закрыть">
                                     <X size={20} aria-hidden="true" />

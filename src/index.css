@@ -32,6 +32,9 @@
   --color-ink-05:  rgba(15,15,16,0.05);   /* подложка при наведении */
   --color-ink-04:  rgba(15,15,16,0.04);
   --color-on-ink:  #FAFAF7;   /* текст на тёмном */
+  --color-overlay: rgba(15,15,16,0.45);   /* затемнение фона под шторкой/окном */
+  --color-sidebar:        #F0ECDD;   /* боковая панель админки */
+  --color-sidebar-narrow: #F3EFE2;   /* она же в узком (свёрнутом) виде */
 
   /* ── Бирюза Unbox — только «выбрано», фокус и главная кнопка ──
    * Не путать с зелёным «оплачено» (--status-ok-*). */
@@ -95,6 +98,7 @@
   --z-nav:            100;     /* нижнее меню /m */
   --z-sheet-backdrop: 200;
   --z-sheet:          201;
+  --z-tour:           300;     /* экскурсия по /m: фон 300, подсветка 301, карточка 302 */
   --z-dialog:         10050;   /* подтверждения — выше старых модалок (1000/9999/10000) */
   --z-toast:          10100;
   --z-tooltip:        10200;
@@ -110,8 +114,8 @@
 
   /* Статусы — единственные цвета со смыслом (StatusBadge, ErrorBar, …).
    * ok — оплачено/подтверждено, pending — ждём, danger — долг/отмена/
-   * опасно, info — запланировано, muted — прошло. warn — легаси, новое не
-   * красим. Контрасты выверены: fg на своём bg ≥ 4.5:1. */
+   * опасно, info — запланировано, muted — прошло, warn — «внимание»
+   * (оранжевый результат теста и т.п., не деньги). Контрасты выверены: fg на своём bg ≥ 4.5:1. */
   --status-ok-bg:        #E6F4EA;
   --status-ok-fg:        #1B6E36;  /* 5.7:1 on bg */
   --status-pending-bg:   #FEF3C7;
@@ -125,6 +129,21 @@
   --status-muted-bg:     #EEEEEE;
   --status-muted-fg:     #555555;  /* 7.5:1 */
   --status-danger-solid: #C8253A;  /* for emphasis text on light bg */
+
+  /* Те же статусы как цвета Tailwind: text-status-ok-fg, bg-status-danger-bg
+   * — вместо text-[color:var(--status-…)]. Значения не дублируем. */
+  --color-status-ok-bg:      var(--status-ok-bg);
+  --color-status-ok-fg:      var(--status-ok-fg);
+  --color-status-pending-bg: var(--status-pending-bg);
+  --color-status-pending-fg: var(--status-pending-fg);
+  --color-status-danger-bg:  var(--status-danger-bg);
+  --color-status-danger-fg:  var(--status-danger-fg);
+  --color-status-info-bg:    var(--status-info-bg);
+  --color-status-info-fg:    var(--status-info-fg);
+  --color-status-warn-bg:    var(--status-warn-bg);
+  --color-status-warn-fg:    var(--status-warn-fg);
+  --color-status-muted-bg:   var(--status-muted-bg);
+  --color-status-muted-fg:   var(--status-muted-fg);
 }
 
 /* ── Prevent horizontal scroll on mobile ── */
