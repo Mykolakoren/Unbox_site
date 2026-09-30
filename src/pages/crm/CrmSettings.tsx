@@ -10,17 +10,12 @@ import { api } from '../../api/client';
 import { toast } from 'sonner';
 import { CURRENCIES, EXCHANGE_RATES, fetchExchangeRates, registerCurrenciesFromRates } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-
-const glassCard: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.45)',
-    backdropFilter: 'blur(24px) saturate(150%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-    border: '1px solid rgba(255,255,255,0.60)',
-    boxShadow: '0 4px 16px rgba(71,109,107,0.06), inset 0 1px 0 rgba(255,255,255,0.70)',
-};
+import { STATUS } from '../../design/tokens';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 
 export function CrmSettings() {
         const { fetchPaymentAccounts } = useCrmStore();
+    const { confirm } = useConfirmDialog();
     const [calendarId, setCalendarId] = useState('');
     const [calendarSaved, setCalendarSaved] = useState(false);
     const [sourceOfTruth, setSourceOfTruth] = useState(false);
@@ -92,6 +87,18 @@ export function CrmSettings() {
 
     const handleToggleSourceOfTruth = async () => {
         const newVal = !sourceOfTruth;
+        // Включение — опасное (удаление в Google отменит сессию и снимет бронь),
+        // поэтому спрашиваем; выключение (защитный режим) — сразу (G5-25).
+        if (newVal) {
+            const ok = await confirm({
+                title: 'Сделать Google Calendar главным?',
+                body: 'Удалили событие в Google — сессия отменится, а привязанная бронь кабинета снимется автоматически. Удаляйте события осознанно.',
+                confirmLabel: 'Сделать главным',
+                cancelLabel: 'Оставить защитный режим',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setSotSaving(true);
         try {
             await crmApi.updateSettings({ googleCalendarSourceOfTruth: newVal });
@@ -152,9 +159,9 @@ export function CrmSettings() {
 const GHS_HAIRLINE = `1px solid ${GH.ink10}`;
 const GHS_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -206,9 +213,9 @@ function GridHouseCrmSettings({
         background: GH.ink,
         color: GH.paper,
         fontFamily: GH_MONO,
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: 600,
-        letterSpacing: '0.18em',
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         padding: '12px 18px',
         border: 'none',
@@ -227,7 +234,7 @@ function GridHouseCrmSettings({
         const rate = parseFloat(newCurRate);
         if (!/^[A-Z]{2,6}$/.test(code)) { toast.error('Код валюты — 2-6 латинских букв (напр. UAH)'); return; }
         if (CURRENCIES.some(cu => cu.code === code)) { toast.error('Такая валюта уже есть'); return; }
-        if (!rate || rate <= 0) { toast.error('Укажите курс к GEL (сколько лари стоит 1 единица)'); return; }
+        if (!rate || rate <= 0) { toast.error('Укажите курс: сколько лари (₾) стоит 1 единица'); return; }
         registerCurrenciesFromRates({ [code]: rate });
         setRates(r => ({ ...r, [code]: rate }));
         setNewCurCode('');
@@ -274,15 +281,12 @@ function GridHouseCrmSettings({
                 <div style={{ border: `1px solid ${GH.ink10}`, padding: 20, background: GH.paper }}>
                     <PaymentAccountsManager />
                 </div>
-                <div style={{ ...GHS_MONO_LABEL, color: GH.ink30, marginTop: 12 }}>
-                    → Унаследованный компонент
-                </div>
             </GHSSection>
 
             {/* ── Section 02 · Currencies & rates ── */}
             <GHSSection num={2} title="Валюты и курсы">
                 <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Coins size={12} /> Курсы к GEL для расчёта эквивалента
+                    <Coins size={12} /> Курсы к лари (₾) для расчёта эквивалента
                 </div>
 
                 <div style={{ borderTop: `2px solid ${GH.ink}` }}>
@@ -319,7 +323,7 @@ function GridHouseCrmSettings({
                                     fontFamily: GH_MONO,
                                     fontSize: 13,
                                     fontWeight: 600,
-                                    letterSpacing: '0.1em',
+                                    letterSpacing: '0.06em',
                                     color: GH.ink,
                                 }}
                             >
@@ -327,7 +331,7 @@ function GridHouseCrmSettings({
                             </div>
                             {c.code !== 'GEL' ? (
                                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                    <span style={{ ...GHS_MONO_LABEL, color: GH.ink30 }}>1 {c.code} =</span>
+                                    <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>1 {c.code} =</span>
                                     <input
                                         type="number"
                                         step="0.001"
@@ -347,7 +351,7 @@ function GridHouseCrmSettings({
                                             fontVariantNumeric: 'tabular-nums',
                                         }}
                                     />
-                                    <span style={{ ...GHS_MONO_LABEL, color: GH.ink30 }}>GEL</span>
+                                    <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>₾</span>
                                 </div>
                             ) : (
                                 <span style={{ ...GHS_MONO_LABEL, color: GH.ink, fontWeight: 600 }}>
@@ -369,7 +373,7 @@ function GridHouseCrmSettings({
                         style={{ ...inputStyle, width: 110, textTransform: 'uppercase' }}
                     />
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink30 }}>1 ед. =</span>
+                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>1 ед. =</span>
                         <input
                             type="number"
                             step="0.001"
@@ -378,20 +382,20 @@ function GridHouseCrmSettings({
                             placeholder="0.065"
                             style={{ ...inputStyle, width: 90, textAlign: 'right' }}
                         />
-                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink30 }}>GEL</span>
+                        <span style={{ ...GHS_MONO_LABEL, color: GH.ink60 }}>₾</span>
                     </div>
                     <button onClick={addCurrency} style={{ ...inkBtn(), padding: '10px 14px' }}>
                         ＋ Добавить валюту
                     </button>
                 </div>
-                <div style={{ ...GHS_MONO_LABEL, color: GH.ink30, marginTop: 8 }}>
+                <div style={{ ...GHS_MONO_LABEL, color: GH.ink60, marginTop: 8 }}>
                     Валюту счёта можно привязать в «Платёжных счетах» — платёж этим счётом сразу пойдёт в ней
                 </div>
 
                 {hasRateChanges && (
                     <button onClick={onSaveRates} disabled={ratesSaving} style={{ ...inkBtn(ratesSaving), marginTop: 20 }}>
                         <Save size={14} />
-                        {ratesSaving ? 'Сохраняю' : 'Сохранить курсы'}
+                        {ratesSaving ? 'Сохраняем…' : 'Сохранить курсы'}
                     </button>
                 )}
             </GHSSection>
@@ -459,8 +463,8 @@ function GridHouseCrmSettings({
                             onClick={onCopyServiceAccount}
                             style={{
                                 fontFamily: GH_MONO,
-                                fontSize: 10,
-                                letterSpacing: '0.14em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                                 padding: '6px 10px',
                                 background: 'transparent',
@@ -504,7 +508,7 @@ function GridHouseCrmSettings({
                             {connTest.state === 'loading'
                                 ? <Loader2 size={14} className="animate-spin" />
                                 : <ShieldCheck size={14} />}
-                            {connTest.state === 'loading' ? 'Проверяю' : 'Проверить подключение'}
+                            {connTest.state === 'loading' ? 'Проверяем…' : 'Проверить подключение'}
                         </button>
                         {connTest.state === 'ok' && (
                             <span
@@ -514,7 +518,7 @@ function GridHouseCrmSettings({
                                     gap: 6,
                                     fontFamily: GH_SANS,
                                     fontSize: 13,
-                                    color: GH.accent,
+                                    color: STATUS.ok.fg,
                                 }}
                             >
                                 <CheckCircle size={14} /> {connTest.message}
@@ -527,8 +531,8 @@ function GridHouseCrmSettings({
                                 marginTop: 14,
                                 padding: '10px 14px',
                                 border: `1px solid ${GH.danger}`,
-                                background: 'rgba(220,38,38,0.04)',
-                                color: GH.danger,
+                                background: STATUS.danger.bg,
+                                color: STATUS.danger.fg,
                                 fontFamily: GH_SANS,
                                 fontSize: 13,
                                 lineHeight: 1.55,
@@ -610,7 +614,7 @@ function GridHouseCrmSettings({
             </GHSSection>
 
             {/* Footer */}
-            <div style={{ ...GHS_MONO_LABEL, textAlign: 'center', padding: '32px 0 24px', color: GH.ink30 }}>
+            <div style={{ ...GHS_MONO_LABEL, textAlign: 'center', padding: '32px 0 24px', color: GH.ink60 }}>
                 Unbox · Конфигурация · {new Date().getFullYear()}
             </div>
         </div>
@@ -624,8 +628,8 @@ function GHSSection({ num, title, children }: { num: number; title: string; chil
                 <div
                     style={{
                         fontFamily: GH_MONO,
-                        fontSize: 11,
-                        letterSpacing: '0.1em',
+                        fontSize: 12,
+                        letterSpacing: '0.06em',
                         color: GH.ink60,
                         fontVariantNumeric: 'tabular-nums',
                         paddingTop: 6,

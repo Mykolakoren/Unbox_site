@@ -1,24 +1,21 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
-    Calendar,
     Plus,
     Check,
     X,
     Loader2,
     Banknote,
-    ChevronLeft,
-    ChevronRight,
     Pencil,
     Trash2,
-    ChevronDown,
     LayoutGrid,
-    List,
     RefreshCw,
+    Unlink,
+    AlertTriangle,
 } from 'lucide-react';
 import {
-    format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
+    format, startOfMonth, endOfMonth, addMonths, subMonths, addDays,
     startOfWeek, endOfWeek, addWeeks, subWeeks, eachDayOfInterval, isToday as isTodayFn,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -28,17 +25,33 @@ import { crmApi } from '../../api/crm';
 import type { CrmSession, CrmSessionCreate, CrmSessionUpdate, CrmClient, CrmPayment } from '../../api/crm';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 import { DeleteSessionModal } from '../../components/crm/DeleteSessionModal';
-import { toGel } from '../../utils/currency';
+import { toGel, CURRENCIES } from '../../utils/currency';
 import { parseUTC } from '../../utils/dateUtils';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { statusLabel } from '../../design/statuses';
+import { statusLabel, getStatusDef } from '../../design/statuses';
+import { STATUS } from '../../design/tokens';
+import { formatMoney, formatGel, formatDayMonth, formatDateLabel, formatMonthLabel, formatTime } from '../../utils/format';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
 
-const STATUS_COLORS: Record<string, string> = {
-    PLANNED: 'bg-blue-100 text-blue-700 border-blue-200',
-    COMPLETED: 'bg-green-100 text-green-700 border-green-200',
-    CANCELLED_CLIENT: 'bg-red-100 text-red-600 border-red-200',
-    CANCELLED_THERAPIST: 'bg-orange-100 text-orange-700 border-orange-200',
-};
+/** «GEL» → «₾» в подписях полей («Цена, ₾»). */
+const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
+
+/** «1 сессия / 2 сессии / 5 сессий». */
+function sessionsWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'сессия';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
+    return 'сессий';
+}
+
+/** «5 октября, 09:00» (год — только если не текущий). */
+function dayTime(d: Date): string {
+    return `${formatDayMonth(d, { withYear: 'auto' })}, ${formatTime(d)}`;
+}
 
 // Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
 const STATUS_LABELS: Record<string, string> = Object.fromEntries(
@@ -74,8 +87,10 @@ type ViewMode = 'list' | 'week' | 'chess';
 export function CrmSessions() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { sessions, clients, fetchSessions, fetchClients, createSession, updateSession, deleteSession, quickPaySession, loading } =
+    const { sessions, clients, fetchSessions, fetchClients, createSession, updateSession, deleteSession, quickPaySession, loading, error } =
         useCrmStore();
+    // Пока первый ответ не пришёл — скелетон, а не «Сессий нет» (rule 8).
+    const [fetchedOnce, setFetchedOnce] = useState(false);
     const [view, setView] = useState<ViewMode>('list');
     const [chessDate, setChessDate] = useState<Date | undefined>();
     // Default: show previous month with COMPLETED filter so history is visible on first open
@@ -147,7 +162,7 @@ export function CrmSessions() {
         fetchSessions({
             dateFrom,
             dateTo,
-        });
+        }).finally(() => setFetchedOnce(true));
     }, [fetchSessions, dateFrom, dateTo]);
 
     // Fetch payments for the month independently (local state, no store collision)
@@ -237,7 +252,7 @@ export function CrmSessions() {
         });
         const debtEntries = Object.entries(debtByCur).filter(([, v]) => v > 0);
         const debtLabel = debtEntries.length > 0
-            ? debtEntries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
+            ? debtEntries.map(([cur, val]) => formatMoney(val, { currency: cur, fraction: 0 })).join(' · ')
             : '';
 
         // «Заработано» — из ЗАВЕРШЁННЫХ ОПЛАЧЕННЫХ сессий этого месяца (по дате сессии).
@@ -254,10 +269,10 @@ export function CrmSessions() {
         });
         const earnedEntries = Object.entries(earnedByCur).filter(([, v]) => v > 0);
         const earnedLabel = earnedEntries.length > 0
-            ? earnedEntries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
-            : '0';
+            ? earnedEntries.map(([cur, val]) => formatMoney(val, { currency: cur, fraction: 0 })).join(' · ')
+            : formatGel(0);
         const earnedGelTotal = earnedEntries.reduce((s, [cur, val]) => s + toGel(val, cur), 0);
-        const earnedGel = earnedEntries.length > 1 ? `≈ ${earnedGelTotal.toFixed(0)} ₾` : '';
+        const earnedGel = earnedEntries.length > 1 ? `≈ ${formatGel(earnedGelTotal, { fraction: 0 })}` : '';
 
         // «Касса» — ВСЕ платежи, датированные месяцем (реальная валюта платежа).
         // Включает оплату прошлых долгов и пополнения без сессии → это кэш-флоу, НЕ
@@ -269,11 +284,11 @@ export function CrmSessions() {
         });
         const entries = Object.entries(revByCur).filter(([, v]) => v > 0);
         const revenueLabel = entries.length > 0
-            ? entries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ')
-            : '0';
+            ? entries.map(([cur, val]) => formatMoney(val, { currency: cur, fraction: 0 })).join(' · ')
+            : formatGel(0);
         // GEL equivalent
         const gelTotal = entries.reduce((s, [cur, val]) => s + toGel(val, cur), 0);
-        const revenueGel = entries.length > 1 ? `≈ ${gelTotal.toFixed(0)} ₾` : '';
+        const revenueGel = entries.length > 1 ? `≈ ${formatGel(gelTotal, { fraction: 0 })}` : '';
 
         return { planned, completed, unpaidCount, debtLabel, revenueLabel, revenueGel, earnedLabel, earnedGel };
     }, [sessions, monthPayments, monthStart, monthEnd, clientMap]);
@@ -329,7 +344,9 @@ export function CrmSessions() {
             stats={stats}
             upcomingGroups={upcomingGroups} pastGroups={pastGroups}
             sessions={sessions} clientMap={clientMap}
-            clients={clients} loading={loading}
+            clients={clients} loading={loading || !fetchedOnce}
+            loadError={fetchedOnce && !loading ? error : null}
+            onRetry={() => { fetchClients(); fetchSessions({ dateFrom, dateTo }); }}
             createSession={createSession} updateSession={updateSession}
             deleteSession={deleteSession} quickPaySession={quickPaySession}
             handleBookCab={handleBookCab}
@@ -378,27 +395,27 @@ function WeekCalendar({
                 const past = day < new Date() && !today;
 
                 return (
-                    <div key={dayStr} className={`bg-white/70 rounded-2xl border overflow-hidden ${today ? 'border-unbox-green/40' : 'border-white/80'}`}>
+                    <div key={dayStr} className={`bg-card/70 rounded-2xl border overflow-hidden ${today ? 'border-unbox-green/40' : 'border-white/80'}`}>
                         {/* Day header */}
-                        <div className={`flex items-center justify-between px-4 py-2.5 ${today ? 'bg-unbox-green/5' : past ? 'bg-gray-50/60' : 'bg-white/50'}`}>
+                        <div className={`flex items-center justify-between px-4 py-2.5 ${today ? 'bg-unbox-green/5' : past ? 'bg-gray-50/60' : 'bg-card/50'}`}>
                             <div className="flex items-center gap-2">
-                                <span className={`text-sm font-semibold capitalize ${today ? 'text-unbox-green' : past ? 'text-unbox-grey' : 'text-unbox-dark'}`}>
+                                <span className={`text-sm font-semibold capitalize ${today ? 'text-unbox-green' : past ? 'text-ink-60' : 'text-unbox-dark'}`}>
                                     {format(day, 'EEEE', { locale: ru })}
                                 </span>
-                                <span className={`text-xs ${today ? 'text-unbox-green font-medium' : 'text-unbox-grey'}`}>
-                                    {format(day, 'd MMMM', { locale: ru })}
+                                <span className={`text-xs ${today ? 'text-unbox-green font-medium' : 'text-ink-60'}`}>
+                                    {formatDayMonth(day)}
                                     {today && ' · Сегодня'}
                                 </span>
                                 {daySessions.length > 0 && (
                                     <span className="text-xs bg-unbox-green/10 text-unbox-green px-1.5 py-0.5 rounded-md font-medium">
-                                        {daySessions.length} сессий
+                                        {daySessions.length} {sessionsWord(daySessions.length)}
                                     </span>
                                 )}
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={() => onBookRoom(dayStr)}
-                                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-light bg-white hover:bg-unbox-light/40 text-unbox-grey hover:text-unbox-dark transition-colors"
+                                    className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-unbox-light bg-card hover:bg-unbox-light/40 text-ink-60 hover:text-unbox-dark transition-colors"
                                 >
                                     <LayoutGrid className="w-3 h-3" />
                                     Кабинеты
@@ -426,38 +443,41 @@ function WeekCalendar({
                                         <div key={session.id}>
                                             <div className="flex items-center gap-3 px-4 py-2.5">
                                                 <div className="text-sm font-bold text-unbox-dark w-12 shrink-0">{format(dt, 'HH:mm')}</div>
+                                                {/* Полоска — цвет статуса из общего словаря (--status-*). */}
                                                 <div className="w-0.5 h-8 rounded-full shrink-0" style={{
-                                                    background: effectiveStatus === 'COMPLETED' ? '#22c55e' : effectiveStatus.startsWith('CANCELLED') ? '#f97316' : '#476D6B',
+                                                    background: STATUS[getStatusDef('session', effectiveStatus).tone].fg,
                                                 }} />
                                                 <div className="flex-1 min-w-0">
                                                     <div
                                                         className="text-sm font-medium text-unbox-dark hover:text-unbox-green cursor-pointer transition-colors"
                                                         onClick={(e) => { e.stopPropagation(); if (session.clientId) navigate(`/crm/clients/${session.clientId}`); }}
                                                     >{client?.name || 'Клиент'}</div>
-                                                    <div className="text-xs text-unbox-grey">{session.durationMinutes} мин · {STATUS_LABELS[effectiveStatus]}</div>
+                                                    <div className="text-xs text-ink-60">{session.durationMinutes} мин · {STATUS_LABELS[effectiveStatus]}</div>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 shrink-0">
                                                     {session.isBooked ? (
-                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">Каб ✓</span>
+                                                        <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]">
+                                                            <Check className="w-3 h-3" aria-hidden="true" /> Кабинет
+                                                        </span>
                                                     ) : !isCancelled && (
                                                         <button
                                                             onClick={() => onBookCab?.(session, client?.name || 'Клиент')}
-                                                            className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors"
-                                                        >+Каб</button>
+                                                            className="text-xs px-1.5 py-0.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                                                        >+ Кабинет</button>
                                                     )}
-                                                    <div className="font-semibold text-xs text-unbox-dark">{session.price ?? client?.basePrice ?? '—'} ₾</div>
+                                                    <div className="font-semibold text-xs text-unbox-dark">{formatMoney(session.price ?? client?.basePrice, { currency: client?.currency })}</div>
                                                     {!session.isPaid && !isCancelled && (
                                                         <button
                                                             onClick={async () => {
-                                                                try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); }
+                                                                try { await quickPaySession(session.id); toast.success('Оплата отмечена'); } catch { toast.error('Не удалось отметить оплату'); }
                                                             }}
-                                                            className="p-1 bg-green-50 hover:bg-green-100 text-green-600 rounded-lg transition-colors"
-                                                            title="Быстрая оплата"
+                                                            className="inline-flex items-center gap-1 text-xs px-2 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
                                                         >
-                                                            <Banknote className="w-3.5 h-3.5" />
+                                                            <Banknote className="w-3.5 h-3.5" aria-hidden="true" />
+                                                            Отметить оплату
                                                         </button>
                                                     )}
-                                                    <button onClick={() => setEditingId(isEditing ? null : session.id)} className="p-1 hover:bg-unbox-light/50 text-unbox-grey hover:text-unbox-green rounded-lg transition-colors">
+                                                    <button onClick={() => setEditingId(isEditing ? null : session.id)} aria-label="Изменить сессию" title="Изменить сессию" className="p-1 hover:bg-unbox-light/50 text-ink-60 hover:text-unbox-green rounded-lg transition-colors">
                                                         <Pencil className="w-3.5 h-3.5" />
                                                     </button>
                                                 </div>
@@ -468,7 +488,7 @@ function WeekCalendar({
                                                     clientCurrency={client?.currency}
                                                     clientDefaultAccount={client?.defaultAccount}
                                                     onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
-                                                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
+                                                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплата отмечена'); }}
                                                     onCancel={() => setEditingId(null)}
                                                     onBookCab={() => onBookCab(session, client?.name || 'Клиент')}
                                                     onRefresh={() => useCrmStore.getState().fetchSessions()}
@@ -479,7 +499,7 @@ function WeekCalendar({
                                 })}
                             </div>
                         ) : (
-                            <div className="px-4 py-3 text-xs text-unbox-grey/60 italic">Нет сессий</div>
+                            <div className="px-4 py-3 text-xs text-ink-60 italic">Нет сессий</div>
                         )}
                     </div>
                 );
@@ -488,291 +508,8 @@ function WeekCalendar({
     );
 }
 
-// ── Day Group ─────────────────────────────────────────────────────────────────
-
-function DayGroup({
-    day,
-    daySessions,
-    clientMap,
-    editingId,
-    setEditingId,
-    updateSession,
-    deleteSession,
-    quickPaySession,
-    onBookRoom,
-    onBookCab,
-}: {
-    day: string;
-    daySessions: CrmSession[];
-    clientMap: Map<string, CrmClient>;
-    editingId: string | null;
-    setEditingId: (id: string | null) => void;
-    updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
-    deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
-    quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
-    onBookRoom?: (day: string) => void;
-    onBookCab?: (session: CrmSession, clientName: string) => void;
-}) {
-    const navigate = useNavigate();
-    return (
-        <div>
-            <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-semibold text-unbox-dark capitalize bg-white/80 backdrop-blur-sm px-3 py-1 rounded-lg shadow-sm">
-                    {format(parseISO(day), 'EEEE, d MMMM', { locale: ru })}
-                </div>
-                {onBookRoom && (
-                    <button
-                        onClick={() => onBookRoom(day)}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-unbox-light bg-white hover:bg-unbox-light/40 text-unbox-grey hover:text-unbox-dark transition-colors"
-                    >
-                        <Calendar className="w-3.5 h-3.5" />
-                        Забронировать кабинет
-                    </button>
-                )}
-            </div>
-            <div className="space-y-2">
-                {daySessions
-                    .sort((a, b) => b.date.localeCompare(a.date))
-                    .map((session) => {
-                        const client = clientMap.get(session.clientId);
-                        const dt = parseSessionDate(session.date);
-                        const isEditing = editingId === session.id;
-                        const effectiveStatus = getEffectiveStatus(session);
-                        const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
-                        return (
-                            <div key={session.id} className="space-y-0">
-                                <div
-                                    className={`glass-card rounded-xl p-4 flex items-center gap-4 transition-all cursor-pointer ${
-                                        isEditing
-                                            ? 'border-unbox-green rounded-b-none ring-1 ring-unbox-green/20'
-                                            : !session.isPaid && !isCancelled
-                                            ? 'border-orange-200/80'
-                                            : ''
-                                    }`}
-                                >
-                                    <div className="w-14 text-center shrink-0">
-                                        <div className="text-lg font-bold text-unbox-dark">{format(dt, 'HH:mm')}</div>
-                                        <div className="text-xs text-unbox-grey">{session.durationMinutes} мин</div>
-                                    </div>
-                                    <div className="w-px h-10 bg-unbox-light shrink-0" />
-                                    <div className="flex-1 min-w-0">
-                                        <div
-                                            className="font-medium text-unbox-dark truncate hover:text-unbox-green cursor-pointer transition-colors"
-                                            onClick={(e) => { e.stopPropagation(); if (session.clientId) navigate(`/crm/clients/${session.clientId}`); }}
-                                        >
-                                            {client?.name || 'Неизвестный клиент'}
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                            <StatusBadgeDropdown
-                                                session={session}
-                                                onUpdate={async (status) => {
-                                                    await updateSession(session.id, { status });
-                                                    toast.success('Статус обновлён');
-                                                }}
-                                            />
-                                            {session.isBooked ? (
-                                                <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">
-                                                    Кабинет ✓
-                                                </span>
-                                            ) : !isCancelled && (
-                                                <button
-                                                    onClick={() => onBookCab?.(session, client?.name || 'Клиент')}
-                                                    className="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors"
-                                                >
-                                                    + Кабинет
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="text-right shrink-0 flex items-center gap-2">
-                                        <div>
-                                            <div className="font-semibold text-unbox-dark">
-                                                {session.price ?? client?.basePrice ?? '—'} {client?.currency || '₾'}
-                                            </div>
-                                            {session.isPaid ? (
-                                                <span className="text-xs text-green-600">Оплачено</span>
-                                            ) : (
-                                                <span className="text-xs text-orange-500">Не оплачено</span>
-                                            )}
-                                        </div>
-                                        {!session.isPaid && !isCancelled && (
-                                            <button
-                                                onClick={async () => {
-                                                    try {
-                                                        const result = await quickPaySession(session.id);
-                                                        toast.success(`Оплачено: ${result.amount} ${result.currency}`);
-                                                    } catch (e: any) {
-                                                        toast.error(e.message || 'Ошибка');
-                                                    }
-                                                }}
-                                                className="p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-lg transition-colors"
-                                                title="Быстрая оплата"
-                                            >
-                                                <Banknote className="w-4 h-4" />
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => setEditingId(isEditing ? null : session.id)}
-                                            className={`p-2 rounded-lg transition-colors ${
-                                                isEditing
-                                                    ? 'bg-unbox-light text-unbox-green'
-                                                    : 'hover:bg-unbox-light/50 text-unbox-grey hover:text-unbox-green'
-                                            }`}
-                                            title="Редактировать"
-                                        >
-                                            <Pencil className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={async () => {
-                                                if (!confirm('Удалить сессию?')) return;
-                                                try {
-                                                    await deleteSession(session.id);
-                                                    toast.success('Сессия удалена');
-                                                } catch (e: any) {
-                                                    toast.error(e.message || 'Ошибка');
-                                                }
-                                            }}
-                                            className="p-2 hover:bg-red-50 text-unbox-grey hover:text-red-500 rounded-lg transition-colors"
-                                            title="Удалить"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </div>
-                                {isEditing && (
-                                    <SessionEditPanel
-                                        session={session}
-                                        clientCurrency={client?.currency}
-                                        clientDefaultAccount={client?.defaultAccount}
-                                        onSave={async (data) => {
-                                            await updateSession(session.id, data);
-                                            setEditingId(null);
-                                            toast.success('Сессия обновлена');
-                                        }}
-                                        onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
-                                        onCancel={() => setEditingId(null)}
-                                        onBookCab={onBookCab ? () => onBookCab(session, client?.name || 'Клиент') : undefined}
-                                        onDelete={async () => {
-                                            // DayGroup keeps the legacy confirm path — sessions here are
-                                            // less likely to be part of a series and the GH list view (which
-                                            // covers recurring) already has the smarter modal.
-                                            if (!confirm('Удалить сессию?')) return;
-                                            try {
-                                                await deleteSession(session.id);
-                                                setEditingId(null);
-                                                toast.success('Сессия удалена');
-                                            } catch { toast.error('Ошибка'); }
-                                        }}
-                                        onRefresh={() => useCrmStore.getState().fetchSessions()}
-                                    />
-                                )}
-                            </div>
-                        );
-                    })}
-            </div>
-        </div>
-    );
-}
-
-// ── Status Badge Dropdown ─────────────────────────────────────────────────────
-
-function StatusBadgeDropdown({
-    session,
-    onUpdate,
-}: {
-    session: CrmSession;
-    onUpdate: (status: string) => Promise<void>;
-}) {
-    const [open, setOpen] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
-    const effectiveStatus = getEffectiveStatus(session);
-    const past = isPastSession(session);
-
-    // Close on outside click
-    useEffect(() => {
-        if (!open) return;
-        const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [open]);
-
-    const options = past
-        ? ['COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST']
-        : ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'];
-
-    const handleSelect = async (status: string) => {
-        setOpen(false);
-        if (status === effectiveStatus && !(session.status === 'PLANNED' && status === 'COMPLETED')) return;
-        setSaving(true);
-        try {
-            await onUpdate(status);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div ref={ref} className="relative">
-            <button
-                onClick={() => setOpen((v) => !v)}
-                disabled={saving}
-                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                    STATUS_COLORS[effectiveStatus] || 'bg-unbox-light/50'
-                } ${past ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-            >
-                {saving ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                    STATUS_LABELS[effectiveStatus] || effectiveStatus
-                )}
-                {past && <ChevronDown className="w-3 h-3 opacity-60" />}
-            </button>
-            {open && (
-                <div className="absolute left-0 top-full mt-1 z-10 bg-white border border-unbox-light rounded-xl shadow-lg py-1 min-w-[160px]">
-                    {options.map((s) => (
-                        <button
-                            key={s}
-                            onClick={() => handleSelect(s)}
-                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-unbox-light/40 transition-colors flex items-center gap-2 ${
-                                s === effectiveStatus ? 'font-medium' : ''
-                            }`}
-                        >
-                            <span
-                                className={`w-2 h-2 rounded-full ${
-                                    s === 'COMPLETED'
-                                        ? 'bg-green-500'
-                                        : s === 'CANCELLED_CLIENT'
-                                        ? 'bg-red-500'
-                                        : s === 'CANCELLED_THERAPIST'
-                                        ? 'bg-orange-500'
-                                        : 'bg-blue-500'
-                                }`}
-                            />
-                            {STATUS_LABELS[s]}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// ── Mini Stat ────────────────────────────────────────────────────────────────
-
-function MiniStat({ label, value, color, subtitle, className }: { label: string; value: number | string; color?: string; subtitle?: string; className?: string }) {
-    const textColor = color === 'red' ? 'text-red-600' : color === 'green' ? 'text-green-600' : 'text-unbox-dark';
-    const accentClass = color === 'red' ? 'stat-accent-red' : color === 'green' ? 'stat-accent-green' : 'stat-accent';
-    return (
-        <div className={`glass-card rounded-xl p-4 ${accentClass} ${className || ''}`}>
-            <div className={`text-2xl font-bold tracking-tight ${textColor}`}>{value}</div>
-            <div className="text-xs text-unbox-grey mt-0.5 font-medium">{label}</div>
-            {subtitle && <div className={`text-[11px] mt-1 font-medium ${textColor} opacity-70`}>{subtitle}</div>}
-        </div>
-    );
-}
+// DayGroup / StatusBadgeDropdown / MiniStat — старый список сессий до Grid House.
+// Нигде не рендерились (мёртвый код с системным окном браузера и цветами Tailwind), удалены в wave 1.
 
 // ── Session Edit Panel ────────────────────────────────────────────────────────
 
@@ -804,6 +541,7 @@ function SessionEditPanel({
     onRefresh?: () => Promise<void> | void;
 }) {
     const clients = useCrmStore(s => s.clients);
+    const { confirm } = useConfirmDialog();
     const [date, setDate] = useState(format(parseSessionDate(session.date), "yyyy-MM-dd'T'HH:mm"));
     const [duration, setDuration] = useState(String(session.durationMinutes));
     const [status, setStatus] = useState(getEffectiveStatus(session));
@@ -862,7 +600,16 @@ function SessionEditPanel({
     // owner). Default false = soft detach so the cabinet booking can be
     // re-attached to a different session (e.g. wrong client originally).
     const handleDetachCabinet = async (cancelToo: boolean) => {
-        if (cancelToo && !confirm('Отменить кабинетную бронь? Деньги вернутся на баланс.')) return;
+        if (cancelToo) {
+            const ok = await confirm({
+                title: 'Отменить бронь кабинета?',
+                body: 'Кабинет отвяжется от сессии, а деньги за бронь вернутся на баланс.',
+                confirmLabel: 'Отменить бронь',
+                cancelLabel: 'Оставить',
+                tone: 'danger',
+            });
+            if (!ok) return;
+        }
         setSaving(true);
         try {
             const { crmApi } = await import('../../api/crm');
@@ -882,7 +629,13 @@ function SessionEditPanel({
     // pick a new one. The new booking will re-link itself when created.
     const handleChangeCabinet = async () => {
         if (!onBookCab) return;
-        if (!confirm('Отвязать текущий кабинет и выбрать новый?')) return;
+        const ok = await confirm({
+            title: 'Поменять кабинет?',
+            body: 'Отвяжем текущий кабинет и откроем выбор нового. Старая бронь останется — её можно отменить отдельно.',
+            confirmLabel: 'Отвязать и выбрать новый',
+            cancelLabel: 'Оставить',
+        });
+        if (!ok) return;
         setSaving(true);
         try {
             const { crmApi } = await import('../../api/crm');
@@ -908,7 +661,7 @@ function SessionEditPanel({
                         type="datetime-local"
                         value={date}
                         onChange={(e) => setDate(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     />
                 </div>
                 <div>
@@ -916,7 +669,7 @@ function SessionEditPanel({
                     <select
                         value={duration}
                         onChange={(e) => setDuration(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     >
                         <option value="30">30 мин</option>
                         <option value="45">45 мин</option>
@@ -931,23 +684,23 @@ function SessionEditPanel({
                     <select
                         value={status}
                         onChange={(e) => setStatus(e.target.value as typeof status)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     >
-                        <option value="PLANNED">Запланирована</option>
-                        <option value="COMPLETED">Завершена</option>
-                        <option value="CANCELLED_CLIENT">Отмена (клиент)</option>
-                        <option value="CANCELLED_THERAPIST">Отмена (терапевт)</option>
+                        {/* Слова — из общего словаря статусов (statuses.ts). */}
+                        {['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => (
+                            <option key={k} value={k}>{STATUS_LABELS[k]}</option>
+                        ))}
                     </select>
                 </div>
                 <div>
                     <label className="text-xs font-medium text-unbox-dark mb-1 block">
-                        Цена {clientCurrency ? `(${clientCurrency})` : ''}
+                        Цена, {currencySign(clientCurrency)}
                     </label>
                     <input
                         type="number"
                         value={price}
                         onChange={(e) => setPrice(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     />
                 </div>
             </div>
@@ -959,14 +712,14 @@ function SessionEditPanel({
                     <select
                         value={clientId}
                         onChange={(e) => setClientId(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white max-w-xs"
+                        className="w-full px-2 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card max-w-xs"
                     >
                         {clients.map(c => (
                             <option key={c.id} value={c.id}>{c.name}{c.aliasCode ? ` #${c.aliasCode}` : ''}</option>
                         ))}
                     </select>
                     {clientId !== session.clientId && (
-                        <p className="text-[10px] text-orange-500 mt-0.5">Клиент будет изменён</p>
+                        <p className="text-xs text-[var(--status-pending-fg)] mt-0.5">Клиент будет изменён</p>
                     )}
                 </div>
             )}
@@ -986,7 +739,7 @@ function SessionEditPanel({
                         <AccountSelect
                             value={account}
                             onChange={setAccount}
-                            className="px-2 py-1 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                            className="px-2 py-1 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                         />
                     )}
                 </div>
@@ -1004,7 +757,7 @@ function SessionEditPanel({
                     */}
                     {/* Cabinet controls — three-state:
                           • not booked yet  → "+ Кабинет"
-                          • booked          → "↻ Поменять кабинет" + "✗ Отвязать"
+                          • booked          → "Поменять кабинет" + "Отвязать кабинет"
                           • cancelled       → hidden
                        Hidden entirely when the session itself is cancelled because
                        attaching a cabinet to a cancelled session is meaningless. */}
@@ -1016,20 +769,20 @@ function SessionEditPanel({
                                         type="button"
                                         onClick={handleChangeCabinet}
                                         disabled={saving}
-                                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-400 text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-400 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
                                         title="Отвязать текущий кабинет и выбрать новый (старая бронь останется и её можно отдельно отменить)"
                                     >
-                                        ↻ Поменять кабинет
+                                        <RefreshCw className="w-3 h-3" aria-hidden="true" /> Поменять кабинет
                                     </button>
                                 )}
                                 <button
                                     type="button"
                                     onClick={() => handleDetachCabinet(false)}
                                     disabled={saving}
-                                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-400 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-400 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
                                     title="Снять связь сессии с кабинетной бронью (сама бронь останется)"
                                 >
-                                    ⊘ Отвязать
+                                    <Unlink className="w-3 h-3" aria-hidden="true" /> Отвязать кабинет
                                 </button>
                             </>
                         ) : (
@@ -1051,10 +804,10 @@ function SessionEditPanel({
                             type="button"
                             onClick={handleQuickCancel}
                             disabled={saving}
-                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-amber-400 text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-400 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
                             title="Отметить сессию как отменённую (статус меняется, запись остаётся)"
                         >
-                            ✗ Отменить
+                            <X className="w-3 h-3" aria-hidden="true" /> Отменить сессию
                         </button>
                     )}
                     {onDelete && (
@@ -1062,16 +815,16 @@ function SessionEditPanel({
                             type="button"
                             onClick={onDelete}
                             disabled={saving}
-                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-[var(--status-danger-fg)]/40 text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] transition-colors disabled:opacity-50"
                             title="Удалить сессию полностью (с возможностью удалить всю серию)"
                         >
-                            🗑 Удалить
+                            <Trash2 className="w-3 h-3" aria-hidden="true" /> Удалить
                         </button>
                     )}
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="px-3 py-1.5 text-xs text-unbox-grey hover:bg-unbox-light/50 rounded-lg transition-colors"
+                        className="px-3 py-1.5 text-xs text-ink-60 hover:bg-unbox-light/50 rounded-lg transition-colors"
                     >
                         Закрыть
                     </button>
@@ -1137,19 +890,19 @@ function SessionForm({
     return (
         <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2"
+            className="bg-card rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2"
         >
             <div className="flex items-center justify-between">
                 <h3 className="font-bold text-lg">Новая сессия</h3>
                 <button type="button" onClick={onCancel} className="p-1 hover:bg-unbox-light/50 rounded-lg">
-                    <X className="w-5 h-5 text-unbox-grey" />
+                    <X className="w-5 h-5 text-ink-60" />
                 </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Клиент <span className="text-red-500">*</span>
+                        Клиент <span className="text-[var(--status-danger-fg)]">*</span>
                     </label>
                     <select
                         value={clientId}
@@ -1167,7 +920,7 @@ function SessionForm({
                 </div>
                 <div>
                     <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Дата и время <span className="text-red-500">*</span>
+                        Дата и время <span className="text-[var(--status-danger-fg)]">*</span>
                     </label>
                     <input
                         type="datetime-local"
@@ -1194,7 +947,7 @@ function SessionForm({
                 </div>
                 <div>
                     <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Стоимость {selectedClient && `(${selectedClient.currency})`}
+                        Стоимость{selectedClient && `, ${currencySign(selectedClient.currency)}`}
                     </label>
                     <input
                         type="number"
@@ -1210,7 +963,7 @@ function SessionForm({
                 <button
                     type="button"
                     onClick={onCancel}
-                    className="px-4 py-2 text-sm text-unbox-grey hover:bg-unbox-light/50 rounded-xl transition-colors"
+                    className="px-4 py-2 text-sm text-ink-60 hover:bg-unbox-light/50 rounded-xl transition-colors"
                 >
                     Отмена
                 </button>
@@ -1250,6 +1003,8 @@ interface GHSessionsProps {
     clientMap: Map<string, CrmClient>;
     clients: CrmClient[];
     loading: boolean;
+    loadError: string | null;
+    onRetry: () => void;
     createSession: (data: CrmSessionCreate) => Promise<any>;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
     deleteSession: (id: string, scope?: 'this' | 'future') => Promise<{ deleted: number; deletedGcal: number }>;
@@ -1259,8 +1014,11 @@ interface GHSessionsProps {
     navigate: ReturnType<typeof useNavigate>;
 }
 
-const ghsMono = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const, color: GH.ink60 };
+const ghsMono = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60 };
 const ghsHairline = `1px solid ${GH.ink10}`;
+// Колонки таблицы сессий: шапка и строки — одна сетка. Кнопки в строке —
+// полными словами 12 px (раньше «Pay / +Каб / Ред. / Уд.» 8 px в 120 px).
+const GH_ROW_COLUMNS = '64px minmax(0, 1fr) 56px 96px 170px 248px';
 
 function useGHNarrow(bp = 768) {
     const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
@@ -1279,7 +1037,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
     const STATUS_TABS: { key: string; label: string }[] = [
         { key: 'all', label: 'Все' },
         { key: 'PLANNED', label: 'Запланированы' },
-        { key: 'COMPLETED', label: 'Завершены' },
+        { key: 'COMPLETED', label: 'Прошли' },
         { key: 'CANCELLED_CLIENT', label: 'Отменены' },
     ];
 
@@ -1317,8 +1075,8 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                             <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
                                 {p.stats.completed}
                             </span>
-                            <span style={{ ...ghsMono, fontSize: 9 }}>
-                                завершено · {format(p.currentMonth, 'LLLL', { locale: ru })}
+                            <span style={{ ...ghsMono, fontSize: 12 }}>
+                                прошло · {formatMonthLabel(p.currentMonth)}
                             </span>
                         </span>
                     </div>
@@ -1329,7 +1087,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         {[
                             { label: 'Запланировано', value: String(p.stats.planned), color: undefined as string | undefined, sub: undefined as string | undefined, multiline: false, hint: 'Сессии этого месяца, которые ещё впереди' },
                             { label: 'Не оплачено', value: String(p.stats.unpaidCount), color: p.stats.unpaidCount > 0 ? GH.danger : undefined, sub: p.stats.debtLabel, multiline: false, hint: 'Прошедшие сессии без оплаты — долг клиентов за всё время' },
-                            { label: 'Заработано', value: p.stats.earnedLabel, color: GH.accent, sub: p.stats.earnedGel, multiline: true, hint: 'Проведённые и оплаченные сессии этого месяца — по дате сессии' },
+                            { label: 'Заработано', value: p.stats.earnedLabel, color: undefined, sub: p.stats.earnedGel, multiline: true, hint: 'Проведённые и оплаченные сессии этого месяца — по дате сессии' },
                             { label: 'Касса · с долгами', value: p.stats.revenueLabel, color: GH.ink60, sub: p.stats.revenueGel, multiline: true, hint: 'Все деньги, полученные в этом месяце, включая оплату старых долгов. Бывает больше или меньше «Заработано»' },
                         ].map(kpi => (
                             <div key={kpi.label} title={kpi.hint} style={{ textAlign: 'right' as const, minWidth: 0, cursor: 'help' }}>
@@ -1344,8 +1102,8 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                 }}>
                                     {kpi.multiline && ghNarrow ? kpi.value.split(' · ').join('\n') : kpi.value}
                                 </div>
-                                <div style={{ ...ghsMono, fontSize: 9 }}>{kpi.label}</div>
-                                {kpi.sub && <div style={{ ...ghsMono, fontSize: 9, color: kpi.color || GH.ink30 }}>{kpi.sub}</div>}
+                                <div style={{ ...ghsMono, fontSize: 12 }}>{kpi.label}</div>
+                                {kpi.sub && <div style={{ ...ghsMono, fontSize: 12, color: kpi.color || GH.ink60 }}>{kpi.sub}</div>}
                             </div>
                         ))}
                     </div>
@@ -1358,7 +1116,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         </button>
                         <button
                             onClick={() => { p.setPrefillDate(null); p.setShowForm(true); }}
-                            style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '8px 16px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}
+                            style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, padding: '8px 16px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}
                         >
                             + Новая
                         </button>
@@ -1373,7 +1131,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         key={v.key}
                         onClick={() => p.setView(v.key)}
                         style={{
-                            fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                             padding: '8px 18px',
                             background: p.view === v.key ? GH.ink : 'transparent',
                             color: p.view === v.key ? GH.paper : GH.ink60,
@@ -1416,14 +1174,16 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         {/* Week nav */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                             <button onClick={() => p.setWeekAnchor(d => subWeeks(d, 1))}
+                                aria-label="Предыдущая неделя"
                                 style={{ ...ghsMono, padding: '8px 12px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
                                 &larr;
                             </button>
-                            <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.08em' }}>
-                                {format(startOfWeek(p.weekAnchor, { weekStartsOn: 1 }), 'd MMM', { locale: ru })} &ndash;{' '}
-                                {format(endOfWeek(p.weekAnchor, { weekStartsOn: 1 }), 'd MMM yyyy', { locale: ru })}
+                            <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em' }}>
+                                {formatDayMonth(startOfWeek(p.weekAnchor, { weekStartsOn: 1 }))} &ndash;{' '}
+                                {formatDayMonth(endOfWeek(p.weekAnchor, { weekStartsOn: 1 }), { withYear: 'auto' })}
                             </span>
                             <button onClick={() => p.setWeekAnchor(d => addWeeks(d, 1))}
+                                aria-label="Следующая неделя"
                                 style={{ ...ghsMono, padding: '8px 12px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
                                 &rarr;
                             </button>
@@ -1449,13 +1209,15 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: 24, paddingBottom: 12, borderBottom: ghsHairline }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <button onClick={() => p.setCurrentMonth(subMonths(p.currentMonth, 1))}
+                                    aria-label="Предыдущий месяц"
                                     style={{ ...ghsMono, padding: '6px 10px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
                                     &larr;
                                 </button>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.08em', textTransform: 'capitalize', minWidth: 120, textAlign: 'center' as const }}>
-                                    {format(p.currentMonth, 'LLLL yyyy', { locale: ru })}
+                                <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'capitalize', minWidth: 120, textAlign: 'center' as const }}>
+                                    {formatMonthLabel(p.currentMonth, { capitalize: true })}
                                 </span>
                                 <button onClick={() => p.setCurrentMonth(addMonths(p.currentMonth, 1))}
+                                    aria-label="Следующий месяц"
                                     style={{ ...ghsMono, padding: '6px 10px', background: 'transparent', border: ghsHairline, cursor: 'pointer' }}>
                                     &rarr;
                                 </button>
@@ -1466,7 +1228,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                         key={s.key}
                                         onClick={() => p.setStatusFilter(s.key)}
                                         style={{
-                                            fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                             padding: '8px 14px', background: 'transparent',
                                             color: p.statusFilter === s.key ? GH.ink : GH.ink60,
                                             border: 'none',
@@ -1481,39 +1243,55 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         </div>
 
                         {/* Table header */}
+                        {p.loadError && (
+                            <ErrorBar
+                                message="Не удалось загрузить сессии"
+                                onRetry={p.onRetry}
+                                retrying={p.loading}
+                                className="mt-3"
+                            />
+                        )}
+
                         {!p.loading && allRows.length > 0 && !ghNarrow && (
                             <div style={{
-                                display: 'grid', gridTemplateColumns: '70px 1fr 80px 100px 100px 120px',
+                                display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: 12,
                                 padding: '8px 0', borderBottom: ghsHairline,
                             }}>
                                 {['Время', 'Клиент', 'Длит.', 'Цена', 'Статус', ''].map(h => (
-                                    <div key={h || 'act'} style={{ ...ghsMono, fontSize: 9 }}>{h}</div>
+                                    <div key={h || 'act'} style={{ ...ghsMono, fontSize: 12 }}>{h}</div>
                                 ))}
                             </div>
                         )}
 
-                        {/* Session rows */}
+                        {/* Session rows. Загрузка ≠ ошибка ≠ пусто (rule 8). */}
                         {p.loading && !allRows.length ? (
-                            <div style={{ padding: '80px 0', textAlign: 'center' }}>
-                                <div style={ghsMono}>Загрузка...</div>
+                            <div role="status" aria-busy="true" style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                <span className="sr-only">Загружаем сессии…</span>
+                                {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={20} radius={0} />)}
                             </div>
                         ) : allRows.length === 0 ? (
-                            <div style={{ padding: '80px 0', textAlign: 'center' }}>
-                                <h2 style={{ fontFamily: GH_SANS, fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', color: GH.ink30 }}>
-                                    Сессий нет.
-                                </h2>
-                            </div>
+                            p.loadError ? null : (
+                                <EmptyState
+                                    title={p.statusFilter === 'all' ? 'В этом месяце сессий нет' : 'Сессий с таким статусом нет'}
+                                    hint={p.statusFilter === 'all'
+                                        ? 'Добавьте сессию или подтяните её из Google Calendar.'
+                                        : 'Новые сессии попадают во «Все» и «Запланированы».'}
+                                    action={p.statusFilter === 'all'
+                                        ? { label: 'Новая сессия', onClick: () => { p.setPrefillDate(null); p.setShowForm(true); } }
+                                        : { label: 'Показать все', onClick: () => p.setStatusFilter('all') }}
+                                />
+                            )
                         ) : (
                             <div>
                                 {allRows.map(([day, daySessions]) => (
                                     <div key={day}>
                                         {/* Day header */}
                                         <div style={{ padding: '16px 0 6px', borderBottom: ghsHairline }}>
-                                            <span style={{ fontFamily: GH_SANS, fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>
-                                                {format(parseISO(day), 'EEEE, d MMMM', { locale: ru })}
+                                            <span style={{ fontFamily: GH_SANS, fontSize: 13, fontWeight: 600 }}>
+                                                {formatDateLabel(day, { capitalize: true })}
                                             </span>
-                                            <span style={{ ...ghsMono, marginLeft: 12, fontSize: 9 }}>
-                                                {daySessions.length} сесс.
+                                            <span style={{ ...ghsMono, marginLeft: 12, fontSize: 12 }}>
+                                                {daySessions.length} {sessionsWord(daySessions.length)}
                                             </span>
                                         </div>
                                         {/* Sessions */}
@@ -1550,14 +1328,14 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
             {/* Legacy sync modal */}
             {p.showSyncModal && (
                 <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => p.setShowSyncModal(false)}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <div className="p-6 space-y-5">
                             <div className="flex items-center justify-between">
                                 <h3 className="text-lg font-bold text-unbox-dark flex items-center gap-2">
                                     <RefreshCw className="w-5 h-5 text-unbox-green" />
                                     Синхронизация с Google Calendar
                                 </h3>
-                                <button onClick={() => p.setShowSyncModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <button onClick={() => p.setShowSyncModal(false)} aria-label="Закрыть" className="text-ink-60 hover:text-gray-600">
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
@@ -1589,23 +1367,23 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                     {p.syncResult.dryRun ? (
                                         <>
                                             <div className="flex justify-between"><span className="text-gray-500">Узнали клиента</span><span className="font-medium">{p.syncResult.matched ?? 0}</span></div>
-                                            <div className="flex justify-between"><span className="text-gray-500">Новых карточек клиентов</span><span className="font-medium text-green-600">{(p.syncResult.wouldCreateNames || []).filter((n: any) => !n.looksNonClient && !p.syncExcluded.has(n.name)).length}</span></div>
+                                            <div className="flex justify-between"><span className="text-gray-500">Новых карточек клиентов</span><span className="font-medium text-[var(--status-ok-fg)]">{(p.syncResult.wouldCreateNames || []).filter((n: any) => !n.looksNonClient && !p.syncExcluded.has(n.name)).length}</span></div>
                                         </>
                                     ) : (
                                         <>
-                                            <div className="flex justify-between"><span className="text-gray-500">Создано</span><span className="font-medium text-green-600">{p.syncResult.created ?? 0}</span></div>
+                                            <div className="flex justify-between"><span className="text-gray-500">Создано</span><span className="font-medium text-[var(--status-ok-fg)]">{p.syncResult.created ?? 0}</span></div>
                                             <div className="flex justify-between"><span className="text-gray-500">Обновлено</span><span className="font-medium">{p.syncResult.updated ?? 0}</span></div>
                                         </>
                                     )}
                                     {p.syncResult.dryRun && (p.syncResult.wouldCreateNames || []).length > 0 && (
-                                        <div className="mt-2 p-2.5 rounded-lg bg-white border border-gray-200">
+                                        <div className="mt-2 p-2.5 rounded-lg bg-card border border-gray-200">
                                             <div className="font-semibold text-unbox-dark">Кто станет новой карточкой клиента</div>
                                             <div className="text-xs text-gray-500 mt-0.5 mb-1.5">
                                                 Снимите галочку, если это не клиент — такие события не будут превращаться в карточки и при автосинке.
                                             </div>
                                             {(p.syncResult.wouldCreateNames || []).map((n: any) => (
                                                 n.looksNonClient ? (
-                                                    <div key={n.name} className="text-xs text-gray-400 py-1" title="Похоже на личное дело — карточку не создадим">
+                                                    <div key={n.name} className="text-xs text-ink-60 py-1" title="Похоже на личное дело — карточку не создадим">
                                                         — {n.name} <span className="italic">(похоже не клиент, пропустим)</span>
                                                     </div>
                                                 ) : (
@@ -1618,25 +1396,26 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                                                 if (e.target.checked) next.delete(n.name); else next.add(n.name);
                                                                 p.setSyncExcluded(next);
                                                             }}
-                                                            className="w-4 h-4 accent-emerald-600"
+                                                            className="w-4 h-4 accent-unbox-green"
                                                         />
-                                                        <span className={p.syncExcluded.has(n.name) ? 'text-gray-400 line-through' : ''}>{n.name}</span>
+                                                        <span className={p.syncExcluded.has(n.name) ? 'text-ink-60 line-through' : ''}>{n.name}</span>
                                                     </label>
                                                 )
                                             ))}
                                         </div>
                                     )}
                                     {(p.syncResult.calendarDuplicatesCount ?? 0) > 0 && (
-                                        <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
-                                            <div className="font-semibold text-amber-800">
-                                                ⚠ Дубли в календаре: {p.syncResult.calendarDuplicatesCount}
+                                        <div className="mt-2 p-2.5 rounded-lg bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
+                                            <div className="font-semibold flex items-center gap-1.5">
+                                                <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                                Дубли в календаре: {p.syncResult.calendarDuplicatesCount}
                                             </div>
-                                            <div className="text-xs text-amber-700 mt-1">
+                                            <div className="text-xs mt-1">
                                                 На одну встречу стоит несколько событий — удалите лишнее в Google Calendar:
                                             </div>
                                             {(p.syncResult.calendarDuplicates ?? []).slice(0, 6).map((d: any, i: number) => (
-                                                <div key={i} className="text-xs text-amber-800 mt-0.5">
-                                                    • {d.summary} — {d.date ? new Date(d.date).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'} (×{d.count})
+                                                <div key={i} className="text-xs mt-0.5">
+                                                    • {d.summary} — {d.date ? `${formatDayMonth(d.date)}, ${formatTime(d.date)}` : '—'} (×{d.count})
                                                 </div>
                                             ))}
                                         </div>
@@ -1646,11 +1425,11 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                             <div className="flex gap-3">
                                 <button onClick={() => p.handleSync(true)} disabled={p.syncing}
                                     className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors">
-                                    {p.syncing ? '...' : 'Предпросмотр'}
+                                    {p.syncing ? 'Проверяем…' : 'Предпросмотр'}
                                 </button>
                                 <button onClick={() => p.handleSync(false)} disabled={p.syncing}
                                     className="flex-1 px-4 py-2.5 bg-unbox-green text-white rounded-xl text-sm font-medium hover:bg-unbox-dark disabled:opacity-50 transition-colors">
-                                    {p.syncing ? '...' : 'Синхронизировать'}
+                                    {p.syncing ? 'Синхронизируем…' : 'Синхронизировать'}
                                 </button>
                             </div>
                         </div>
@@ -1676,9 +1455,28 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     const dt = parseSessionDate(session.date);
     const effectiveStatus = getEffectiveStatus(session);
     const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
-    const statusColor: string = isCancelled ? GH.danger : effectiveStatus === 'COMPLETED' ? GH.accent : GH.ink60;
+    // Одни слова для оплаты во всей CRM (G5-06): «Оплачено» — статус,
+    // «Отметить оплату» — действие.
+    const statusBadge = session.isPaid
+        ? <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" />
+        : <StatusBadge kind="session" status={effectiveStatus} audience="staff" variant="dot" />;
+    const price = formatMoney(session.price ?? client?.basePrice, { currency: client?.currency });
 
-    const actionBtnStyle: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', padding: '4px 8px', background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60 };
+    // Кнопки строки: Plex Sans 12 px, без капса; на узком экране — 44 px (rule 9).
+    const touch = narrow ? 44 : 32;
+    const textBtnStyle: React.CSSProperties = {
+        fontFamily: GH_SANS, fontSize: 12, fontWeight: 500, minHeight: touch, padding: '0 10px',
+        display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+        background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink,
+    };
+    const iconBtnStyle: React.CSSProperties = {
+        width: touch, height: touch, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: 'transparent', border: ghsHairline, cursor: 'pointer', color: GH.ink60,
+    };
+
+    const handleQuickPay = async () => {
+        try { await quickPaySession(session.id); toast.success('Оплата отмечена'); } catch { toast.error('Не удалось отметить оплату'); }
+    };
 
     const [deleteOpen, setDeleteOpen] = React.useState(false);
     const handleDelete = async (scope: 'this' | 'future') => {
@@ -1686,19 +1484,47 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
             const res = await deleteSession(session.id, scope);
             toast.success(
                 scope === 'future' && res.deleted > 1
-                    ? `Удалено ${res.deleted} сессий`
-                    : 'Удалена',
+                    ? `Удалено сессий: ${res.deleted}`
+                    : 'Сессия удалена',
             );
         } catch {
-            toast.error('Ошибка');
+            toast.error('Не удалось удалить сессию');
         }
     };
+
+    const actions = (
+        <>
+            {!session.isPaid && !isCancelled && (
+                <button onClick={handleQuickPay} style={{ ...textBtnStyle, background: GH.ink, color: GH.paper, border: 'none' }}>
+                    <Banknote size={14} aria-hidden="true" /> Отметить оплату
+                </button>
+            )}
+            {!session.isBooked && !isCancelled && (
+                <button onClick={() => onBookCab(session, client?.name || 'Клиент')} style={iconBtnStyle}
+                    title="Забронировать кабинет" aria-label="Забронировать кабинет">
+                    <LayoutGrid size={14} aria-hidden="true" />
+                </button>
+            )}
+            <button onClick={() => setEditingId(isEditing ? null : session.id)}
+                title="Изменить" aria-label="Изменить сессию" aria-pressed={isEditing}
+                style={{ ...iconBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>
+                <Pencil size={14} aria-hidden="true" />
+            </button>
+            {/* Удаление — через общее окно (серия: «только эту / эту и будущие»),
+                как на телефоне; раньше тут было системное окно браузера. */}
+            <button onClick={() => setDeleteOpen(true)} title="Удалить" aria-label="Удалить сессию"
+                style={{ ...iconBtnStyle, color: GH.danger }}>
+                <Trash2 size={14} aria-hidden="true" />
+            </button>
+        </>
+    );
 
     return (
         <>
             {narrow ? (
                 /* ── Mobile: stacked card ── */
-                <div style={{ padding: '12px 0', borderBottom: ghsHairline, opacity: isCancelled ? 0.4 : 1 }}>
+                // Отменённые — приглушаем цветом, не прозрачностью (текст не бледнее ink-60).
+                <div style={{ padding: '12px 0', borderBottom: ghsHairline, color: isCancelled ? GH.ink60 : undefined }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -1709,28 +1535,16 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                                 >
                                     {client?.name || 'Клиент'}
                                 </span>
-                                {session.isBooked && <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', color: GH.accent, textTransform: 'uppercase' }}>Каб</span>}
+                                {session.isBooked && <BookedMark />}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60 }}>{session.durationMinutes}′</span>
-                                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{session.price ?? client?.basePrice ?? '—'} {client?.currency || '₾'}</span>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: statusColor }}>
-                                    {session.isPaid ? 'Оплачено' : STATUS_LABELS[effectiveStatus] || effectiveStatus}
-                                </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{session.durationMinutes}′</span>
+                                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{price}</span>
+                                {statusBadge}
                             </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 3, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 120 }}>
-                            {!session.isPaid && !isCancelled && (
-                                <button onClick={async () => { try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); } }}
-                                    style={{ ...actionBtnStyle, background: GH.accent, color: GH.paper, border: 'none' }}>Pay</button>
-                            )}
-                            {!session.isBooked && !isCancelled && (
-                                <button onClick={() => onBookCab(session, client?.name || 'Клиент')} style={actionBtnStyle}>+Каб</button>
-                            )}
-                            <button onClick={() => setEditingId(isEditing ? null : session.id)}
-                                style={{ ...actionBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>Ред.</button>
-                            <button onClick={() => setDeleteOpen(true)}
-                                style={{ ...actionBtnStyle, border: `1px solid ${GH.danger}`, color: GH.danger }}>Уд.</button>
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 196 }}>
+                            {actions}
                         </div>
                     </div>
                 </div>
@@ -1738,9 +1552,9 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                 /* ── Desktop: grid row ── */
                 <div
                     style={{
-                        display: 'grid', gridTemplateColumns: '70px 1fr 80px 100px 100px 120px',
-                        alignItems: 'center', padding: '10px 0', borderBottom: ghsHairline,
-                        opacity: isCancelled ? 0.4 : 1, transition: 'background 120ms',
+                        display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: 12,
+                        alignItems: 'center', padding: '8px 0', borderBottom: ghsHairline,
+                        color: isCancelled ? GH.ink60 : undefined, transition: 'background 120ms',
                     }}
                     onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -1749,28 +1563,16 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     <div>
                         <span style={{ fontSize: 13, fontWeight: 600, cursor: session.clientId ? 'pointer' : 'default' }}
                             onClick={() => session.clientId && navigate(`/crm/clients/${session.clientId}`)}
-                            onMouseEnter={e => (e.currentTarget.style.color = GH.accent)} onMouseLeave={e => (e.currentTarget.style.color = GH.ink)}>
+                            onMouseEnter={e => (e.currentTarget.style.color = GH.accent)} onMouseLeave={e => (e.currentTarget.style.color = isCancelled ? GH.ink60 : GH.ink)}>
                             {client?.name || 'Клиент'}
                         </span>
-                        {session.isBooked && <span style={{ fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', color: GH.accent, marginLeft: 8, textTransform: 'uppercase' as const }}>Каб</span>}
+                        {session.isBooked && <BookedMark style={{ marginLeft: 8 }} />}
                     </div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 11, color: GH.ink60 }}>{session.durationMinutes}′</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{session.price ?? client?.basePrice ?? '—'} {client?.currency || '₾'}</div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: statusColor }}>
-                        {session.isPaid ? 'Оплачено' : STATUS_LABELS[effectiveStatus] || effectiveStatus}
-                    </div>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{session.durationMinutes}′</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{price}</div>
+                    <div>{statusBadge}</div>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                        {!session.isPaid && !isCancelled && (
-                            <button onClick={async () => { try { await quickPaySession(session.id); toast.success('Оплачено'); } catch { toast.error('Ошибка'); } }}
-                                style={{ ...actionBtnStyle, background: GH.accent, color: GH.paper, border: 'none' }}>Pay</button>
-                        )}
-                        {!session.isBooked && !isCancelled && (
-                            <button onClick={() => onBookCab(session, client?.name || 'Клиент')} style={actionBtnStyle}>+Каб</button>
-                        )}
-                        <button onClick={() => setEditingId(isEditing ? null : session.id)}
-                            style={{ ...actionBtnStyle, background: isEditing ? GH.ink : 'transparent', color: isEditing ? GH.paper : GH.ink60, border: isEditing ? 'none' : ghsHairline }}>Ред.</button>
-                        <button onClick={async () => { if (!confirm('Удалить сессию?')) return; try { await deleteSession(session.id); toast.success('Удалена'); } catch { toast.error('Ошибка'); } }}
-                            style={{ ...actionBtnStyle, border: `1px solid ${GH.danger}`, color: GH.danger }}>Уд.</button>
+                        {actions}
                     </div>
                 </div>
             )}
@@ -1780,8 +1582,8 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                     session={session}
                     clientCurrency={client?.currency}
                     clientDefaultAccount={client?.defaultAccount}
-                    onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Обновлена'); }}
-                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплачено'); }}
+                    onSave={async (data) => { await updateSession(session.id, data); setEditingId(null); toast.success('Сессия обновлена'); }}
+                    onQuickPay={async (acc) => { await quickPaySession(session.id, acc); toast.success('Оплата отмечена'); }}
                     onCancel={() => setEditingId(null)}
                     onBookCab={() => onBookCab(session, client?.name || 'Клиент')}
                     onDelete={() => { setEditingId(null); setDeleteOpen(true); }}
@@ -1793,8 +1595,23 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                 onClose={() => setDeleteOpen(false)}
                 onConfirm={handleDelete}
                 isRecurring={Boolean(session.recurringGroupId)}
-                label={`${client?.name || 'Клиент'} — ${format(dt, 'dd.MM.yyyy HH:mm')}`}
+                label={`${client?.name || 'Клиент'} — ${dayTime(dt)}`}
             />
         </>
+    );
+}
+
+/** «С кабинетом» — у сессии есть бронь кабинета (статус ok, не бирюза). */
+function BookedMark({ style }: { style?: React.CSSProperties }) {
+    return (
+        <span
+            title="Кабинет забронирован"
+            style={{
+                display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 12, fontWeight: 500,
+                color: STATUS.ok.fg, whiteSpace: 'nowrap', ...style,
+            }}
+        >
+            <Check size={12} aria-hidden="true" /> Кабинет
+        </span>
     );
 }

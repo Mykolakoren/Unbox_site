@@ -7,18 +7,12 @@ import {
     Search,
     Phone,
     Mail,
-    Hash,
-    MoreVertical,
-    UserCircle,
     Loader2,
     X,
     Check,
     Pencil,
     Tag,
     Send,
-    LayoutGrid,
-    LayoutList,
-    ArrowUpDown,
     Merge,
     Trash2,
 } from 'lucide-react';
@@ -28,6 +22,20 @@ import { AccountSelect } from '../../components/crm/AccountSelect';
 import { toast } from 'sonner';
 import { CURRENCIES } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { formatMoney, formatDayMonth } from '../../utils/format';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
+
+/** «1 сессия / 2 сессии / 5 сессий». */
+function sessionsWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'сессия';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
+    return 'сессий';
+}
 
 type ViewMode = 'table' | 'cards';
 type SortField = 'name' | 'basePrice' | 'sessionCount' | 'unpaidSum' | 'totalPaid' | 'lastSessionDate';
@@ -36,8 +44,11 @@ type SortDir = 'asc' | 'desc';
 const VIEW_KEY = 'crm_clients_view';
 
 export function CrmClients() {
-        const { clients, fetchClients, createClient, updateClient, deleteClient, loading } =
+        const { clients, fetchClients, createClient, updateClient, deleteClient, loading, error } =
         useCrmStore();
+    const { confirm } = useConfirmDialog();
+    // Пока первый ответ не пришёл — скелетон, а не «Клиентов ещё нет» (rule 8).
+    const [fetchedOnce, setFetchedOnce] = useState(false);
     const { currentUser } = useUserStore();
     const navigate = useNavigate();
     const [search, setSearch] = useState('');
@@ -56,7 +67,7 @@ export function CrmClients() {
     const editingClient = editingId ? clients.find((c) => c.id === editingId) ?? null : null;
 
     useEffect(() => {
-        fetchClients(false, true);
+        fetchClients(false, true).finally(() => setFetchedOnce(true));
     }, [fetchClients]);
 
     const toggleSort = (field: SortField) => {
@@ -133,7 +144,9 @@ export function CrmClients() {
             <GridHouseCrmClients
                 clients={clients}
                 filtered={filtered}
-                loading={loading}
+                loading={loading || !fetchedOnce}
+                loadError={fetchedOnce && !loading ? error : null}
+                onRetry={() => fetchClients(false, true)}
                 search={search}
                 setSearch={setSearch}
                 showInactive={showInactive}
@@ -167,7 +180,14 @@ export function CrmClients() {
                 }}
                 onToggleActive={handleToggleActive}
                 onPermanentDelete={async (client) => {
-                    if (!confirm(`Удалить клиента "${client.name}"? Все сессии, платежи и заметки будут удалены.`)) return;
+                    const ok = await confirm({
+                        title: `Удалить клиента «${client.name}»?`,
+                        body: 'Все сессии, платежи и заметки клиента удалятся навсегда. Вернуть их будет нельзя.',
+                        confirmLabel: 'Удалить клиента',
+                        cancelLabel: 'Оставить',
+                        tone: 'danger',
+                    });
+                    if (!ok) return;
                     try {
                         await deleteClient(client.id, true);
                         toast.success(`${client.name} удалён`);
@@ -196,41 +216,7 @@ export function CrmClients() {
 }
 
 
-// ── Sort Header ──────────────────────────────────────────────────────────────
-
-function SortHeader({
-    field,
-    current,
-    dir,
-    onSort,
-    children,
-    className = '',
-}: {
-    field: SortField;
-    current: SortField;
-    dir: SortDir;
-    onSort: (f: SortField) => void;
-    children: React.ReactNode;
-    className?: string;
-}) {
-    const isActive = current === field;
-    return (
-        <th
-            className={`px-4 py-3.5 font-medium cursor-pointer select-none hover:bg-gray-100/50 transition-colors ${className}`}
-            onClick={() => onSort(field)}
-        >
-            <div className="flex items-center gap-1">
-                {children}
-                <ArrowUpDown size={12} className={isActive ? 'text-unbox-green' : 'text-gray-300'} />
-                {isActive && (
-                    <span className="text-[10px] text-unbox-green">
-                        {dir === 'asc' ? '\u2191' : '\u2193'}
-                    </span>
-                )}
-            </div>
-        </th>
-    );
-}
+// SortHeader (старая таблица до Grid House) нигде не рендерился — удалён в wave 1.
 
 // ── Client Form ──────────────────────────────────────────────────────────────
 
@@ -286,19 +272,19 @@ function ClientForm({
     return (
         <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2"
+            className="bg-card rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2"
         >
             <div className="flex items-center justify-between">
                 <h3 className="font-bold text-lg">{isEdit ? 'Редактировать клиента' : 'Новый клиент'}</h3>
                 <button type="button" onClick={onCancel} className="p-1 hover:bg-unbox-light/50 rounded-lg">
-                    <X className="w-5 h-5 text-unbox-grey" />
+                    <X className="w-5 h-5 text-ink-60" />
                 </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Имя <span className="text-red-500">*</span>
+                        Имя <span className="text-[var(--status-danger-fg)]">*</span>
                     </label>
                     <input
                         type="text"
@@ -380,7 +366,7 @@ function ClientForm({
 
             <div>
                 <label className="text-sm font-medium text-unbox-dark mb-1 block flex items-center gap-1">
-                    <Tag className="w-3.5 h-3.5" /> Теги <span className="text-unbox-grey font-normal">(через запятую)</span>
+                    <Tag className="w-3.5 h-3.5" /> Теги <span className="text-ink-60 font-normal">(через запятую)</span>
                 </label>
                 <input
                     type="text"
@@ -404,7 +390,7 @@ function ClientForm({
                 <button
                     type="button"
                     onClick={onCancel}
-                    className="px-4 py-2 text-sm text-unbox-grey hover:bg-unbox-light/50 rounded-xl transition-colors"
+                    className="px-4 py-2 text-sm text-ink-60 hover:bg-unbox-light/50 rounded-xl transition-colors"
                 >
                     Отмена
                 </button>
@@ -421,76 +407,7 @@ function ClientForm({
     );
 }
 
-// ── Client Menu ──────────────────────────────────────────────────────────────
-
-function ClientMenu({
-    isActive,
-    onDelete,
-    onRestore,
-    onPermanentDelete,
-    canPermanentDelete = false,
-}: {
-    isActive: boolean;
-    onDelete: () => void;
-    onRestore: () => void;
-    onPermanentDelete?: () => void;
-    canPermanentDelete?: boolean;
-}) {
-    const [open, setOpen] = useState(false);
-
-    return (
-        <div className="relative">
-            <button
-                onClick={() => setOpen(!open)}
-                className="p-1.5 hover:bg-unbox-light/50 rounded-lg transition-colors"
-            >
-                <MoreVertical className="w-4 h-4 text-unbox-grey" />
-            </button>
-            {open && (
-                <>
-                    <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-                    <div className="absolute right-0 top-8 z-20 bg-white rounded-xl border border-unbox-light shadow-lg py-1 w-44 animate-in fade-in slide-in-from-top-2">
-                        {isActive ? (
-                            <button
-                                onClick={() => {
-                                    onDelete();
-                                    setOpen(false);
-                                }}
-                                className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-amber-50 transition-colors"
-                            >
-                                Деактивировать
-                            </button>
-                        ) : (
-                            <button
-                                onClick={() => {
-                                    onRestore();
-                                    setOpen(false);
-                                }}
-                                className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-green-50 transition-colors"
-                            >
-                                Восстановить
-                            </button>
-                        )}
-                        {canPermanentDelete && onPermanentDelete && (
-                            <>
-                                <div className="h-px bg-gray-100 my-1" />
-                                <button
-                                    onClick={() => {
-                                        onPermanentDelete();
-                                        setOpen(false);
-                                    }}
-                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors font-medium"
-                                >
-                                    Удалить навсегда
-                                </button>
-                            </>
-                        )}
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
+// ClientMenu (старое меню «⋯» с цветами Tailwind) нигде не рендерилось — удалено в wave 1.
 
 // ── Merge Dialog ──────────────────────────────────────────────────────────────
 
@@ -535,21 +452,21 @@ function MergeDialog({
         <>
             <div className="fixed inset-0 bg-black/40 z-40 animate-in fade-in" onClick={onCancel} />
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
+                <div className="bg-card rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
                     {/* Header */}
                     <div className="p-6 border-b border-gray-100">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
-                                    <Merge className="w-5 h-5 text-amber-600" />
+                                <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
+                                    <Merge className="w-5 h-5 text-gray-700" />
                                 </div>
                                 <div>
                                     <h2 className="text-lg font-bold text-unbox-dark">Объединить клиентов</h2>
-                                    <p className="text-xs text-unbox-grey">{clients.length} карточек → 1</p>
+                                    <p className="text-xs text-ink-60">{clients.length} карточек → 1</p>
                                 </div>
                             </div>
-                            <button onClick={onCancel} className="p-1.5 hover:bg-gray-100 rounded-lg">
-                                <X className="w-5 h-5 text-unbox-grey" />
+                            <button onClick={onCancel} aria-label="Закрыть" className="p-1.5 hover:bg-gray-100 rounded-lg">
+                                <X className="w-5 h-5 text-ink-60" />
                             </button>
                         </div>
                     </div>
@@ -560,7 +477,7 @@ function MergeDialog({
                             <label className="block text-sm font-medium text-unbox-dark mb-2">
                                 Основная карточка
                             </label>
-                            <p className="text-xs text-unbox-grey mb-2">
+                            <p className="text-xs text-ink-60 mb-2">
                                 Все данные будут перенесены в эту карточку. Остальные карточки будут удалены.
                             </p>
                             <div className="space-y-1.5">
@@ -569,7 +486,7 @@ function MergeDialog({
                                         key={c.id}
                                         className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
                                             targetId === c.id
-                                                ? 'border-amber-400 bg-amber-50'
+                                                ? 'border-unbox-green bg-unbox-green/5'
                                                 : 'border-gray-100 hover:border-gray-200'
                                         }`}
                                     >
@@ -578,17 +495,17 @@ function MergeDialog({
                                             name="target"
                                             checked={targetId === c.id}
                                             onChange={() => setTargetId(c.id)}
-                                            className="text-amber-600 focus:ring-amber-500"
+                                            className="text-unbox-green focus:ring-unbox-green"
                                         />
                                         <div className="flex-1 min-w-0">
                                             <div className="font-medium text-sm text-unbox-dark truncate">{c.name}</div>
-                                            <div className="text-xs text-unbox-grey truncate">
+                                            <div className="text-xs text-ink-60 truncate">
                                                 {[c.phone, c.telegram, c.email].filter(Boolean).join(' · ') || 'Нет контактов'}
                                             </div>
                                         </div>
                                         {(c as any).sessionCount > 0 && (
-                                            <span className="text-[10px] text-unbox-grey bg-gray-100 px-2 py-0.5 rounded-full">
-                                                {(c as any).sessionCount} сессий
+                                            <span className="text-xs text-ink-60 bg-gray-100 px-2 py-0.5 rounded-full">
+                                                {(c as any).sessionCount} {sessionsWord((c as any).sessionCount)}
                                             </span>
                                         )}
                                     </label>
@@ -647,7 +564,7 @@ function MergeDialog({
                                                 onChange={() => setPhoneSource(phone)}
                                                 className="text-unbox-green focus:ring-unbox-green"
                                             />
-                                            <Phone className="w-3.5 h-3.5 text-unbox-grey" />
+                                            <Phone className="w-3.5 h-3.5 text-ink-60" />
                                             <span className="text-sm">{phone}</span>
                                         </label>
                                     ))}
@@ -678,7 +595,7 @@ function MergeDialog({
                                                 onChange={() => setEmailSource(email)}
                                                 className="text-unbox-green focus:ring-unbox-green"
                                             />
-                                            <Mail className="w-3.5 h-3.5 text-unbox-grey" />
+                                            <Mail className="w-3.5 h-3.5 text-ink-60" />
                                             <span className="text-sm">{email}</span>
                                         </label>
                                     ))}
@@ -709,7 +626,7 @@ function MergeDialog({
                                                 onChange={() => setTelegramSource(tg)}
                                                 className="text-unbox-green focus:ring-unbox-green"
                                             />
-                                            <Send className="w-3.5 h-3.5 text-unbox-grey" />
+                                            <Send className="w-3.5 h-3.5 text-ink-60" />
                                             <span className="text-sm">{tg}</span>
                                         </label>
                                     ))}
@@ -718,8 +635,8 @@ function MergeDialog({
                         )}
 
                         {/* Warning */}
-                        <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                            <p className="text-xs text-red-700">
+                        <div className="bg-[var(--status-danger-bg)] rounded-xl p-3">
+                            <p className="text-xs text-[var(--status-danger-fg)]">
                                 <strong>Внимание:</strong> {clients.length - 1} карточ{clients.length - 1 === 1 ? 'ка' : clients.length - 1 < 5 ? 'ки' : 'ек'} будут удалены.
                                 Все сессии, платежи и заметки будут перенесены в выбранную основную карточку.
                                 Это действие необратимо.
@@ -731,17 +648,17 @@ function MergeDialog({
                     <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
                         <button
                             onClick={onCancel}
-                            className="px-4 py-2.5 text-sm text-unbox-grey hover:bg-gray-100 rounded-xl transition-colors"
+                            className="px-4 py-2.5 text-sm text-ink-60 hover:bg-gray-100 rounded-xl transition-colors"
                         >
-                            Отмена
+                            Оставить как есть
                         </button>
                         <button
                             onClick={handleConfirm}
                             disabled={saving}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-xl hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--status-danger-solid)] text-white text-sm font-medium rounded-xl hover:bg-[var(--status-danger-fg)] disabled:opacity-50 transition-colors"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />}
-                            Объединить
+                            Объединить карточки
                         </button>
                     </div>
                 </div>
@@ -759,9 +676,9 @@ const GHC_HAIRLINE = `1px solid ${GH.ink10}`;
 const GHC_HAIRLINE_STRONG = `1px solid ${GH.ink}`;
 const GHC_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 11,
+    fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     color: GH.ink60,
 };
 
@@ -769,6 +686,8 @@ interface GridHouseCrmClientsProps {
     clients: CrmClient[];
     filtered: CrmClient[];
     loading: boolean;
+    loadError: string | null;
+    onRetry: () => void;
     search: string;
     setSearch: (v: string) => void;
     showInactive: boolean;
@@ -797,7 +716,7 @@ interface GridHouseCrmClientsProps {
 
 function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
     const {
-        clients, filtered, loading, search, setSearch, showInactive, setShowInactive,
+        clients, filtered, loading, loadError, onRetry, search, setSearch, showInactive, setShowInactive,
         sortField, sortDir, toggleSort, navigate, mergeMode, setMergeMode,
         mergeSelected, setMergeSelected, showMergeDialog, setShowMergeDialog,
         showForm, setShowForm, editingClient, editingId, setEditingId,
@@ -864,9 +783,9 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                             border: `1px solid ${mergeMode ? GH.danger : GH.ink}`,
                             padding: '12px 20px',
                             fontFamily: GH_MONO,
-                            fontSize: 11,
+                            fontSize: 12,
                             textTransform: 'uppercase',
-                            letterSpacing: '0.18em',
+                            letterSpacing: '0.06em',
                             fontWeight: 600,
                             cursor: 'pointer',
                             display: 'flex',
@@ -886,9 +805,9 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                             border: 'none',
                             padding: '12px 20px',
                             fontFamily: GH_MONO,
-                            fontSize: 11,
+                            fontSize: 12,
                             textTransform: 'uppercase',
-                            letterSpacing: '0.18em',
+                            letterSpacing: '0.06em',
                             fontWeight: 600,
                             cursor: 'pointer',
                             display: 'flex',
@@ -1008,9 +927,9 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                 border: 'none',
                                 padding: '10px 18px',
                                 fontFamily: GH_MONO,
-                                fontSize: 10,
+                                fontSize: 12,
                                 textTransform: 'uppercase',
-                                letterSpacing: '0.18em',
+                                letterSpacing: '0.06em',
                                 fontWeight: 600,
                                 cursor: mergeSelected.length < 2 ? 'not-allowed' : 'pointer',
                             }}
@@ -1059,41 +978,32 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                 />
             )}
 
-            {/* ── Table ── */}
+            {/* ── Table ── Загрузка ≠ ошибка ≠ пусто (rule 8). */}
+            {loadError && (
+                <ErrorBar
+                    message="Не удалось загрузить клиентов"
+                    onRetry={onRetry}
+                    retrying={loading}
+                    className="mb-4"
+                />
+            )}
             {loading && !clients.length ? (
-                <div
-                    style={{
-                        ...GHC_MONO_LABEL,
-                        textAlign: 'center',
-                        padding: '80px 0',
-                    }}
-                >
-                    Загрузка клиентов…
+                <div role="status" aria-busy="true" style={{ border: GHC_HAIRLINE, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <span className="sr-only">Загружаем клиентов…</span>
+                    {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={20} radius={0} />)}
                 </div>
             ) : filtered.length === 0 ? (
-                <div
-                    style={{
-                        border: GHC_HAIRLINE,
-                        padding: '64px 24px',
-                        textAlign: 'center',
-                    }}
-                >
-                    <div style={{ ...GHC_MONO_LABEL, marginBottom: 12 }}>Пусто</div>
-                    <div
-                        style={{
-                            fontSize: 'clamp(24px, 3vw, 36px)',
-                            fontWeight: 800,
-                            letterSpacing: '-0.02em',
-                            lineHeight: 1.05,
-                            marginBottom: 10,
-                        }}
-                    >
-                        {search ? 'Никто не найден.' : 'Клиентов ещё нет.'}
+                loadError && !clients.length ? null : (
+                    <div style={{ border: GHC_HAIRLINE }}>
+                        <EmptyState
+                            title={search ? 'Никого не нашли' : 'Клиентов пока нет'}
+                            hint={search ? 'Попробуйте изменить запрос или снять фильтр.' : 'Добавьте первого клиента — займёт минуту.'}
+                            action={search
+                                ? { label: 'Очистить поиск', onClick: () => setSearch('') }
+                                : { label: 'Новый клиент', onClick: () => setShowForm(true) }}
+                        />
                     </div>
-                    <div style={{ fontSize: 14, color: GH.ink60 }}>
-                        {search ? 'Попробуйте изменить запрос или снять фильтр.' : 'Добавьте первого клиента через кнопку «Новый клиент».'}
-                    </div>
-                </div>
+                )
             ) : (
                 <div style={{ border: GHC_HAIRLINE, overflowX: 'auto' }}>
                     {/* Table head */}
@@ -1118,7 +1028,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                         <GHSortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</GHSortHeader>
                         <div style={GHC_MONO_LABEL}>Контакты</div>
                         <GHSortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</GHSortHeader>
-                        <GHSortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort}>LTV</GHSortHeader>
+                        <GHSortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort}>Оплачено всего</GHSortHeader>
                         <GHSortHeader field="lastSessionDate" current={sortField} dir={sortDir} onSort={toggleSort}>Посл. сессия</GHSortHeader>
                         <div style={{ ...GHC_MONO_LABEL, textAlign: 'right' }}>Действия</div>
                     </div>
@@ -1153,7 +1063,9 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     borderBottom: i === filtered.length - 1 ? 'none' : GHC_HAIRLINE,
                                     cursor: 'pointer',
                                     background: isSelected ? GH.ink5 : 'transparent',
-                                    opacity: isInactive ? 0.5 : 1,
+                                    // Неактивных приглушаем цветом, не прозрачностью:
+                                    // текст не бледнее ink-60 (X4-19).
+                                    color: isInactive ? GH.ink60 : undefined,
                                     transition: 'background 0.12s ease',
                                     minWidth: mergeMode ? 1040 : 1000,
                                     fontSize: 14,
@@ -1186,67 +1098,81 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                         alignItems: 'center',
                                         gap: 6,
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                         color: GH.ink60,
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
+                                    {/* Точка 6 px, а зона нажатия 24×24 (G5-10). */}
                                     <button
                                         onClick={() => onToggleActive(client)}
                                         title={client.isActive ? 'Деактивировать' : 'Активировать'}
+                                        aria-label={client.isActive ? `Деактивировать ${client.name}` : `Активировать ${client.name}`}
                                         style={{
-                                            width: 6,
-                                            height: 6,
-                                            borderRadius: '50%',
-                                            background: client.isActive ? GH.ink : GH.ink30,
+                                            width: 24,
+                                            height: 24,
+                                            margin: -9,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            background: 'transparent',
                                             border: 'none',
                                             cursor: 'pointer',
                                             padding: 0,
                                         }}
-                                    />
+                                    >
+                                        <span aria-hidden="true" style={{
+                                            width: 6,
+                                            height: 6,
+                                            borderRadius: '50%',
+                                            background: client.isActive ? GH.ink : GH.ink30,
+                                        }} />
+                                    </button>
                                     <span>{String(i + 1).padStart(2, '0')}</span>
                                 </div>
 
                                 {/* Name */}
                                 <div style={{ paddingRight: 12 }}>
-                                    <div style={{ fontWeight: 600, color: GH.ink, marginBottom: 2 }}>
+                                    <div style={{ fontWeight: 600, color: isInactive ? GH.ink60 : GH.ink, marginBottom: 2 }}>
                                         {client.name}
                                     </div>
-                                    {client.aliasCode && (
+                                    {(client.aliasCode || isInactive) && (
                                         <div
                                             style={{
                                                 fontFamily: GH_MONO,
-                                                fontSize: 10,
-                                                color: GH.ink30,
+                                                fontSize: 12,
+                                                color: GH.ink60,
                                                 textTransform: 'uppercase',
-                                                letterSpacing: '0.1em',
+                                                letterSpacing: '0.06em',
                                             }}
                                         >
-                                            #{client.aliasCode}
+                                            {client.aliasCode && `#${client.aliasCode}`}
+                                            {client.aliasCode && isInactive && ' · '}
+                                            {isInactive && 'Неактивен'}
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Debt */}
-                                <div style={{ fontSize: 11 }}>
+                                <div style={{ fontSize: 12 }}>
                                     {(c.unpaidSum || 0) > 0 ? (
                                         <span
                                             style={{
                                                 fontFamily: GH_MONO,
                                                 textTransform: 'uppercase',
-                                                letterSpacing: '0.08em',
+                                                letterSpacing: '0.06em',
                                                 color: GH.danger,
                                                 fontWeight: 600,
                                                 fontVariantNumeric: 'tabular-nums',
                                             }}
                                         >
-                                            {(c.unpaidSum || 0).toLocaleString()} {client.currency}
+                                            {formatMoney(c.unpaidSum, { currency: client.currency })}
                                         </span>
                                     ) : (c.sessionCount || 0) > 0 ? (
-                                        <span style={{ ...GHC_MONO_LABEL, color: GH.accent }}>Оплачено</span>
+                                        <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" />
                                     ) : (
-                                        <span style={{ color: GH.ink30 }}>—</span>
+                                        <span style={{ color: GH.ink60 }}>—</span>
                                     )}
                                 </div>
 
@@ -1254,7 +1180,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                 <div
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                         color: GH.ink60,
                                         paddingRight: 12,
                                         display: 'flex',
@@ -1264,7 +1190,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                 >
                                     {client.telegram && <div>@{client.telegram.replace(/^@/, '')}</div>}
                                     {client.phone && <div>{client.phone}</div>}
-                                    {!client.telegram && !client.phone && <div style={{ color: GH.ink30 }}>—</div>}
+                                    {!client.telegram && !client.phone && <div style={{ color: GH.ink60 }}>—</div>}
                                 </div>
 
                                 {/* Rate */}
@@ -1276,7 +1202,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
                                 >
-                                    {client.basePrice || 0} {client.currency}
+                                    {formatMoney(client.basePrice || 0, { currency: client.currency })}
                                 </div>
 
                                 {/* LTV — sum of REAL payments (was totalCost
@@ -1286,19 +1212,20 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     style={{
                                         fontFamily: GH_MONO,
                                         fontSize: 13,
-                                        color: (c.totalPaid || 0) > 0 ? GH.ink : GH.ink30,
+                                        color: (c.totalPaid || 0) > 0 ? GH.ink : GH.ink60,
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
-                                    title="LTV — сумма всех реально полученных платежей"
+                                    title="Сумма всех реально полученных платежей (во всех валютах клиента)"
                                 >
-                                    {((c as any).totalPaid || 0).toLocaleString()}
+                                    {/* Сумма по всем валютам сразу — поэтому без знака валюты. */}
+                                    {((c as any).totalPaid || 0).toLocaleString('ru-RU')}
                                 </div>
 
                                 {/* Last session */}
                                 <div
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                         color: GH.ink60,
                                         textTransform: 'uppercase',
                                         letterSpacing: '0.05em',
@@ -1306,8 +1233,8 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     }}
                                 >
                                     {c.lastSessionDate
-                                        ? new Date(c.lastSessionDate).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })
-                                        : <span style={{ color: GH.ink30 }}>—</span>}
+                                        ? formatDayMonth(c.lastSessionDate, { withYear: 'auto' })
+                                        : <span style={{ color: GH.ink60 }}>—</span>}
                                 </div>
 
                                 {/* Actions */}
@@ -1321,6 +1248,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                             setEditingId(editingId === client.id ? null : client.id);
                                         }}
                                         title="Редактировать"
+                                        aria-label={`Редактировать ${client.name}`}
                                         style={{
                                             background: 'none',
                                             border: 'none',
@@ -1336,6 +1264,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                     <button
                                         onClick={() => onPermanentDelete(client)}
                                         title="Удалить"
+                                        aria-label={`Удалить ${client.name}`}
                                         style={{
                                             background: 'none',
                                             border: 'none',
@@ -1383,9 +1312,9 @@ function GHSortHeader({
                 padding: 0,
                 textAlign: 'left',
                 fontFamily: GH_MONO,
-                fontSize: 11,
+                fontSize: 12,
                 textTransform: 'uppercase',
-                letterSpacing: '0.18em',
+                letterSpacing: '0.06em',
                 color: active ? GH.ink : GH.ink60,
                 fontWeight: active ? 600 : 400,
                 display: 'flex',
@@ -1394,7 +1323,7 @@ function GHSortHeader({
             }}
         >
             {children}
-            {active && <span style={{ fontSize: 9 }}>{dir === 'asc' ? '↑' : '↓'}</span>}
+            {active && <span style={{ fontSize: 12 }}>{dir === 'asc' ? '↑' : '↓'}</span>}
         </button>
     );
 }

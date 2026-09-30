@@ -64,7 +64,7 @@ function CrmTopTabs() {
 
     return (
         <div className="mb-6 -mt-2">
-            <nav className="flex gap-1 bg-white/70 backdrop-blur rounded-2xl p-1.5 border border-white/80 shadow-sm overflow-x-auto scrollbar-hide md:w-fit">
+            <nav className="flex gap-1 bg-card/70 backdrop-blur rounded-2xl p-1.5 border border-white/80 shadow-sm overflow-x-auto scrollbar-hide md:w-fit">
                 {CRM_TABS.map(tab => {
                     const active = isActive(tab.path, tab.exact);
                     return (
@@ -75,7 +75,7 @@ function CrmTopTabs() {
                                 'flex items-center gap-1.5 md:gap-2 px-2.5 md:px-4 py-2 rounded-xl text-sm font-medium transition-all shrink-0',
                                 active
                                     ? 'bg-unbox-green text-white shadow-md shadow-unbox-green/25'
-                                    : 'text-unbox-grey hover:text-unbox-dark hover:bg-unbox-light/60'
+                                    : 'text-ink-60 hover:text-unbox-dark hover:bg-unbox-light/60'
                             )}
                         >
                             <tab.icon size={15} />
@@ -184,7 +184,7 @@ export function CrmLayout() {
             )}
             <button
                 onClick={() => navigate('/dashboard')}
-                className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-700 transition-colors w-full px-3 py-2"
+                className="flex items-center gap-2 text-sm text-ink-60 hover:text-gray-700 transition-colors w-full px-3 py-2"
             >
                 <ArrowLeft size={16} />
                 К бронированиям
@@ -259,8 +259,8 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
 
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
-        fontSize: '10px',
-        letterSpacing: '0.2em',
+        fontSize: '12px',
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         color: GH.ink60,
         fontWeight: 500,
@@ -309,7 +309,7 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         ...monoLabel,
                         marginTop: '4px',
                     }}>
-                        CRM · ОПЕРАТОР
+                        Кабинет специалиста
                     </div>
                 </Link>
                 {/* Уведомления (конфликты календаря, удержанные удаления, связи
@@ -326,7 +326,8 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         borderBottom: `1px solid ${GH.ink10}`,
                     }}
                 >
-                    <div style={monoLabel}>СЕССИЯ · {currentUser.role === 'specialist' ? 'СПЕЦИАЛИСТ' : currentUser.role === 'owner' || currentUser.role === 'senior_admin' ? 'АДМИН' : 'ОПЕРАТОР'}</div>
+                    {/* Без слова «СЕССИЯ» — в CRM сессия значит встречу с клиентом (G5-18). */}
+                    <div style={monoLabel}>{currentUser.role === 'specialist' ? 'Специалист' : currentUser.role === 'owner' || currentUser.role === 'senior_admin' ? 'Админ' : 'Оператор'}</div>
                     <div style={{
                         fontFamily: GH_SANS,
                         fontSize: '15px',
@@ -345,7 +346,7 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         survives a token change. */}
                     <div style={{
                         fontFamily: GH_MONO,
-                        fontSize: '10px',
+                        fontSize: '12px',
                         marginTop: '2px',
                         color: GH.ink60,
                         overflow: 'hidden',
@@ -398,8 +399,8 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         <Icon size={16} />
                         <span style={{
                             fontFamily: GH_MONO,
-                            fontSize: 9,
-                            letterSpacing: '0.08em',
+                            fontSize: 12,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                         }}>
                             {label}
@@ -437,9 +438,9 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         >
                             <span style={{
                                 fontFamily: GH_MONO,
-                                fontSize: '11px',
-                                letterSpacing: '0.1em',
-                                color: active ? 'rgba(250,250,247,0.5)' : GH.ink30,
+                                fontSize: '12px',
+                                letterSpacing: '0.06em',
+                                color: active ? 'rgba(250,250,247,0.6)' : GH.ink60,
                             }}>
                                 {String(idx + 1).padStart(2, '0')}
                             </span>
@@ -463,7 +464,7 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         onClick={() => navigate('/admin')}
                         style={{
                             ...monoLabel,
-                            color: GH.accent,
+                            color: GH.ink,
                             background: 'none',
                             border: 'none',
                             padding: 0,
@@ -536,14 +537,16 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         {isNarrow && (
                             <button
                                 onClick={() => setIsMobileOpen(true)}
+                                aria-label="Открыть меню"
                                 style={{
                                     background: GH.ink,
                                     color: GH.paper,
                                     border: 'none',
                                     padding: '8px 12px',
+                                    minHeight: 44,
                                     fontFamily: GH_MONO,
-                                    fontSize: '10px',
-                                    letterSpacing: '0.2em',
+                                    fontSize: '12px',
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     cursor: 'pointer',
                                 }}
@@ -553,25 +556,25 @@ function GridHouseCrmShell({ isAdmin, currentUser, quickActions }: { isAdmin: bo
                         )}
                         <div style={{
                             fontFamily: GH_MONO,
-                            fontSize: '10px',
-                            letterSpacing: '0.2em',
+                            fontSize: '12px',
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             color: GH.ink60,
                             display: 'flex',
                             gap: '10px',
                             flexWrap: 'wrap',
                         }}>
-                            <span style={{ color: GH.ink30 }}>{String(activeIndex >= 0 ? activeIndex + 1 : 1).padStart(2, '0')}</span>
+                            <span style={{ color: GH.ink60 }}>{String(activeIndex >= 0 ? activeIndex + 1 : 1).padStart(2, '0')}</span>
                             <span>/</span>
                             <span style={{ color: GH.ink }}>{activeTab.label.toUpperCase()}</span>
                         </div>
                     </div>
                     <div style={{
                         fontFamily: GH_MONO,
-                        fontSize: '10px',
-                        letterSpacing: '0.2em',
+                        fontSize: '12px',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
-                        color: GH.ink30,
+                        color: GH.ink60,
                     }}>
                         UNBOX · CRM
                     </div>

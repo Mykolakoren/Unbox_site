@@ -2,8 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
-    Wallet, ChevronLeft, ChevronRight, Loader2,
-    TrendingUp, AlertTriangle, Banknote, Plus, Check, X, Calendar,
+    ChevronLeft, ChevronRight, Loader2, Plus, Check, X, Calendar,
 } from 'lucide-react';
 import {
     format,
@@ -12,12 +11,23 @@ import {
     startOfDay, endOfDay, addDays, subDays,
     isSameDay,
 } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { parseUTC } from '../../utils/dateUtils';
 import { crmApi, type CrmPaymentCreate, type CrmClient, type CrmSession } from '../../api/crm';
 import { totalInGel } from '../../utils/currency';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { formatMoney, formatGel, formatDayMonth, formatMonthLabel, formatTime } from '../../utils/format';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
+
+/** «1 сессия / 2 сессии / 5 сессий». */
+function sessionsWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'сессия';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
+    return 'сессий';
+}
 
 type Period = 'day' | 'week' | 'month';
 
@@ -34,12 +44,12 @@ function navigatePeriod(date: Date, period: Period, dir: 1 | -1): Date {
 }
 
 function formatPeriodLabel(date: Date, period: Period): string {
-    if (period === 'day') return format(date, 'd MMMM yyyy', { locale: ru });
+    if (period === 'day') return formatDayMonth(date, { withYear: 'auto' });
     if (period === 'week') {
         const { from, to } = getPeriodRange(date, 'week');
-        return `${format(from, 'd MMM', { locale: ru })} – ${format(to, 'd MMM yyyy', { locale: ru })}`;
+        return `${formatDayMonth(from)} – ${formatDayMonth(to, { withYear: 'auto' })}`;
     }
-    return format(date, 'LLLL yyyy', { locale: ru });
+    return formatMonthLabel(date);
 }
 
 export function CrmFinances() {
@@ -47,8 +57,10 @@ export function CrmFinances() {
     const {
         payments, sessions, clients,
         fetchPayments, fetchSessions, fetchClients,
-        createPayment, loading,
+        createPayment, loading, error,
     } = useCrmStore();
+    // Первый ответ ещё не пришёл — вместо «0» и «Платежей нет» скелетон (rule 8).
+    const [loaded, setLoaded] = useState(false);
 
     const [period, setPeriod] = useState<Period>('month');
     const [anchor, setAnchor] = useState(new Date());
@@ -63,8 +75,10 @@ export function CrmFinances() {
 
     useEffect(() => { fetchClients(); }, [fetchClients]);
     useEffect(() => {
-        fetchPayments({ dateFrom, dateTo });
-        fetchSessions({ dateFrom, dateTo });
+        Promise.all([
+            fetchPayments({ dateFrom, dateTo }),
+            fetchSessions({ dateFrom, dateTo }),
+        ]).finally(() => setLoaded(true));
     }, [fetchPayments, fetchSessions, dateFrom, dateTo]);
 
     // Fetch ALL unpaid completed sessions (no date filter) for total debt calculation
@@ -108,8 +122,8 @@ export function CrmFinances() {
 
         const formatMultiCur = (map: Record<string, number>) => {
             const entries = Object.entries(map).filter(([, v]) => v > 0);
-            if (entries.length === 0) return '0';
-            return entries.map(([cur, val]) => `${val.toFixed(0)} ${cur}`).join(' · ');
+            if (entries.length === 0) return formatGel(0);
+            return entries.map(([cur, val]) => formatMoney(val, { currency: cur, fraction: 0 })).join(' · ');
         };
 
         const revenueGel = totalInGel(revByCur);
@@ -122,8 +136,8 @@ export function CrmFinances() {
         return {
             revenueLabel: formatMultiCur(revByCur),
             debtLabel: formatMultiCur(debtByCur),
-            revenueGel: showRevEquiv ? `≈ ${revenueGel.toFixed(0)} ₾` : null,
-            debtGel: showDebtEquiv ? `≈ ${debtGel.toFixed(0)} ₾` : null,
+            revenueGel: showRevEquiv ? `≈ ${formatGel(revenueGel, { fraction: 0 })}` : null,
+            debtGel: showDebtEquiv ? `≈ ${formatGel(debtGel, { fraction: 0 })}` : null,
             unpaidCount: allUnpaidSessions.length,
             totalPayments: payments.length,
             held,
@@ -165,7 +179,13 @@ export function CrmFinances() {
                 payments={payments}
                 clients={clients.filter(c => c.isActive)}
                 clientMap={clientMap}
-                loading={loading}
+                loading={loading || !loaded}
+                loadError={loaded && !loading ? error : null}
+                onRetry={() => {
+                    fetchClients();
+                    fetchPayments({ dateFrom, dateTo });
+                    fetchSessions({ dateFrom, dateTo });
+                }}
                 isToday={isToday}
                 isThisMonth={isThisMonth}
                 onCreatePayment={async (data: CrmPaymentCreate) => {
@@ -179,87 +199,7 @@ export function CrmFinances() {
 }
 
 
-// ── Payment Form ─────────────────────────────────────────────────────────────
-
-function PaymentForm({ clients, onSave, onCancel }: {
-    clients: CrmClient[];
-    onSave: (data: CrmPaymentCreate) => Promise<void>;
-    onCancel: () => void;
-}) {
-    const [clientId, setClientId] = useState('');
-    const [amount, setAmount] = useState('');
-    const [account, setAccount] = useState('');
-    const [saving, setSaving] = useState(false);
-
-    const selectedClient = clients.find(c => c.id === clientId);
-
-    useEffect(() => {
-        if (selectedClient) {
-            setAmount(String(selectedClient.basePrice));
-            setAccount(selectedClient.defaultAccount || '');
-        }
-    }, [selectedClient]);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!clientId || !amount) return;
-        setSaving(true);
-        try {
-            // 07.09: у счёта может быть своя валюта (напр. Mono → UAH) —
-            // она важнее валюты клиента.
-            const accCurrency = useCrmStore.getState().paymentAccounts.find(a => a.id === account)?.currency;
-            await onSave({ clientId, amount: Number(amount), currency: accCurrency || selectedClient?.currency, account: account || undefined });
-        } catch (err: any) {
-            toast.error(err.message || 'Ошибка');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-center justify-between">
-                <h3 className="font-bold text-lg">Новый платёж</h3>
-                <button type="button" onClick={onCancel} className="p-1 hover:bg-unbox-light/50 rounded-lg">
-                    <X className="w-5 h-5 text-unbox-grey" />
-                </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">Клиент *</label>
-                    <select value={clientId} onChange={e => setClientId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green" required>
-                        <option value="">Выберите клиента</option>
-                        {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">Сумма *</label>
-                    <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green" required />
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">Счёт</label>
-                    <input type="text" value={account} onChange={e => setAccount(e.target.value)}
-                        placeholder="cash / bank / transfer"
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green" />
-                </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-unbox-grey hover:bg-unbox-light/50 rounded-xl transition-colors">
-                    Отмена
-                </button>
-                <button type="submit" disabled={saving || !clientId || !amount}
-                    className="flex items-center gap-2 px-5 py-2 bg-unbox-green text-white text-sm font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-50 transition-colors">
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Добавить
-                </button>
-            </div>
-        </form>
-    );
-}
+// PaymentForm (старая форма до Grid House) нигде не рендерилась — удалена в wave 1.
 
 // ============================================================================
 // Grid House variant — Vignelli/Bierut CRM finance index
@@ -275,6 +215,8 @@ type GHFinProps = {
     clients: CrmClient[];
     clientMap: Map<string, CrmClient>;
     loading: boolean;
+    loadError: string | null;
+    onRetry: () => void;
     isToday: boolean;
     isThisMonth: boolean;
     onCreatePayment: (data: CrmPaymentCreate) => Promise<void>;
@@ -282,7 +224,7 @@ type GHFinProps = {
 };
 
 function GridHouseCrmFinances(p: GHFinProps) {
-    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+    const eyebrow: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
     const periods: { id: Period; label: string }[] = [
         { id: 'day', label: 'День' },
         { id: 'week', label: 'Неделя' },
@@ -303,11 +245,12 @@ function GridHouseCrmFinances(p: GHFinProps) {
                     <button
                         onClick={() => p.setShowForm(true)}
                         style={{
-                            fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                             background: GH.ink, color: GH.paper, border: `1px solid ${GH.ink}`, padding: '14px 22px', cursor: 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: 8,
                         }}
                     >
-                        <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 8 }} />
+                        <Plus size={12} aria-hidden="true" />
                         Новый платёж
                     </button>
                 </div>
@@ -322,7 +265,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
                                     key={pp.id}
                                     onClick={() => p.setPeriod(pp.id)}
                                     style={{
-                                        fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                         padding: '10px 16px',
                                         background: active ? GH.ink : 'transparent',
                                         color: active ? GH.paper : GH.ink,
@@ -340,15 +283,17 @@ function GridHouseCrmFinances(p: GHFinProps) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <button
                             onClick={() => p.setAnchor((d: Date) => navigatePeriod(d, p.period, -1))}
+                            aria-label="Предыдущий период"
                             style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         >
                             <ChevronLeft size={14} />
                         </button>
-                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 200, textAlign: 'center' }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', minWidth: 200, textAlign: 'center' }}>
                             {formatPeriodLabel(p.anchor, p.period)}
                         </span>
                         <button
                             onClick={() => p.setAnchor((d: Date) => navigatePeriod(d, p.period, 1))}
+                            aria-label="Следующий период"
                             style={{ width: 32, height: 32, border: `1px solid ${GH.ink10}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         >
                             <ChevronRight size={14} />
@@ -358,13 +303,17 @@ function GridHouseCrmFinances(p: GHFinProps) {
                     {!p.isToday && !p.isThisMonth && (
                         <button
                             onClick={() => p.setAnchor(new Date())}
-                            style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', cursor: 'pointer' }}
+                            style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', cursor: 'pointer' }}
                         >
                             <Calendar size={11} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Сейчас
                         </button>
                     )}
                 </div>
+
+                {p.loadError && (
+                    <ErrorBar message="Не удалось загрузить финансы" onRetry={p.onRetry} retrying={p.loading} className="mb-6" />
+                )}
 
                 {/* KPI strip — auto-fit columns: 4-up на десктопе, 2-up на
                     узком mobile (≤~600px). Раньше было `repeat(4, 1fr)`,
@@ -374,16 +323,20 @@ function GridHouseCrmFinances(p: GHFinProps) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', borderTop: `1px solid ${GH.ink10}`, borderBottom: `1px solid ${GH.ink10}`, marginBottom: 40 }}>
                     {[
                         { label: 'Получено', value: p.stats.revenueLabel, sub: p.stats.revenueGel },
-                        { label: 'Общий долг', value: p.stats.debtLabel, sub: `${p.stats.unpaidCount} сессий${p.stats.debtGel ? ' · ' + p.stats.debtGel : ''}`, danger: p.stats.unpaidCount > 0 },
+                        { label: 'Общий долг', value: p.stats.debtLabel, sub: `${p.stats.unpaidCount} ${sessionsWord(p.stats.unpaidCount)}${p.stats.debtGel ? ' · ' + p.stats.debtGel : ''}`, danger: p.stats.unpaidCount > 0 },
                         { label: 'Платежей', value: String(p.stats.totalPayments), sub: null },
                         { label: 'Сессий', value: String(p.stats.held), sub: null },
                     ].map((k, i) => (
                         <div key={k.label} style={{ padding: '20px 16px', borderLeft: i > 0 ? `1px solid ${GH.ink10}` : 'none', minWidth: 0 }}>
                             <div style={{ ...eyebrow, marginBottom: 10 }}>{k.label}</div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(18px, 2.6vw, 32px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color: k.danger ? GH.danger : GH.ink, wordBreak: 'break-word' }}>
-                                {k.value}
-                            </div>
-                            {k.sub && <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 8, textTransform: 'uppercase', wordBreak: 'break-word' }}>{k.sub}</div>}
+                            {p.loading && !p.payments.length ? (
+                                <Skeleton height={28} width="70%" radius={0} />
+                            ) : (
+                                <div style={{ fontFamily: GH_MONO, fontSize: 'clamp(18px, 2.6vw, 32px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color: k.danger ? GH.danger : GH.ink, wordBreak: 'break-word' }}>
+                                    {k.value}
+                                </div>
+                            )}
+                            {k.sub && !(p.loading && !p.payments.length) && <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, marginTop: 8, textTransform: 'uppercase', wordBreak: 'break-word' }}>{k.sub}</div>}
                         </div>
                     ))}
                 </div>
@@ -439,11 +392,11 @@ function GridHouseCrmFinances(p: GHFinProps) {
                                         {String(i + 1).padStart(2, '0')}
                                     </span>
                                     <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: '1 1 140px', minWidth: 0, wordBreak: 'break-word' }}>{client.name}</div>
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap' }}>
-                                        {count} сессий
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap' }}>
+                                        {count} {sessionsWord(count)}
                                     </div>
                                     <div style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.danger, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-                                        {total} {client.currency}
+                                        {formatMoney(total, { currency: client.currency })}
                                     </div>
                                 </div>
                             ))}
@@ -466,16 +419,18 @@ function GridHouseCrmFinances(p: GHFinProps) {
                     </div>
 
                     {p.loading && !p.payments.length ? (
-                        <div style={{ padding: 60, display: 'flex', justifyContent: 'center' }}>
-                            <Loader2 className="animate-spin" size={20} color={GH.ink60} />
+                        <div role="status" aria-busy="true" style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <span className="sr-only">Загружаем платежи…</span>
+                            {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} height={20} radius={0} />)}
                         </div>
                     ) : p.payments.length === 0 ? (
-                        <div style={{ padding: '80px 0', textAlign: 'center' }}>
-                            <div style={{ fontFamily: GH_SANS, fontSize: 'clamp(28px, 3vw, 40px)', fontWeight: 800, letterSpacing: '-0.01em', marginBottom: 8 }}>
-                                Платежей нет.
-                            </div>
-                            <div style={{ ...eyebrow }}>Выберите другой период или добавьте платёж</div>
-                        </div>
+                        p.loadError ? null : (
+                            <EmptyState
+                                title="За этот период платежей нет"
+                                hint="Выберите другой период или добавьте платёж."
+                                action={{ label: 'Новый платёж', onClick: () => p.setShowForm(true) }}
+                            />
+                        )
                     ) : (
                         <div>
                             {p.payments.map((pay, i) => {
@@ -502,16 +457,16 @@ function GridHouseCrmFinances(p: GHFinProps) {
                                         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
                                             <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, wordBreak: 'break-word' }}>{client?.name || 'Неизвестный'}</div>
                                             {pay.account && (
-                                                <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', color: GH.ink60, marginTop: 3, textTransform: 'uppercase' }}>
+                                                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, marginTop: 3, textTransform: 'uppercase' }}>
                                                     {pay.account}
                                                 </div>
                                             )}
                                         </div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: GH.ink60, whiteSpace: 'nowrap' }}>
-                                            {format(parseUTC(pay.date), 'dd.MM.yyyy · HH:mm')}
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: GH.ink60, whiteSpace: 'nowrap' }}>
+                                            {formatDayMonth(parseUTC(pay.date), { withYear: 'auto' })} · {formatTime(parseUTC(pay.date))}
                                         </div>
                                         <div style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: GH.ink, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-                                            +{pay.amount} {pay.currency}
+                                            {formatMoney(pay.amount, { currency: pay.currency, sign: true })}
                                         </div>
                                     </div>
                                 );
@@ -565,7 +520,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
         }
     };
 
-    const labelStyle: React.CSSProperties = { display: 'block', fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 };
+    const labelStyle: React.CSSProperties = { display: 'block', fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 8 };
     const hairlineInput: React.CSSProperties = {
         fontFamily: GH_SANS, fontSize: 15, background: 'transparent',
         border: 'none', borderBottom: `1px solid ${GH.ink10}`, padding: '10px 0',
@@ -576,7 +531,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
         <form onSubmit={handleSubmit}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `2px solid ${GH.ink}`, paddingBottom: 16, marginBottom: 24 }}>
                 <div>
-                    <div style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
+                    <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, marginBottom: 6 }}>
                         Действие · Новый платёж
                     </div>
                     <h3 style={{ fontFamily: GH_SANS, fontSize: 28, fontWeight: 800, letterSpacing: '-0.01em', margin: 0 }}>
@@ -586,6 +541,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
                 <button
                     type="button"
                     onClick={onCancel}
+                    aria-label="Закрыть"
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60, padding: 4 }}
                 >
                     <X size={20} />
@@ -632,7 +588,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
                     type="button"
                     onClick={onCancel}
                     style={{
-                        flex: 1, fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+                        flex: 1, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                         background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '14px 20px', cursor: 'pointer',
                     }}
                 >
@@ -642,7 +598,7 @@ function GHPaymentForm({ clients, onSave, onCancel }: {
                     type="submit"
                     disabled={saving || !clientId || !amount}
                     style={{
-                        flex: 1, fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+                        flex: 1, fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                         background: GH.ink, color: GH.paper, border: `1px solid ${GH.ink}`, padding: '14px 20px',
                         opacity: (saving || !clientId || !amount) ? 0.4 : 1,
                         cursor: (saving || !clientId || !amount) ? 'not-allowed' : 'pointer',

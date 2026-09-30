@@ -69,9 +69,9 @@ export function CrmApplyPage() {
 const GH_HAIRLINE = `1px solid ${GH.ink10}`;
 const GH_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 11,
+    fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     color: GH.ink60,
 };
 
@@ -113,7 +113,7 @@ function GridHouseCrmApplyPage({
                     fontFamily: GH_SANS,
                 }}
             >
-                <Loader2 size={24} style={{ color: GH.ink30, animation: 'spin 1s linear infinite' }} />
+                <Loader2 size={24} aria-label="Проверяем доступ" style={{ color: GH.ink60, animation: 'spin 1s linear infinite' }} />
             </div>
         );
     }
@@ -134,7 +134,7 @@ function GridHouseCrmApplyPage({
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
                     <div style={{ maxWidth: 480, width: '100%', textAlign: 'center' }}>
                         <div style={{ ...GH_MONO_LABEL, marginBottom: 24 }}>Статус · На рассмотрении</div>
-                        <Clock size={32} style={{ color: GH.ink30, margin: '0 auto 24px' }} />
+                        <Clock size={32} aria-hidden="true" style={{ color: GH.ink60, margin: '0 auto 24px' }} />
                         <h2
                             style={{
                                 fontSize: 'clamp(28px, 3.5vw, 42px)',
@@ -146,8 +146,8 @@ function GridHouseCrmApplyPage({
                             Заявка на рассмотрении
                         </h2>
                         <p style={{ fontSize: 16, lineHeight: 1.6, color: GH.ink60, maxWidth: 400, margin: '0 auto' }}>
-                            Ваша заявка уже отправлена и ожидает рассмотрения администратором.
-                            Вы получите уведомление, когда доступ будет предоставлен.
+                            Заявка уже у администратора — ждём подтверждения.
+                            Как только доступ откроют, придёт уведомление.
                         </p>
                     </div>
                 </div>
@@ -344,9 +344,9 @@ function GridHouseCrmApplyPage({
                                 color: GH.paper,
                                 border: 'none',
                                 fontFamily: GH_MONO,
-                                fontSize: 11,
+                                fontSize: 12,
                                 textTransform: 'uppercase',
-                                letterSpacing: '0.18em',
+                                letterSpacing: '0.06em',
                                 fontWeight: 600,
                                 cursor: loading ? 'not-allowed' : 'pointer',
                                 opacity: loading ? 0.6 : 1,
@@ -368,10 +368,10 @@ function GridHouseCrmApplyPage({
                         <p
                             style={{
                                 ...GH_MONO_LABEL,
-                                fontSize: 10,
+                                fontSize: 12,
                                 textAlign: 'center',
                                 marginTop: 16,
-                                color: GH.ink30,
+                                color: GH.ink60,
                             }}
                         >
                             Заявка поступит администратору. Доступ открывается вручную.

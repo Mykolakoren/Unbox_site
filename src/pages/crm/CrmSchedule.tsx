@@ -7,8 +7,10 @@ import { Link } from 'react-router-dom';
 import { Clock, Save, Loader2, Trash2, Calendar, MapPin, Video, User, Plus, CalendarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { formatDayMonth, formatDateLabel, formatTime } from '../../utils/format';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { Skeleton } from '../../components/ui/Skeleton';
 
 const DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const LOCATION_OPTIONS = [
@@ -59,6 +61,7 @@ const emptyOverride = (): OverrideEntry => ({
  *  широком окне. */
 export function CrmSchedule({ compact = false }: { compact?: boolean } = {}) {
     const currentUser = useUserStore(s => s.currentUser);
+    const { confirm } = useConfirmDialog();
     const [specialistId, setSpecialistId] = useState<string | null>(null);
     // Поиск анкеты: 'pending' пока ищем, 'missing' — анкеты нет (404),
     // 'error' — не смогли спросить сервер (сеть/5xx). Раньше тупик «нет
@@ -297,13 +300,23 @@ export function CrmSchedule({ compact = false }: { compact?: boolean } = {}) {
                 upcomingAppointments={upcomingAppointments}
                 onCancelAppt={async (id) => {
                     if (!specialistId) return;
-                    if (!window.confirm('Отменить запись?')) return;
+                    const appt = appointments.find(a => a.id === id);
+                    const ok = await confirm({
+                        title: 'Отменить запись?',
+                        body: appt
+                            ? `${appt.clientName} · ${formatDateLabel(appt.date)}, ${formatTime(appt.startTime)}`
+                            : undefined,
+                        confirmLabel: 'Отменить запись',
+                        cancelLabel: 'Оставить',
+                        tone: 'danger',
+                    });
+                    if (!ok) return;
                     try {
                         await specialistsApi.cancelAppointment(specialistId, id);
                         setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a));
                         toast.success('Запись отменена');
                     } catch {
-                        toast.error('Ошибка');
+                        toast.error('Не удалось отменить запись');
                     }
                 }}
             />
@@ -320,9 +333,9 @@ const GH_HAIRLINE = `1px solid ${GH.ink10}`;
 const GH_HAIRLINE_STRONG = `1px solid ${GH.ink}`;
 const GH_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 11,
+    fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     color: GH.ink60,
 };
 const GH_DOW_LABELS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
@@ -380,18 +393,10 @@ function GridHouseCrmSchedule({
 
     if (loading || lookup === 'pending') {
         return (
-            <div
-                style={{
-                    fontFamily: GH_MONO,
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.18em',
-                    color: GH.ink30,
-                    padding: '80px 0',
-                    textAlign: 'center',
-                }}
-            >
-                Загрузка расписания…
+            <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '24px 0' }}>
+                <span className="sr-only">Загружаем расписание…</span>
+                <Skeleton height={40} width="50%" radius={0} />
+                {Array.from({ length: 7 }, (_, i) => <Skeleton key={i} height={36} radius={0} />)}
             </div>
         );
     }
@@ -404,10 +409,10 @@ function GridHouseCrmSchedule({
             border: 'none',
             padding: '14px 22px',
             fontFamily: GH_MONO,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 600,
             textTransform: 'uppercase',
-            letterSpacing: '0.18em',
+            letterSpacing: '0.06em',
             cursor: 'pointer',
             textDecoration: 'none',
             display: 'inline-block',
@@ -508,10 +513,10 @@ function GridHouseCrmSchedule({
                         border: 'none',
                         padding: '14px 24px',
                         fontFamily: GH_MONO,
-                        fontSize: 11,
+                        fontSize: 12,
                         fontWeight: 600,
                         textTransform: 'uppercase',
-                        letterSpacing: '0.18em',
+                        letterSpacing: '0.06em',
                         cursor: saving ? 'not-allowed' : 'pointer',
                         opacity: saving ? 0.5 : 1,
                         display: 'flex',
@@ -586,10 +591,10 @@ function GridHouseCrmSchedule({
                             color: GH.ink,
                             padding: '6px 14px',
                             fontFamily: GH_MONO,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: 600,
                             textTransform: 'uppercase',
-                            letterSpacing: '0.18em',
+                            letterSpacing: '0.06em',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
@@ -655,7 +660,7 @@ function GridHouseCrmSchedule({
                         fontSize: 12,
                         fontWeight: 600,
                         textTransform: 'uppercase',
-                        letterSpacing: '0.18em',
+                        letterSpacing: '0.06em',
                         cursor: saving ? 'not-allowed' : 'pointer',
                         opacity: saving ? 0.5 : 1,
                         display: 'flex',
@@ -722,7 +727,7 @@ function GridHouseCrmSchedule({
                                 key={appt.id}
                                 style={{
                                     display: 'grid',
-                                    // Узко: [дата | клиент | ✕] над [время | локация]
+                                    // Узко: [дата | клиент | ×] над [время | локация]
                                     gridTemplateColumns: narrow ? '64px 1fr 32px' : '32px 88px 1.4fr 1fr 1fr 40px',
                                     gap: narrow ? '6px 8px' : 0,
                                     padding: '14px 16px',
@@ -735,7 +740,7 @@ function GridHouseCrmSchedule({
                                     style={{
                                         display: narrow ? 'none' : undefined,
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                         color: GH.ink60,
                                         fontVariantNumeric: 'tabular-nums',
                                     }}
@@ -752,7 +757,7 @@ function GridHouseCrmSchedule({
                                         textTransform: 'uppercase',
                                     }}
                                 >
-                                    {format(new Date(appt.date + 'T00:00'), 'dd MMM', { locale: ru })}
+                                    {formatDayMonth(appt.date)}
                                 </div>
                                 <div style={narrow ? { gridColumn: 2, gridRow: 1, minWidth: 0 } : undefined}>
                                     <div style={{ fontWeight: 600, color: GH.ink }}>{appt.clientName}</div>
@@ -760,7 +765,7 @@ function GridHouseCrmSchedule({
                                         <div
                                             style={{
                                                 fontFamily: GH_MONO,
-                                                fontSize: 11,
+                                                fontSize: 12,
                                                 color: GH.ink60,
                                                 marginTop: 2,
                                             }}
@@ -785,9 +790,9 @@ function GridHouseCrmSchedule({
                                         gridColumn: narrow ? 2 : undefined,
                                         gridRow: narrow ? 2 : undefined,
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
+                                        fontSize: 12,
                                         textTransform: 'uppercase',
-                                        letterSpacing: '0.1em',
+                                        letterSpacing: '0.06em',
                                         color: GH.ink60,
                                     }}
                                 >
@@ -797,10 +802,11 @@ function GridHouseCrmSchedule({
                                     <button
                                         onClick={() => onCancelAppt(appt.id)}
                                         title="Отменить запись"
+                                        aria-label="Отменить запись"
                                         style={{
                                             background: 'none',
                                             border: 'none',
-                                            color: GH.ink30,
+                                            color: GH.ink60,
                                             cursor: 'pointer',
                                             padding: 4,
                                             display: 'flex',
@@ -860,7 +866,7 @@ function GridHouseDayRow({
                 style={{
                     display: narrow ? 'none' : undefined,
                     fontFamily: GH_MONO,
-                    fontSize: 11,
+                    fontSize: 12,
                     color: GH.ink60,
                     fontVariantNumeric: 'tabular-nums',
                     paddingTop: 6,
@@ -923,7 +929,7 @@ function GridHouseDayRow({
                                     onChange={e => onUpdateRange(ri, { start_time: e.target.value })}
                                     style={narrow ? { ...GH_TIME_INPUT, width: 100 } : GH_TIME_INPUT}
                                 />
-                                <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
+                                <span aria-hidden="true" style={{ color: GH.ink60, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
                                 <input
                                     type="time"
                                     value={range.end_time}
@@ -937,7 +943,7 @@ function GridHouseDayRow({
                                         fontFamily: GH_MONO,
                                         fontSize: 12,
                                         textTransform: 'uppercase',
-                                        letterSpacing: '0.1em',
+                                        letterSpacing: '0.06em',
                                         border: 'none',
                                         borderBottom: `1px solid ${GH.ink30}`,
                                         background: 'transparent',
@@ -987,10 +993,10 @@ function GridHouseDayRow({
                                 color: GH.ink60,
                                 padding: '4px 10px',
                                 fontFamily: GH_MONO,
-                                fontSize: 10,
+                                fontSize: 12,
                                 fontWeight: 600,
                                 textTransform: 'uppercase',
-                                letterSpacing: '0.18em',
+                                letterSpacing: '0.06em',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
@@ -1050,7 +1056,7 @@ function GridHouseOverrideRow({
         <div
             style={{
                 display: 'grid',
-                // Узко: [дата | ✕], ниже во всю ширину статус, время, локация
+                // Узко: [дата | ×], ниже во всю ширину статус, время, локация
                 gridTemplateColumns: narrow ? '1fr 40px' : '120px 180px 1fr 1fr 40px',
                 gap: narrow ? '10px 0' : 0,
                 padding: '12px 16px',
@@ -1092,10 +1098,10 @@ function GridHouseOverrideRow({
                         background: !is_available ? GH.ink : 'transparent',
                         color: !is_available ? GH.paper : GH.ink60,
                         fontFamily: GH_MONO,
-                        fontSize: 10,
+                        fontSize: 12,
                         fontWeight: 600,
                         textTransform: 'uppercase',
-                        letterSpacing: '0.1em',
+                        letterSpacing: '0.06em',
                         cursor: 'pointer',
                     }}
                 >
@@ -1110,10 +1116,10 @@ function GridHouseOverrideRow({
                         background: is_available ? GH.ink : 'transparent',
                         color: is_available ? GH.paper : GH.ink60,
                         fontFamily: GH_MONO,
-                        fontSize: 10,
+                        fontSize: 12,
                         fontWeight: 600,
                         textTransform: 'uppercase',
-                        letterSpacing: '0.1em',
+                        letterSpacing: '0.06em',
                         cursor: 'pointer',
                     }}
                 >
@@ -1141,7 +1147,7 @@ function GridHouseOverrideRow({
                                 width: narrow ? 100 : 70,
                             }}
                         />
-                        <span style={{ color: GH.ink30, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
+                        <span aria-hidden="true" style={{ color: GH.ink60, fontFamily: GH_MONO, fontSize: 12 }}>—</span>
                         <input
                             type="time"
                             value={override.end_time}
@@ -1172,9 +1178,9 @@ function GridHouseOverrideRow({
                         onChange={(e) => onUpdate({ location_id: e.target.value })}
                         style={{
                             fontFamily: GH_MONO,
-                            fontSize: 11,
+                            fontSize: 12,
                             textTransform: 'uppercase',
-                            letterSpacing: '0.1em',
+                            letterSpacing: '0.06em',
                             border: 'none',
                             borderBottom: GH_HAIRLINE,
                             background: 'transparent',
@@ -1199,10 +1205,11 @@ function GridHouseOverrideRow({
                 <button
                     onClick={onRemove}
                     title="Удалить"
+                    aria-label="Удалить исключение"
                     style={{
                         background: 'none',
                         border: 'none',
-                        color: GH.ink30,
+                        color: GH.ink60,
                         cursor: 'pointer',
                         padding: 4,
                         display: 'flex',

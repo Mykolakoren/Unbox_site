@@ -4,23 +4,15 @@ import { useUserStore } from '../../store/userStore';
 import { useCrmStore } from '../../store/crmStore';
 import { type CrmClient } from '../../api/crm';
 import { RESOURCES } from '../../utils/data';
-import { format, isAfter, isBefore } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { isAfter, isBefore } from 'date-fns';
 import type { BookingHistoryItem } from '../../store/types';
 import {
-    Calendar,
-    Clock,
-    MapPin,
-    UserPlus,
     UserCheck,
     Loader2,
     X,
     Search,
     Link2,
-    LayoutList,
-    LayoutGrid,
     Repeat2,
-    Trash2,
     AlertTriangle,
 } from 'lucide-react';
 import { bookingsApi } from '../../api/bookings';
@@ -28,33 +20,54 @@ import { toast } from 'sonner';
 import clsx from 'clsx';
 import { CrmChessboardView } from '../../components/crm/CrmChessboardView';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { CURRENCIES } from '../../utils/currency';
+import { formatMoney, formatGel, formatDayMonth } from '../../utils/format';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button } from '../../components/ui/Button';
+import { Field, TextArea } from '../../components/ui/Field';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { EmptyState } from '../../components/ui/EmptyState';
 
-// 2026-06-05 owner: getSafeBookingDate вынесена в utils/bookingHelpers
-// (Фаза 1 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md). Свой safeFormat
-// раньше принимал Date | null, общий принимает str | Date | null —
-// сигнатура шире, рендеринг тот же.
-import { getSafeBookingDate, safeFormat as sharedSafeFormat } from '../../utils/bookingHelpers';
+/** «GEL» → «₾» в подписях полей («Стоимость, ₾»). */
+const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
 
-// Локальный shim: старый код звал safeFormat(dateObj, fmt) — общий
-// принимает либо строку либо Date. Обёртка сохраняет старую сигнатуру
-// чтобы не править ~30 call-sites внутри файла.
-function safeFormat(dateObj: Date | null, fmt: string, opts?: any): string {
-    return sharedSafeFormat(dateObj, fmt, opts, '—');
+/** «1 сессия / 2 сессии / 5 сессий». */
+function sessionsWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'сессия';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
+    return 'сессий';
 }
 
-// ─── Статусы бронирований ─────────────────────────────────────────────────────
-// 2026-06-05 owner: словарь статусов вынесен в utils/bookingHelpers, чтобы
-// MyBookingsPage и mobile-страницы пользовались одним и тем же словарём.
-import { BOOKING_STATUS_LABELS } from '../../utils/bookingHelpers';
+/** «1 бронь / 2 брони / 5 броней». */
+function bookingsWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'бронь';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'брони';
+    return 'броней';
+}
 
-const BOOKING_STATUS_COLORS: Record<string, string> = {
-    confirmed: 'bg-blue-100 text-blue-700 border-blue-200',
-    completed: 'bg-green-100 text-green-700 border-green-200',
-    cancelled: 'bg-red-100 text-red-600 border-red-200',
-    rescheduled: 'bg-amber-100 text-amber-700 border-amber-200',
-    no_show: 'bg-gray-100 text-gray-600 border-gray-200',
-    're-rented': 'bg-purple-100 text-purple-700 border-purple-200',
-};
+/** Скелетон строк таблицы Grid House — пока грузим, не пишем «пусто». */
+function GHSkeletonRows({ label }: { label: string }) {
+    return (
+        <div role="status" aria-busy="true" style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <span className="sr-only">{label}…</span>
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={20} radius={0} />)}
+        </div>
+    );
+}
+
+// 2026-06-05 owner: getSafeBookingDate вынесена в utils/bookingHelpers
+// (Фаза 1 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md). Свой форматтер
+// раньше принимал Date | null, общий принимает str | Date | null —
+// сигнатура шире, рендеринг тот же.
+import { getSafeBookingDate } from '../../utils/bookingHelpers';
+
+// Wave 1: даты в этом файле — через utils/format (formatDayMonth), статусы
+// брони — через общий StatusBadge (src/design/statuses.ts).
+
 
 // ─── Фильтры ─────────────────────────────────────────────────────────────────
 type FilterType = 'all' | 'linked' | 'unlinked' | 'upcoming' | 'past';
@@ -88,7 +101,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
     const splitMode = slots.length > 1;
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
-
+    const { confirm } = useConfirmDialog();
 
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const { dateStr: bookingDate, dateObj: bookingDateObj } = getSafeBookingDate(booking);
@@ -185,20 +198,20 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-200">
+            <div className="bg-card rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-200">
                 {/* Header */}
-                <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10 rounded-t-2xl">
+                <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-card z-10 rounded-t-2xl">
                     <div>
                         <h3 className="font-bold text-base flex items-center gap-2">
                             <Link2 size={16} className="text-unbox-green" />
                             {existingSessionClientId ? 'Изменить клиента сессии' : 'Создать сессию из брони'}
                         </h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                            {resource?.name || 'Кабинет'} · {safeFormat(bookingDateObj, 'd MMM yyyy', { locale: ru }) || bookingDate} {booking.startTime || ''}
+                            {resource?.name || 'Кабинет'} · {bookingDateObj ? formatDayMonth(bookingDateObj, { withYear: 'auto' }) : bookingDate} {booking.startTime || ''}
                             {booking.duration ? ` · ${booking.duration} мин` : ''}
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                    <button onClick={onClose} aria-label="Закрыть" className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
                         <X size={18} className="text-gray-500" />
                     </button>
                 </div>
@@ -268,7 +281,9 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                         {slots.length > 1 && (
                                             <span
                                                 onClick={e => { e.stopPropagation(); removeSlot(idx); }}
-                                                className="ml-1 text-red-400 hover:text-red-600"
+                                                title="Убрать слот"
+                                                aria-label="Убрать слот"
+                                                className="ml-1 text-[var(--status-danger-fg)] hover:opacity-70"
                                             >×</span>
                                         )}
                                     </button>
@@ -277,7 +292,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                             {remainingMinutes > 0 && (
                                 <button
                                     onClick={addSlot}
-                                    className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-gray-400 hover:border-unbox-green hover:text-unbox-green transition-colors"
+                                    className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-ink-60 hover:border-unbox-green hover:text-unbox-green transition-colors"
                                 >
                                     + Слот
                                 </button>
@@ -294,7 +309,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                     Клиент {splitMode ? `(Слот ${activeSlot + 1})` : ''} *
                                 </label>
                                 <div className="relative mb-2">
-                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
                                     <input
                                         type="text"
                                         value={search}
@@ -305,7 +320,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                 </div>
                                 <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50">
                                     {filteredClients.length === 0 ? (
-                                        <div className="p-4 text-center text-sm text-gray-400">Клиенты не найдены</div>
+                                        <div className="p-4 text-center text-sm text-ink-60">Клиенты не найдены</div>
                                     ) : filteredClients.map(client => (
                                         <button
                                             key={client.id}
@@ -314,7 +329,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                                 'w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors border-b border-gray-100 last:border-0',
                                                 currentSlot.clientId === client.id
                                                     ? 'bg-unbox-green/10 text-unbox-dark'
-                                                    : 'hover:bg-white'
+                                                    : 'hover:bg-card'
                                             )}
                                         >
                                             <div className={clsx(
@@ -326,7 +341,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                             <div className="min-w-0">
                                                 <div className="font-medium text-sm truncate">{client.name}</div>
                                                 {client.aliasCode && (
-                                                    <div className="text-[10px] text-gray-400 font-mono">{client.aliasCode}</div>
+                                                    <div className="text-xs text-ink-60 font-mono">{client.aliasCode}</div>
                                                 )}
                                             </div>
                                             {currentSlot.clientId === client.id && (
@@ -341,7 +356,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5">
-                                        Стоимость ({selectedClient?.currency || 'GEL'})
+                                        Стоимость, {currencySign(selectedClient?.currency)}
                                     </label>
                                     <input
                                         type="number"
@@ -398,13 +413,14 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                                 return (
                                     <div key={idx} className="flex justify-between text-xs text-gray-600">
                                         <span>{slotStartTimes[idx]} — {c?.name || '(не выбран)'}</span>
-                                        <span>{sl.duration} мин · {sl.price || '0'} {c?.currency || 'GEL'}</span>
+                                        <span>{sl.duration} мин · {formatMoney(Number(sl.price) || 0, { currency: c?.currency })}</span>
                                     </div>
                                 );
                             })}
                             {remainingMinutes !== 0 && (
-                                <div className={clsx('text-xs font-medium', remainingMinutes > 0 ? 'text-amber-600' : 'text-red-600')}>
-                                    {remainingMinutes > 0 ? `⚠ Не распределено: ${remainingMinutes} мин` : `⚠ Превышение: ${Math.abs(remainingMinutes)} мин`}
+                                <div className={clsx('text-xs font-medium flex items-center gap-1', remainingMinutes > 0 ? 'text-[var(--status-pending-fg)]' : 'text-[var(--status-danger-fg)]')}>
+                                    <AlertTriangle size={12} className="shrink-0" aria-hidden="true" />
+                                    {remainingMinutes > 0 ? `Не распределено: ${remainingMinutes} мин` : `Превышение: ${Math.abs(remainingMinutes)} мин`}
                                 </div>
                             )}
                         </div>
@@ -417,10 +433,17 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                     <div className="px-5 pb-1">
                         <button
                             onClick={async () => {
-                                if (!confirm('Отвязать клиента от этой брони? Сессия будет удалена, бронь останется.')) return;
+                                const ok = await confirm({
+                                    title: 'Отвязать клиента от брони?',
+                                    body: 'Сессия удалится, а бронь кабинета останется — к ней можно будет привязать другого клиента.',
+                                    confirmLabel: 'Отвязать клиента',
+                                    cancelLabel: 'Оставить',
+                                    tone: 'danger',
+                                });
+                                if (!ok) return;
                                 await onUnlink();
                             }}
-                            className="w-full py-2 rounded-xl border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 transition-colors"
+                            className="w-full py-2 rounded-xl border border-[var(--status-danger-fg)]/30 text-[var(--status-danger-fg)] text-xs font-semibold hover:bg-[var(--status-danger-bg)] transition-colors"
                         >
                             Отвязать клиента от брони
                         </button>
@@ -428,7 +451,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                 )}
 
                 {/* Footer */}
-                <div className="flex gap-3 p-5 pt-0 sticky bottom-0 bg-white rounded-b-2xl">
+                <div className="flex gap-3 p-5 pt-0 sticky bottom-0 bg-card rounded-b-2xl">
                     <button
                         onClick={onClose}
                         className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
@@ -441,7 +464,7 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
                         className="flex-1 py-2.5 rounded-xl bg-unbox-green text-white text-sm font-semibold hover:bg-unbox-dark disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                     >
                         {saving && <Loader2 size={14} className="animate-spin" />}
-                        {existingSessionClientId ? 'Сохранить' : splitMode && slots.length > 1 ? `Создать ${slots.length} сессии` : 'Создать сессию'}
+                        {existingSessionClientId ? 'Сохранить' : splitMode && slots.length > 1 ? `Создать ${slots.length} ${sessionsWord(slots.length)}` : 'Создать сессию'}
                     </button>
                 </div>
             </div>
@@ -449,146 +472,9 @@ function LinkSessionModal({ booking, clients, existingSessionClientId, onClose, 
     );
 }
 
-// ─── Карточка бронирования ───────────────────────────────────────────────────
-interface BookingCardProps {
-    booking: BookingHistoryItem;
-    linkedClient?: CrmClient;
-    linkedSessionId?: string;
-    linkedSessions?: any[];
-    clientById: Map<string, CrmClient>;
-    onLink: (booking: BookingHistoryItem, existingSessionId?: string, existingClientId?: string) => void;
-}
+// BookingCard (карточка старого списка до Grid House) нигде не рендерилась —
+// удалена в wave 1 вместе со своими синими/фиолетовыми цветами.
 
-const CARD_SEGMENT_COLORS = [
-    'bg-unbox-light/40 border-unbox-green/20',
-    'bg-blue-50 border-blue-200/40',
-    'bg-amber-50 border-amber-200/40',
-    'bg-purple-50 border-purple-200/40',
-];
-
-function BookingCard({ booking, linkedClient, linkedSessionId, linkedSessions, clientById, onLink }: BookingCardProps) {
-    const resource = RESOURCES.find(r => r.id === booking.resourceId);
-    const { dateStr, dateObj } = getSafeBookingDate(booking);
-
-    const isPast = dateObj ? isBefore(dateObj, new Date()) : false;
-    const isActive = booking.status === 'confirmed' || booking.status === 'completed';
-    const hasMultiple = (linkedSessions?.length || 0) > 1;
-
-    return (
-        <div className={clsx(
-            'bg-white rounded-2xl border transition-shadow hover:shadow-md p-4',
-            linkedClient || hasMultiple ? 'border-unbox-green/40' : 'border-gray-100',
-            !isActive && 'opacity-60'
-        )}>
-            {/* Top row: date + status */}
-            <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2">
-                    <div className={clsx('p-1.5 rounded-lg', isPast ? 'bg-gray-100' : 'bg-unbox-light/60')}>
-                        <Calendar size={14} className={isPast ? 'text-gray-400' : 'text-unbox-green'} />
-                    </div>
-                    <div>
-                        <div className="font-semibold text-sm text-gray-900 flex items-center gap-1">
-                            {/* Recurring marker — feature parity with the chessboard
-                                view; missing here meant series weren't visible in
-                                the list tab on /crm/bookings. */}
-                            {booking.recurringGroupId && (
-                                <span className="text-orange-500" title="Постоянная бронь (серия)">⭐</span>
-                            )}
-                            {safeFormat(dateObj, 'd MMMM yyyy', { locale: ru }) || dateStr || '—'}
-                        </div>
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                            <Clock size={11} />
-                            {booking.startTime || '—'}
-                            {booking.duration ? ` · ${booking.duration} мин` : ''}
-                        </div>
-                    </div>
-                </div>
-                <span className={clsx(
-                    'px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border',
-                    BOOKING_STATUS_COLORS[booking.status] || 'bg-gray-100 text-gray-500'
-                )}>
-                    {BOOKING_STATUS_LABELS[booking.status] || booking.status}
-                </span>
-            </div>
-
-            {/* Room */}
-            <div className="flex items-center gap-1.5 text-sm text-gray-600 mb-3">
-                <MapPin size={13} className="text-gray-400 shrink-0" />
-                <span>{resource?.name || `Кабинет ${booking.resourceId}`}</span>
-            </div>
-
-            {/* Multi-client split display */}
-            {hasMultiple ? (
-                <div className="space-y-1.5">
-                    {linkedSessions!
-                        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                        .map((sess, idx) => {
-                            const cl = clientById.get(sess.clientId);
-                            const color = CARD_SEGMENT_COLORS[idx % CARD_SEGMENT_COLORS.length];
-                            return (
-                                <div key={sess.id} className={clsx('flex items-center justify-between rounded-xl px-3 py-2 border', color)}>
-                                    <div className="flex items-center gap-2">
-                                        <div className={clsx(
-                                            'w-5 h-5 rounded-full text-white flex items-center justify-center text-[10px] font-bold shrink-0',
-                                            idx === 0 ? 'bg-unbox-green' : idx === 1 ? 'bg-blue-500' : idx === 2 ? 'bg-amber-500' : 'bg-purple-500'
-                                        )}>
-                                            {idx + 1}
-                                        </div>
-                                        <div>
-                                            <div className="text-sm font-semibold text-gray-900">{cl?.name || '—'}</div>
-                                            <div className="text-[10px] text-gray-400">{sess.durationMinutes || 60} мин</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    {isActive && (
-                        <button
-                            onClick={() => onLink(booking, linkedSessionId, linkedClient?.id)}
-                            className="w-full text-xs text-gray-400 hover:text-unbox-green transition-colors underline py-1"
-                        >
-                            Изменить
-                        </button>
-                    )}
-                </div>
-            ) : linkedClient ? (
-                <div className="flex items-center justify-between bg-unbox-light/40 rounded-xl px-3 py-2">
-                    <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-unbox-green text-white flex items-center justify-center text-xs font-bold shrink-0">
-                            {linkedClient.name?.[0]?.toUpperCase() ?? '?'}
-                        </div>
-                        <div>
-                            <div className="text-sm font-semibold text-gray-900">{linkedClient.name}</div>
-                            {linkedClient.aliasCode && (
-                                <div className="text-[10px] text-gray-400 font-mono">{linkedClient.aliasCode}</div>
-                            )}
-                        </div>
-                    </div>
-                    {isActive && (
-                        <button
-                            onClick={() => onLink(booking, linkedSessionId, linkedClient.id)}
-                            className="text-xs text-gray-400 hover:text-unbox-green transition-colors underline"
-                        >
-                            Изменить
-                        </button>
-                    )}
-                </div>
-            ) : isActive ? (
-                <button
-                    onClick={() => onLink(booking)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-unbox-green hover:text-unbox-green transition-colors"
-                >
-                    <UserPlus size={14} />
-                    Привязать клиента
-                </button>
-            ) : (
-                <div className="text-xs text-gray-400 text-center py-1">Бронь неактивна</div>
-            )}
-        </div>
-    );
-}
-
-// ─── Главная страница ─────────────────────────────────────────────────────────
 export function CrmBookings() {
         const { currentUser, bookings: allBookings } = useUserStore();
     const { clients, sessions, fetchClients, fetchSessions } = useCrmStore();
@@ -884,7 +770,7 @@ interface GHCrmBookingsProps {
     handleUnlinkSession: () => Promise<void>;
 }
 
-const ghMono = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' as const, color: GH.ink60 };
+const ghMono = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60 };
 const ghHairline = `1px solid ${GH.ink10}`;
 
 function GridHouseCrmBookings(props: GHCrmBookingsProps) {
@@ -949,27 +835,27 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                                 <span style={{ fontFamily: GH_MONO, fontSize: 24, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
                                     {stats.upcoming}
                                 </span>
-                                <span style={{ ...ghMono, fontSize: 9 }}>предстоит</span>
+                                <span style={{ ...ghMono, fontSize: 12 }}>предстоит</span>
                             </span>
                             <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-                                <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.accent, lineHeight: 1 }}>
+                                <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.ink, lineHeight: 1 }}>
                                     {stats.linked}
                                 </span>
-                                <span style={{ ...ghMono, fontSize: 9 }}>с клиентом</span>
+                                <span style={{ ...ghMono, fontSize: 12 }}>с клиентом</span>
                             </span>
                             {stats.unlinked > 0 && (
                                 <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.danger, lineHeight: 1 }}>
                                         {stats.unlinked}
                                     </span>
-                                    <span style={{ ...ghMono, fontSize: 9 }}>без клиента</span>
+                                    <span style={{ ...ghMono, fontSize: 12 }}>без клиента</span>
                                 </span>
                             )}
                             <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
                                 <span style={{ fontFamily: GH_MONO, fontSize: 16, fontWeight: 600, color: GH.ink, lineHeight: 1 }}>
                                     {stats.total}
                                 </span>
-                                <span style={{ ...ghMono, fontSize: 9 }}>всего</span>
+                                <span style={{ ...ghMono, fontSize: 12 }}>всего</span>
                             </span>
                         </div>
                     </div>
@@ -983,8 +869,8 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                                 border: ghHairline,
                                 cursor: 'pointer',
                                 fontFamily: GH_MONO,
-                                fontSize: 10,
-                                letterSpacing: '0.14em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase' as const,
                                 background: GH.ink,
                                 color: GH.paper,
@@ -1003,8 +889,8 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                                         border: 'none',
                                         cursor: 'pointer',
                                         fontFamily: GH_MONO,
-                                        fontSize: 10,
-                                        letterSpacing: '0.14em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         textTransform: 'uppercase' as const,
                                         background: viewMode === v.key ? GH.ink : 'transparent',
                                         color: viewMode === v.key ? GH.paper : GH.ink60,
@@ -1043,7 +929,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                                     key={f.key}
                                     onClick={() => setFilter(f.key)}
                                     style={{
-                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                         padding: '10px 16px', background: 'transparent',
                                         color: filter === f.key ? GH.ink : GH.ink60,
                                         border: 'none',
@@ -1066,7 +952,7 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                                 padding: '8px 0', borderBottom: ghHairline,
                             }}>
                                 {['№', 'Дата', 'Клиент', 'Кабинет', 'Статус'].map(h => (
-                                    <div key={h} style={{ ...ghMono, fontSize: 9 }}>{h}</div>
+                                    <div key={h} style={{ ...ghMono, fontSize: 12 }}>{h}</div>
                                 ))}
                             </div>
                         )}
@@ -1076,20 +962,18 @@ function GridHouseCrmBookings(props: GHCrmBookingsProps) {
                             }
                         `}</style>
 
-                        {/* Rows */}
+                        {/* Rows. Загрузка ≠ пусто (rule 8). */}
                         {loadingClients ? (
-                            <div style={{ padding: '80px 0', textAlign: 'center' }}>
-                                <div style={ghMono}>Загрузка...</div>
-                            </div>
+                            <GHSkeletonRows label="Загружаем брони" />
                         ) : filteredBookings.length === 0 ? (
-                            <div style={{ padding: '80px 0', textAlign: 'center' }}>
-                                <h2 style={{ fontFamily: GH_SANS, fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', color: GH.ink30 }}>
-                                    {filter === 'upcoming' ? 'Нет предстоящих.' :
-                                     filter === 'unlinked' ? 'Все привязаны.' :
-                                     filter === 'linked' ? 'Нет привязанных.' :
-                                     'Бронирований нет.'}
-                                </h2>
-                            </div>
+                            <EmptyState
+                                title={filter === 'upcoming' ? 'Предстоящих броней нет' :
+                                    filter === 'unlinked' ? 'Все брони привязаны к клиентам' :
+                                    filter === 'linked' ? 'Привязанных броней нет' :
+                                    'Броней пока нет'}
+                                hint={filter === 'unlinked' ? undefined : 'Забронируйте кабинет в шахматке.'}
+                                action={filter === 'unlinked' ? undefined : { label: 'Открыть шахматку', onClick: () => setViewMode('chess') }}
+                            />
                         ) : (
                             <div>
                                 {filteredBookings.map((booking, idx) => {
@@ -1155,27 +1039,45 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
     // Cab 2 in One — мини-группы до 4 чел, добавлен по запросу админа.
     const groupCapable = ['unbox_uni_room_7', 'unbox_uni_room_8', 'unbox_one_room_2'].includes(booking.resourceId || '');
     const fetchBookings = useUserStore(s => s.fetchBookings);
+    const { confirm } = useConfirmDialog();
+
+    // Причина снятия штрафа — поле в шторке вместо системного окна браузера.
+    const [waiveOpen, setWaiveOpen] = useState(false);
+    const [waiveReason, setWaiveReason] = useState('');
+    const [waiveError, setWaiveError] = useState<string | undefined>();
+    const [waiveBusy, setWaiveBusy] = useState(false);
+    const openWaive = () => { setWaiveReason(''); setWaiveError(undefined); setWaiveOpen(true); };
 
     const handleWaive = async () => {
-        const reason = window.prompt('Причина снятия штрафа (обязательно):', '');
-        if (!reason || !reason.trim()) return;
+        const reason = waiveReason.trim();
+        if (!reason) { setWaiveError('Напишите причину — без неё штраф не снять'); return; }
+        setWaiveBusy(true);
         try {
-            const res = await bookingsApi.waiveCharge(booking.id, reason.trim());
+            const res = await bookingsApi.waiveCharge(booking.id, reason);
             toast.success(
                 res.scenario === 'waived_paid_refunded'
                     ? 'Штраф снят, средства возвращены'
                     : 'Штраф снят (списание не произойдёт)'
             );
+            setWaiveOpen(false);
             await fetchBookings?.();
         } catch (e: any) {
             toast.error(e?.response?.data?.detail || 'Не удалось снять штраф');
+        } finally {
+            setWaiveBusy(false);
         }
     };
 
     const handleChangeFormat = async () => {
         const target: 'individual' | 'group' = (booking.format === 'group') ? 'individual' : 'group';
-        const targetLabel = target === 'group' ? 'Групповой' : 'Индивид.';
-        if (!window.confirm(`Сменить формат на «${targetLabel}»? Цена пересчитается.`)) return;
+        const targetLabel = target === 'group' ? 'Групповой' : 'Индивидуальный';
+        const ok = await confirm({
+            title: `Сменить формат на «${targetLabel}»?`,
+            body: 'Цена брони пересчитается.',
+            confirmLabel: `Сменить на «${targetLabel}»`,
+            cancelLabel: 'Оставить',
+        });
+        if (!ok) return;
         try {
             await bookingsApi.changeFormat(booking.id, target);
             toast.success(`Формат изменён на «${targetLabel}»`);
@@ -1195,14 +1097,15 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
             style={{
                 display: 'flex', alignItems: 'center', flexWrap: 'wrap',
                 padding: '14px 0', borderBottom: ghHairline,
-                opacity: isActive ? 1 : 0.4, transition: 'background 120ms',
+                // Неактивные — приглушаем цветом, не прозрачностью (текст ≥ ink-60).
+                color: isActive ? undefined : GH.ink60, transition: 'background 120ms',
                 gap: '8px 14px',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = GH.ink5)}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
             {/* № */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30, letterSpacing: '0.14em', minWidth: 28 }}>
+            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, letterSpacing: '0.06em', minWidth: 28 }}>
                 {String(index + 1).padStart(2, '0')}
             </div>
 
@@ -1210,11 +1113,13 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
             <div style={{ flexShrink: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', display: 'flex', alignItems: 'center', gap: 4 }}>
                     {booking.recurringGroupId && (
-                        <span style={{ color: '#f97316' }} title="Постоянная бронь (серия)">⭐</span>
+                        <span style={{ display: 'inline-flex' }} title="Постоянная бронь (серия)">
+                            <Repeat2 size={12} aria-label="Постоянная бронь (серия)" />
+                        </span>
                     )}
-                    {safeFormat(dateObj, 'd MMM', { locale: ru })}
+                    {dateObj ? formatDayMonth(dateObj) : '—'}
                 </div>
-                <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+                <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                     {booking.startTime || '—'}{booking.duration ? ` · ${booking.duration} мин` : ''}
                 </div>
             </div>
@@ -1233,8 +1138,8 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
                         })}
                         {isActive && (
                             <button onClick={() => onLink(booking, linkedSessionId, linkedClient?.id)}
-                                style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                                Изм.
+                                style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                                Изменить
                             </button>
                         )}
                     </div>
@@ -1242,77 +1147,92 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{linkedClient.name}</span>
                         {linkedClient.aliasCode && (
-                            <span style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink30 }}>{linkedClient.aliasCode}</span>
+                            <span style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>{linkedClient.aliasCode}</span>
                         )}
                         {isActive && (
                             <button onClick={() => onLink(booking, linkedSessionId, linkedClient.id)}
-                                style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                                Изм.
+                                style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                                Изменить
                             </button>
                         )}
                     </div>
                 ) : isActive ? (
                     <button onClick={() => onLink(booking)}
-                        style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.accent, background: 'none', border: `1px solid ${GH.accent}`, padding: '4px 12px', cursor: 'pointer' }}>
+                        style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.accent, background: 'none', border: `1px solid ${GH.accent}`, padding: '4px 12px', cursor: 'pointer' }}>
                         + Привязать
                     </button>
                 ) : (
-                    <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase' as const, color: GH.ink30 }}>Неактивна</span>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60 }}>Неактивна</span>
                 )}
             </div>
 
             {/* Кабинет */}
-            <div style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap', flexShrink: 0 }}>
+            <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60, whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {resource?.name || booking.resourceId}
             </div>
 
-            {/* Статус */}
-            <div style={{ flexShrink: 0 }}>
-                <div style={{
-                    fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    color: booking.status === 'cancelled' || booking.status === 'no_show' ? GH.danger : GH.ink60,
-                    whiteSpace: 'nowrap',
-                }}>
-                    {BOOKING_STATUS_LABELS[booking.status] || booking.status}
-                </div>
+            {/* Статус брони и оплаты — слова и цвета из общего словаря (statuses.ts). */}
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <StatusBadge kind="booking" status={booking.status} audience="staff" variant="dot" />
                 {booking.paymentStatus && (
-                    <div style={{
-                        fontFamily: GH_MONO, fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase',
-                        marginTop: 3,
-                        color: booking.paymentStatus === 'pending' ? '#92400E'
-                            : booking.paymentStatus === 'waived' ? GH.accent
-                            : GH.ink30,
-                    }} title={booking.paymentStatus === 'waived' && booking.waiverReason ? booking.waiverReason : undefined}>
-                        {booking.paymentStatus === 'pending' ? 'Ожидает оплату'
-                            : booking.paymentStatus === 'waived' ? 'Штраф снят'
-                            : 'Оплачено'}
-                    </div>
+                    <span title={booking.paymentStatus === 'waived' && booking.waiverReason ? booking.waiverReason : undefined}>
+                        <StatusBadge
+                            kind="payment"
+                            status={booking.paymentStatus === 'pending' || booking.paymentStatus === 'waived' ? booking.paymentStatus : 'paid'}
+                            audience="staff"
+                            variant="dot"
+                        />
+                    </span>
                 )}
             </div>
 
             {/* Действия — waive + format change. Скрываем для прошедших/отменённых */}
             <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 {isActive && (booking.paymentStatus === 'pending' || booking.paymentStatus === 'paid') && (
-                    <button onClick={handleWaive}
+                    <button onClick={openWaive}
                         title="Снять штраф (с причиной)"
                         style={{
-                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                             padding: '4px 8px', background: 'transparent', border: ghHairline, color: GH.ink60, cursor: 'pointer',
                         }}>
-                        🩹 Штраф
+                        Снять штраф
                     </button>
                 )}
                 {isActive && groupCapable && (
                     <button onClick={handleChangeFormat}
-                        title="Сменить формат (индивид/групп)"
+                        title="Сменить формат (индивидуальный / групповой)"
                         style={{
-                            fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase' as const,
+                            fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const,
                             padding: '4px 8px', background: 'transparent', border: ghHairline, color: GH.ink60, cursor: 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
                         }}>
-                        🔄 {booking.format === 'group' ? 'Индив.' : 'Групп.'}
+                        <Repeat2 size={12} aria-hidden="true" /> {booking.format === 'group' ? 'В индивидуальный' : 'В групповой'}
                     </button>
                 )}
             </div>
+
+            <Sheet
+                open={waiveOpen}
+                onClose={() => { if (!waiveBusy) setWaiveOpen(false); }}
+                dismissible={!waiveBusy}
+                title="Снять штраф"
+                description={`${resource?.name || 'Кабинет'} · ${dateObj ? formatDayMonth(dateObj) : '—'}${booking.startTime ? `, ${booking.startTime}` : ''}`}
+                width={440}
+                footer={
+                    <>
+                        <Button variant="primary" block loading={waiveBusy} onClick={handleWaive}>Снять штраф</Button>
+                        <Button variant="secondary" block disabled={waiveBusy} onClick={() => setWaiveOpen(false)}>Оставить</Button>
+                    </>
+                }
+            >
+                <Field label="Причина" required error={waiveError}>
+                    <TextArea
+                        rows={3}
+                        value={waiveReason}
+                        onChange={e => { setWaiveReason(e.target.value); if (waiveError) setWaiveError(undefined); }}
+                    />
+                </Field>
+            </Sheet>
         </div>
     );
 }
@@ -1333,6 +1253,21 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
     const [exCount, setExCount] = useState(4);
     const [exUntil, setExUntil] = useState('');
     const [exBusy, setExBusy] = useState(false);
+    const { confirm } = useConfirmDialog();
+    // Отмена серии — общее окно подтверждения с числом броней вместо «Да / Нет» в строке.
+    const askCancelSeries = async (g: any, resourceName: string) => {
+        setConfirmCancelGroupId(g.recurringGroupId);
+        const n = Number(g.futureCount) || 0;
+        const ok = await confirm({
+            title: 'Отменить серию?',
+            body: `${resourceName} · ${g.startTime}. Отменим будущие брони серии: ${n}.`,
+            confirmLabel: n > 0 ? `Отменить ${n} ${bookingsWord(n)}` : 'Отменить серию',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) { setConfirmCancelGroupId(null); return; }
+        await handleCancelSeries(g.recurringGroupId);
+    };
     const submitExtend = async () => {
         if (!extendFor) return;
         if (exMode === 'until' && !exUntil) { toast.error('Укажите дату «до»'); return; }
@@ -1340,7 +1275,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
         try {
             const r = await bookingsApi.extendRecurringSeries(extendFor,
                 exMode === 'until' ? { untilDate: exUntil, pattern: exPattern } : { addOccurrences: exCount, pattern: exPattern });
-            toast.success(`Добавлено ${r.created} сессий${r.totalCost ? ` (+${r.totalCost.toFixed(0)} ₾)` : ''}`);
+            toast.success(`Добавлено ${r.created} ${bookingsWord(r.created)}${r.totalCost ? ` (${formatGel(r.totalCost, { sign: true, fraction: 0 })})` : ''}`);
             setExtendFor(null);
             await reloadGroups();
         } catch (e: any) {
@@ -1350,14 +1285,14 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
     };
 
     if (loadingGroups) {
-        return <div style={{ padding: '80px 0', textAlign: 'center' }}><div style={ghMono}>Загрузка...</div></div>;
+        return <GHSkeletonRows label="Загружаем серии" />;
     }
     if (recurringGroups.length === 0) {
         return (
-            <div style={{ padding: '80px 0', textAlign: 'center' }}>
-                <h2 style={{ fontFamily: GH_SANS, fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', color: GH.ink30 }}>Серий нет.</h2>
-                <div style={{ ...ghMono, marginTop: 8 }}>Создайте через шахматку</div>
-            </div>
+            <EmptyState
+                title="Серий пока нет"
+                hint="Постоянную бронь можно создать в шахматке: выберите время и включите повторение."
+            />
         );
     }
     return (
@@ -1370,7 +1305,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                 padding: '8px 0', borderBottom: ghHairline,
             }}>
                 {['Кабинет', 'Клиент', 'Паттерн', 'Осталось', 'Всего', 'След.', 'Заканчивается', ''].map(h => (
-                    <div key={h || 'empty'} style={{ ...ghMono, fontSize: 9 }}>{h}</div>
+                    <div key={h || 'empty'} style={{ ...ghMono, fontSize: 12 }}>{h}</div>
                 ))}
             </div>
             {recurringGroups.map(g => {
@@ -1389,7 +1324,7 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                     >
                         <div>
                             <div style={{ fontSize: 14, fontWeight: 600 }}>{resource?.name || g.resourceId}</div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 9, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase', marginTop: 2 }}>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 2 }}>
                                 {g.startTime} · {g.duration} мин
                             </div>
                         </div>
@@ -1398,51 +1333,52 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                                 ? (clientById.get(g.crmClientId)?.name || <span style={{ color: GH.ink60 }}>—</span>)
                                 : <span style={{ color: GH.ink60, fontStyle: 'italic' }}>без клиента</span>}
                         </div>
-                        <div style={{ fontFamily: GH_MONO, fontSize: 10, color: GH.ink60, letterSpacing: '0.14em', textTransform: 'uppercase' }}>{patternLabel}</div>
+                        <div style={{ fontFamily: GH_MONO, fontSize: 12, color: GH.ink60, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{patternLabel}</div>
                         <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{g.futureCount}</div>
                         <div style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: GH.ink60 }}>{g.totalCount}</div>
                         <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {g.nextDate ? format(new Date(g.nextDate + 'T00:00:00'), 'd MMM', { locale: ru }) : '—'}
+                            {g.nextDate ? formatDayMonth(g.nextDate) : '—'}
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {g.lastDate ? format(new Date(g.lastDate + 'T00:00:00'), 'd MMM yyyy', { locale: ru }) : '—'}
+                            {g.lastDate ? formatDayMonth(g.lastDate, { withYear: 'auto' }) : '—'}
                         </div>
                         <div>
-                            {isConfirming ? (
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                    <button onClick={() => setConfirmCancelGroupId(null)}
-                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: ghHairline, cursor: 'pointer', color: GH.ink60 }}>
-                                        Нет
-                                    </button>
-                                    <button onClick={() => handleCancelSeries(g.recurringGroupId)} disabled={isCancelling}
-                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: GH.danger, color: GH.paper, border: 'none', cursor: 'pointer', opacity: isCancelling ? 0.5 : 1 }}>
-                                        {isCancelling ? '...' : 'Да'}
-                                    </button>
-                                </div>
-                            ) : (
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                    <button onClick={() => { setExtendFor(g.recurringGroupId); setExPattern((g.pattern as any) || 'weekly'); }}
-                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}>
-                                        Продлить
-                                    </button>
-                                    <button onClick={() => setConfirmCancelGroupId(g.recurringGroupId)}
-                                        style={{ fontFamily: GH_MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer' }}>
-                                        Отменить
-                                    </button>
-                                </div>
-                            )}
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <button onClick={() => { setExtendFor(g.recurringGroupId); setExPattern((g.pattern as any) || 'weekly'); }}
+                                    disabled={isCancelling}
+                                    style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, padding: '5px 10px', background: GH.ink, color: GH.paper, border: 'none', cursor: 'pointer' }}>
+                                    Продлить
+                                </button>
+                                <button onClick={() => askCancelSeries(g, resource?.name || g.resourceId)}
+                                    disabled={isConfirming || isCancelling}
+                                    style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, padding: '5px 10px', background: 'transparent', border: `1px solid ${GH.danger}`, color: GH.danger, cursor: 'pointer', opacity: isCancelling ? 0.5 : 1 }}>
+                                    {isCancelling ? 'Отменяем…' : 'Отменить'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 );
             })}
 
-            {extendFor && (() => {
-                const chip = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 11, cursor: 'pointer', background: active ? GH.ink : 'transparent', color: active ? GH.paper : GH.ink60 });
+            {(() => {
+                const chip = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 12, cursor: 'pointer', background: active ? GH.ink : 'transparent', color: active ? GH.paper : GH.ink60 });
                 const inp: React.CSSProperties = { padding: '8px 10px', border: `1px solid ${GH.ink10}`, fontFamily: 'inherit', fontSize: 14, width: 170 };
+                // Общая шторка вместо самодельного окна: Esc, фокус внутри, подвал с кнопкой.
                 return (
-                    <div onClick={() => !exBusy && setExtendFor(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,14,14,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div onClick={e => e.stopPropagation()} style={{ background: GH.paper, padding: 24, width: 'min(420px, 92vw)', border: `1px solid ${GH.ink}` }}>
-                            <div style={{ fontFamily: GH_SANS, fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Продлить серию</div>
+                    <Sheet
+                        open={!!extendFor}
+                        onClose={() => { if (!exBusy) setExtendFor(null); }}
+                        dismissible={!exBusy}
+                        title="Продлить серию"
+                        width={420}
+                        footer={
+                            <>
+                                <Button variant="primary" block loading={exBusy} onClick={submitExtend}>Добавить</Button>
+                                <Button variant="secondary" block disabled={exBusy} onClick={() => setExtendFor(null)}>Отмена</Button>
+                            </>
+                        }
+                    >
+                        <div>
                             <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>ПЕРИОДИЧНОСТЬ</div>
                             <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
                                 {([['weekly', 'Еженед.'], ['biweekly', 'Раз в 2 нед.'], ['monthly', '4 недели']] as const).map(([p, l]) => (
@@ -1456,16 +1392,12 @@ function GHSeriesView({ loadingGroups, recurringGroups, confirmCancelGroupId, se
                                 ))}
                             </div>
                             {exMode === 'count' ? (
-                                <input type="number" min={1} max={52} value={exCount} onChange={e => setExCount(Math.max(1, Math.min(52, Number(e.target.value))))} style={inp} />
+                                <input type="number" min={1} max={52} value={exCount} aria-label="Сколько броней добавить" onChange={e => setExCount(Math.max(1, Math.min(52, Number(e.target.value))))} style={inp} />
                             ) : (
-                                <input type="date" value={exUntil} min={new Date().toISOString().slice(0, 10)} onChange={e => setExUntil(e.target.value)} style={inp} />
+                                <input type="date" value={exUntil} aria-label="До какой даты продлить" min={new Date().toISOString().slice(0, 10)} onChange={e => setExUntil(e.target.value)} style={inp} />
                             )}
-                            <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-                                <button onClick={submitExtend} disabled={exBusy} style={{ padding: '9px 16px', background: GH.ink, color: GH.paper, border: 'none', fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.08em', cursor: 'pointer', opacity: exBusy ? 0.6 : 1 }}>{exBusy ? 'Добавляю…' : 'Добавить'}</button>
-                                <button onClick={() => setExtendFor(null)} style={{ padding: '9px 16px', background: 'transparent', color: GH.ink60, border: `1px solid ${GH.ink10}`, fontFamily: GH_MONO, fontSize: 11, cursor: 'pointer' }}>Отмена</button>
-                            </div>
                         </div>
-                    </div>
+                    </Sheet>
                 );
             })()}
         </div>

@@ -67,7 +67,7 @@ export function PaymentAccountsManager() {
             <h3 className="font-bold text-unbox-dark flex items-center gap-2">
                 <Wallet size={18} /> Счета для оплаты
             </h3>
-            <p className="text-xs text-unbox-grey">
+            <p className="text-xs text-ink-60">
                 Настройте список счетов, которые будут доступны при приёме оплаты от клиентов.
             </p>
 
@@ -75,7 +75,7 @@ export function PaymentAccountsManager() {
                 {paymentAccounts.map((acc) => (
                     <div
                         key={acc.id}
-                        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/60 border border-white/80"
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-card/60 border border-white/80"
                     >
                         {editing === acc.id ? (
                             <>
@@ -95,7 +95,7 @@ export function PaymentAccountsManager() {
                                 </button>
                                 <button
                                     onClick={() => setEditing(null)}
-                                    className="p-1 text-unbox-grey hover:bg-gray-100 rounded-lg transition-colors"
+                                    className="p-1 text-ink-60 hover:bg-gray-100 rounded-lg transition-colors"
                                 >
                                     <X size={16} />
                                 </button>
@@ -117,7 +117,7 @@ export function PaymentAccountsManager() {
                                         } catch { toast.error('Ошибка при сохранении'); }
                                     }}
                                     title="Валюта счёта — подставится в платёж при выборе этого счёта"
-                                    className="text-[11px] text-unbox-grey border border-unbox-light rounded-lg px-1.5 py-1 bg-white/80 focus:outline-none"
+                                    className="text-xs text-ink-60 border border-unbox-light rounded-lg px-1.5 py-1 bg-card/80 focus:outline-none"
                                 >
                                     <option value="">валюта —</option>
                                     {CURRENCIES.map(cur => (
@@ -126,13 +126,17 @@ export function PaymentAccountsManager() {
                                 </select>
                                 <button
                                     onClick={() => { setEditing(acc.id); setEditLabel(acc.label); }}
-                                    className="p-1 text-unbox-grey hover:text-unbox-dark hover:bg-gray-100 rounded-lg transition-colors"
+                                    aria-label={`Переименовать счёт «${acc.label}»`}
+                                    title="Переименовать"
+                                    className="p-1 text-ink-60 hover:text-unbox-dark hover:bg-gray-100 rounded-lg transition-colors"
                                 >
                                     <Pencil size={14} />
                                 </button>
                                 <button
                                     onClick={() => handleDelete(acc.id)}
-                                    className="p-1 text-unbox-grey hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                    aria-label={`Удалить счёт «${acc.label}»`}
+                                    title="Удалить"
+                                    className="p-1 text-ink-60 hover:text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] rounded-lg transition-colors"
                                 >
                                     <Trash2 size={14} />
                                 </button>
@@ -156,7 +160,7 @@ export function PaymentAccountsManager() {
                     <select
                         value={newCurrency}
                         onChange={(e) => setNewCurrency(e.target.value)}
-                        className="px-2 py-2 rounded-xl border border-unbox-light text-sm bg-white focus:outline-none"
+                        className="px-2 py-2 rounded-xl border border-unbox-light text-sm bg-card focus:outline-none"
                     >
                         <option value="">валюта —</option>
                         {CURRENCIES.map(cur => (
@@ -172,7 +176,7 @@ export function PaymentAccountsManager() {
                     </button>
                     <button
                         onClick={() => { setAdding(false); setNewLabel(''); }}
-                        className="p-2 text-unbox-grey hover:bg-gray-100 rounded-xl transition-colors"
+                        className="p-2 text-ink-60 hover:bg-gray-100 rounded-xl transition-colors"
                     >
                         <X size={18} />
                     </button>

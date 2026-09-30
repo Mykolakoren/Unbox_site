@@ -65,11 +65,14 @@ def test_paid_label_is_status_not_button():
     i = src.find("session.isPaid ? (")
     assert i != -1, "не нашли ветку оплаченной сессии"
     chunk = src[i:src.find(") : (", i)]
-    label = chunk.find("Оплачено")
+    # Wave 1 (30.09): «Оплачено» — общий StatusBadge payment/paid, а кнопка
+    # отмены называется «Снять отметку об оплате» (одни слова во всей CRM, G5-06).
+    label = max(chunk.find("Оплачено"), chunk.find('kind="payment" status="paid"'))
     btn = chunk.find("<button")
     assert label != -1 and (btn == -1 or label < btn), \
         "текст «Оплачено» снова внутри кнопки"
-    assert 'aria-label="Снять оплату"' in chunk, "у снятия оплаты нет отдельной подписанной кнопки"
+    assert ('aria-label="Снять оплату"' in chunk or 'aria-label="Снять отметку об оплате"' in chunk), \
+        "у снятия оплаты нет отдельной подписанной кнопки"
 
 
 def test_delete_payment_uses_same_dialog():

@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { Loader2, Save, Plus, X, Upload } from 'lucide-react';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { compressImage } from '../../utils/imageCompress';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
 
 const SPECIALIZATION_SUGGESTIONS = [
     'Тревога', 'Депрессия', 'Отношения', 'Самооценка', 'Стресс', 'Горе и утрата',
@@ -46,13 +48,23 @@ export function CrmProfile() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [newSpec, setNewSpec] = useState('');
+    // Сбой загрузки ≠ «анкеты нет»: 404 — анкеты правда нет, остальное — ошибка
+    // с «Повторить» (rule 8). Раньше любой сбой сети писал «Анкета не найдена».
+    const [loadFailed, setLoadFailed] = useState(false);
 
-    useEffect(() => {
+    const loadProfile = () => {
+        setLoading(true);
+        setLoadFailed(false);
         api.get('/specialists/me')
             .then(r => setProfile(r.data))
-            .catch(() => toast.error('Не удалось загрузить анкету'))
+            .catch((e: any) => {
+                if (e?.response?.status !== 404) setLoadFailed(true);
+                toast.error('Не удалось загрузить анкету');
+            })
             .finally(() => setLoading(false));
-    }, []);
+    };
+
+    useEffect(() => { loadProfile(); }, []);
 
     const handleSave = async () => {
         if (!profile) return;
@@ -102,6 +114,8 @@ export function CrmProfile() {
             <GridHouseCrmProfile
                 profile={profile}
                 loading={loading}
+                loadFailed={loadFailed}
+                onRetry={loadProfile}
                 saving={saving}
                 setProfile={setProfile}
                 newSpec={newSpec}
@@ -122,9 +136,9 @@ export function CrmProfile() {
 const GHP_HAIRLINE = `1px solid ${GH.ink10}`;
 const GHP_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -132,6 +146,8 @@ const GHP_MONO_LABEL: React.CSSProperties = {
 function GridHouseCrmProfile({
     profile,
     loading,
+    loadFailed,
+    onRetry,
     saving,
     setProfile,
     newSpec,
@@ -143,6 +159,8 @@ function GridHouseCrmProfile({
 }: {
     profile: ProfileData | null;
     loading: boolean;
+    loadFailed: boolean;
+    onRetry: () => void;
     saving: boolean;
     setProfile: React.Dispatch<React.SetStateAction<ProfileData | null>>;
     newSpec: string;
@@ -154,8 +172,19 @@ function GridHouseCrmProfile({
 }) {
     if (loading) {
         return (
-            <div style={{ fontFamily: GH_SANS, color: GH.ink, padding: '120px 0', textAlign: 'center', ...GHP_MONO_LABEL }}>
-                Загрузка анкеты…
+            <div role="status" aria-busy="true" style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <span className="sr-only">Загружаем анкету…</span>
+                <Skeleton height={56} width="60%" radius={0} />
+                <Skeleton height={120} radius={0} />
+                <Skeleton height={160} radius={0} />
+            </div>
+        );
+    }
+
+    if (!profile && loadFailed) {
+        return (
+            <div style={{ maxWidth: 760 }}>
+                <ErrorBar message="Не удалось загрузить анкету" onRetry={onRetry} />
             </div>
         );
     }
@@ -188,9 +217,9 @@ function GridHouseCrmProfile({
         background: GH.ink,
         color: GH.paper,
         fontFamily: GH_MONO,
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: 600,
-        letterSpacing: '0.18em',
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         padding: '14px 22px',
         border: 'none',
@@ -233,7 +262,7 @@ function GridHouseCrmProfile({
                     </h1>
                     <button onClick={onSave} disabled={saving} style={saveBtnStyle}>
                         {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                        {saving ? 'Сохраняю' : 'Сохранить'}
+                        {saving ? 'Сохраняем…' : 'Сохранить'}
                     </button>
                 </div>
                 <div style={{ ...GHP_MONO_LABEL, marginTop: 10 }}>
@@ -274,7 +303,7 @@ function GridHouseCrmProfile({
                         <PhotoUpload
                             onUploaded={(url) => setProfile((p) => (p ? { ...p, photoUrl: url } : p))}
                         />
-                        <div style={{ ...GHP_MONO_LABEL, color: GH.ink30, marginTop: 8 }}>
+                        <div style={{ ...GHP_MONO_LABEL, color: GH.ink60, marginTop: 8 }}>
                             jpg, png · до 2 МБ
                         </div>
                     </div>
@@ -311,7 +340,7 @@ function GridHouseCrmProfile({
                         placeholder="Психолог · КПТ · 5 лет практики"
                         style={inputStyle}
                     />
-                    <div style={{ ...GHP_MONO_LABEL, color: GH.ink30, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ ...GHP_MONO_LABEL, color: GH.ink60, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>
                         {String(profile.tagline.length).padStart(3, '0')} / 150
                     </div>
                 </div>
@@ -339,8 +368,8 @@ function GridHouseCrmProfile({
                                 alignItems: 'center',
                                 gap: 8,
                                 fontFamily: GH_MONO,
-                                fontSize: 11,
-                                letterSpacing: '0.08em',
+                                fontSize: 12,
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                                 color: GH.paper,
                                 background: GH.ink,
@@ -378,8 +407,8 @@ function GridHouseCrmProfile({
                         disabled={!newSpec.trim()}
                         style={{
                             fontFamily: GH_MONO,
-                            fontSize: 11,
-                            letterSpacing: '0.18em',
+                            fontSize: 12,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             padding: '10px 18px',
                             background: 'transparent',
@@ -405,8 +434,8 @@ function GridHouseCrmProfile({
                                 onClick={() => onAddSpec(s)}
                                 style={{
                                     fontFamily: GH_MONO,
-                                    fontSize: 10,
-                                    letterSpacing: '0.08em',
+                                    fontSize: 12,
+                                    letterSpacing: '0.06em',
                                     textTransform: 'uppercase',
                                     color: GH.ink60,
                                     background: 'transparent',
@@ -485,8 +514,8 @@ function GridHouseCrmProfile({
                                 padding: 0,
                             }}
                         />
-                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.1em' }}>
-                            GEL
+                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.06em' }}>
+                            ₾
                         </span>
                     </div>
                 </div>
@@ -515,7 +544,7 @@ function GridHouseCrmProfile({
                                 padding: 0,
                             }}
                         />
-                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.1em' }}>
+                        <span style={{ fontFamily: GH_MONO, fontSize: 14, color: GH.ink60, letterSpacing: '0.06em' }}>
                             МИН
                         </span>
                     </div>
@@ -529,7 +558,7 @@ function GridHouseCrmProfile({
             <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 24, paddingBottom: 40, borderTop: GHP_HAIRLINE, marginTop: 36 }}>
                 <button onClick={onSave} disabled={saving} style={saveBtnStyle}>
                     {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    {saving ? 'Сохраняю' : 'Сохранить изменения'}
+                    {saving ? 'Сохраняем…' : 'Сохранить изменения'}
                 </button>
             </div>
         </div>
@@ -540,7 +569,7 @@ function GHPSection({ num, title, children }: { num: number; title: string; chil
     return (
         <section style={{ marginBottom: 40, paddingBottom: 40, borderBottom: GHP_HAIRLINE }}>
             <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 20, marginBottom: 24 }}>
-                <div style={{ fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.1em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', paddingTop: 6 }}>
+                <div style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', color: GH.ink60, fontVariantNumeric: 'tabular-nums', paddingTop: 6 }}>
                     {String(num).padStart(2, '0')}
                 </div>
                 <h2
@@ -606,7 +635,7 @@ function FormatCheckbox({
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
                 {sub && (
-                    <span style={{ fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: GH.ink60 }}>
+                    <span style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 }}>
                         {sub}
                     </span>
                 )}
@@ -633,7 +662,7 @@ function FormatPreview({ formats }: { formats: string[] }) {
                 color: GH.ink60,
                 fontStyle: 'italic',
             }}>
-                Отметь хотя бы один формат — клиенты увидят, как с тобой можно работать.
+                Отметьте хотя бы один формат — клиенты увидят, как с вами можно работать.
             </div>
         );
     }
@@ -659,7 +688,7 @@ function FormatPreview({ formats }: { formats: string[] }) {
             </span>
         );
     } else if (legacyOffline) {
-        parts.push(<span key="legacy">{online ? 'и ' : ''}очно <em style={{ color: GH.ink60 }}>(уточни конкретные центры выше)</em></span>);
+        parts.push(<span key="legacy">{online ? 'и ' : ''}очно <em style={{ color: GH.ink60 }}>(уточните конкретные центры выше)</em></span>);
     }
 
     return (

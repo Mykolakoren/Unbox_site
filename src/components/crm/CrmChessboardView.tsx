@@ -10,7 +10,7 @@ import {
     isSameDay, isToday,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus, Bell, Repeat } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Loader2, Search, UserCheck, Link2, UserPlus, Bell, Repeat, ArrowLeftRight, Check } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { bookingsApi } from '../../api/bookings';
@@ -25,6 +25,12 @@ import { TrimBookingModal } from '../TrimBookingModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { tbilisiNow } from '../../utils/dateUtils';
+import { CURRENCIES } from '../../utils/currency';
+import { formatDayMonth } from '../../utils/format';
+import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
+
+/** «GEL» → «₾» в подписях полей («Стоимость, ₾»). */
+const currencySign = (code?: string) => CURRENCIES.find(c => c.code === (code || 'GEL'))?.symbol ?? code ?? '₾';
 
 // 2026-06-06 owner (Фаза 3 — см. docs/REFACTOR-BOOKINGS-UNIFICATION.md):
 // TIME_SLOTS, timeToMin, parseBookingDate раньше дублировались в
@@ -146,7 +152,7 @@ function CrmQuickBookModal({
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200"
+                className="bg-card rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -154,7 +160,7 @@ function CrmQuickBookModal({
                     <div>
                         <h3 className="font-bold text-base">Забронировать кабинет</h3>
                         <p className="text-sm text-gray-500 mt-0.5">
-                            {resource?.name || slot.resId} · {format(slot.date, 'd MMM yyyy', { locale: ru })}
+                            {resource?.name || slot.resId} · {formatDayMonth(slot.date, { withYear: 'auto' })}
                         </p>
                     </div>
                     <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
@@ -169,7 +175,7 @@ function CrmQuickBookModal({
                             <div className="text-xs text-gray-500 mb-0.5">Начало</div>
                             <div className="font-bold text-lg">{slot.time}</div>
                         </div>
-                        <div className="text-gray-400">→</div>
+                        <div className="text-ink-60">→</div>
                         <div className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
                             <div className="text-xs text-gray-500 mb-0.5">Конец</div>
                             <div className="font-bold text-lg">{endTime}</div>
@@ -201,10 +207,10 @@ function CrmQuickBookModal({
                     <div>
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                             <Link2 size={11} />
-                            Привязать клиента CRM <span className="font-normal text-gray-400">(необязательно)</span>
+                            Привязать клиента CRM <span className="font-normal text-ink-60">(необязательно)</span>
                         </div>
                         <div className="relative mb-2">
-                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
                             <input
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
@@ -218,7 +224,7 @@ function CrmQuickBookModal({
                                 onClick={() => setSelectedClientId('')}
                                 className={clsx(
                                     'w-full text-left px-3 py-2 text-sm flex items-center gap-2 border-b border-gray-100 transition-colors',
-                                    !selectedClientId ? 'bg-gray-100 text-gray-700 font-medium' : 'hover:bg-white text-gray-400 italic'
+                                    !selectedClientId ? 'bg-gray-100 text-gray-700 font-medium' : 'hover:bg-card text-ink-60 italic'
                                 )}
                             >
                                 Без клиента
@@ -231,7 +237,7 @@ function CrmQuickBookModal({
                                         'w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0',
                                         selectedClientId === client.id
                                             ? 'bg-unbox-green/10 text-unbox-dark'
-                                            : 'hover:bg-white'
+                                            : 'hover:bg-card'
                                     )}
                                 >
                                     <div className={clsx(
@@ -245,7 +251,7 @@ function CrmQuickBookModal({
                                 </button>
                             ))}
                             {filteredClients.length === 0 && search && (
-                                <div className="p-3 text-center text-xs text-gray-400">Не найдено</div>
+                                <div className="p-3 text-center text-xs text-ink-60">Не найдено</div>
                             )}
                         </div>
 
@@ -253,7 +259,7 @@ function CrmQuickBookModal({
                         {selectedClient && (
                             <div className="mt-3">
                                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                    Стоимость ({selectedClient.currency || 'GEL'})
+                                    Стоимость, {currencySign(selectedClient.currency)}
                                 </div>
                                 <input
                                     type="number"
@@ -423,6 +429,7 @@ function LinkBookingModal({
     // separately (or через recurring booking flow).
     const [recurringPattern, setRecurringPattern] = useState<'' | 'weekly' | 'biweekly' | 'monthly'>('');
     const [recurringOccurrences, setRecurringOccurrences] = useState(8);
+    const { confirm } = useConfirmDialog();
 
     const activeSlot = slots[activeSlotIdx];
     const activeClient = crmClients.find(c => c.id === activeSlot?.clientId);
@@ -465,11 +472,21 @@ function LinkBookingModal({
     };
 
     const handleDelete = async () => {
-        if (!window.confirm(
-            `Удалить эту бронь?\n\n` +
-            `${resource?.name || 'Кабинет'} · ${bookingDateStr} · ${duration} мин\n\n` +
-            `Все привязанные сессии (${assignedCount}) останутся в CRM, но потеряют связь с этой бронью кабинета.`
-        )) return;
+        const ok = await confirm({
+            title: 'Удалить эту бронь кабинета?',
+            body: (
+                <>
+                    <div style={{ fontWeight: 500 }}>{resource?.name || 'Кабинет'} · {bookingDateStr} · {duration} мин</div>
+                    <div style={{ marginTop: 8 }}>
+                        Привязанные сессии ({assignedCount}) останутся в CRM, но потеряют связь с этой бронью.
+                    </div>
+                </>
+            ),
+            confirmLabel: 'Удалить бронь',
+            cancelLabel: 'Оставить',
+            tone: 'danger',
+        });
+        if (!ok) return;
         setDeleting(true);
         try {
             await onDeleteBooking(booking);
@@ -485,7 +502,7 @@ function LinkBookingModal({
             const d = booking.date instanceof Date
                 ? booking.date
                 : new Date(String(booking.date).replace(' 12:00', '').split(' ')[0]);
-            return isNaN(d.getTime()) ? '' : format(d, 'd MMM yyyy', { locale: ru });
+            return isNaN(d.getTime()) ? '' : formatDayMonth(d, { withYear: 'auto' });
         } catch { return ''; }
     })();
 
@@ -494,7 +511,7 @@ function LinkBookingModal({
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200 max-h-[90vh] overflow-y-auto"
+                className="bg-card rounded-2xl shadow-2xl w-full max-w-md animate-in slide-in-from-bottom-4 duration-200 max-h-[90vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -513,7 +530,8 @@ function LinkBookingModal({
                             onClick={handleDelete}
                             disabled={deleting || saving}
                             title="Удалить эту бронь"
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 hover:text-red-600 disabled:opacity-50 transition-colors"
+                            aria-label="Удалить эту бронь"
+                            className="p-1.5 rounded-lg hover:bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] disabled:opacity-50 transition-colors"
                         >
                             {deleting ? <Loader2 size={16} className="animate-spin" /> : (
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
@@ -540,12 +558,12 @@ function LinkBookingModal({
                                             activeSlotIdx === idx
                                                 ? 'border-unbox-green bg-unbox-green/5 text-unbox-dark'
                                                 : slot.clientId
-                                                    ? 'border-green-200 bg-green-50 text-green-700'
+                                                    ? 'border-[var(--status-ok-bg)] bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)]'
                                                     : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300'
                                         )}
                                     >
                                         <div className="font-bold">{slot.label.split(' – ')[0]}</div>
-                                        <div className="text-[10px] mt-0.5 truncate">
+                                        <div className="text-xs mt-0.5 truncate">
                                             {client ? client.name : '—'}
                                         </div>
                                     </button>
@@ -561,7 +579,7 @@ function LinkBookingModal({
 
                     {/* Search */}
                     <div className="relative">
-                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-60" />
                         <input
                             value={search}
                             onChange={e => setSearch(e.target.value)}
@@ -576,7 +594,7 @@ function LinkBookingModal({
                         {activeSlot.clientId && (
                             <button
                                 onClick={() => updateSlot(activeSlotIdx, null)}
-                                className="w-full text-left px-3 py-2 text-sm border-b border-gray-100 text-gray-400 hover:bg-white italic transition-colors"
+                                className="w-full text-left px-3 py-2 text-sm border-b border-gray-100 text-ink-60 hover:bg-card italic transition-colors"
                             >
                                 Открепить клиента
                             </button>
@@ -599,20 +617,20 @@ function LinkBookingModal({
                                     className={clsx(
                                         'w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-gray-100 last:border-0',
                                         isSelected ? 'bg-unbox-green/10 text-unbox-dark' :
-                                            assignedToOther ? 'bg-blue-50/50 text-blue-600' : 'hover:bg-white'
+                                            assignedToOther ? 'bg-[var(--status-info-bg)]/50 text-[var(--status-info-fg)]' : 'hover:bg-card'
                                     )}
                                 >
                                     <div className={clsx(
                                         'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
                                         isSelected ? 'bg-unbox-green text-white' :
-                                            assignedToOther ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-600'
+                                            assignedToOther ? 'bg-[var(--status-info-bg)] text-[var(--status-info-fg)]' : 'bg-gray-200 text-gray-600'
                                     )}>
                                         {client.name?.[0]?.toUpperCase() ?? '?'}
                                     </div>
                                     <span className="text-sm font-medium truncate">{client.name}</span>
                                     {isSelected && <UserCheck size={13} className="ml-auto text-unbox-green shrink-0" />}
                                     {assignedToOther && !isSelected && (
-                                        <span className="ml-auto text-[10px] text-blue-500 shrink-0">
+                                        <span className="ml-auto text-xs text-[var(--status-info-fg)] shrink-0">
                                             {slots.find((s, i) => i !== activeSlotIdx && s.clientId === client.id)?.label.split(' – ')[0]}
                                         </span>
                                     )}
@@ -620,7 +638,7 @@ function LinkBookingModal({
                             );
                         })}
                         {filteredClients.length === 0 && (
-                            <div className="p-3 text-center text-xs text-gray-400">Клиенты не найдены</div>
+                            <div className="p-3 text-center text-xs text-ink-60">Клиенты не найдены</div>
                         )}
                     </div>
 
@@ -628,7 +646,7 @@ function LinkBookingModal({
                     {activeClient && (
                         <div>
                             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Стоимость ({activeClient.currency || 'GEL'})
+                                Стоимость, {currencySign(activeClient.currency)}
                             </div>
                             <input
                                 type="number"
@@ -648,7 +666,7 @@ function LinkBookingModal({
                     cabinet booking via createRecurringBooking. */}
                 {true && (
                     <div className="px-5 pb-3 pt-0">
-                        <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Повторять</div>
+                        <div className="text-xs uppercase tracking-wider text-ink-60 mb-2">Повторять</div>
                         <div className="flex flex-wrap gap-1.5 mb-2">
                             {([
                                 { id: '', label: 'Не повторять' },
@@ -661,10 +679,10 @@ function LinkBookingModal({
                                     type="button"
                                     onClick={() => setRecurringPattern(p.id as any)}
                                     className={clsx(
-                                        'px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors',
+                                        'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
                                         recurringPattern === p.id
                                             ? 'bg-unbox-green text-white border-unbox-green'
-                                            : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green/50'
+                                            : 'bg-card text-gray-600 border-gray-200 hover:border-unbox-green/50'
                                     )}
                                 >
                                     {p.label}
@@ -686,7 +704,7 @@ function LinkBookingModal({
                                     }}
                                     className="w-16 px-2 py-1 rounded border border-gray-200 text-center"
                                 />
-                                <span className="text-gray-400">
+                                <span className="text-ink-60">
                                     (включая текущую)
                                 </span>
                             </div>
@@ -702,7 +720,7 @@ function LinkBookingModal({
                         <button
                             onClick={() => onTrim(booking)}
                             disabled={deleting || saving}
-                            className="w-full py-2 rounded-xl border border-red-200 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                            className="w-full py-2 rounded-xl border border-[var(--status-danger-fg)]/30 text-sm font-medium text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] disabled:opacity-50 transition-colors"
                         >
                             Отменить часть
                         </button>
@@ -720,7 +738,7 @@ function LinkBookingModal({
                         <button
                             onClick={() => onSplit(booking)}
                             disabled={deleting || saving}
-                            className="w-full py-2 rounded-xl border border-amber-200 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                            className="w-full py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                         >
                             Разделить на отдельные брони
                         </button>
@@ -1471,7 +1489,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 <ChevronLeft size={16} />
             </button>
             <span className="text-sm font-medium min-w-[100px] md:min-w-[160px] text-center">
-                {format(weekStart, 'd MMM', { locale: ru })} – {format(endOfWeek(weekStart, { weekStartsOn: 1 }), 'd MMM', { locale: ru })}
+                {formatDayMonth(weekStart)} – {formatDayMonth(endOfWeek(weekStart, { weekStartsOn: 1 }))}
             </span>
             <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
                 <ChevronRight size={16} />
@@ -1497,7 +1515,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                     : 'border-transparent text-gray-500 hover:bg-gray-50'
                         )}
                     >
-                        <span className="text-[10px] uppercase font-semibold opacity-70">
+                        <span className="text-xs uppercase font-semibold opacity-70">
                             {format(day, 'EEEEEE', { locale: ru })}
                         </span>
                         <span className="font-bold text-base leading-none">{format(day, 'd')}</span>
@@ -1521,24 +1539,25 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     return (
                         <div
                             key={`${b.resId}-${b.start}-${i}`}
-                            className="inline-flex items-center gap-1.5 bg-white border border-unbox-green/30 rounded-lg px-2 py-1 text-xs font-semibold text-unbox-dark"
+                            className="inline-flex items-center gap-1.5 bg-card border border-unbox-green/30 rounded-lg px-2 py-1 text-xs font-semibold text-unbox-dark"
                         >
-                            <span className="text-unbox-grey font-normal">{resName}</span>
+                            <span className="text-ink-60 font-normal">{resName}</span>
                             <span className="font-mono">{startT}–{endT}</span>
-                            <span className="text-unbox-grey font-normal">· {mins >= 60 ? `${(mins / 60).toString().replace(/\.0$/, '')}ч` : `${mins}м`}</span>
+                            <span className="text-ink-60 font-normal">· {mins >= 60 ? `${(mins / 60).toString().replace(/\.0$/, '')}ч` : `${mins}м`}</span>
                             <button
                                 onClick={() => removeBlock(b)}
-                                className="ml-1 rounded-full hover:bg-red-100 p-0.5 transition-colors"
+                                className="ml-1 rounded-full hover:bg-[var(--status-danger-bg)] p-0.5 transition-colors"
                                 title="Убрать этот период"
+                                aria-label="Убрать этот период"
                             >
-                                <X size={11} className="text-red-500" />
+                                <X size={11} className="text-[var(--status-danger-fg)]" />
                             </button>
                         </div>
                     );
                 })}
             </div>
             <div className="flex gap-2 shrink-0">
-                <button onClick={() => setNewSlots([])} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+                <button onClick={() => setNewSlots([])} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-card text-gray-600 hover:bg-gray-50">
                     Сбросить
                 </button>
                 <button onClick={handleContinue} className="px-3 py-1.5 text-sm rounded-lg bg-unbox-green text-white hover:bg-unbox-dark font-semibold">
@@ -1590,7 +1609,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 const endSlotIdx = TIME_SLOTS.indexOf(slot) + colspan;
                 const endTime = endSlotIdx < TIME_SLOTS.length ? TIME_SLOTS[endSlotIdx] : '21:00';
                 // For multi-slot bookings that span to the next column, we'll handle via colspan spanning
-                // claimable: чужой слот на переаренде — забрать (паритет с desktop/admin)
+                // claimable: чужой слот на пересдаче — забрать (паритет с desktop/admin)
                 const claimable = !isMine && booking.isReRentListed;
                 return (
                     <button
@@ -1607,34 +1626,34 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             }
                             openWaitlistFor(booking);
                         }}
-                        title={isMine ? undefined : claimable ? 'Слот на переаренде — тап чтобы забрать' : 'Тап — следить за слотом'}
+                        title={isMine ? undefined : claimable ? 'Слот на пересдаче — нажмите, чтобы забрать' : 'Нажмите, чтобы следить за слотом'}
                         className={clsx(
                             'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors min-h-[48px] active:scale-[0.97]',
                             isMine
                                 ? 'bg-unbox-green/10 border border-unbox-green/30 text-unbox-dark'
                                 : claimable
-                                    ? 'bg-amber-50 border border-amber-300 border-dashed text-amber-800 hover:bg-amber-100'
-                                    : 'bg-gray-100 border border-gray-200 text-gray-500 hover:bg-orange-50 hover:border-orange-200'
+                                    ? 'bg-[var(--status-pending-bg)] border border-[var(--status-pending-fg)]/40 border-dashed text-[var(--status-pending-fg)] hover:bg-[var(--status-pending-bg)]/70'
+                                    : 'bg-gray-100 border border-gray-200 text-gray-600 hover:bg-gray-200'
                         )}
                     >
                         <div className="min-w-0">
                             <div className="text-xs font-bold tabular-nums">{slot}–{endTime}</div>
-                            <div className="text-[10px] truncate">
+                            <div className="text-xs truncate">
                                 {isMine
                                     ? (linkedSessions.length > 1
                                         ? `${linkedSessions.length} клиента`
                                         : linkedClient?.name || 'Привязать клиента')
                                     : claimable
-                                        ? '📤 Переаренда — тап чтобы забрать'
-                                        : 'Занято — тап чтобы следить'
+                                        ? 'На пересдаче — нажмите, чтобы забрать'
+                                        : 'Занято — нажмите, чтобы следить'
                                 }
                             </div>
                         </div>
                         {isMine
                             ? <UserPlus size={12} className="text-unbox-green shrink-0" />
                             : claimable
-                                ? <Repeat size={12} className="text-amber-600 shrink-0" />
-                                : <Bell size={12} className="text-orange-500 shrink-0" />}
+                                ? <ArrowLeftRight size={12} className="shrink-0" aria-hidden="true" />
+                                : <Bell size={12} className="text-gray-500 shrink-0" aria-hidden="true" />}
                     </button>
                 );
             }
@@ -1653,19 +1672,19 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                     className={clsx(
                         'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl transition-all min-h-[48px]',
                         past
-                            ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                            ? 'bg-gray-50 text-ink-60 cursor-not-allowed'
                             : selected
                                 ? 'bg-unbox-green text-white shadow-sm'
                                 : isPeakTime(slot)
-                                    ? 'bg-amber-50 text-amber-700 border border-amber-200/60 active:scale-[0.97]'
-                                    : 'bg-white text-gray-700 border border-gray-100 active:scale-[0.97]'
+                                    ? 'bg-[var(--status-pending-bg)]/60 text-[var(--status-pending-fg)] border border-[var(--status-pending-fg)]/15 active:scale-[0.97]'
+                                    : 'bg-card text-gray-700 border border-gray-100 active:scale-[0.97]'
                     )}
                 >
-                    <span className={clsx('text-sm font-bold tabular-nums', selected ? 'text-white' : past ? 'text-gray-300' : 'text-gray-700')}>
+                    <span className={clsx('text-sm font-bold tabular-nums', selected ? 'text-white' : past ? 'text-ink-60' : 'text-gray-700')}>
                         {slot}
                     </span>
                     {selected ? (
-                        <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
+                        <div className="w-5 h-5 rounded-full bg-card/20 flex items-center justify-center">
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                         </div>
                     ) : !past ? (
@@ -1690,7 +1709,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 'shrink-0 px-3 py-2 rounded-xl text-xs font-medium border transition-colors',
                                 mobileResIdx === idx
                                     ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-white text-gray-500 border-gray-200'
+                                    : 'bg-card text-gray-500 border-gray-200'
                             )}
                         >
                             {r.name}
@@ -1701,7 +1720,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 {selectedBar}
 
                 {/* 2-column time grid */}
-                <div className="rounded-2xl bg-white border border-gray-100 p-2 space-y-1">
+                <div className="rounded-2xl bg-card border border-gray-100 p-2 space-y-1">
                     {mobileHourPairs.map(([left, right]) => {
                         const leftRendered = renderMobileSlot(left, true);
                         const rightRendered = right ? renderMobileSlot(right, false) : <div className="flex-1" />;
@@ -1784,7 +1803,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
                                 filterLocation === loc.id
                                     ? 'bg-unbox-green text-white border-unbox-green'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
+                                    : 'bg-card text-gray-600 border-gray-200 hover:border-unbox-green hover:text-unbox-green'
                             )}
                         >
                             {loc.name}
@@ -1802,15 +1821,15 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                 <table className="border-collapse" style={{ minWidth: `${180 + TIME_SLOTS.length * SLOT_W}px` }}>
                     <thead>
                         <tr>
-                            <th className="sticky left-0 z-10 bg-white border-b border-r border-gray-100 px-3 py-2 text-left text-xs text-gray-400 font-medium min-w-[180px]">
+                            <th className="sticky left-0 z-10 bg-card border-b border-r border-gray-100 px-3 py-2 text-left text-xs text-ink-60 font-medium min-w-[180px]">
                                 Кабинет
                             </th>
                             {TIME_SLOTS.map((slot, i) => (
                                 <th
                                     key={slot}
                                     className={clsx(
-                                        "border-b border-gray-50 text-[10px] font-normal py-1 text-center",
-                                        isPeakTime(slot) ? "text-amber-500 bg-amber-50/30" : "text-gray-400"
+                                        "border-b border-gray-50 text-xs font-normal py-1 text-center",
+                                        isPeakTime(slot) ? "text-[var(--status-pending-fg)] bg-[var(--status-pending-bg)]/30" : "text-ink-60"
                                     )}
                                     style={{ width: SLOT_W, minWidth: SLOT_W }}
                                 >
@@ -1824,7 +1843,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             const cells = rowCellsMap.get(resource.id) ?? [];
                             return (
                                 <tr key={resource.id} className="group/row">
-                                    <td className="sticky left-0 z-10 bg-white border-b border-r border-gray-100 px-3 py-2 text-sm font-medium text-gray-700 group-hover/row:bg-gray-50 transition-colors">
+                                    <td className="sticky left-0 z-10 bg-card border-b border-r border-gray-100 px-3 py-2 text-sm font-medium text-gray-700 group-hover/row:bg-gray-50 transition-colors">
                                         {resource.name}
                                     </td>
                                     {cells.map((cell) => {
@@ -1855,12 +1874,12 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                 ? clientById.get(firstSession.clientId)
                                                 : (booking.crmClientId && !allCancelled ? clientById.get(booking.crmClientId) : undefined);
 
-                                            // Multi-client split view
+                                            // Multi-client split view. Wave 1: без синего/жёлтого/
+                                            // фиолетового для красоты — два тона бирюзы по очереди,
+                                            // клиентов разделяет пунктир.
                                             const SEGMENT_COLORS = [
                                                 'bg-unbox-green/15 border-unbox-green/40 hover:bg-unbox-green/25',
-                                                'bg-blue-100/60 border-blue-300/50 hover:bg-blue-100',
-                                                'bg-amber-100/60 border-amber-300/50 hover:bg-amber-100',
-                                                'bg-purple-100/60 border-purple-300/50 hover:bg-purple-100',
+                                                'bg-unbox-green/5 border-unbox-green/30 hover:bg-unbox-green/15',
                                             ];
 
                                             const hasMultipleClients = isMine && linkedSessions.length > 1;
@@ -1889,7 +1908,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                             style={{ width: `${pct}%` }}
                                                                             className={clsx(
                                                                                 'h-full border-y first:border-l last:border-r first:rounded-l-md last:rounded-r-md',
-                                                                                'text-[9px] font-semibold flex items-center px-1 overflow-hidden select-none transition-colors',
+                                                                                'text-xs font-semibold flex items-center px-1 overflow-hidden select-none transition-colors',
                                                                                 'text-unbox-dark',
                                                                                 color,
                                                                                 idx > 0 && 'border-l border-dashed border-gray-300'
@@ -1903,9 +1922,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                         </div>
                                                     ) : (() => {
                                                         // 2026-06-13 owner: чужой слот, выставленный на
-                                                        // переаренду — это НЕ глухое «занято», а claimable
+                                                        // пересдачу — это НЕ глухое «занято», а claimable
                                                         // слот. Специалист может забрать его (backend
-                                                        // авто-отменит переаренду оригиналу с возвратом
+                                                        // авто-отменит пересдачу оригиналу с возвратом
                                                         // 50%). Раньше CRM-шахматка показывала его как
                                                         // обычный серый «Занято» с подпиской на слежение —
                                                         // совпадало с админом только частично. Теперь паритет.
@@ -1930,7 +1949,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                 }
                                                                 : claimable
                                                                     ? (e) => {
-                                                                        // Забрать слот с переаренды → открыть
+                                                                        // Забрать слот с пересдачи → открыть
                                                                         // booking-модал на этот слот/кабинет/время.
                                                                         e.stopPropagation();
                                                                         if (booking.resourceId && booking.startTime) {
@@ -1948,34 +1967,37 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                         openWaitlistFor(booking);
                                                                     }}
                                                             className={clsx(
-                                                                'h-8 rounded-md border text-[10px] font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
+                                                                'h-8 rounded-md border text-xs font-semibold flex items-center px-1.5 overflow-hidden select-none gap-1',
                                                                 isMine
                                                                     ? 'bg-unbox-green/15 text-unbox-dark border-unbox-green/40 cursor-grab active:cursor-grabbing hover:bg-unbox-green/25 hover:border-unbox-green/60 transition-colors group'
                                                                     : claimable
-                                                                        ? 'bg-amber-50 text-amber-800 border-amber-300 border-dashed cursor-pointer hover:bg-amber-100 transition-colors'
-                                                                        : 'bg-gray-100 text-gray-500 border-gray-200 cursor-pointer hover:bg-orange-50 hover:border-orange-200 hover:text-orange-700 transition-colors',
+                                                                        ? 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)] border-[var(--status-pending-fg)]/40 border-dashed cursor-pointer hover:bg-[var(--status-pending-bg)]/70 transition-colors'
+                                                                        : 'bg-gray-100 text-gray-600 border-gray-200 cursor-pointer hover:bg-gray-200 hover:text-gray-700 transition-colors',
                                                                 reschedSaving && 'opacity-60 pointer-events-none'
                                                             )}
                                                             title={isMine
-                                                                ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время чтобы перенести, клик — изменить клиента`
+                                                                ? `${linkedClient ? linkedClient.name : 'Слот'} — потяните на свободное время, чтобы перенести; нажмите, чтобы изменить клиента`
                                                                 : claimable
-                                                                    ? 'Слот на переаренде — нажмите чтобы забрать'
-                                                                    : 'Тап — следить за слотом, уведомим когда освободится'}
+                                                                    ? 'Слот на пересдаче — нажмите, чтобы забрать'
+                                                                    : 'Нажмите, чтобы следить за слотом — уведомим, когда освободится'}
                                                         >
-                                                            {/* Recurring marker — оранжевая звёздочка ⭐ для серийных
-                                                                броней. Видна и владельцу, и админу/наблюдателю. */}
+                                                            {/* Серийная бронь — значок Repeat (раньше эмодзи-звёздочка).
+                                                                Виден и владельцу, и админу/наблюдателю. */}
                                                             {booking.recurringGroupId && (
-                                                                <span className="text-orange-500 shrink-0" title="Постоянная бронь (серия)">⭐</span>
+                                                                <span className="shrink-0 inline-flex" title="Постоянная бронь (серия)">
+                                                                    <Repeat size={10} aria-label="Постоянная бронь (серия)" />
+                                                                </span>
                                                             )}
+                                                            {isMine && !linkedClient && <Check size={10} className="shrink-0" aria-hidden="true" />}
                                                             <span className="truncate flex-1">
                                                                 {isMine
-                                                                    ? (linkedClient ? linkedClient.name : '✓ Моё')
+                                                                    ? (linkedClient ? linkedClient.name : 'Моё')
                                                                     : claimable
-                                                                        ? '📤 Переаренда'
+                                                                        ? 'На пересдаче'
                                                                         : 'Занято'}
                                                             </span>
-                                                            {claimable && <Repeat size={10} className="text-amber-600 shrink-0" />}
-                                                            {!isMine && !claimable && <Bell size={10} className="text-orange-500 shrink-0 opacity-70" />}
+                                                            {claimable && <ArrowLeftRight size={10} className="shrink-0" aria-hidden="true" />}
+                                                            {!isMine && !claimable && <Bell size={10} className="text-gray-500 shrink-0" aria-hidden="true" />}
                                                             {isMine && (
                                                                 <UserPlus
                                                                     size={10}
@@ -2016,9 +2038,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                         : isSelected
                                                             ? 'bg-unbox-green/20 cursor-pointer'
                                                             : (dragModeRef.current === 'move' && moveHover?.resId === resource.id && moveHover?.time === slot)
-                                                                ? 'bg-blue-200/60 ring-2 ring-blue-400 cursor-copy'
+                                                                ? 'bg-unbox-green/20 ring-2 ring-unbox-green cursor-copy'
                                                                 : isPeakTime(slot)
-                                                                    ? 'bg-amber-50/50 hover:bg-amber-100/40 cursor-pointer'
+                                                                    ? 'bg-[var(--status-pending-bg)]/40 hover:bg-[var(--status-pending-bg)]/70 cursor-pointer'
                                                                     : 'hover:bg-unbox-light/40 cursor-pointer'
                                                 )}
                                                 style={{ width: SLOT_W, minWidth: SLOT_W, height: 40 }}

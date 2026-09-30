@@ -3,19 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { totalInGel } from '../../utils/currency';
 import {
-    Users,
-    Calendar,
-    AlertCircle,
-    TrendingUp,
-    Clock,
-    ChevronLeft,
-    ChevronRight,
-    Loader2,
-    Wallet,
-    BarChart3,
-    UserX,
-} from 'lucide-react';
-import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     CartesianGrid,
 } from 'recharts';
@@ -28,46 +15,70 @@ import { RESOURCES } from '../../utils/data';
 import { isAfter, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
-import { statusLabel } from '../../design/statuses';
+import { statusLabel, getStatusDef } from '../../design/statuses';
+import { STATUS } from '../../design/tokens';
+import { formatMoney, formatGel, formatDayMonth, formatMonthLabel, formatTime } from '../../utils/format';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { Sheet } from '../../components/ui/Sheet';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { Check } from 'lucide-react';
 
-const STATUS_COLORS: Record<string, string> = {
-    PLANNED: 'bg-blue-100 text-blue-700',
-    COMPLETED: 'bg-green-100 text-green-700',
-    CANCELLED_CLIENT: 'bg-red-100 text-red-600',
-    CANCELLED_THERAPIST: 'bg-orange-100 text-orange-700',
-};
+// Подписи и цвета сессий — из общего словаря статусов (src/design/statuses.ts).
+// Раньше тут была своя карта «ЗАВЕРШЕНА / ОТМЕНА · КЛ.» с бирюзой для «прошла».
+const sessionStatusText = (code: string) => statusLabel('session', code, 'staff');
+const sessionStatusColor = (code: string) => STATUS[getStatusDef('session', code).tone].fg;
 
-// Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
-const STATUS_LABELS: Record<string, string> = Object.fromEntries(
-    ['PLANNED', 'COMPLETED', 'CANCELLED_CLIENT', 'CANCELLED_THERAPIST'].map(k => [k, statusLabel('session', k)]),
-);
+/** «1 сессия / 2 сессии / 5 сессий». */
+function sessionsWord(n: number): string {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'сессия';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'сессии';
+    return 'сессий';
+}
+
+/** «5 октября, 09:00». */
+function dayTime(d: Date): string {
+    return `${formatDayMonth(d, { withYear: 'auto' })}, ${formatTime(d)}`;
+}
 
 export function CrmDashboard() {
-    const { dashboard, fetchDashboard, loading } = useCrmStore();
+    const { dashboard, fetchDashboard, loading, error } = useCrmStore();
     const navigate = useNavigate();
     const [calendarIdSaved, setCalendarIdSaved] = useState<string | null>(null);
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const monthStr = format(currentMonth, 'yyyy-MM');
     const isThisMonth = format(new Date(), 'yyyy-MM') === monthStr;
+    // Ошибку показываем только после своей попытки загрузки, а не чужую из стора.
+    const [dashTried, setDashTried] = useState(false);
 
     useEffect(() => {
         // Auto-complete past PLANNED sessions, then load dashboard
         crmApi.autoCompleteSessions().then((result) => {
             if (result.autoCompleted > 0) {
-                toast.info(`${result.autoCompleted} ${result.autoCompleted === 1 ? 'сессия автозавершена' : 'сессий автозавершены'}`);
+                const n = result.autoCompleted;
+                toast.info(`${n} ${sessionsWord(n)} ${n === 1 ? 'отмечена прошедшей' : 'отмечены прошедшими'}`);
             }
         }).catch(() => {}).finally(() => {
-            fetchDashboard(monthStr);
+            fetchDashboard(monthStr).finally(() => setDashTried(true));
         });
         crmApi.getSettings().then((s) => {
             setCalendarIdSaved(s.calendarId);
         }).catch(() => {});
     }, [fetchDashboard, monthStr]);
 
-    if (loading && !dashboard) {
+    // Загрузка ≠ ошибка ≠ пусто (rule 8): пока данных нет — скелетон, а не
+    // «0 ₾» и «нет сессий»; если запрос упал — полоса с «Повторить».
+    if (!dashboard) {
+        if (error && !loading && dashTried) {
+            return <ErrorBar message="Не удалось загрузить кабинет" onRetry={() => fetchDashboard(monthStr)} />;
+        }
         return (
-            <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-8 h-8 animate-spin text-unbox-grey" />
+            <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <span className="sr-only">Загружаем кабинет…</span>
+                <Skeleton height={56} width="40%" radius={0} />
+                <Skeleton height={120} radius={0} />
+                <Skeleton height={120} radius={0} />
             </div>
         );
     }
@@ -87,45 +98,7 @@ export function CrmDashboard() {
 }
 
 
-function StatCard({
-    icon: Icon,
-    label,
-    value,
-    subtitle,
-    color,
-    onClick,
-}: {
-    icon: React.ElementType;
-    label: string;
-    value: number | string;
-    subtitle?: string;
-    color: string;
-    onClick?: () => void;
-}) {
-    const colorClasses: Record<string, { bg: string; icon: string; text: string }> = {
-        blue: { bg: 'bg-unbox-light', icon: 'text-unbox-green', text: 'text-unbox-dark' },
-        green: { bg: 'bg-unbox-light', icon: 'text-unbox-green', text: 'text-unbox-green' },
-        red: { bg: 'bg-red-50', icon: 'text-red-500', text: 'text-red-600' },
-        emerald: { bg: 'bg-unbox-light', icon: 'text-unbox-green', text: 'text-unbox-dark' },
-        gray: { bg: 'bg-unbox-light/30', icon: 'text-unbox-grey', text: 'text-unbox-grey' },
-    };
-
-    const c = colorClasses[color] || colorClasses.gray;
-
-    return (
-        <div
-            className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5 cursor-pointer hover:shadow-md transition-all group"
-            onClick={onClick}
-        >
-            <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
-                <Icon className={`w-5 h-5 ${c.icon}`} />
-            </div>
-            <div className={`text-2xl font-bold ${c.text}`}>{value}</div>
-            {subtitle && <div className="text-xs text-unbox-grey mt-0.5 leading-snug">{subtitle}</div>}
-            <div className="text-sm text-unbox-grey mt-0.5">{label}</div>
-        </div>
-    );
-}
+// StatCard (карточка старого дашборда до Grid House) нигде не рендерилась — удалена в wave 1.
 
 // ────────────────────────────────────────────────────────────────────────
 // GRID HOUSE — Dashboard variant.
@@ -145,7 +118,7 @@ interface GHDashProps {
 
 // Аудит 30.08: специалисты работают с телефона между сессиями — на узком
 // экране дашборд открывается блоком «Сегодня»: ближайшие сессии дня одним
-// вертикальным списком, тап ведёт в «Сессии» (там кнопка «Оплачено»).
+// вертикальным списком, тап ведёт в «Сессии» (там кнопка «Отметить оплату»).
 function useGHDashNarrow(bp = 768) {
     const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
     useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
@@ -159,7 +132,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     // therapy sessions. Two separate worlds, but admins want one screen
     // to plan their week.
     const { bookings, fetchBookings, currentUser } = useUserStore();
-    // «Оплачено» прямо из блока «Сегодня» (аудит 30.08, «Мой день» v2)
+    // «Отметить оплату» прямо из блока «Сегодня» (аудит 30.08, «Мой день» v2)
     const { quickPaySession: ghQuickPay, fetchDashboard: ghRefetchDash } = useCrmStore();
     const [payingId, setPayingId] = useState<string | null>(null);
     useEffect(() => { fetchBookings(); }, [fetchBookings]);
@@ -235,8 +208,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     })();
     const monoLabel: React.CSSProperties = {
         fontFamily: GH_MONO,
-        fontSize: '10px',
-        letterSpacing: '0.2em',
+        fontSize: '12px',
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         color: GH.ink60,
         fontWeight: 500,
@@ -259,17 +232,17 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
         color: GH.ink,
     };
 
-    const monthLabel = format(currentMonth, 'LLLL yyyy', { locale: ru });
+    const monthLabel = formatMonthLabel(currentMonth);
     const revenueByCurrency = dashboard?.revenueByCurrency;
     const hasMultiCurrency = revenueByCurrency && Object.keys(revenueByCurrency).length > 1;
     const revenueValue = revenueByCurrency && Object.keys(revenueByCurrency).length > 0
-        ? totalInGel(revenueByCurrency).toFixed(0)
-        : (dashboard?.revenueThisMonth ?? 0).toFixed(0);
+        ? totalInGel(revenueByCurrency)
+        : (dashboard?.revenueThisMonth ?? 0);
     const debtByCurrency = dashboard?.debtByCurrency;
     const hasDebt = (dashboard?.totalActiveDebt ?? 0) > 0 || (debtByCurrency && Object.keys(debtByCurrency).length > 0);
     const debtTotal = debtByCurrency && Object.keys(debtByCurrency).length > 0
-        ? totalInGel(debtByCurrency).toFixed(0)
-        : '0';
+        ? totalInGel(debtByCurrency)
+        : 0;
 
     const kpiCells = [
         {
@@ -290,10 +263,10 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
         },
         {
             label: 'Доход за месяц',
-            value: `${revenueValue} ₾`,
+            value: formatGel(revenueValue, { fraction: 0 }),
             href: () => navigate('/crm/finances'),
             sub: hasMultiCurrency
-                ? Object.entries(revenueByCurrency!).map(([c, v]) => `${(v as number).toFixed(0)} ${c}`).join(' · ')
+                ? Object.entries(revenueByCurrency!).map(([c, v]) => formatMoney(v as number, { currency: c, fraction: 0 })).join(' · ')
                 : undefined,
         },
     ];
@@ -301,29 +274,22 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
     const kpiExtras = [
         {
             label: 'Средняя ставка/час',
-            value: `${(dashboard?.avgHourlyRate ?? 0).toFixed(0)} ₾`,
+            value: formatGel(dashboard?.avgHourlyRate ?? 0, { fraction: 0 }),
         },
         {
             label: 'Мин — Макс ставка',
-            value: `${dashboard?.minRate ?? 0} — ${dashboard?.maxRate ?? 0} ₾`,
+            value: `${formatGel(dashboard?.minRate ?? 0)} — ${formatGel(dashboard?.maxRate ?? 0)}`,
         },
         {
             label: 'Общий долг',
-            value: `${debtTotal} ₾`,
+            value: formatGel(debtTotal, { fraction: 0 }),
             warn: hasDebt,
             sub: hasMultiCurrency && debtByCurrency && Object.keys(debtByCurrency).length > 1
-                ? Object.entries(debtByCurrency!).map(([c, v]) => `${(v as number).toFixed(0)} ${c}`).join(' · ')
+                ? Object.entries(debtByCurrency!).map(([c, v]) => formatMoney(v as number, { currency: c, fraction: 0 })).join(' · ')
                 : undefined,
             href: hasDebt ? () => navigate('/crm/finances') : undefined,
         },
     ];
-
-    const STATUS_GH: Record<string, { label: string; color: string }> = {
-        PLANNED:             { label: 'ЗАПЛАНИРОВАНА', color: GH.ink },
-        COMPLETED:           { label: 'ЗАВЕРШЕНА',     color: GH.accent },
-        CANCELLED_CLIENT:    { label: 'ОТМЕНА · КЛ.',  color: GH.danger },
-        CANCELLED_THERAPIST: { label: 'ОТМЕНА · ТЕР.', color: GH.danger },
-    };
 
     // Сессии сегодняшнего дня из уже загруженных «ближайших»
     const todayKey = new Date().toDateString();
@@ -340,7 +306,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
                         padding: '12px 14px', borderBottom: `1px solid ${GH.ink10}`,
                     }}>
-                        <span style={monoLabel}>Сегодня · {new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span>
+                        <span style={monoLabel}>Сегодня · {formatDayMonth(new Date())}</span>
                         {(dashboard?.unpaidSessions ?? 0) > 0 && (
                             <button
                                 onClick={() => navigate('/crm/sessions')}
@@ -356,7 +322,6 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         </div>
                     ) : todaySessions.map((x) => {
                         const dt = parseUTC(x.date);
-                        const st = STATUS_GH[x.status] || { label: x.status, color: GH.ink60 };
                         return (
                             <div
                                 key={x.id}
@@ -368,7 +333,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 }}
                             >
                                 <span style={{ fontFamily: GH_MONO, fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                                    {dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                    {formatTime(dt)}
                                 </span>
                                 <span style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 600, color: GH.ink, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {x.clientName}
@@ -381,7 +346,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                             setPayingId(x.id);
                                             try {
                                                 const r = await ghQuickPay(x.id);
-                                                toast.success(`Оплачено: ${r.amount} ${r.currency}`);
+                                                toast.success(`Оплата отмечена: ${formatMoney(r.amount, { currency: r.currency })}`);
                                                 ghRefetchDash(format(currentMonth, 'yyyy-MM'));
                                             } catch (err: any) {
                                                 toast.error(err?.response?.data?.detail || 'Не удалось отметить оплату');
@@ -390,17 +355,19 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                             }
                                         }}
                                         style={{
-                                            ...monoLabel, fontSize: 9, color: GH.paper,
+                                            ...monoLabel, fontSize: 12, color: GH.paper,
                                             background: GH.accent, border: 'none', cursor: 'pointer',
-                                            padding: '8px 10px', minHeight: 32,
+                                            padding: '8px 10px', minHeight: 44,
                                             opacity: payingId === x.id ? 0.6 : 1,
                                         }}
                                     >
-                                        {payingId === x.id ? '…' : (x.price ? `${x.price} ${x.currency && x.currency !== 'GEL' ? x.currency : '₾'} · Оплачено` : 'Оплачено')}
+                                        {/* Действие, а не статус (G5-06): раньше кнопка
+                                            называлась «140 ₾ · Оплачено» и звучала как уже сделанное. */}
+                                        {payingId === x.id ? 'Отмечаем…' : (x.price ? `Отметить оплату · ${formatMoney(x.price, { currency: x.currency ?? undefined })}` : 'Отметить оплату')}
                                     </button>
                                 ) : (
-                                    <span style={{ ...monoLabel, color: x.isPaid ? GH.accent : st.color, fontSize: 9 }}>
-                                        {x.isPaid ? 'Оплачено' : st.label}
+                                    <span style={{ ...monoLabel, color: x.isPaid ? STATUS.ok.fg : sessionStatusColor(x.status), fontSize: 12 }}>
+                                        {x.isPaid ? statusLabel('payment', 'paid', 'staff') : sessionStatusText(x.status)}
                                     </span>
                                 )}
                             </div>
@@ -421,8 +388,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                 "Пропустить" hides this pair until the next page load. */}
             {mergePairs.length > 0 && (
                 <div style={{
-                    border: `1px solid ${GH.accent}`,
-                    background: 'rgba(71,109,107,0.06)',
+                    border: `1px solid ${GH.ink}`,
+                    background: GH.sunken,
                     padding: '14px 18px',
                     display: 'flex',
                     alignItems: 'center',
@@ -432,7 +399,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     marginBottom: -56,
                 }}>
                     <div>
-                        <div style={{ ...monoLabel, color: GH.accent, marginBottom: 4 }}>СОВПАДЕНИЯ ПО ВРЕМЕНИ</div>
+                        <div style={{ ...monoLabel, marginBottom: 4 }}>СОВПАДЕНИЯ ПО ВРЕМЕНИ</div>
                         <div style={{ fontFamily: GH_SANS, fontSize: 14, color: GH.ink }}>
                             Найдено <b>{mergePairs.length}</b> {mergePairs.length === 1 ? 'пара' : mergePairs.length < 5 ? 'пары' : 'пар'} «бронь+сессия» в одно время. Объединить в одно событие?
                         </div>
@@ -443,8 +410,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             background: GH.accent,
                             color: GH.paper,
                             fontFamily: GH_MONO,
-                            fontSize: 11,
-                            letterSpacing: '0.18em',
+                            fontSize: 12,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
                             padding: '10px 18px',
                             border: 'none',
@@ -458,38 +425,17 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
 
             {/* Merge dialog — list of pairs with per-row Объединить /
                 Пропустить buttons. Closes itself when the list is empty. */}
-            {mergeOpen && (
-                <div
-                    onClick={() => setMergeOpen(false)}
-                    style={{
-                        position: 'fixed', inset: 0, zIndex: 100,
-                        background: 'rgba(0,0,0,0.45)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        padding: 20,
-                    }}
-                >
-                    <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                            background: GH.paper, border: `1px solid ${GH.ink}`,
-                            maxWidth: 640, width: '100%', maxHeight: '80vh',
-                            overflowY: 'auto', padding: 24,
-                        }}
-                    >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
-                            <h2 style={{ fontFamily: GH_SANS, fontSize: 22, fontWeight: 700, margin: 0, color: GH.ink }}>
-                                Объединить бронь и сессию
-                            </h2>
-                            <button
-                                onClick={() => setMergeOpen(false)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}
-                            >
-                                ЗАКРЫТЬ
-                            </button>
-                        </div>
+            {/* Общая шторка вместо самодельного окна: Esc, фокус внутри. */}
+            <Sheet
+                open={mergeOpen}
+                onClose={() => setMergeOpen(false)}
+                title="Объединить бронь и сессию"
+                width={640}
+            >
+                    <div>
                         {mergePairs.length === 0 ? (
-                            <div style={{ ...monoLabel, padding: '32px 0', textAlign: 'center', color: GH.ink30 }}>
-                                ВСЕ ОБЪЕДИНЕНО · ХОРОШО
+                            <div style={{ ...monoLabel, padding: '32px 0', textAlign: 'center' }}>
+                                Всё объединено
                             </div>
                         ) : (
                             <div>
@@ -510,7 +456,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         >
                                             <div>
                                                 <div style={{ fontFamily: GH_SANS, fontSize: 15, fontWeight: 700, color: GH.ink }}>
-                                                    {pair.clientName || 'Клиент'} · {format(dt, 'd MMM, HH:mm', { locale: ru })}
+                                                    {pair.clientName || 'Клиент'} · {dayTime(dt)}
                                                 </div>
                                                 <div style={{ ...monoLabel, marginTop: 4 }}>
                                                     {resName} · {pair.bookingDuration} МИН
@@ -521,7 +467,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                     onClick={() => handleSkipMerge(pair)}
                                                     style={{
                                                         background: 'transparent', border: `1px solid ${GH.ink10}`,
-                                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em',
+                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                                         textTransform: 'uppercase', padding: '8px 12px',
                                                         cursor: 'pointer', color: GH.ink60,
                                                     }}
@@ -533,14 +479,14 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                     disabled={mergingId === pair.sessionId}
                                                     style={{
                                                         background: GH.ink, border: 'none',
-                                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em',
+                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                                         textTransform: 'uppercase', padding: '8px 14px',
                                                         cursor: mergingId === pair.sessionId ? 'default' : 'pointer',
                                                         color: GH.paper,
                                                         opacity: mergingId === pair.sessionId ? 0.5 : 1,
                                                     }}
                                                 >
-                                                    {mergingId === pair.sessionId ? '…' : 'Объединить'}
+                                                    {mergingId === pair.sessionId ? 'Объединяем…' : 'Объединить'}
                                                 </button>
                                             </div>
                                         </div>
@@ -549,8 +495,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             </div>
                         )}
                     </div>
-                </div>
-            )}
+            </Sheet>
 
             {/* ── Page header ── */}
             <header>
@@ -583,6 +528,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                     }}>
                         <button
                             onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+                            aria-label="Предыдущий месяц"
                             style={{
                                 background: 'none',
                                 border: 'none',
@@ -605,8 +551,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 borderRight: `1px solid ${GH.ink10}`,
                                 padding: '12px 18px',
                                 fontFamily: GH_MONO,
-                                fontSize: '10px',
-                                letterSpacing: '0.2em',
+                                fontSize: '12px',
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                                 color: isThisMonth ? GH.ink30 : GH.ink,
                                 cursor: isThisMonth ? 'default' : 'pointer',
@@ -616,6 +562,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         </button>
                         <button
                             onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+                            aria-label="Следующий месяц"
                             style={{
                                 background: 'none',
                                 border: 'none',
@@ -677,7 +624,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 <div style={{
                                     ...monoLabel,
                                     marginTop: '8px',
-                                    letterSpacing: '0.12em',
+                                    letterSpacing: '0.06em',
                                 }}>
                                     {cell.sub}
                                 </div>
@@ -773,12 +720,12 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         const months = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК'];
                                         return months[parseInt(m, 10) - 1] || m;
                                     }}
-                                    tick={{ fontSize: 10, fontFamily: GH_MONO, fill: GH.ink60, letterSpacing: '0.1em' }}
+                                    tick={{ fontSize: 12, fontFamily: GH_MONO, fill: GH.ink60, letterSpacing: '0.06em' }}
                                     tickLine={false}
                                     axisLine={{ stroke: GH.ink }}
                                 />
                                 <YAxis
-                                    tick={{ fontSize: 10, fontFamily: GH_MONO, fill: GH.ink60 }}
+                                    tick={{ fontSize: 12, fontFamily: GH_MONO, fill: GH.ink60 }}
                                     tickLine={false}
                                     axisLine={false}
                                 />
@@ -803,14 +750,14 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                 <div style={{ ...monoLabel, marginBottom: '8px', color: GH.ink }}>{title}</div>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                                                     <span style={{ color: GH.ink60 }}>Ожидалось</span>
-                                                    <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{Number(data.expected || 0).toFixed(0)} ₾</span>
+                                                    <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.expected || 0), { fraction: 0 })}</span>
                                                 </div>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                                                     <span style={{ color: GH.ink60 }}>Получено</span>
-                                                    <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{Number(data.received || 0).toFixed(0)} ₾</span>
+                                                    <span style={{ fontFamily: GH_MONO, fontWeight: 600 }}>{formatGel(Number(data.received || 0), { fraction: 0 })}</span>
                                                 </div>
-                                                <div style={{ ...monoLabel, color: GH.ink30, paddingTop: '6px', borderTop: `1px solid ${GH.ink10}` }}>
-                                                    {data.sessionCount || 0} СЕССИЙ
+                                                <div style={{ ...monoLabel, paddingTop: '6px', borderTop: `1px solid ${GH.ink10}` }}>
+                                                    {data.sessionCount || 0} {sessionsWord(data.sessionCount || 0)}
                                                 </div>
                                             </div>
                                         );
@@ -872,7 +819,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         {/* Header row */}
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: '80px 72px 1fr auto 120px',
+                            gridTemplateColumns: '80px 72px 1fr auto 150px',
                             gap: '20px',
                             padding: '14px 4px',
                             borderBottom: `1px solid ${GH.ink10}`,
@@ -886,14 +833,13 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         </div>
                         {dashboard.upcomingSessions.map((s) => {
                             const dt = parseUTC(s.date);
-                            const status = STATUS_GH[s.status] || { label: s.status, color: GH.ink60 };
                             return (
                                 <div
                                     key={s.id}
                                     onClick={() => navigate('/crm/sessions')}
                                     style={{
                                         display: 'grid',
-                                        gridTemplateColumns: '80px 72px 1fr auto 120px',
+                                        gridTemplateColumns: '80px 72px 1fr auto 150px',
                                         gap: '20px',
                                         alignItems: 'baseline',
                                         padding: '18px 4px',
@@ -905,7 +851,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                     onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                                 >
                                     <div>
-                                        <div style={{ ...monoLabel, color: GH.ink30 }}>
+                                        <div style={monoLabel}>
                                             {format(dt, 'EEE', { locale: ru }).toUpperCase()}
                                         </div>
                                         <div style={{
@@ -916,7 +862,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                             marginTop: '2px',
                                             fontVariantNumeric: 'tabular-nums',
                                         }}>
-                                            {format(dt, 'd MMM', { locale: ru })}
+                                            {formatDayMonth(dt)}
                                         </div>
                                     </div>
                                     <div style={{
@@ -926,7 +872,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                         color: GH.ink,
                                         fontVariantNumeric: 'tabular-nums',
                                     }}>
-                                        {format(dt, 'HH:mm')}
+                                        {formatTime(dt)}
                                     </div>
                                     <div style={{
                                         fontFamily: GH_SANS,
@@ -939,19 +885,17 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                     }}>
                                         {s.clientName}
                                     </div>
+                                    {/* «Без кабинета» — нейтрально: онлайн-сессии не ошибка (M5). */}
                                     <div style={{
                                         ...monoLabel,
                                         textAlign: 'right',
-                                        color: s.isBooked ? GH.ink : GH.danger,
+                                        color: s.isBooked ? GH.ink : GH.ink60,
+                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4,
                                     }}>
-                                        {s.isBooked ? '✓ КАБИНЕТ' : '○ НЕ БРОН.'}
+                                        {s.isBooked ? <><Check size={12} aria-hidden="true" /> Кабинет</> : 'Без кабинета'}
                                     </div>
-                                    <div style={{
-                                        ...monoLabel,
-                                        textAlign: 'right',
-                                        color: status.color,
-                                    }}>
-                                        {status.label}
+                                    <div style={{ textAlign: 'right' }}>
+                                        <StatusBadge kind="session" status={s.status} audience="staff" variant="dot" />
                                     </div>
                                 </div>
                             );
@@ -1020,15 +964,15 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                     onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                                 >
                                     <div>
-                                        <div style={{ ...monoLabel, color: GH.ink30 }}>{format(b._dt, 'EEE', { locale: ru }).toUpperCase()}</div>
-                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 600 }}>{format(b._dt, 'd MMM', { locale: ru })}</div>
+                                        <div style={monoLabel}>{format(b._dt, 'EEE', { locale: ru }).toUpperCase()}</div>
+                                        <div style={{ fontFamily: GH_MONO, fontSize: 18, fontWeight: 600 }}>{formatDayMonth(b._dt)}</div>
                                     </div>
                                     <div style={{ fontFamily: GH_MONO, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                                         {startT}–{endStr}
                                     </div>
                                     <div style={{ fontFamily: GH_SANS, fontSize: 14 }}>{res?.name || b.resourceId}</div>
                                     <div style={{ textAlign: 'right', fontFamily: GH_MONO, fontSize: 13, fontWeight: 600 }}>
-                                        {b.finalPrice ? `${b.finalPrice} ₾` : '—'}
+                                        {b.finalPrice ? formatGel(b.finalPrice) : '—'}
                                     </div>
                                 </div>
                             );
@@ -1086,8 +1030,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 }}>
                                     {d.clientName}
                                 </div>
-                                <div style={{ ...monoLabel, color: GH.ink30 }}>
-                                    {d.unpaidSessionsCount} СЕССИЙ
+                                <div style={monoLabel}>
+                                    {d.unpaidSessionsCount} {sessionsWord(d.unpaidSessionsCount)}
                                 </div>
                                 <div style={{
                                     fontFamily: GH_MONO,
@@ -1097,7 +1041,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                     textAlign: 'right',
                                     fontVariantNumeric: 'tabular-nums',
                                 }}>
-                                    {d.totalDebt.toFixed(0)} {d.currency || 'GEL'}
+                                    {formatMoney(d.totalDebt, { currency: d.currency, fraction: 0 })}
                                 </div>
                             </div>
                         ))}
@@ -1139,7 +1083,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GH.ink5; }}
                                 onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                             >
-                                <span style={{ ...monoLabel, color: GH.ink30 }}>
+                                <span style={monoLabel}>
                                     {String(idx + 1).padStart(2, '0')}
                                 </span>
                                 <div style={{
@@ -1152,7 +1096,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 </div>
                                 <div style={{ ...monoLabel, color: GH.ink60 }}>
                                     {c.lastSessionDate
-                                        ? `ПОСЛЕДНЯЯ · ${format(parseUTC(c.lastSessionDate), 'd MMM yyyy', { locale: ru }).toUpperCase()}`
+                                        ? `ПОСЛЕДНЯЯ · ${formatDayMonth(parseUTC(c.lastSessionDate), { withYear: 'auto' }).toUpperCase()}`
                                         : 'НЕТ СЕССИЙ'}
                                 </div>
                             </div>
@@ -1178,7 +1122,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             <span style={{
                                 width: '8px',
                                 height: '8px',
-                                background: GH.accent,
+                                background: STATUS.ok.fg,
                                 borderRadius: '50%',
                             }} />
                             <span style={{ ...monoLabel, color: GH.ink }}>GOOGLE CALENDAR · ПОДКЛЮЧЁН</span>
@@ -1191,7 +1135,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                 border: 'none',
                                 padding: 0,
                                 cursor: 'pointer',
-                                color: GH.accent,
+                                color: GH.ink,
                             }}
                         >
                             СИНХРОНИЗАЦИЯ →
@@ -1259,10 +1203,10 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                         >
                             <span style={{
                                 fontFamily: GH_MONO,
-                                fontSize: '10px',
-                                letterSpacing: '0.2em',
+                                fontSize: '12px',
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
-                                opacity: 0.55,
+                                opacity: 0.7,
                             }}>
                                 → ДЕЙСТВИЕ · {String(idx + 1).padStart(2, '0')}
                             </span>
@@ -1276,9 +1220,9 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                             </span>
                             <span style={{
                                 fontFamily: GH_MONO,
-                                fontSize: '10px',
-                                letterSpacing: '0.12em',
-                                opacity: 0.6,
+                                fontSize: '12px',
+                                letterSpacing: '0.06em',
+                                opacity: 0.7,
                             }}>
                                 {action.sub}
                             </span>

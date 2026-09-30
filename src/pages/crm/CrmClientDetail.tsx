@@ -11,27 +11,28 @@ import {
     Plus, Trash2, Check, X, Loader2, Pencil, Send,
     CheckCheck, RefreshCw, FileText,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { parseUTC } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
+import { formatMoney, formatDayMonth, formatTime } from '../../utils/format';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
+import { STATUS } from '../../design/tokens';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ErrorBar } from '../../components/ui/ErrorBar';
 import { statusLabel } from '../../design/statuses';
 
-/** «GEL» → «₾» для текста в окнах подтверждения. */
-function currencySymbol(code?: string): string {
-    if (!code) return '';
-    return CURRENCIES.find(c => c.code === code)?.symbol ?? code;
+/** Сумма по частям для крупной цифры: [«1 250», «₾»] — знак валюты мельче. */
+function moneyParts(amount: number, currency?: string): [string, string] {
+    const s = formatMoney(amount, { currency });
+    const i = s.lastIndexOf('\u00A0');
+    return i === -1 ? [s, ''] : [s.slice(0, i), s.slice(i + 1)];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-    PLANNED: 'bg-blue-100 text-blue-700',
-    COMPLETED: 'bg-green-100 text-green-700',
-    CANCELLED_CLIENT: 'bg-red-100 text-red-600',
-    CANCELLED_THERAPIST: 'bg-orange-100 text-orange-700',
-};
+/** «5 октября, 09:00» (год — только если не текущий). */
+function dayTime(d: Date | string): string {
+    return `${formatDayMonth(d, { withYear: 'auto' })}, ${formatTime(d)}`;
+}
 
 // Подписи сессий — из общего словаря статусов (src/design/statuses.ts).
 const STATUS_LABELS: Record<string, string> = Object.fromEntries(
@@ -84,10 +85,14 @@ export function CrmClientDetail() {
     // "this one only" vs "this and all future in the series" for recurring
     // sessions (one-off sessions get the simpler single-button confirm).
     const [pendingDelete, setPendingDelete] = useState<CrmSession | null>(null);
+    // Загрузка упала ≠ «клиент не найден»: раньше при сбое сети карточка
+    // писала «Клиент не найден», будто его удалили.
+    const [loadError, setLoadError] = useState(false);
 
     const loadData = useCallback(async () => {
         if (!clientId) return;
         setLoading(true);
+        setLoadError(false);
         try {
             const [c, s, n, p, b] = await Promise.all([
                 crmApi.getClient(clientId),
@@ -102,6 +107,7 @@ export function CrmClientDetail() {
             setPayments(p);
             setBalance(b);
         } catch {
+            setLoadError(true);
             toast.error('Не удалось загрузить данные клиента');
         } finally {
             setLoading(false);
@@ -146,7 +152,7 @@ export function CrmClientDetail() {
             const result = await crmApi.quickPaySession(sessionId, account);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: true } : s));
             const accLabel = result.account ? (paymentAccounts.find(a => a.id === result.account)?.label || result.account) : '';
-            toast.success(`Оплачено: ${result.amount} ${result.currency}${accLabel ? ` · ${accLabel}` : ''}`);
+            toast.success(`Оплата отмечена: ${formatMoney(result.amount, { currency: result.currency })}${accLabel ? ` · ${accLabel}` : ''}`);
             loadData();
         } catch (e: any) {
             toast.error(e.message || 'Ошибка');
@@ -157,14 +163,16 @@ export function CrmClientDetail() {
         // Снятие оплаты удаляет платёж целиком: у клиента снова появляется
         // долг, а повторная отметка запишет оплату сегодняшним числом. Раньше
         // это делал один клик по плашке «Оплачено» — теперь только через вопрос.
+        // Одни слова для оплаты во всей CRM (G5-06): «Оплачено» — статус,
+        // «Отметить оплату» — действие, «Снять отметку об оплате» — отмена.
         const s = sessions.find(x => x.id === sessionId);
         const what = s
-            ? ` ${s.price ?? client?.basePrice ?? 0} ${currencySymbol(s.currency ?? client?.currency)} за ${format(parseUTC(s.date), 'd MMM', { locale: ru })}`
+            ? ` ${formatMoney(s.price ?? client?.basePrice ?? 0, { currency: s.currency ?? client?.currency })} за ${formatDayMonth(parseUTC(s.date))}`
             : '';
         const ok = await askConfirm({
-            title: `Снять оплату${what}?`,
+            title: `Снять отметку об оплате${what}?`,
             message: 'Платёж удалится из истории оплат, и сессия снова станет долгом. Если потом отметить её заново, оплата запишется сегодняшним числом.',
-            confirmLabel: 'Снять оплату',
+            confirmLabel: 'Снять отметку об оплате',
             cancelLabel: 'Оставить',
             destructive: true,
         });
@@ -172,7 +180,7 @@ export function CrmClientDetail() {
         try {
             await crmApi.unmarkPaidSession(sessionId);
             setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isPaid: false } : s));
-            toast.success('Оплата снята');
+            toast.success('Отметка об оплате снята');
             loadData();
         } catch (e: any) {
             toast.error(e.message || 'Ошибка');
@@ -182,14 +190,16 @@ export function CrmClientDetail() {
     const handleMarkAllPaid = async () => {
         if (!clientId || !client) return;
         const ok = await askConfirm({
-            title: `Отметить ${stats.unpaidCount} неоплаченных сессий как оплаченные?`,
-            confirmLabel: 'Отметить',
+            title: `Отметить оплату всех сессий с долгом (${stats.unpaidCount})?`,
+            message: 'Будущие сессии не трогаем — только прошедшие без оплаты.',
+            confirmLabel: `Отметить оплату (${stats.unpaidCount})`,
+            cancelLabel: 'Оставить',
         });
         if (!ok) return;
         setMarkingAll(true);
         try {
             const result = await crmApi.markAllPaid(clientId);
-            toast.success(`Отмечено оплаченными: ${result.marked}`);
+            toast.success(`Оплата отмечена: ${result.marked}`);
             loadData();
         } catch (e: any) {
             toast.error(e.message || 'Ошибка');
@@ -286,7 +296,8 @@ export function CrmClientDetail() {
         const ok = await askConfirm({
             title: 'Удалить заметку?',
             message: <NoteDeletePreview content={note?.content} />,
-            confirmLabel: 'Удалить',
+            confirmLabel: 'Удалить заметку',
+            cancelLabel: 'Оставить',
             destructive: true,
         });
         if (!ok) return;
@@ -303,10 +314,11 @@ export function CrmClientDetail() {
         const p = payments.find(x => x.id === paymentId);
         const ok = await askConfirm({
             title: p
-                ? `Удалить оплату ${p.amount} ${currencySymbol(p.currency)} от ${format(parseISO(p.date || p.createdAt), 'd MMM', { locale: ru })}?`
+                ? `Удалить оплату ${formatMoney(p.amount, { currency: p.currency })} от ${formatDayMonth(p.date || p.createdAt)}?`
                 : 'Удалить оплату?',
             message: 'Если это единственная оплата сессии, сессия снова станет неоплаченной.',
-            confirmLabel: 'Удалить',
+            confirmLabel: 'Удалить оплату',
+            cancelLabel: 'Оставить',
             destructive: true,
         });
         if (!ok) return;
@@ -324,14 +336,22 @@ export function CrmClientDetail() {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
-                <Loader2 className="w-8 h-8 animate-spin text-unbox-grey" />
+                <Loader2 className="w-8 h-8 animate-spin text-ink-60" />
+            </div>
+        );
+    }
+
+    if (!client && loadError) {
+        return (
+            <div style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper, padding: 32 }}>
+                <ErrorBar message="Не удалось загрузить карточку клиента" onRetry={loadData} />
             </div>
         );
     }
 
     if (!client) {
         return (
-            <div className="text-center py-20 text-unbox-grey" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
+            <div className="text-center py-20" style={{ fontFamily: GH_SANS, color: GH.ink, background: GH.paper }}>
                 <p className="text-lg font-medium">Клиент не найден</p>
                 <button onClick={() => navigate('/crm/clients')} className="mt-4 text-sm text-unbox-green hover:underline">
                     Вернуться к списку
@@ -419,7 +439,7 @@ export function CrmClientDetail() {
             onClose={closeDelete}
             onConfirm={handleDeleteSession}
             isRecurring={Boolean(pendingDelete?.recurringGroupId)}
-            label={pendingDelete ? `${client?.name || 'Клиент'} — ${format(parseISO(pendingDelete.date), 'dd.MM.yyyy HH:mm')}` : undefined}
+            label={pendingDelete ? `${client?.name || 'Клиент'} — ${dayTime(parseUTC(pendingDelete.date))}` : undefined}
         />
         </>
     );
@@ -457,7 +477,7 @@ function NoteInlineForm({
                 onChange={e => setContent(e.target.value)}
                 rows={3}
                 autoFocus
-                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green resize-none bg-white"
+                className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green resize-none bg-card"
                 placeholder="Текст заметки..."
                 required
             />
@@ -466,11 +486,11 @@ function NoteInlineForm({
                     type="text"
                     value={tags}
                     onChange={e => setTags(e.target.value)}
-                    className="flex-1 px-3 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-white"
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-unbox-light text-xs focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green bg-card"
                     placeholder="Теги через запятую (необязательно)"
                 />
                 <button type="button" onClick={onCancel} className="p-1.5 hover:bg-unbox-light/50 rounded-lg transition-colors">
-                    <X className="w-4 h-4 text-unbox-grey" />
+                    <X className="w-4 h-4 text-ink-60" />
                 </button>
                 <button
                     type="submit"
@@ -543,15 +563,11 @@ interface GHClientDetailProps {
     setPendingDelete: (s: CrmSession | null) => void;
 }
 
-const ghMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: GH.ink60 };
+const ghMono: React.CSSProperties = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', color: GH.ink60 };
 const ghHairline = `1px solid ${GH.ink10}`;
 
-const GH_STATUS_COLORS: Record<string, { bg: string; color: string }> = {
-    PLANNED: { bg: 'rgba(71,109,107,0.10)', color: GH.accent },
-    COMPLETED: { bg: 'rgba(71,109,107,0.15)', color: '#2D5250' },
-    CANCELLED_CLIENT: { bg: 'rgba(184,74,47,0.10)', color: GH.danger },
-    CANCELLED_THERAPIST: { bg: 'rgba(184,74,47,0.08)', color: '#A04030' },
-};
+// Статус сессии — общий StatusBadge (цвета --status-*). Раньше тут была своя
+// карта: бирюза для «Прошла» и старый кирпичный красный вместо --status-danger.
 
 function GridHouseCrmClientDetail(props: GHClientDetailProps) {
     const narrow = useGHNarrow();
@@ -570,9 +586,14 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
         clientId, loadData, navigate, paymentAccounts, setPendingDelete,
     } = props;
 
+    // История сессий: шапка и строки — одна сетка с фиксированными колонками,
+    // иначе у каждой строки своя ширина «auto» и статус наезжал на сумму (M4).
+    // На телефоне — одна колонка: дата, под ней статус, под ним сумма.
+    const historyColumns = narrow ? '1fr' : 'minmax(0, 1fr) 160px 250px';
+
     const ghInput: React.CSSProperties = {
         fontFamily: GH_SANS, fontSize: 13, padding: '8px 12px',
-        border: ghHairline, background: '#fff', color: GH.ink,
+        border: ghHairline, background: GH.card, color: GH.ink,
         outline: 'none', width: '100%',
     };
 
@@ -601,7 +622,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                         <div style={{
                             width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontSize: 22, fontWeight: 800, color: GH.paper,
-                            background: client.isActive ? GH.accent : GH.ink30,
+                            background: client.isActive ? GH.accent : GH.ink60,
                         }}>
                             {client.name?.[0]?.toUpperCase() ?? '?'}
                         </div>
@@ -612,23 +633,23 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             }}>
                                 {client.name}
                                 {client.aliasCode && (
-                                    <span style={{ color: GH.ink30, fontWeight: 400, fontSize: '0.55em', marginLeft: 8 }}>#{client.aliasCode}</span>
+                                    <span style={{ color: GH.ink60, fontWeight: 400, fontSize: '0.55em', marginLeft: 8 }}>#{client.aliasCode}</span>
                                 )}
                             </h1>
                             {/* Contact row */}
                             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, marginTop: 8 }}>
                                 {client.phone && (
-                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                                         <Phone size={12} />{client.phone}
                                     </span>
                                 )}
                                 {client.telegram && (
-                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                                         <Send size={12} />{client.telegram}
                                     </span>
                                 )}
                                 {client.email && (
-                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                                    <span style={{ ...ghMono, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                                         <Mail size={12} />{client.email}
                                     </span>
                                 )}
@@ -638,7 +659,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                                     {client.tags.map(tag => (
                                         <span key={tag} style={{
-                                            ...ghMono, fontSize: 9, padding: '3px 8px',
+                                            ...ghMono, fontSize: 12, padding: '3px 8px',
                                             background: GH.ink5, border: ghHairline,
                                         }}>
                                             {tag}
@@ -655,20 +676,20 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                 onClick={handleMarkAllPaid}
                                 disabled={markingAll}
                                 style={{
-                                    fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                    fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                     padding: '10px 20px', background: GH.accent, color: GH.paper,
                                     border: 'none', cursor: 'pointer', opacity: markingAll ? 0.5 : 1,
                                     display: 'flex', alignItems: 'center', gap: 6,
                                 }}
                             >
                                 {markingAll ? <Loader2 size={14} className="animate-spin" /> : <CheckCheck size={14} />}
-                                Оплатить все ({stats.unpaidCount})
+                                Отметить оплату всех ({stats.unpaidCount})
                             </button>
                         )}
                         <button
                             onClick={openEditProfile}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 padding: '10px 16px', background: 'transparent', border: ghHairline,
                                 cursor: 'pointer', color: GH.ink60, display: 'flex', alignItems: 'center', gap: 6,
                             }}
@@ -678,7 +699,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                         <button
                             onClick={() => navigate('/crm/sessions')}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 padding: '10px 20px', background: GH.ink, color: GH.paper,
                                 border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
                             }}
@@ -702,8 +723,8 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                     fontFamily: GH_MONO, fontSize: 'clamp(28px, 3.5vw, 44px)',
                                     fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
                                 }}>
-                                    {amt}
-                                    <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink30 }}>{cur}</span>
+                                    {moneyParts(amt, cur)[0]}
+                                    <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink60 }}>{moneyParts(amt, cur)[1]}</span>
                                 </div>
                             ))}
                         </div>
@@ -712,20 +733,20 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             fontFamily: GH_MONO, fontSize: 'clamp(40px, 5vw, 64px)',
                             fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
                         }}>
-                            {stats.totalPaid}
-                            <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink30 }}>{Object.keys(stats.paidByCurrency)[0] || client.currency}</span>
+                            {moneyParts(stats.totalPaid, Object.keys(stats.paidByCurrency)[0] || client.currency)[0]}
+                            <span style={{ fontSize: '0.4em', marginLeft: 4, color: GH.ink60 }}>{moneyParts(stats.totalPaid, Object.keys(stats.paidByCurrency)[0] || client.currency)[1]}</span>
                         </div>
                     )}
-                    <div style={{ ...ghMono, marginTop: 4 }}>LTV</div>
+                    <div style={{ ...ghMono, marginTop: 4 }}>Всего оплачено</div>
                 </div>
                 <div style={{ display: 'flex', gap: 24 }}>
                     {[
                         { label: 'Сессий', value: stats.completed },
-                        { label: 'Ставка', value: `${client.basePrice}` },
+                        { label: 'Ставка', value: formatMoney(client.basePrice, { currency: client.currency }) },
                         { label: 'Не оплачено', value: stats.unpaidCount, color: stats.unpaidCount > 0 ? GH.danger : undefined },
                         ...(stats.debt > 0 ? [{ label: 'Долг', value: Object.keys(stats.debtByCurrency).length > 1
-                            ? Object.entries(stats.debtByCurrency).map(([c, a]) => `${a} ${c}`).join(' / ')
-                            : `${stats.debt} ${Object.keys(stats.debtByCurrency)[0] || client.currency}`, color: GH.danger }] : []),
+                            ? Object.entries(stats.debtByCurrency).map(([c, a]) => formatMoney(a, { currency: c })).join(' / ')
+                            : formatMoney(stats.debt, { currency: Object.keys(stats.debtByCurrency)[0] || client.currency }), color: GH.danger }] : []),
                     ].map(kpi => (
                         <div key={kpi.label} style={{ textAlign: 'right' }}>
                             <div style={{
@@ -734,7 +755,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             }}>
                                 {kpi.value}
                             </div>
-                            <div style={{ ...ghMono, fontSize: 9 }}>{kpi.label}</div>
+                            <div style={{ ...ghMono, fontSize: 12 }}>{kpi.label}</div>
                         </div>
                     ))}
                 </div>
@@ -745,7 +766,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
             {/* ── Edit Profile Form ── */}
             {editingProfile && (
-                <div style={{ margin: narrow ? '16px' : '24px 32px', padding: narrow ? 16 : 24, border: `1px solid ${GH.accent}`, background: '#fff' }}>
+                <div style={{ margin: narrow ? '16px' : '24px 32px', padding: narrow ? 16 : 24, border: `1px solid ${GH.accent}`, background: GH.card }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                         <div style={{ ...ghMono, color: GH.accent }}>Редактировать профиль</div>
                         <button onClick={() => setEditingProfile(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
@@ -754,27 +775,27 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Имя *</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Имя *</label>
                             <input style={ghInput} value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} required />
                         </div>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Телефон</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Телефон</label>
                             <input style={ghInput} value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} placeholder="+995..." />
                         </div>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Email</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Email</label>
                             <input style={ghInput} type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
                         </div>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Telegram</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Telegram</label>
                             <input style={ghInput} value={editForm.telegram} onChange={e => setEditForm(f => ({ ...f, telegram: e.target.value }))} placeholder="@username" />
                         </div>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Код клиента</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Код клиента</label>
                             <input style={ghInput} value={editForm.aliasCode} onChange={e => setEditForm(f => ({ ...f, aliasCode: e.target.value }))} placeholder="4-значный код" maxLength={4} />
                         </div>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Ставка</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Ставка</label>
                             <div style={{ display: 'flex', gap: 8 }}>
                                 <input style={{ ...ghInput, flex: 1 }} type="number" value={editForm.basePrice} onChange={e => setEditForm(f => ({ ...f, basePrice: e.target.value }))} placeholder="0" />
                                 <select
@@ -787,23 +808,23 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             </div>
                         </div>
                         <div>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Счёт по умолчанию</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Счёт по умолчанию</label>
                             <AccountSelect value={editForm.defaultAccount} onChange={(v) => setEditForm(f => ({ ...f, defaultAccount: v }))} />
                         </div>
                         <div style={{ gridColumn: '1 / -1' }}>
-                            <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Теги</label>
+                            <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Теги</label>
                             <input style={ghInput} value={editForm.tags} onChange={e => setEditForm(f => ({ ...f, tags: e.target.value }))} placeholder="через запятую: тревога, пары, онлайн" />
                         </div>
                     </div>
                     {(editForm.basePrice !== String(client?.basePrice || '') || editForm.currency !== (client?.currency || 'GEL') || editForm.defaultAccount !== (client?.defaultAccount || 'cash')) && (
-                        <div style={{ marginTop: 16, padding: 12, background: 'rgba(184,154,47,0.08)', border: '1px solid rgba(184,154,47,0.25)' }}>
-                            <div style={{ ...ghMono, fontSize: 10, color: '#8B7320', marginBottom: 8 }}>Применить к существующим сессиям:</div>
+                        <div style={{ marginTop: 16, padding: 12, background: STATUS.pending.bg, border: `1px solid ${STATUS.pending.fg}33` }}>
+                            <div style={{ ...ghMono, fontSize: 12, color: STATUS.pending.fg, marginBottom: 8 }}>Применить к существующим сессиям:</div>
                             {[
                                 { value: 'none' as const, label: 'Только для новых сессий' },
                                 { value: 'future_only' as const, label: 'Ко всем запланированным (незавершённым)' },
                                 { value: 'all_unpaid' as const, label: 'Ко всем неоплаченным' },
                             ].map(opt => (
-                                <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 8, ...ghMono, fontSize: 11, color: '#6B5A18', cursor: 'pointer', marginBottom: 4 }}>
+                                <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 8, ...ghMono, fontSize: 12, color: STATUS.pending.fg, cursor: 'pointer', marginBottom: 4 }}>
                                     <input type="radio" name="ghApplyPriceTo" checked={applyPriceTo === opt.value} onChange={() => setApplyPriceTo(opt.value)} />
                                     {opt.label}
                                 </label>
@@ -821,7 +842,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             onClick={handleSaveProfile}
                             disabled={!editForm.name.trim()}
                             style={{
-                                fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                 padding: '8px 20px', background: GH.ink, color: GH.paper,
                                 border: 'none', cursor: 'pointer', opacity: !editForm.name.trim() ? 0.4 : 1,
                                 display: 'flex', alignItems: 'center', gap: 6,
@@ -846,7 +867,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                             <button
                                 onClick={() => setShowNoteForm(!showNoteForm)}
                                 style={{
-                                    ...ghMono, fontSize: 10, padding: '6px 12px',
+                                    ...ghMono, fontSize: 12, padding: '6px 12px',
                                     background: 'transparent', border: ghHairline,
                                     cursor: 'pointer', color: GH.accent,
                                     display: 'flex', alignItems: 'center', gap: 4,
@@ -862,22 +883,22 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
                         {notes.filter(n => !n.sessionId).length === 0 && !showNoteForm ? (
                             <div style={{
-                                padding: 32, textAlign: 'center', color: GH.ink30,
-                                fontSize: 13, border: `1px dashed ${GH.ink10}`,
+                                padding: 32, textAlign: 'center', color: GH.ink60,
+                                fontSize: 14, border: `1px dashed ${GH.ink10}`,
                             }}>
                                 Заметок пока нет. Добавьте первую запись.
                             </div>
                         ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {notes.filter(n => !n.sessionId).map(note => (
-                                    <div key={note.id} style={{ padding: '12px 16px', border: ghHairline, background: '#fff', position: 'relative' }}>
+                                    <div key={note.id} style={{ padding: '12px 16px', border: ghHairline, background: GH.card, position: 'relative' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                                            <span style={{ ...ghMono, fontSize: 9 }}>
-                                                {format(parseISO(note.createdAt), 'dd MMM yyyy, HH:mm', { locale: ru })}
+                                            <span style={{ ...ghMono, fontSize: 12 }}>
+                                                {dayTime(note.createdAt)}
                                             </span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                 {note.tags && (
-                                                    <span style={{ ...ghMono, fontSize: 9, padding: '2px 6px', background: GH.ink5 }}>
+                                                    <span style={{ ...ghMono, fontSize: 12, padding: '2px 6px', background: GH.ink5 }}>
                                                         {note.tags}
                                                     </span>
                                                 )}
@@ -888,18 +909,18 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                     title="Удалить заметку"
                                                     aria-label="Удалить заметку"
                                                     style={{
-                                                        background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30,
+                                                        background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
                                                         width: 32, height: 32, margin: '-9px -10px -9px -4px',
                                                         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                                                     }}
                                                     onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
-                                                    onMouseLeave={e => (e.currentTarget.style.color = GH.ink30)}
+                                                    onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
                                                 >
                                                     <Trash2 size={13} />
                                                 </button>
                                             </div>
                                         </div>
-                                        <p style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>{note.content}</p>
+                                        <p style={{ fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>{note.content}</p>
                                     </div>
                                 ))}
                             </div>
@@ -913,7 +934,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                         <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                                 <div style={ghMono}>Ближайшие сессии</div>
-                                <span style={{ ...ghMono, fontSize: 9, color: GH.accent }}>{futureSessions.length} запланировано</span>
+                                <span style={{ ...ghMono, fontSize: 12, color: GH.accent }}>{futureSessions.length} запланировано</span>
                             </div>
                             {futureSessions.slice(0, 3).map(s => (
                                 <div key={s.id} style={{
@@ -923,29 +944,29 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <div style={{
                                             width: 8, height: 8, borderRadius: '50%',
-                                            background: s.isBooked ? GH.accent : GH.danger,
+                                            background: s.isBooked ? STATUS.ok.fg : STATUS.danger.fg,
                                         }} />
                                         <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                            {format(parseUTC(s.date), 'dd MMM yyyy, HH:mm', { locale: ru })}
+                                            {dayTime(parseUTC(s.date))}
                                         </span>
                                         {!s.isBooked && (
                                             <button
                                                 onClick={() => navigate('/dashboard/bookings', {
                                                     state: { crmMode: { sessionId: s.id, clientId: client.id, clientName: client.name, date: /Z$|[+-]\d{2}:\d{2}$/.test(s.date) ? s.date : s.date + 'Z', duration: s.durationMinutes } },
                                                 })}
-                                                style={{ ...ghMono, fontSize: 9, padding: '2px 8px', background: 'rgba(184,74,47,0.08)', color: GH.danger, border: 'none', cursor: 'pointer' }}
+                                                style={{ ...ghMono, fontSize: 12, padding: '2px 8px', background: STATUS.danger.bg, color: STATUS.danger.fg, border: 'none', cursor: 'pointer' }}
                                             >
                                                 Нет брони
                                             </button>
                                         )}
                                     </div>
                                     <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500, color: GH.ink60 }}>
-                                        {s.price ?? client.basePrice} {s.currency ?? client.currency}
+                                        {formatMoney(s.price ?? client.basePrice, { currency: s.currency ?? client.currency })}
                                     </span>
                                 </div>
                             ))}
                             {futureSessions.length > 3 && (
-                                <div style={{ ...ghMono, fontSize: 9, padding: '10px 0', textAlign: 'center' }}>
+                                <div style={{ ...ghMono, fontSize: 12, padding: '10px 0', textAlign: 'center' }}>
                                     И ещё {futureSessions.length - 3} сессий в будущем
                                 </div>
                             )}
@@ -962,7 +983,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                     onClick={() => setShowSyncPicker(!showSyncPicker)}
                                     disabled={syncing}
                                     style={{
-                                        ...ghMono, fontSize: 10, padding: '6px 12px',
+                                        ...ghMono, fontSize: 12, padding: '6px 12px',
                                         background: 'transparent', border: ghHairline,
                                         cursor: 'pointer', color: GH.ink60,
                                         display: 'flex', alignItems: 'center', gap: 4,
@@ -973,11 +994,11 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                 </button>
                                 {showSyncPicker && (
                                     <div
-                                        style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,16,0.3)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        style={{ position: 'fixed', inset: 0, background: GH.ink30, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                         onClick={() => setShowSyncPicker(false)}
                                     >
                                         <div
-                                            style={{ background: '#fff', border: `2px solid ${GH.ink}`, padding: 24, width: 340 }}
+                                            style={{ background: GH.card, border: `2px solid ${GH.ink}`, padding: 24, width: 340 }}
                                             onClick={e => e.stopPropagation()}
                                         >
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -987,13 +1008,13 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                 </button>
                                             </div>
                                             <div style={{ marginBottom: 12 }}>
-                                                <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Назад</label>
+                                                <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Назад</label>
                                                 <select style={ghInput} value={syncMonthsBack} onChange={e => setSyncMonthsBack(Number(e.target.value))}>
                                                     {[1, 3, 6, 12, 24, 60].map(m => <option key={m} value={m}>{m === 1 ? '1 месяц' : m === 3 ? '3 месяца' : m === 6 ? '6 месяцев' : m === 12 ? '1 год' : m === 24 ? '2 года' : '5 лет'}</option>)}
                                                 </select>
                                             </div>
                                             <div style={{ marginBottom: 16 }}>
-                                                <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Вперёд</label>
+                                                <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Вперёд</label>
                                                 <select style={ghInput} value={syncMonthsForward} onChange={e => setSyncMonthsForward(Number(e.target.value))}>
                                                     {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m === 1 ? '1 месяц' : m === 3 ? '3 месяца' : m === 6 ? '6 месяцев' : '1 год'}</option>)}
                                                 </select>
@@ -1020,7 +1041,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                         }
                                                     }}
                                                     style={{
-                                                        fontFamily: GH_MONO, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                                         flex: 1, padding: '10px', background: GH.ink, color: GH.paper,
                                                         border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                                                     }}
@@ -1035,19 +1056,21 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                         </div>
 
                         {pastSessions.length === 0 ? (
-                            <div style={{ padding: 32, textAlign: 'center', color: GH.ink30, fontSize: 13 }}>
+                            <div style={{ padding: 32, textAlign: 'center', color: GH.ink60, fontSize: 14 }}>
                                 У клиента пока нет состоявшихся сессий.
                             </div>
                         ) : (
                             <>
                                 {/* Table header */}
+                                {/* Шапка и строки — одна сетка с одинаковыми колонками и
+                                    зазором, чтобы статус не наезжал на сумму (M4). */}
                                 <div style={{
-                                    display: 'grid', gridTemplateColumns: '1fr auto auto',
+                                    display: 'grid', gridTemplateColumns: historyColumns, columnGap: 12,
                                     padding: '8px 0', borderBottom: `2px solid ${GH.ink}`,
                                 }}>
-                                    <div style={{ ...ghMono, fontSize: 9 }}>Дата</div>
-                                    <div style={{ ...ghMono, fontSize: 9, textAlign: 'center', minWidth: 100 }}>Статус</div>
-                                    <div style={{ ...ghMono, fontSize: 9, textAlign: 'right', minWidth: 140 }}>Ставка</div>
+                                    <div style={{ ...ghMono, fontSize: 12 }}>{narrow ? 'Дата · статус · ставка' : 'Дата'}</div>
+                                    {!narrow && <div style={{ ...ghMono, fontSize: 12, textAlign: 'center' }}>Статус</div>}
+                                    {!narrow && <div style={{ ...ghMono, fontSize: 12, textAlign: 'right' }}>Ставка</div>}
                                 </div>
 
                                 {/* Rows */}
@@ -1056,19 +1079,19 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                     const sessionPrice = session.price ?? client.basePrice;
                                     const isCancelled = session.status === 'CANCELLED_CLIENT' || session.status === 'CANCELLED_THERAPIST';
                                     const isEditing = editingSession === session.id;
-                                    const statusStyle = GH_STATUS_COLORS[session.status] || { bg: GH.ink5, color: GH.ink60 };
 
                                     return (
                                         <div key={session.id} style={{ borderBottom: ghHairline }}>
                                             <div style={{
-                                                display: 'grid', gridTemplateColumns: '1fr auto auto',
+                                                display: 'grid', gridTemplateColumns: historyColumns, columnGap: 12, rowGap: 8,
                                                 padding: '12px 0', alignItems: 'start',
-                                                background: session.isPaid ? 'rgba(71,109,107,0.03)' : isCancelled ? 'transparent' : 'rgba(184,74,47,0.03)',
+                                                // Долг — лёгкая красная подложка (статус), оплаченное — без подложки.
+                                                background: session.isPaid || isCancelled ? 'transparent' : `${STATUS.danger.bg}66`,
                                             }}>
                                                 {/* Date + session note */}
                                                 <div>
                                                     <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                                        {format(dt, 'dd MMM yyyy, HH:mm', { locale: ru })}
+                                                        {dayTime(dt)}
                                                     </span>
                                                     <button
                                                         onClick={() => {
@@ -1084,7 +1107,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                         style={{
                                                             display: 'flex', alignItems: 'center', gap: 4,
                                                             background: 'transparent', border: 'none', cursor: 'pointer',
-                                                            marginTop: 4, padding: 0, color: GH.ink30, fontSize: 11,
+                                                            marginTop: 4, padding: 0, color: GH.ink60, fontSize: 12,
                                                         }}
                                                     >
                                                         <StickyNote size={11} />
@@ -1109,14 +1132,14 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                     onClick={() => handleAddSessionNote(session.id)}
                                                                     disabled={savingSessionNote || !sessionNoteText.trim()}
                                                                     style={{
-                                                                        ...ghMono, fontSize: 9, padding: '4px 10px',
+                                                                        ...ghMono, fontSize: 12, padding: '4px 10px',
                                                                         background: GH.accent, color: GH.paper, border: 'none',
                                                                         cursor: 'pointer', opacity: savingSessionNote || !sessionNoteText.trim() ? 0.4 : 1,
                                                                     }}
                                                                 >
-                                                                    {savingSessionNote ? '...' : 'Сохранить'}
+                                                                    {savingSessionNote ? 'Сохраняем…' : 'Сохранить'}
                                                                 </button>
-                                                                <button onClick={() => setSessionNoteId(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30 }}>
+                                                                <button onClick={() => setSessionNoteId(null)} aria-label="Закрыть заметку" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
                                                                     <X size={12} />
                                                                 </button>
                                                             </div>
@@ -1125,20 +1148,15 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                 </div>
 
                                                 {/* Status */}
-                                                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                                    <span style={{
-                                                        ...ghMono, fontSize: 9, padding: '3px 10px',
-                                                        background: statusStyle.bg, color: statusStyle.color,
-                                                    }}>
-                                                        {STATUS_LABELS[session.status] || session.status}
-                                                    </span>
+                                                <div style={{ display: 'flex', justifyContent: narrow ? 'flex-start' : 'center' }}>
+                                                    <StatusBadge kind="session" status={session.status} audience="staff" />
                                                 </div>
 
                                                 {/* Price + actions */}
-                                                <div style={{ textAlign: 'right' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                                                        <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500 }}>
-                                                            {sessionPrice} {session.currency ?? client.currency}
+                                                <div style={{ textAlign: narrow ? 'left' : 'right' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: narrow ? 'flex-start' : 'flex-end', gap: 8 }}>
+                                                        <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                                                            {formatMoney(sessionPrice, { currency: session.currency ?? client.currency })}
                                                         </span>
                                                         {!isCancelled && (
                                                             session.isPaid ? (
@@ -1146,23 +1164,18 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                 // один клик по нему удалял платёж (G5-07). Снять
                                                                 // оплату — отдельный крестик с подтверждением.
                                                                 <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                                                                    <span style={{
-                                                                        ...ghMono, fontSize: 9, padding: '3px 8px',
-                                                                        background: 'rgba(71,109,107,0.10)', color: GH.accent,
-                                                                    }}>
-                                                                        Оплачено
-                                                                    </span>
+                                                                    <StatusBadge kind="payment" status="paid" audience="staff" />
                                                                     <button
                                                                         onClick={() => handleUnmarkPaid(session.id)}
-                                                                        title="Снять оплату"
-                                                                        aria-label="Снять оплату"
+                                                                        title="Снять отметку об оплате"
+                                                                        aria-label="Снять отметку об оплате"
                                                                         style={{
-                                                                            width: 32, height: 32, margin: '-8px -4px -8px 0',
+                                                                            width: narrow ? 44 : 32, height: narrow ? 44 : 32, margin: narrow ? 0 : '-8px -4px -8px 0',
                                                                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                            background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink30,
+                                                                            background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
                                                                         }}
                                                                         onMouseEnter={e => (e.currentTarget.style.color = GH.danger)}
-                                                                        onMouseLeave={e => (e.currentTarget.style.color = GH.ink30)}
+                                                                        onMouseLeave={e => (e.currentTarget.style.color = GH.ink60)}
                                                                     >
                                                                         <X size={12} />
                                                                     </button>
@@ -1171,13 +1184,15 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                 <button
                                                                     onClick={() => handleQuickPay(session.id, isEditing ? editSessionAccount : undefined)}
                                                                     style={{
-                                                                        ...ghMono, fontSize: 9, padding: '3px 8px',
+                                                                        ...ghMono, fontSize: 12, padding: '3px 8px',
+                                                                        // На телефоне — палец, 44 px (rule 9).
+                                                                        minHeight: narrow ? 44 : undefined,
                                                                         background: GH.ink, color: GH.paper,
                                                                         border: 'none', cursor: 'pointer',
                                                                         display: 'flex', alignItems: 'center', gap: 4,
                                                                     }}
                                                                 >
-                                                                    <Check size={10} /> Оплатить
+                                                                    <Check size={12} /> Отметить оплату
                                                                 </button>
                                                             )
                                                         )}
@@ -1191,10 +1206,12 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                     setEditSessionAccount(session.account ?? (client.defaultAccount || 'cash'));
                                                                 }
                                                             }}
+                                                            aria-label="Изменить сессию"
+                                                            title="Изменить сессию"
                                                             style={{
                                                                 background: isEditing ? GH.ink5 : 'transparent',
-                                                                border: 'none', cursor: 'pointer', padding: 4,
-                                                                color: isEditing ? GH.accent : GH.ink30,
+                                                                border: 'none', cursor: 'pointer', padding: narrow ? 14 : 4,
+                                                                color: isEditing ? GH.accent : GH.ink60,
                                                             }}
                                                         >
                                                             <Pencil size={12} />
@@ -1206,7 +1223,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                         <div style={{ marginTop: 8, padding: 12, background: GH.ink5, border: ghHairline, textAlign: 'left' }} onClick={e => e.stopPropagation()}>
                                                             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                                                                 <div style={{ flex: 1 }}>
-                                                                    <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Сумма</label>
+                                                                    <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Сумма</label>
                                                                     <input
                                                                         type="number" step="0.01"
                                                                         value={editSessionPrice}
@@ -1215,7 +1232,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                     />
                                                                 </div>
                                                                 <div style={{ flex: 1 }}>
-                                                                    <label style={{ ...ghMono, fontSize: 9, display: 'block', marginBottom: 4 }}>Счёт</label>
+                                                                    <label style={{ ...ghMono, fontSize: 12, display: 'block', marginBottom: 4 }}>Счёт</label>
                                                                     <AccountSelect value={editSessionAccount} onChange={setEditSessionAccount} />
                                                                 </div>
                                                                 <button
@@ -1226,12 +1243,12 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                         }
                                                                     }}
                                                                     style={{
-                                                                        fontFamily: GH_MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                                                                        fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                                                                         padding: '8px 12px', background: GH.ink, color: GH.paper,
                                                                         border: 'none', cursor: 'pointer',
                                                                     }}
                                                                 >
-                                                                    OK
+                                                                    Сохранить
                                                                 </button>
                                                             </div>
                                                             {/* Status buttons */}
@@ -1241,7 +1258,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                         key={key}
                                                                         onClick={() => handleUpdateSession(session.id, { status: key as CrmSession['status'] })}
                                                                         style={{
-                                                                            ...ghMono, fontSize: 9, padding: '3px 10px',
+                                                                            ...ghMono, fontSize: 12, padding: '3px 10px',
                                                                             background: session.status === key ? GH.ink : 'transparent',
                                                                             color: session.status === key ? GH.paper : GH.ink60,
                                                                             border: session.status === key ? 'none' : ghHairline,
@@ -1254,7 +1271,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                 <button
                                                                     onClick={() => setPendingDelete(session)}
                                                                     style={{
-                                                                        ...ghMono, fontSize: 9, padding: '3px 10px',
+                                                                        ...ghMono, fontSize: 12, padding: '3px 10px',
                                                                         background: 'transparent', border: `1px solid ${GH.danger}`,
                                                                         color: GH.danger, cursor: 'pointer', marginLeft: 'auto',
                                                                     }}
@@ -1281,41 +1298,42 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
                     <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
                         <div style={{ padding: '14px 16px', background: GH.cellDead, border: ghHairline }}>
-                            <div style={{ ...ghMono, fontSize: 9, marginBottom: 4 }}>Ставка за сессию</div>
-                            <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700 }}>{client.basePrice} {client.currency}</div>
+                            <div style={{ ...ghMono, fontSize: 12, marginBottom: 4 }}>Ставка за сессию</div>
+                            <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700 }}>{formatMoney(client.basePrice, { currency: client.currency })}</div>
                         </div>
 
-                        <div style={{ padding: '14px 16px', background: 'rgba(71,109,107,0.06)', border: `1px solid rgba(71,109,107,0.15)` }}>
-                            <div style={{ ...ghMono, fontSize: 9, marginBottom: 4, color: GH.accent }}>LTV</div>
+                        {/* «Всего оплачено» — нейтральная карточка: бирюза значит «выбрано», не деньги. */}
+                        <div style={{ padding: '14px 16px', background: GH.sunken, border: ghHairline }}>
+                            <div style={{ ...ghMono, fontSize: 12, marginBottom: 4 }}>Всего оплачено</div>
                             {Object.keys(stats.paidByCurrency).length > 1 ? (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                     {Object.entries(stats.paidByCurrency).map(([cur, amt]) => (
-                                        <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, color: GH.accent }}>
-                                            {amt} {cur}
+                                        <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700 }}>
+                                            {formatMoney(amt, { currency: cur })}
                                         </div>
                                     ))}
                                 </div>
                             ) : (
-                                <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: GH.accent }}>
-                                    {stats.totalPaid} {Object.keys(stats.paidByCurrency)[0] || client.currency}
+                                <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700 }}>
+                                    {formatMoney(stats.totalPaid, { currency: Object.keys(stats.paidByCurrency)[0] || client.currency })}
                                 </div>
                             )}
                         </div>
 
                         {stats.debt > 0 && (
-                            <div style={{ padding: '14px 16px', background: 'rgba(184,74,47,0.06)', border: `1px solid rgba(184,74,47,0.15)` }}>
-                                <div style={{ ...ghMono, fontSize: 9, marginBottom: 4, color: GH.danger }}>Текущий долг</div>
+                            <div style={{ padding: '14px 16px', background: STATUS.danger.bg, border: `1px solid ${STATUS.danger.fg}26` }}>
+                                <div style={{ ...ghMono, fontSize: 12, marginBottom: 4, color: STATUS.danger.fg }}>Текущий долг</div>
                                 {Object.keys(stats.debtByCurrency).length > 1 ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                         {Object.entries(stats.debtByCurrency).map(([cur, amt]) => (
-                                            <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, color: GH.danger }}>
-                                                {amt} {cur}
+                                            <div key={cur} style={{ fontFamily: GH_MONO, fontSize: 17, fontWeight: 700, color: STATUS.danger.fg }}>
+                                                {formatMoney(amt, { currency: cur })}
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
-                                    <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: GH.danger }}>
-                                        {stats.debt} {Object.keys(stats.debtByCurrency)[0] || client.currency}
+                                    <div style={{ fontFamily: GH_MONO, fontSize: 20, fontWeight: 700, color: STATUS.danger.fg }}>
+                                        {formatMoney(stats.debt, { currency: Object.keys(stats.debtByCurrency)[0] || client.currency })}
                                     </div>
                                 )}
                             </div>
@@ -1324,10 +1342,10 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
                     {/* Payment history */}
                     <div style={{ marginTop: 24, borderTop: ghHairline }}>
-                        <div style={{ ...ghMono, fontSize: 9, padding: '12px 0 8px' }}>История оплат</div>
+                        <div style={{ ...ghMono, fontSize: 12, padding: '12px 0 8px' }}>История оплат</div>
                         {payments.length === 0 ? (
-                            <div style={{ padding: '24px 0', textAlign: 'center', color: GH.ink30, fontSize: 13 }}>
-                                Оплаты отсутствуют.
+                            <div style={{ padding: '24px 0', textAlign: 'center', color: GH.ink60, fontSize: 14 }}>
+                                Оплат пока нет.
                             </div>
                         ) : (
                             <div style={{ maxHeight: 240, overflowY: 'auto' }}>
@@ -1338,22 +1356,23 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                     }}>
                                         <div>
                                             <div style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 600 }}>
-                                                {p.amount} {p.currency}
+                                                {formatMoney(p.amount, { currency: p.currency })}
                                             </div>
-                                            <div style={{ ...ghMono, fontSize: 9 }}>
+                                            <div style={{ ...ghMono, fontSize: 12 }}>
                                                 {paymentAccounts.find(a => a.id === p.account)?.label || p.account}
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                            <div style={{ ...ghMono, fontSize: 9 }}>
-                                                {format(parseISO(p.date || p.createdAt), 'dd.MM.yyyy', { locale: ru })}
+                                            <div style={{ ...ghMono, fontSize: 12 }}>
+                                                {formatDayMonth(p.date || p.createdAt, { withYear: 'auto' })}
                                             </div>
                                             <button
                                                 onClick={() => handleDeletePayment(p.id)}
                                                 title="Удалить оплату"
+                                                aria-label="Удалить оплату"
                                                 style={{
                                                     background: 'none', border: 'none', cursor: 'pointer',
-                                                    padding: 4, lineHeight: 0, color: GH.ink30,
+                                                    padding: 4, lineHeight: 0, color: GH.ink60,
                                                 }}
                                             >
                                                 <Trash2 size={13} />
@@ -1372,8 +1391,8 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                 borderTop: `2px solid ${GH.ink}`, margin: narrow ? '32px 16px 0' : '48px 32px 0',
                 padding: '12px 0 32px', display: 'flex', justifyContent: 'space-between',
             }}>
-                <div style={{ ...ghMono, fontSize: 9 }}>UNBOX · 2026</div>
-                <div style={{ ...ghMono, fontSize: 9 }}>GRID HOUSE</div>
+                <div style={{ ...ghMono, fontSize: 12 }}>UNBOX · 2026</div>
+                <div style={{ ...ghMono, fontSize: 12 }}>GRID HOUSE</div>
             </div>
         </div>
     );

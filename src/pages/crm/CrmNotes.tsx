@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useCrmStore } from '../../store/crmStore';
 import {
-    StickyNote,
     Plus,
     Trash2,
     Loader2,
@@ -9,17 +8,21 @@ import {
     X,
     Search,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import type { CrmNoteCreate, CrmNote, CrmClient } from '../../api/crm';
 import { GH, GH_SANS, GH_MONO } from '../../hooks/useDesignFlag';
 import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
 import { NoteDeletePreview } from '../../components/crm/NoteDeletePreview';
+import { formatDayMonth, formatTime } from '../../utils/format';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 export function CrmNotes() {
-        const { notes, clients, fetchNotes, fetchClients, createNote, deleteNote, loading } =
+        const { notes, clients, fetchNotes, fetchClients, createNote, deleteNote, loading, error } =
         useCrmStore();
+    // Первый ответ ещё не пришёл — скелетон, а не «Заметок ещё нет» (rule 8).
+    const [loaded, setLoaded] = useState(false);
     const [filterClient, setFilterClient] = useState<string>('');
     const [showForm, setShowForm] = useState(false);
     const [search, setSearch] = useState('');
@@ -31,11 +34,8 @@ export function CrmNotes() {
     }, [fetchClients, fetchNotes]);
 
     useEffect(() => {
-        if (filterClient) {
-            fetchNotes(filterClient);
-        } else {
-            fetchNotes();
-        }
+        const req = filterClient ? fetchNotes(filterClient) : fetchNotes();
+        Promise.resolve(req).finally(() => setLoaded(true));
     }, [filterClient, fetchNotes]);
 
     const clientMap = useMemo(() => {
@@ -62,7 +62,9 @@ export function CrmNotes() {
                 filtered={filtered}
                 clients={clients}
                 clientMap={clientMap}
-                loading={loading}
+                loading={loading || !loaded}
+                loadError={loaded && !loading ? error : null}
+                onRetry={() => { fetchClients(); if (filterClient) fetchNotes(filterClient); else fetchNotes(); }}
                 search={search}
                 setSearch={setSearch}
                 filterClient={filterClient}
@@ -82,7 +84,8 @@ export function CrmNotes() {
                     const ok = await askConfirm({
                         title: clientName ? `Удалить заметку о клиенте ${clientName}?` : 'Удалить заметку?',
                         message: <NoteDeletePreview content={note?.content} />,
-                        confirmLabel: 'Удалить',
+                        confirmLabel: 'Удалить заметку',
+                        cancelLabel: 'Оставить',
                         destructive: true,
                     });
                     if (!ok) return;
@@ -98,119 +101,7 @@ export function CrmNotes() {
 }
 
 
-// ── Note Form ────────────────────────────────────────────────────────────────
-
-function NoteForm({
-    clients,
-    defaultClient,
-    onSave,
-    onCancel,
-}: {
-    clients: CrmClient[];
-    defaultClient?: string;
-    onSave: (data: CrmNoteCreate) => Promise<void>;
-    onCancel: () => void;
-}) {
-    const [clientId, setClientId] = useState(defaultClient || '');
-    const [content, setContent] = useState('');
-    const [tags, setTags] = useState('');
-    const [saving, setSaving] = useState(false);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!clientId || !content.trim()) return;
-        setSaving(true);
-        try {
-            await onSave({
-                clientId,
-                content: content.trim(),
-                tags: tags || undefined,
-            });
-        } catch (err: any) {
-            toast.error(err.message || 'Ошибка');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <form
-            onSubmit={handleSubmit}
-            className="bg-white rounded-2xl border border-unbox-light shadow-sm p-5 space-y-4 animate-in fade-in slide-in-from-top-2"
-        >
-            <div className="flex items-center justify-between">
-                <h3 className="font-bold text-lg">Новая заметка</h3>
-                <button type="button" onClick={onCancel} className="p-1 hover:bg-unbox-light/50 rounded-lg">
-                    <X className="w-5 h-5 text-unbox-grey" />
-                </button>
-            </div>
-
-            <div className="space-y-4">
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Клиент <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                        value={clientId}
-                        onChange={(e) => setClientId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                        required
-                    >
-                        <option value="">Выберите клиента</option>
-                        {clients.map((c) => (
-                            <option key={c.id} value={c.id}>
-                                {c.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Содержание <span className="text-red-500">*</span>
-                    </label>
-                    <textarea
-                        value={content}
-                        onChange={(e) => setContent(e.target.value)}
-                        rows={4}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green resize-none"
-                        placeholder="Текст заметки..."
-                        required
-                    />
-                </div>
-                <div>
-                    <label className="text-sm font-medium text-unbox-dark mb-1 block">
-                        Теги <span className="text-unbox-grey">(через запятую)</span>
-                    </label>
-                    <input
-                        type="text"
-                        value={tags}
-                        onChange={(e) => setTags(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-unbox-light text-sm focus:outline-none focus:ring-2 focus:ring-unbox-green/20 focus:border-unbox-green"
-                        placeholder="важное, запрос, прогресс"
-                    />
-                </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="px-4 py-2 text-sm text-unbox-grey hover:bg-unbox-light/50 rounded-xl transition-colors"
-                >
-                    Отмена
-                </button>
-                <button
-                    type="submit"
-                    disabled={saving || !clientId || !content.trim()}
-                    className="flex items-center gap-2 px-5 py-2 bg-unbox-green text-white text-sm font-medium rounded-xl hover:bg-unbox-dark disabled:opacity-50 transition-colors"
-                >
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Создать
-                </button>
-            </div>
-        </form>
-    );
-}
+// NoteForm (старая форма до Grid House) нигде не рендерилась — удалена в wave 1.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Grid House variant — Vignelli × Bierut
@@ -219,9 +110,9 @@ function NoteForm({
 const GHN_HAIRLINE = `1px solid ${GH.ink10}`;
 const GHN_MONO_LABEL: React.CSSProperties = {
     fontFamily: GH_MONO,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 500,
-    letterSpacing: '0.18em',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: GH.ink60,
 };
@@ -232,6 +123,8 @@ function GridHouseCrmNotes({
     clients,
     clientMap,
     loading,
+    loadError,
+    onRetry,
     search,
     setSearch,
     filterClient,
@@ -246,6 +139,8 @@ function GridHouseCrmNotes({
     clients: CrmClient[];
     clientMap: Map<string, CrmClient>;
     loading: boolean;
+    loadError: string | null;
+    onRetry: () => void;
     search: string;
     setSearch: (v: string) => void;
     filterClient: string;
@@ -287,9 +182,9 @@ function GridHouseCrmNotes({
                                 background: GH.ink,
                                 color: GH.paper,
                                 fontFamily: GH_MONO,
-                                fontSize: 11,
+                                fontSize: 12,
                                 fontWeight: 600,
-                                letterSpacing: '0.18em',
+                                letterSpacing: '0.06em',
                                 textTransform: 'uppercase',
                                 padding: '14px 22px',
                                 border: 'none',
@@ -391,31 +286,27 @@ function GridHouseCrmNotes({
                 </div>
             )}
 
-            {/* ── List / empty / loading ── */}
+            {/* ── List / empty / loading — три разных состояния (rule 8) ── */}
+            {loadError && (
+                <ErrorBar message="Не удалось загрузить заметки" onRetry={onRetry} retrying={loading} className="mb-4" />
+            )}
             {loading && !notes.length ? (
-                <div style={{ textAlign: 'center', padding: '80px 0', ...GHN_MONO_LABEL }}>
-                    Загрузка…
+                <div role="status" aria-busy="true" style={{ borderTop: `2px solid ${GH.ink}`, padding: '24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <span className="sr-only">Загружаем заметки…</span>
+                    {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} height={48} radius={0} />)}
                 </div>
             ) : filtered.length === 0 ? (
-                <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: GHN_HAIRLINE, padding: '80px 24px', textAlign: 'center' }}>
-                    <div style={{ ...GHN_MONO_LABEL, marginBottom: 16 }}>→ Пустой индекс</div>
-                    <h2
-                        style={{
-                            fontFamily: GH_SANS,
-                            fontWeight: 800,
-                            fontSize: 'clamp(28px, 3.5vw, 44px)',
-                            lineHeight: 0.95,
-                            letterSpacing: '-0.02em',
-                            margin: 0,
-                            marginBottom: 12,
-                        }}
-                    >
-                        {search || filterClient ? 'Ничего не найдено.' : 'Заметок ещё нет.'}
-                    </h2>
-                    <div style={{ ...GHN_MONO_LABEL, color: GH.ink60 }}>
-                        {search || filterClient ? 'Сбросьте фильтр или попробуйте другой запрос' : 'Создайте первую заметку о клиенте'}
+                loadError && !notes.length ? null : (
+                    <div style={{ borderTop: `2px solid ${GH.ink}`, borderBottom: GHN_HAIRLINE }}>
+                        <EmptyState
+                            title={search || filterClient ? 'Ничего не нашли' : 'Заметок пока нет'}
+                            hint={search || filterClient ? 'Сбросьте фильтр или попробуйте другой запрос.' : 'Создайте первую заметку о клиенте.'}
+                            action={search || filterClient
+                                ? { label: 'Сбросить фильтр', onClick: () => { setSearch(''); setFilterClient(''); } }
+                                : { label: 'Новая заметка', onClick: () => setShowForm(true) }}
+                        />
                     </div>
-                </div>
+                )
             ) : (
                 <div style={{ borderTop: `2px solid ${GH.ink}` }}>
                     {filtered.map((note, idx) => {
@@ -436,8 +327,8 @@ function GridHouseCrmNotes({
                                 <div
                                     style={{
                                         fontFamily: GH_MONO,
-                                        fontSize: 11,
-                                        letterSpacing: '0.1em',
+                                        fontSize: 12,
+                                        letterSpacing: '0.06em',
                                         color: GH.ink60,
                                         fontVariantNumeric: 'tabular-nums',
                                         paddingTop: 2,
@@ -461,7 +352,7 @@ function GridHouseCrmNotes({
                                             {client?.name || '— Неизвестный клиент'}
                                         </div>
                                         <div style={{ ...GHN_MONO_LABEL, color: GH.ink60 }}>
-                                            {format(parseISO(note.createdAt), 'dd MMM yyyy · HH:mm', { locale: ru })}
+                                            {formatDayMonth(note.createdAt, { withYear: 'auto' })} · {formatTime(note.createdAt)}
                                         </div>
                                     </div>
                                     <div
@@ -485,8 +376,8 @@ function GridHouseCrmNotes({
                                                         key={trimmed}
                                                         style={{
                                                             fontFamily: GH_MONO,
-                                                            fontSize: 10,
-                                                            letterSpacing: '0.1em',
+                                                            fontSize: 12,
+                                                            letterSpacing: '0.06em',
                                                             textTransform: 'uppercase',
                                                             color: GH.ink,
                                                             border: `1px solid ${GH.ink}`,
@@ -536,7 +427,7 @@ function GridHouseCrmNotes({
             )}
 
             {/* Footer mono signature */}
-            <div style={{ ...GHN_MONO_LABEL, textAlign: 'center', padding: '40px 0 20px', color: GH.ink30 }}>
+            <div style={{ ...GHN_MONO_LABEL, textAlign: 'center', padding: '40px 0 20px', color: GH.ink60 }}>
                 Unbox · Индекс заметок · {new Date().getFullYear()}
             </div>
         </div>
@@ -631,8 +522,8 @@ function GridHouseNoteForm({
                     onClick={onCancel}
                     style={{
                         fontFamily: GH_MONO,
-                        fontSize: 11,
-                        letterSpacing: '0.18em',
+                        fontSize: 12,
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         padding: '12px 20px',
                         background: 'transparent',
@@ -648,9 +539,9 @@ function GridHouseNoteForm({
                     disabled={saving || !clientId || !content.trim()}
                     style={{
                         fontFamily: GH_MONO,
-                        fontSize: 11,
+                        fontSize: 12,
                         fontWeight: 600,
-                        letterSpacing: '0.18em',
+                        letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         padding: '12px 22px',
                         background: GH.ink,

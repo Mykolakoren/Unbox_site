@@ -1,6 +1,6 @@
-import { createPortal } from 'react-dom';
-import { AlertTriangle, X } from 'lucide-react';
-import { LegacyButton as Button } from '../ui/LegacyButton';
+import { useState } from 'react';
+import { Sheet } from '../ui/Sheet';
+import { Button } from '../ui/Button';
 
 /**
  * Delete-confirm dialog for CRM therapy sessions. When the session is part of
@@ -9,10 +9,13 @@ import { LegacyButton as Button } from '../ui/LegacyButton';
  * event:
  *   • Только эту встречу        — drops just this row
  *   • Эту и все будущие в серии — drops this + every later sibling
- *   • Отмена
+ *   • Оставить
  *
  * For one-off sessions (no recurringGroupId) it falls back to a single
- * "Удалить" button so we don't bother the specialist with a meaningless choice.
+ * "Удалить сессию" button so we don't bother the specialist with a meaningless choice.
+ *
+ * Wave 1 (30.09): вместо самодельного окна с красными Tailwind-кнопками —
+ * общая шторка Sheet и Button variant="danger" (цвет --status-danger-solid).
  */
 export interface DeleteSessionModalProps {
     isOpen: boolean;
@@ -31,92 +34,63 @@ export function DeleteSessionModal({
     isRecurring,
     label,
 }: DeleteSessionModalProps) {
-    if (!isOpen) return null;
+    // Пока идёт удаление — кнопки заблокированы, второй клик не уйдёт.
+    const [busy, setBusy] = useState<'this' | 'future' | null>(null);
 
-    return createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div
-                className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
-                onClick={onClose}
-            />
-            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-200 transform">
-                <button
-                    onClick={onClose}
-                    className="absolute top-4 right-4 text-unbox-grey hover:text-unbox-dark transition-colors"
-                >
-                    <X size={20} />
-                </button>
+    const run = async (scope: 'this' | 'future') => {
+        setBusy(scope);
+        try {
+            await onConfirm(scope);
+        } finally {
+            setBusy(null);
+            onClose();
+        }
+    };
 
-                <div className="flex flex-col items-center text-center">
-                    <div className="w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-red-100 text-red-600">
-                        <AlertTriangle size={24} />
-                    </div>
-
-                    <h3 className="text-xl font-bold text-unbox-dark mb-2">
-                        {isRecurring ? 'Удалить из серии?' : 'Удалить сессию?'}
-                    </h3>
-
-                    <div className="text-unbox-grey mb-6 text-sm leading-relaxed">
-                        {isRecurring ? (
-                            <>
-                                Эта сессия — часть повторяющейся серии.
-                                {label && <div className="mt-1 font-medium text-unbox-dark">{label}</div>}
-                                <div className="mt-2">Что удалить?</div>
-                            </>
-                        ) : (
-                            <>
-                                Действие нельзя отменить. Также удалится событие в Google Calendar.
-                                {label && <div className="mt-2 font-medium text-unbox-dark">{label}</div>}
-                            </>
-                        )}
-                    </div>
-
-                    {isRecurring ? (
-                        <div className="flex flex-col gap-2 w-full">
-                            <Button
-                                variant="ghost"
-                                className="w-full bg-red-600 text-white hover:bg-red-700 hover:text-white"
-                                onClick={async () => {
-                                    await onConfirm('this');
-                                    onClose();
-                                }}
-                            >
-                                Только эту встречу
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                className="w-full bg-red-600 text-white hover:bg-red-700 hover:text-white"
-                                onClick={async () => {
-                                    await onConfirm('future');
-                                    onClose();
-                                }}
-                            >
-                                Эту и все будущие в серии
-                            </Button>
-                            <Button variant="outline" className="w-full" onClick={onClose}>
-                                Отмена
-                            </Button>
-                        </div>
-                    ) : (
-                        <div className="flex gap-3 w-full">
-                            <Button variant="outline" className="flex-1" onClick={onClose}>
-                                Отмена
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                className="flex-1 bg-red-600 text-white hover:bg-red-700 hover:text-white"
-                                onClick={async () => {
-                                    await onConfirm('this');
-                                    onClose();
-                                }}
-                            >
-                                Удалить
-                            </Button>
-                        </div>
-                    )}
-                </div>
+    return (
+        <Sheet
+            open={isOpen}
+            onClose={() => { if (!busy) onClose(); }}
+            title={isRecurring ? 'Удалить из серии?' : 'Удалить сессию?'}
+            role="alertdialog"
+            width={420}
+            footer={isRecurring ? (
+                <>
+                    <Button variant="danger" block loading={busy === 'this'} disabled={!!busy} onClick={() => run('this')}>
+                        Удалить только эту встречу
+                    </Button>
+                    <Button variant="danger" block loading={busy === 'future'} disabled={!!busy} onClick={() => run('future')}>
+                        Удалить эту и все будущие
+                    </Button>
+                    <Button variant="secondary" block disabled={!!busy} onClick={onClose}>
+                        Оставить
+                    </Button>
+                </>
+            ) : (
+                <>
+                    <Button variant="danger" block loading={busy === 'this'} disabled={!!busy} onClick={() => run('this')}>
+                        Удалить сессию
+                    </Button>
+                    <Button variant="secondary" block disabled={!!busy} onClick={onClose}>
+                        Оставить
+                    </Button>
+                </>
+            )}
+        >
+            <div style={{ color: 'var(--color-ink-80)' }}>
+                {isRecurring ? (
+                    <>
+                        Эта сессия — часть повторяющейся серии.
+                        {label && <div style={{ marginTop: 4, fontWeight: 500, color: 'var(--color-ink)' }}>{label}</div>}
+                        <div style={{ marginTop: 8 }}>Что удалить?</div>
+                    </>
+                ) : (
+                    <>
+                        Действие нельзя отменить. Событие в Google Calendar тоже удалится.
+                        {label && <div style={{ marginTop: 8, fontWeight: 500, color: 'var(--color-ink)' }}>{label}</div>}
+                    </>
+                )}
             </div>
-        </div>,
-        document.body,
+        </Sheet>
     );
 }
