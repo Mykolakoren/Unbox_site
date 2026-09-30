@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { QuickActionsFab, type QuickAction } from './ui/QuickActionsFab';
-import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut, Plus, Search, FileText, Bell, Smartphone, Gift, CreditCard } from 'lucide-react';
+import { Calendar, Settings, LayoutDashboard, ShieldCheck, Loader2, Menu, X, LogOut, Plus, Search, FileText, Bell, Smartphone, Gift, CreditCard, ArrowUpRight, UserCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CrmAccessToggle } from './CrmAccessToggle';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
@@ -89,13 +89,17 @@ export function DashboardLayout() {
     // (раньше были только из кнопок в /dashboard и теряли видимость).
     // «Mobile (beta)» переименовано в «С телефона» — слово beta устарело
     // (мобильный давно основной интерфейс на phone-width).
+    // Волна 2 (G3-20): «Абонементы» и «Правила» живут на публичном сайте —
+    // они в отдельной группе «На сайте» со значком ↗, чтобы уход из кабинета
+    // не был сюрпризом. Для роли user — пункт «Анкета специалиста».
     const navItems = [
         { icon: LayoutDashboard, label: 'Обзор',            path: '/dashboard',          exact: true },
-        { icon: Calendar,        label: 'Мои бронирования', path: '/dashboard/bookings' },
+        { icon: Calendar,        label: 'Мои брони',        path: '/dashboard/bookings' },
         { icon: Bell,            label: 'Слежу за слотами', path: '/dashboard/waitlist' },
-        { icon: CreditCard,      label: 'Абонементы',       path: '/subscriptions' },
-        { icon: Gift,            label: 'Бонусы',           path: '/dashboard/bonuses' },
+        { icon: Gift,            label: 'Скидки и бонусы',  path: '/dashboard/bonuses' },
         { icon: Settings,        label: 'Профиль',          path: '/dashboard/profile' },
+        ...(!canBookCabinets(currentUser) ? [{ icon: UserCheck, label: 'Анкета специалиста', path: '/become-specialist', external: true }] : []),
+        { icon: CreditCard,      label: 'Абонементы',       path: '/subscriptions', external: true },
         ...(isAdmin ? [{ icon: ShieldCheck, label: 'Админ-панель', path: '/admin' }] : []),
         // С телефона — для тех у кого есть booking permission. MobileLayout
         // enforces access check внутри. App.tsx редирект автоматически
@@ -105,7 +109,7 @@ export function DashboardLayout() {
         // Legal — placed last so it sits right above the divider/"Выйти"
         // at the bottom of the sidebar; far enough from primary nav not
         // to compete for attention but always visible without scroll.
-        { icon: FileText,        label: 'Правила бронирования', path: '/booking-rules' },
+        { icon: FileText,        label: 'Правила бронирования', path: '/booking-rules', external: true },
     ];
 
     const quickActions: QuickAction[] = [
@@ -114,7 +118,8 @@ export function DashboardLayout() {
         // Кому сервер бронь не даст (роль user) — сразу анкета, а не шахматка
         // с отказом на кнопке «Оплатить».
         canBookCabinets(currentUser)
-            ? { label: 'Забронировать кабинет', sub: 'Выбрать время в шахматке', path: '/dashboard/bookings', icon: Plus }
+            // ?view=grid — сразу сетка, а не список (X2-15: один адрес брони).
+            ? { label: 'Забронировать кабинет', sub: 'Выбрать время в шахматке', path: '/dashboard/bookings?view=grid', icon: Plus }
             : { label: 'Заполнить анкету', sub: 'Бронь — после проверки анкеты', path: '/become-specialist', icon: Plus },
         { label: 'Мои бронирования', sub: 'Ближайшие и история', path: '/dashboard/bookings', icon: Calendar },
         { label: 'Найти специалиста', sub: 'Каталог и запись', path: '/specialists', icon: Search },
@@ -146,7 +151,7 @@ function GridHouseDashboardShell({
     currentUser,
     quickActions,
 }: {
-    navItems: Array<{ path: string; label: string; icon: React.ElementType; exact?: boolean }>;
+    navItems: Array<{ path: string; label: string; icon: React.ElementType; exact?: boolean; external?: boolean }>;
     currentUser: any;
     quickActions: QuickAction[];
 }) {
@@ -216,13 +221,28 @@ function GridHouseDashboardShell({
                 </div>
 
                 {/* User */}
-                <div style={{ padding: '18px 24px', borderBottom: hairline }}>
-                    <div style={{ ...ghMono, color: GH.ink60, marginBottom: 6 }}>
-                        Пользователь
-                    </div>
-                    <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' }}>
+                <div style={{ padding: '16px 24px', borderBottom: hairline }}>
+                    <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.005em' }}>
                         {currentUser.name}
                     </div>
+                    {currentUser.email && (
+                        <div style={{ fontSize: 14, color: GH.ink60, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {currentUser.email}
+                        </div>
+                    )}
+                    {/* Главное действие кабинета — всегда под рукой (G3-20). Тем, кому
+                        сервер бронь не даст (роль user), — анкета, а не отказ на оплате. */}
+                    {canBookCabinets(currentUser) && (
+                        <Link
+                            to="/dashboard/bookings?view=grid"
+                            onClick={() => setMobileOpen(false)}
+                            className="ui-btn ui-btn--secondary ui-btn--touch ui-btn--block"
+                            style={{ marginTop: 14 }}
+                        >
+                            <Plus size={18} aria-hidden="true" />
+                            Забронировать
+                        </Link>
+                    )}
                 </div>
 
                 {/* CRM toggle — owner 2026-06-05: показываем только тем кому
@@ -239,12 +259,18 @@ function GridHouseDashboardShell({
                 )}
 
                 {/* Nav */}
-                <nav style={{ flex: 1, padding: '12px 0' }}>
+                <nav aria-label="Кабинет" style={{ flex: 1, padding: '12px 0' }}>
                     {navItems.map((item, i) => {
                         const active = isActive(item);
+                        const firstExternal = item.external && !navItems[i - 1]?.external;
                         return (
+                            <div key={item.path}>
+                            {firstExternal && (
+                                <div style={{ ...ghMono, color: GH.ink60, padding: '16px 24px 6px', borderTop: hairline, marginTop: 8 }}>
+                                    На сайте
+                                </div>
+                            )}
                             <Link
-                                key={item.path}
                                 to={item.path}
                                 onClick={() => setMobileOpen(false)}
                                 aria-current={active ? 'page' : undefined}
@@ -252,7 +278,8 @@ function GridHouseDashboardShell({
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: 10,
-                                    padding: '12px 24px',
+                                    minHeight: 44,
+                                    padding: '10px 24px',
                                     fontSize: 14,
                                     fontWeight: active ? 600 : 500,
                                     color: active ? GH.ink : GH.ink60,
@@ -262,11 +289,11 @@ function GridHouseDashboardShell({
                                     transition: 'all 0.12s ease',
                                 }}
                             >
-                                <span aria-hidden="true" style={{ ...ghMono, width: 20, textAlign: 'center', color: active ? GH.ink : GH.ink60 }}>
-                                    {String(i + 1).padStart(2, '0')}
-                                </span>
-                                {item.label}
+                                <item.icon size={18} aria-hidden="true" style={{ flexShrink: 0, color: active ? GH.ink : GH.ink60 }} />
+                                <span style={{ flex: 1 }}>{item.label}</span>
+                                {item.external && <><ArrowUpRight size={14} aria-hidden="true" style={{ color: GH.ink60 }} /><span className="sr-only">(откроется на сайте)</span></>}
                             </Link>
+                            </div>
                         );
                     })}
                 </nav>
@@ -275,23 +302,24 @@ function GridHouseDashboardShell({
                 <div style={{ padding: '16px 24px', borderTop: hairline }}>
                     <button
                         onClick={handleLogout}
+                        type="button"
                         style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
+                            display: 'flex', alignItems: 'center', gap: 8, minHeight: 44,
                             background: 'none', border: 'none', color: GH.danger,
-                            fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0,
+                            fontSize: 14, fontWeight: 600, cursor: 'pointer', padding: 0,
                         }}
                     >
-                        <LogOut size={14} />
+                        <LogOut size={16} aria-hidden="true" />
                         Выйти
                     </button>
                     <Link
                         to="/"
                         style={{
-                            display: 'block', marginTop: 12,
-                            ...ghMono, color: GH.ink60, textDecoration: 'none',
+                            display: 'flex', alignItems: 'center', minHeight: 44,
+                            fontSize: 14, color: GH.ink80, textDecoration: 'none',
                         }}
                     >
-                        ← На сайт
+                        ← На главную сайта
                     </Link>
                 </div>
             </aside>
@@ -306,40 +334,37 @@ function GridHouseDashboardShell({
 
             {/* ── MAIN ── */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                {/* Top bar */}
-                <header
-                    style={{
-                        padding: narrow ? '14px 20px' : '14px 32px',
-                        borderBottom: hairline,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        position: 'sticky',
-                        top: 0,
-                        background: GH.paper,
-                        zIndex: 30,
-                    }}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {narrow && (
-                            <button
-                                onClick={() => setMobileOpen(!mobileOpen)}
-                                aria-label={mobileOpen ? 'Закрыть меню' : 'Открыть меню'}
-                                aria-expanded={mobileOpen}
-                                // 44×44 для пальца; отрицательный отступ держит высоту шапки прежней.
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: GH.ink, padding: 0, width: 44, height: 44, margin: -12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                            >
-                                {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-                            </button>
-                        )}
-                        <span style={{ ...ghMono, color: GH.ink60 }}>
-                            Unbox · Кабинет
+                {/* Верхняя полоса — только на узком экране: кнопка меню и раздел.
+                    На широком её не было смысла держать: бледное «Unbox · Кабинет»
+                    и второй раз имя (G3-20). */}
+                {narrow && (
+                    <header
+                        style={{
+                            padding: '6px 20px',
+                            borderBottom: hairline,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            position: 'sticky',
+                            top: 0,
+                            background: GH.paper,
+                            zIndex: 30,
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setMobileOpen(!mobileOpen)}
+                            aria-label={mobileOpen ? 'Закрыть меню' : 'Открыть меню'}
+                            aria-expanded={mobileOpen}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: GH.ink, padding: 0, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+                        </button>
+                        <span style={{ fontSize: 16, fontWeight: 600 }}>
+                            {navItems.find(isActive)?.label ?? 'Кабинет'}
                         </span>
-                    </div>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>
-                        {currentUser.name}
-                    </span>
-                </header>
+                    </header>
+                )}
 
                 {/* Content */}
                 <main style={{ flex: 1, padding: narrow ? '24px 20px' : '32px 40px' }}>
