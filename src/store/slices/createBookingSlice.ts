@@ -283,7 +283,7 @@ export const createBookingSlice: StateCreator<UserStore, [], [], BookingSlice> =
             }));
         } catch (error: any) {
             const detail = error?.response?.data?.detail;
-            toast.error(detail || 'Не удалось обновить статус переаренды');
+            toast.error(detail || 'Не удалось изменить пересдачу. Попробуйте ещё раз');
             throw error;
         }
     },
