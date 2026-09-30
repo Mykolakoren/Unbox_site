@@ -21,6 +21,7 @@ import { Field as FormField, Input } from '../../components/ui/Field';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { canUsePsyCrm, isBookingAdmin } from './crmAccess';
+import { lateRescheduleLabel, lateRescheduleLeft } from '../../utils/subscription';
 import { bookingEndDate, bookingPlace, bookingStartDate, bookingTimeRange, mapsUrl } from './bookingView';
 
 const ADMIN_TG_URL = 'https://t.me/UnboxCenter';
@@ -93,6 +94,11 @@ export function BookingDetailSheet({ booking, onClose }: {
     const isLive = !isPast && booking.status !== 'cancelled';
     // Клиенту меньше чем за сутки сервер не даст ни отменить, ни перенести.
     const lateForClient = within24h && !isAdmin;
+    // …кроме бесплатного переноса по абонементу (владелец 01.10: Тёплый 1,
+    // Регулярный 2, Профи+ 3; не позже чем за 3 ч до начала).
+    const lateLeft = lateForClient && booking.status === 'confirmed'
+        ? lateRescheduleLeft(currentUser?.subscription, hoursToStart)
+        : 0;
     // Пересдать можно только подтверждённую бронь (сервер: status == confirmed).
     const canReRent = isLive && booking.status === 'confirmed';
 
@@ -397,10 +403,23 @@ export function BookingDetailSheet({ booking, onClose }: {
                         {isLive && !isActive && lateForClient && (
                             <>
                                 <div style={{ fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink80, background: COLOR.sunken, borderRadius: 12, padding: 12 }}>
-                                    До начала меньше 24 часов — отменить или перенести уже нельзя.
+                                    {lateLeft > 0
+                                        ? 'До начала меньше 24 часов — отменить уже нельзя, но перенести можно: по абонементу есть бесплатные переносы.'
+                                        : 'До начала меньше 24 часов — отменить или перенести уже нельзя.'}
                                     {canReRent ? ' Можно пересдать время: если его займёт другой специалист, вернём 50%.' : ''}
                                     {' '}Или напишите администратору.
                                 </div>
+                                {lateLeft > 0 && (
+                                    <ActionRow
+                                        icon={<CalendarClock size={18} />}
+                                        label={lateRescheduleLabel(lateLeft)}
+                                        sub="Не позже чем за 3 часа, в пределах срока абонемента"
+                                        onClick={() => {
+                                            onClose();
+                                            navigate(`/m/find?reschedule=${booking.id}`);
+                                        }}
+                                    />
+                                )}
                                 {canReRent && (
                                     <ActionRow
                                         icon={<Users size={18} />}

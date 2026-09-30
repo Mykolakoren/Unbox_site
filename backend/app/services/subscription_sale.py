@@ -32,17 +32,20 @@ from app.models.cashbox_transaction import CashboxTransaction
 from app.models.user import User
 from app.services import subscription_pool, wallet
 
+# free_reschedules — бесплатные переносы позже суток (не позже чем за 3 ч),
+# решение владельца 01.10: Тёплый 1, Регулярный 2, Профи+ 3, Пробный и
+# Групповой 0. Тратит reschedule_booking (services/subscription_perks.py).
 PLANS: dict[str, dict] = {
     "TRIAL": dict(name="Пробный", hours=4, bonus_hours=0, price=70, duration_days=14,
                   discount_percent=0, formats=["individual"], free_reschedules=0),
     "WARM_START": dict(name="Тёплый старт", hours=10, bonus_hours=0, price=180, duration_days=30,
-                       discount_percent=10, formats=["individual"], free_reschedules=0),
+                       discount_percent=10, formats=["individual"], free_reschedules=1),
     "REGULAR_PRACTITIONER": dict(name="Регулярный практик", hours=20, bonus_hours=0, price=350,
                                  duration_days=30, discount_percent=15, formats=["individual"],
-                                 free_reschedules=1),
+                                 free_reschedules=2),
     "PRO_PLUS": dict(name="Профи+", hours=40, bonus_hours=2, price=650, duration_days=45,
                      discount_percent=20, formats=["individual", "group", "intervision"],
-                     free_reschedules=0),
+                     free_reschedules=3),
     "GROUP_MASTER": dict(name="Групповой мастер", hours=20, bonus_hours=0, price=450, duration_days=45,
                          discount_percent=25, formats=["group"], free_reschedules=0),
 }
@@ -75,7 +78,7 @@ def build_subscription(plan_id: str, now: datetime, carry_hours: float = 0.0) ->
         "id": str(uuid4()), "plan_id": plan_id, "name": p["name"],
         "total_hours": total, "bonus_hours": round(bonus, 2),
         "remaining_hours": round(total + bonus, 2), "used_hours": 0.0,
-        "free_reschedules": p["free_reschedules"],
+        "free_reschedules": p["free_reschedules"], "free_reschedules_used": 0,
         "expiry_date": (now + timedelta(days=p["duration_days"])).isoformat(),
         "is_frozen": False, "freeze_count": 0, "discount_percent": p["discount_percent"],
         "included_formats": list(p["formats"]), "status": "active",

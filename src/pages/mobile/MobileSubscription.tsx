@@ -142,8 +142,10 @@ export function MobileSubscription() {
                                 <InfoRow label="Действует до" value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })} />
                                 <InfoRow label="Осталось по абонементу" value={fmtHours(sub.remainingHours)} />
                                 <InfoRow label="Использовано" value={fmtHours(usedHours)} />
-                                {sub.freeReschedules > 0 && (
-                                    <InfoRow label="Бесплатных переносов" value={String(sub.freeReschedules)} />
+                                {/* Владелец 01.10: перенос позже суток (не позже чем за 3 ч) —
+                                    N раз за абонемент. Показываем и 0, если переносы были. */}
+                                {((Number(sub.freeReschedules) || 0) > 0 || (Number(sub.freeReschedulesUsed) || 0) > 0) && (
+                                    <InfoRow label="Переносов позже суток" value={`осталось ${Number(sub.freeReschedules) || 0}`} />
                                 )}
                                 <InfoRow
                                     label="Заморозка"

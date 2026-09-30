@@ -26,6 +26,8 @@ export interface Subscription {
     bonusHours?: number;
     remainingHours: number;
     freeReschedules: number;
+    /** Сколько бесплатных переносов позже суток уже потрачено (владелец 01.10). */
+    freeReschedulesUsed?: number;
     expiryDate: string; // ISO string
     isFrozen: boolean;
     frozenUntil?: string; // ISO string

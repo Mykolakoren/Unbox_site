@@ -37,6 +37,9 @@ _ALIASES: dict[str, str] = {
     "expiry_date": "expiryDate",
     "plan_id": "planId",
     "free_reschedules": "freeReschedules",
+    # Обещания тарифа (владелец 01.10, services/subscription_perks.py):
+    # сколько бесплатных переносов позже суток уже потрачено.
+    "free_reschedules_used": "freeReschedulesUsed",
     "included_formats": "includedFormats",
     "discount_percent": "discountPercent",
     # Особые условия клиента: абонемент без ограничения срока (owner-решение,

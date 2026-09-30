@@ -284,7 +284,10 @@ export let SUBSCRIPTION_PLANS = [
         price: 70,
         durationDays: 14,
         discountPercent: 0,
-        formats: ['individual']
+        formats: ['individual'],
+        // Переносы позже суток (не позже чем за 3 ч) — владелец 01.10.
+        // Сервер: subscription_sale.PLANS[...]['free_reschedules'] (сторож сверяет).
+        freeReschedules: 0,
     },
     {
         id: 'WARM_START',
@@ -293,7 +296,8 @@ export let SUBSCRIPTION_PLANS = [
         price: 180,
         durationDays: 30,
         discountPercent: 10,
-        formats: ['individual']
+        formats: ['individual'],
+        freeReschedules: 1,
     },
     {
         id: 'REGULAR_PRACTITIONER',
@@ -303,7 +307,8 @@ export let SUBSCRIPTION_PLANS = [
         durationDays: 30,
         discountPercent: 15,
         formats: ['individual'],
-        perks: ['1 бесплатный перенос']
+        freeReschedules: 2,
+        perks: ['2 переноса позже суток']
     },
     {
         id: 'PRO_PLUS',
@@ -314,6 +319,7 @@ export let SUBSCRIPTION_PLANS = [
         durationDays: 45,
         discountPercent: 20,
         formats: ['individual', 'group', 'intervision'],
+        freeReschedules: 3,
         perks: ['Приоритет', 'Внеурочный доступ', 'Рекомендация']
     },
     {
@@ -324,6 +330,7 @@ export let SUBSCRIPTION_PLANS = [
         durationDays: 45,
         discountPercent: 25,
         formats: ['group'],
+        freeReschedules: 0,
         perks: ['Анонс по базе']
     },
 ];

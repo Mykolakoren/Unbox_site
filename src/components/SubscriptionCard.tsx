@@ -119,8 +119,10 @@ export const SubscriptionCard: FC<SubscriptionCardProps> = ({ user }) => {
                     <dd className="m-0 font-medium">{formatDayMonth(parseISO(sub.expiryDate), { withYear: 'auto' })}</dd>
                 </div>
                 <div className={`${cell} flex justify-between gap-3`}>
-                    <dt className="flex items-center gap-2 text-ink-60"><RefreshCcw size={14} aria-hidden="true" /> Бесплатные переносы</dt>
-                    <dd className="m-0 font-medium">{sub.freeReschedules > 0 ? `осталось ${sub.freeReschedules}` : 'нет'}</dd>
+                    {/* Владелец 01.10: перенос позже суток (не позже чем за 3 ч) —
+                        N раз за абонемент; сервер тратит счётчик freeReschedules. */}
+                    <dt className="flex items-center gap-2 text-ink-60"><RefreshCcw size={14} aria-hidden="true" /> Переносов позже суток</dt>
+                    <dd className="m-0 font-medium">{(Number(sub.freeReschedules) || 0) > 0 ? `осталось ${sub.freeReschedules}` : 'нет'}</dd>
                 </div>
                 <div className={`${cell} flex justify-between gap-3`}>
                     <dt className="flex items-center gap-2 text-ink-60"><Snowflake size={14} aria-hidden="true" /> Пауза на 7 дней</dt>

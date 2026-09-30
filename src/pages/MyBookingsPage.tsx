@@ -47,6 +47,7 @@ import { Field, Input } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatTime } from '../utils/format';
 import { ruCountWord } from '../utils/plural';
+import { hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
  *  пересдачу (флаг isReRentListed, не отдельный статус). Вид — как у
@@ -305,6 +306,12 @@ function BookingsChessboard({
         );
         return (startUTC - Date.now()) > 24 * 60 * 60 * 1000;
     };
+    // Позже суток — перенос только бесплатным переносом абонемента (владелец
+    // 01.10: Тёплый 1, Регулярный 2, Профи+ 3; не позже чем за 3 ч). Сколько
+    // осталось — 0, если сейчас такой перенос недоступен.
+    const lateSub = useUserStore(s => s.currentUser?.subscription);
+    const lateFreeLeft = (b: BookingHistoryItem) =>
+        b.status === 'confirmed' && !canModify(b) ? lateRescheduleLeft(lateSub, hoursUntilBookingStart(b)) : 0;
 
     // Is slot in the past? Compares Tbilisi wall-clock both sides — without
     // tbilisiNow() the previous `new Date().getHours()` returned the
@@ -1371,6 +1378,14 @@ function BookingsChessboard({
                                             <div className="text-caption text-ink-60 text-center italic px-2">
                                                 До начала меньше 24 часов — отменить уже нельзя. Можно пересдать время: если его займёт другой специалист, вернём 50 %. Или напишите администратору.
                                             </div>
+                                            {lateFreeLeft(activeBooking) > 0 && (
+                                                <button
+                                                    onClick={() => { onReschedule(activeBooking); setActiveBooking(null); }}
+                                                    className="w-full py-2.5 rounded-lg bg-sunken text-ink text-xs font-semibold"
+                                                >
+                                                    {lateRescheduleLabel(lateFreeLeft(activeBooking))}
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => { onReRent(activeBooking.id); setActiveBooking(null); }}
                                                 className="w-full py-2 rounded-lg border border-dashed border-accent text-accent-ink text-xs font-semibold hover:bg-ink-05 transition-all"
@@ -2099,6 +2114,14 @@ function BookingsChessboard({
                                 <div className="text-caption text-ink-60 text-center italic">
                                     До начала меньше 24 часов — отменить уже нельзя. Можно пересдать время: если его займёт другой специалист, вернём 50 %. Или напишите администратору.
                                 </div>
+                                {lateFreeLeft(activeBooking) > 0 && (
+                                    <button
+                                        onClick={() => { setActiveBooking(null); onReschedule(activeBooking); }}
+                                        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-ink-10 text-ink text-xs font-semibold hover:border-accent hover:text-accent-ink transition-all"
+                                    >
+                                        <RefreshCw size={12} /> {lateRescheduleLabel(lateFreeLeft(activeBooking))}
+                                    </button>
+                                )}
                                 <button
                                     disabled={extending}
                                     onClick={async () => {
@@ -2851,6 +2874,11 @@ function BookingCard({
         start.setUTCHours(h, m, 0, 0);
         return (start.getTime() - Date.now()) > 24 * 60 * 60 * 1000;
     })();
+    // Позже суток — бесплатный перенос абонемента (владелец 01.10).
+    const cardSub = useUserStore(s => s.currentUser?.subscription);
+    const lateLeft = booking.status === 'confirmed' && !canMod
+        ? lateRescheduleLeft(cardSub, hoursUntilBookingStart(booking))
+        : 0;
 
     const clientInfo = booking.crmClientId ? crmClients.find(c => c.id === booking.crmClientId) : null;
 
@@ -3165,9 +3193,16 @@ function BookingCard({
                                     </UiButton>
                                 </>
                             ) : (
-                                <UiButton variant="secondary" size="touch" icon={<Repeat size={16} aria-hidden="true" />} onClick={() => onReRent(booking.id)}>
-                                    Пересдать
-                                </UiButton>
+                                <>
+                                    {lateLeft > 0 && (
+                                        <UiButton variant="secondary" size="touch" onClick={() => onEdit(booking)}>
+                                            {lateRescheduleLabel(lateLeft)}
+                                        </UiButton>
+                                    )}
+                                    <UiButton variant="secondary" size="touch" icon={<Repeat size={16} aria-hidden="true" />} onClick={() => onReRent(booking.id)}>
+                                        Пересдать
+                                    </UiButton>
+                                </>
                             )}
                         </div>
                     )}

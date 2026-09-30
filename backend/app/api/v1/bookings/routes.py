@@ -3443,13 +3443,12 @@ def reschedule_booking(
         )
 
     # 24h policy — Tbilisi-aware (see _booking_hours_until_start docstring).
+    # Клиент переносит сам не позже чем за сутки. Позже — только бесплатным
+    # переносом абонемента (владелец 01.10: Тёплый 1, Регулярный 2, Профи+ 3;
+    # не позже чем за 3 ч, одиночная бронь, новая дата в сроке абонемента).
+    # Администратор переносит всегда и счётчик клиента не тратит.
     hours_until = _booking_hours_until_start(booking)
-    if hours_until < 24 and not current_user.role in ADMIN_ROLES:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"Перенос невозможен менее чем за 24 часа до начала (осталось {hours_until:.1f} ч). "
-                    f"Можно выставить бронь на переаренду или написать администратору."),
-        )
+    late_for_client = hours_until < 24 and not current_user.role in ADMIN_ROLES
 
     try:
         new_date = datetime.strptime(data.new_date, "%Y-%m-%d")
@@ -3457,6 +3456,40 @@ def reschedule_booking(
         raise HTTPException(
             status_code=400, detail="Некорректная дата — нужен формат ГГГГ-ММ-ДД"
         )
+
+    free_reschedule_used = False
+    free_reschedules_left_after: Optional[int] = None
+    if late_for_client:
+        from app.services import subscription_perks
+        try:
+            _nh, _nm = map(int, data.new_start_time.split(":"))
+            # Booking.date — полночь дня по Тбилиси, время — по Тбилиси; в UTC −4 ч.
+            _new_start_utc = new_date.replace(hour=_nh, minute=_nm) - timedelta(hours=4)
+        except Exception:
+            _new_start_utc = None
+        # Строка владельца брони под замком (как при продаже абонемента):
+        # два переноса одновременно не потратят один бесплатный перенос дважды.
+        # populate_existing — перечитать пул из БД, а не из кэша сессии.
+        _late_owner = None
+        if booking.user_uuid:
+            _late_owner = session.exec(
+                select(User).where(User.id == booking.user_uuid)
+                .with_for_update().execution_options(populate_existing=True)
+            ).first()
+        if _late_owner is None:
+            _late_owner = _resolve_booking_owner(session, booking)
+        _refusal = subscription_perks.late_reschedule_refusal(
+            getattr(_late_owner, "subscription", None),
+            hours_until=hours_until, new_start_utc=_new_start_utc, now=datetime.utcnow(),
+        )
+        if _refusal:
+            raise HTTPException(status_code=400, detail=_refusal)
+        # Тратим в памяти — в БД уйдёт одним коммитом вместе с переносом;
+        # любой отказ ниже (слот занят, не хватает денег) откатит и счётчик.
+        _late_owner.subscription = subscription_perks.spend_free_reschedule(_late_owner.subscription)
+        session.add(_late_owner)
+        free_reschedule_used = True
+        free_reschedules_left_after = subscription_perks.free_reschedules_left(_late_owner.subscription)
 
     new_resource = data.new_resource_id or booking.resource_id
     # Use new_duration when client passes it (mobile reschedule UI), else
@@ -3490,6 +3523,7 @@ def reschedule_booking(
     old_date = booking.date
     old_time = booking.start_time
     old_resource = booking.resource_id
+    old_duration = booking.duration
 
     # ── Price recalculation when room, duration, TIME or DATE changes ──
     # 17.09 (кейс Алёны Ловиц): перенос 18:00 → 19:00 при той же длительности
@@ -3716,12 +3750,14 @@ def reschedule_booking(
     if slot_moved:
         try:
             from app.services.waitlist_notify import notify_waitlist_for_freed_slot
-            # Build a proxy booking representing the old (freed) slot
-            from copy import copy as _copy
-            freed = _copy(booking)
-            freed.resource_id = old_resource
-            freed.date = old_date
-            freed.start_time = old_time
+            # Освободившийся (старый) слот — простым объектом, НЕ копией брони.
+            # copy.copy() ORM-объекта делит с ним состояние SQLAlchemy: после
+            # коммита бронь «протухшая», и запись полей в копию ломала flush
+            # сессии (KeyError 'resource_id') — дальше падало событие переноса
+            # (500 уже после переезда брони). Найдено сторожем тарифов 01.10.
+            from types import SimpleNamespace as _NS
+            freed = _NS(id=booking.id, resource_id=old_resource, date=old_date,
+                        start_time=old_time, duration=old_duration)
             notify_waitlist_for_freed_slot(session, freed)
         except Exception:
             logger.exception("Failed to notify waitlist on reschedule")
@@ -3770,8 +3806,14 @@ def reschedule_booking(
             "old_price": old_price if price_recalculated else None,
             "new_price": new_price if price_recalculated else None,
             "price_diff": price_diff if price_recalculated else None,
+            # Владелец 01.10: перенос позже суток за счёт абонемента.
+            "free_reschedule_used": free_reschedule_used,
+            "free_reschedules_left": free_reschedules_left_after,
         },
     )
+    if free_reschedule_used:
+        logger.info("[reschedule] booking %s: бесплатный перенос абонемента (позже 24 ч), осталось %s",
+                    booking.id, free_reschedules_left_after)
 
     # Reset reminder_sent_at so the T-2h reminder fires for the new slot
     # if it's still ≥2h away.
@@ -3779,31 +3821,9 @@ def reschedule_booking(
     session.add(booking)
     session.commit()
 
-    # ── Telegram notification on reschedule (owner + admin 2026-05-29).
-    # Previously this code lived but was unreachable in the series
-    # endpoint; the single-reschedule path never had it at all.
-    try:
-        notify_owner = _resolve_booking_owner(session, booking)
-        if notify_owner and notify_owner.telegram_id:
-            resource_name = booking.resource_id
-            try:
-                res_obj = session.get(Resource, booking.resource_id)
-                if res_obj:
-                    resource_name = res_obj.name or booking.resource_id
-            except Exception:
-                pass
-            telegram_service.send_booking_rescheduled(
-                chat_id=str(notify_owner.telegram_id),
-                resource_name=resource_name,
-                old_date=old_date,
-                old_start_time=old_time,
-                new_date=booking.date,
-                new_start_time=booking.start_time,
-                duration_minutes=booking.duration,
-                booking_id=str(booking.id),
-            )
-    except Exception as e:
-        logger.warning(f"[Booking reschedule] TG notification failed: {e}")
+    # Клиенту о переносе пишет ОДНО сообщение — фоновое, выше (slot_moved).
+    # Здесь раньше стояла вторая, синхронная отправка того же текста —
+    # клиент получал «Бронь перенесена» дважды (план тарифов 01.10).
 
     if dropped_extras:
         logger.info(
@@ -4235,6 +4255,18 @@ def reschedule_booking_series(
     is_owner = _check_ownership(booking, current_user)
     if not is_owner and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Нет доступа к этой брони")
+
+    # Серию «эту и следующие» клиент позже суток не переносит: бесплатный
+    # перенос абонемента (владелец 01.10) — только для одной брони. Без этой
+    # проверки вызов reschedule_booking ниже потратил бы его на всю серию.
+    if current_user.role not in ADMIN_ROLES:
+        _anchor_hours = _booking_hours_until_start(booking)
+        if _anchor_hours < 24:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Серию нельзя перенести менее чем за 24 часа до начала (осталось {_anchor_hours:.1f} ч). "
+                        f"Перенесите эту бронь отдельно или напишите администратору."),
+            )
 
     # Snapshot the anchor's pre-move date so we can find "later" siblings
     # AFTER the anchor is updated (its own date may have moved).
