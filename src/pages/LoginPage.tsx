@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { PhoneInput } from '../components/ui/PhoneInput';
-import { User, Lock, Phone, LogIn, Eye, EyeOff } from 'lucide-react';
+import { User, Mail, Lock, Phone, LogIn, Eye, EyeOff } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { TelegramLoginButton } from '../components/TelegramLoginButton';
+import { PublicHeader } from '../components/public/PublicHeader';
 import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
 import { safeRedirectPath } from '../utils/loginRedirect';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 // Компьютерные кабинеты: на телефоне у них свой интерфейс /m, поэтому
 // возврат туда после входа с телефона не делаем (как и раньше — в /m).
@@ -17,25 +19,6 @@ function useGHNarrow(bp = 768) {
     useEffect(() => { const h = () => setN(window.innerWidth < bp); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, [bp]);
     return n;
 }
-
-// ─── Clean styles (post-Liquid Glass) ────────────────────────────────────────
-const glassHeader: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.94)',
-    borderBottom: '1px solid rgba(0,0,0,0.06)',
-    boxShadow: '0 1px 8px rgba(0,0,0,0.03)',
-};
-
-const glassPanel: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.92)',
-    border: '1px solid rgba(0,0,0,0.06)',
-    boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
-};
-
-const glassInput: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.70)',
-    border: '1px solid rgba(0,0,0,0.08)',
-};
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function LoginPage() {
     const navigate = useNavigate();
@@ -51,6 +34,7 @@ export function LoginPage() {
         () => safeRedirectPath(new URLSearchParams(window.location.search).get('redirect'))
     );
     const [isLoading, setIsLoading] = useState(false);
+    useDocumentTitle(isRegistering ? 'Создать аккаунт' : 'Вход');
     // Surface the reason the Telegram-callback page bounced us here, so the
     // user knows why they didn't land on /dashboard. Strip the param from
     // the URL once read so a refresh doesn't keep showing the message.
@@ -197,7 +181,10 @@ export function LoginPage() {
 
 // ─────────────────────────────────────────────────────────────────────────
 // GRID HOUSE LOGIN — newspaper-front-desk variant
-// Rollback: delete this component + its early-return above.
+// Волна 2 (G1-14, G1-15, G1-16, G1-17, X4-14, G1-landing-entry-M2):
+// подписи связаны с полями, автозаполнение браузера и менеджеров паролей,
+// «глазок» 44 px с названием, h1, ошибка озвучивается; на регистрации нет
+// Telegram (аккаунт через него не создаётся — был тупик с 403).
 // ─────────────────────────────────────────────────────────────────────────
 
 const GH_HAIRLINE = `1px solid ${GH.ink10}`;
@@ -226,6 +213,22 @@ interface GridHouseLoginPageProps {
     onGoogleError: () => void;
 }
 
+/** Кнопка Google рисуется скриптом accounts.google.com. Если он не пришёл
+ *  (блокировщик, сеть), вместо кнопки оставалась пустая рамка — прячем. */
+function useGoogleButtonVisible(ref: React.RefObject<HTMLDivElement | null>): boolean {
+    const [visible, setVisible] = useState(true);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const rendered = () => !!el.querySelector('iframe, div[role="button"]');
+        const timer = window.setTimeout(() => { if (!rendered()) setVisible(false); }, 3000);
+        const obs = new MutationObserver(() => { if (rendered()) setVisible(true); });
+        obs.observe(el, { childList: true, subtree: true });
+        return () => { window.clearTimeout(timer); obs.disconnect(); };
+    }, [ref]);
+    return visible;
+}
+
 function GridHouseLoginPage({
     isRegistering,
     setIsRegistering,
@@ -242,6 +245,13 @@ function GridHouseLoginPage({
     onGoogleError,
 }: GridHouseLoginPageProps) {
     const narrow = useGHNarrow(768);
+    const googleRef = useRef<HTMLDivElement>(null);
+    const googleVisible = useGoogleButtonVisible(googleRef);
+    const title = isRegistering ? 'Создать аккаунт.' : narrow ? 'Вход.' : 'Добро пожаловать.';
+    const lead = isRegistering
+        ? 'Аккаунт открывает личный кабинет: бронирования, сессии, расписание.'
+        : 'Войдите, чтобы увидеть бронирования, сессии и расписание.';
+
     return (
         <div
             style={{
@@ -253,41 +263,8 @@ function GridHouseLoginPage({
                 flexDirection: 'column',
             }}
         >
-            {/* ── Top bar ── */}
-            <header
-                style={{
-                    borderBottom: GH_HAIRLINE,
-                    padding: narrow ? '16px 20px' : '20px 32px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                }}
-            >
-                <Link
-                    to="/"
-                    style={{
-                        fontSize: 22,
-                        fontWeight: 800,
-                        letterSpacing: '-0.02em',
-                        color: GH.ink,
-                        textDecoration: 'none',
-                    }}
-                >
-                    Unbox
-                </Link>
-                <Link
-                    to="/"
-                    style={{
-                        ...GH_MONO_LABEL,
-                        color: GH.ink,
-                        textDecoration: 'none',
-                        borderBottom: `1px solid ${GH.ink}`,
-                        paddingBottom: 2,
-                    }}
-                >
-                    ← На главную
-                </Link>
-            </header>
+            {/* G1-21: общая шапка сайта вместо своей «← На главную». */}
+            <PublicHeader />
 
             {/* ── Main grid ── */}
             <div
@@ -313,71 +290,53 @@ function GridHouseLoginPage({
                         minHeight: 520,
                     }}
                 >
+                    <div style={GH_MONO_LABEL}>{isRegistering ? 'Регистрация' : 'Вход'}</div>
                     <div>
-                        <div style={GH_MONO_LABEL}>Раздел · Вход</div>
-                        <div style={{ ...GH_MONO_LABEL, marginTop: 4 }}>Доступ · Резиденты и клиенты</div>
-                    </div>
-                    <div>
-                        <div
+                        <h1
                             style={{
                                 fontSize: 'clamp(48px, 6vw, 88px)',
-                                fontWeight: 800,
+                                fontWeight: 600,
                                 lineHeight: 0.92,
                                 letterSpacing: '-0.03em',
-                                marginBottom: 24,
+                                margin: '0 0 24px',
                             }}
                         >
-                            {isRegistering ? 'Новый специалист.' : 'Добро пожаловать.'}
-                        </div>
-                        <div
-                            style={{
-                                fontSize: 17,
-                                lineHeight: 1.55,
-                                color: GH.ink60,
-                                maxWidth: 420,
-                            }}
-                        >
-                            {isRegistering
-                                ? 'Регистрация открывает личный кабинет: бронирования, сессии, расписание.'
-                                : 'Войдите, чтобы увидеть бронирования, сессии и расписание.'}
-                        </div>
+                            {title}
+                        </h1>
+                        <p style={{ fontSize: 17, lineHeight: 1.55, color: GH.ink60, maxWidth: 420, margin: 0 }}>
+                            {lead}
+                        </p>
                     </div>
                     <div style={GH_MONO_LABEL}>Unbox · Батуми</div>
                 </aside>
                 )}
 
                 {/* RIGHT — form column */}
-                <main style={{ padding: narrow ? '32px 20px' : '64px 48px', display: 'flex', alignItems: narrow ? 'flex-start' : 'center', flex: 1 }}>
+                <main style={{ padding: narrow ? '32px 16px' : '64px 48px', display: 'flex', alignItems: narrow ? 'flex-start' : 'center', flex: 1 }}>
                     <div style={{ width: '100%', maxWidth: 420, margin: '0 auto' }}>
                         {/* Mobile-only headline */}
                         {narrow && (
                             <div style={{ marginBottom: 28 }}>
-                                <div
+                                <h1
                                     style={{
                                         fontSize: 36,
-                                        fontWeight: 800,
+                                        fontWeight: 600,
                                         lineHeight: 0.95,
                                         letterSpacing: '-0.03em',
-                                        marginBottom: 12,
+                                        margin: '0 0 12px',
                                     }}
                                 >
-                                    {isRegistering ? 'Новый специалист.' : 'Вход.'}
-                                </div>
-                                <div style={{ fontSize: 15, lineHeight: 1.5, color: GH.ink60 }}>
-                                    {isRegistering
-                                        ? 'Регистрация открывает личный кабинет.'
-                                        : 'Войдите, чтобы увидеть бронирования, сессии и расписание.'}
-                                </div>
+                                    {title}
+                                </h1>
+                                <p style={{ fontSize: 16, lineHeight: 1.5, color: GH.ink60, margin: 0 }}>
+                                    {lead}
+                                </p>
                             </div>
-                        )}
-                        {!narrow && (
-                        <div style={{ ...GH_MONO_LABEL, marginBottom: 24 }}>
-                            {isRegistering ? '→ Регистрация' : '→ Вход'}
-                        </div>
                         )}
 
                         {error && (
                             <div
+                                role="alert"
                                 style={{
                                     border: `1px solid ${GH.danger}`,
                                     padding: '12px 16px',
@@ -410,20 +369,24 @@ function GridHouseLoginPage({
                         <form onSubmit={handleSubmit}>
                             {isRegistering && (
                                 <GHField
+                                    id="login-name"
                                     label="Имя"
-                                    icon={<User size={14} />}
+                                    icon={<User size={16} />}
                                     type="text"
+                                    autoComplete="name"
                                     value={formData.name}
                                     onChange={(v) => setFormData({ ...formData, name: v })}
-                                    placeholder="Ваше имя"
+                                    placeholder="Как к вам обращаться"
                                     required
                                 />
                             )}
 
                             <GHField
+                                id="login-email"
                                 label="Email"
-                                icon={<User size={14} />}
+                                icon={<Mail size={16} />}
                                 type="email"
+                                autoComplete={isRegistering ? 'email' : 'username'}
                                 value={formData.email}
                                 onChange={(v) => setFormData({ ...formData, email: v })}
                                 placeholder="name@example.com"
@@ -431,17 +394,21 @@ function GridHouseLoginPage({
                             />
 
                             <GHField
+                                id="login-password"
                                 label="Пароль"
-                                icon={<Lock size={14} />}
+                                icon={<Lock size={16} />}
                                 type={showPassword ? 'text' : 'password'}
+                                autoComplete={isRegistering ? 'new-password' : 'current-password'}
                                 value={formData.password}
                                 onChange={(v) => setFormData({ ...formData, password: v })}
-                                placeholder="••••••••"
                                 required
                                 trailing={
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
+                                        aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                                        aria-pressed={showPassword}
+                                        aria-controls="login-password"
                                         style={{
                                             background: 'none',
                                             border: 'none',
@@ -449,20 +416,25 @@ function GridHouseLoginPage({
                                             cursor: 'pointer',
                                             display: 'flex',
                                             alignItems: 'center',
+                                            justifyContent: 'center',
+                                            width: 44,
+                                            height: 44,
+                                            margin: '-12px -10px -12px 0',
                                             padding: 0,
                                         }}
-                                        tabIndex={-1}
                                     >
-                                        {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                                        {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                                     </button>
                                 }
                             />
 
                             {isRegistering && (
                                 <GHField
-                                    label="Телефон — опционально"
-                                    icon={<Phone size={14} />}
+                                    id="login-phone"
+                                    label="Телефон · необязательно"
+                                    icon={<Phone size={16} />}
                                     type="tel"
+                                    autoComplete="tel"
                                     value={formData.phone}
                                     onChange={(v) => setFormData({ ...formData, phone: v })}
                                     placeholder="+995 555 00 00 00"
@@ -474,14 +446,13 @@ function GridHouseLoginPage({
                                 disabled={isLoading}
                                 style={{
                                     width: '100%',
-                                    padding: '16px 24px',
+                                    minHeight: 48,
+                                    padding: '0 24px',
                                     background: GH.ink,
                                     color: GH.paper,
                                     border: 'none',
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.06em',
+                                    fontFamily: GH_SANS,
+                                    fontSize: 16,
                                     fontWeight: 600,
                                     cursor: isLoading ? 'not-allowed' : 'pointer',
                                     opacity: isLoading ? 0.6 : 1,
@@ -492,19 +463,25 @@ function GridHouseLoginPage({
                                     transition: 'opacity 0.15s ease',
                                 }}
                             >
-                                <span>{isLoading ? 'Отправка…' : isRegistering ? 'Создать аккаунт' : 'Войти'}</span>
-                                <LogIn size={14} />
+                                <span>{isLoading ? (isRegistering ? 'Создаём аккаунт…' : 'Входим…') : isRegistering ? 'Создать аккаунт' : 'Войти'}</span>
+                                <LogIn size={18} aria-hidden="true" />
                             </button>
 
+                            {/* G1-17: сброса пароля по почте пока нет. Не обещаем сроков —
+                                только куда написать и что есть вход через Google. */}
                             {!isRegistering && (
-                                <a
-                                    href="https://t.me/UnboxCenter"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    style={{ display: 'block', textAlign: 'right', marginTop: 14, padding: '6px 0', fontSize: 13, color: GH.ink60, textDecoration: 'underline', textUnderlineOffset: 3 }}
-                                >
-                                    Забыли пароль? Напишите администратору
-                                </a>
+                                <p style={{ margin: '16px 0 0', fontSize: 14, lineHeight: 1.5, color: GH.ink60 }}>
+                                    Забыли пароль?{' '}
+                                    <a
+                                        href="https://t.me/UnboxCenter"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ color: GH.ink, textDecoration: 'underline', textUnderlineOffset: 3 }}
+                                    >
+                                        Напишите нам в Telegram
+                                    </a>{' '}
+                                    — поможем восстановить доступ. Или войдите через Google.
+                                </p>
                             )}
                         </form>
 
@@ -522,16 +499,11 @@ function GridHouseLoginPage({
                             <div style={{ flex: 1, borderTop: GH_HAIRLINE }} />
                         </div>
 
-                        {/* OAuth */}
+                        {/* OAuth. G1-16: без рамок вокруг кнопок («рамка в рамке»). */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                             <div
-                                style={{
-                                    display: 'flex',
-                                    justifyContent: 'center',
-                                    border: GH_HAIRLINE,
-                                    padding: 8,
-                                    background: GH.paper,
-                                }}
+                                ref={googleRef}
+                                style={{ display: googleVisible ? 'flex' : 'none', justifyContent: 'center', minHeight: 44 }}
                             >
                                 <GoogleLogin
                                     onSuccess={async (credentialResponse) => {
@@ -540,32 +512,37 @@ function GridHouseLoginPage({
                                         }
                                     }}
                                     onError={onGoogleError}
+                                    theme="outline"
+                                    size="large"
+                                    shape="rectangular"
+                                    text={isRegistering ? 'signup_with' : 'signin_with'}
+                                    width={narrow ? 320 : 400}
                                     useOneTap
                                 />
                             </div>
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    justifyContent: 'center',
-                                    border: GH_HAIRLINE,
-                                    padding: 8,
-                                    minHeight: 56,
-                                    alignItems: 'center',
-                                }}
-                            >
-                                <TelegramLoginButton botName="8209648149" />
-                            </div>
+                            {/* G1-landing-entry-M2: Telegram аккаунт не создаёт (решение
+                                владельца 25.05) — новичку эта кнопка давала 403-тупик.
+                                На регистрации её нет, на входе — с пояснением. */}
+                            {!isRegistering && (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                                    <TelegramLoginButton botName="8209648149" block />
+                                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: GH.ink60, textAlign: 'center' }}>
+                                        Работает, если Telegram уже привязан в профиле.
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
                         {/* Toggle */}
                         <div
                             style={{
                                 marginTop: 32,
-                                paddingTop: 20,
+                                paddingTop: 12,
                                 borderTop: GH_HAIRLINE,
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
+                                gap: 12,
                                 fontSize: 14,
                                 color: GH.ink60,
                             }}
@@ -581,18 +558,17 @@ function GridHouseLoginPage({
                                     background: 'none',
                                     border: 'none',
                                     color: GH.ink,
-                                    fontFamily: GH_MONO,
-                                    fontSize: 12,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.06em',
+                                    fontFamily: GH_SANS,
+                                    fontSize: 16,
                                     fontWeight: 600,
                                     cursor: 'pointer',
-                                    padding: 0,
-                                    borderBottom: `1px solid ${GH.ink}`,
-                                    paddingBottom: 2,
+                                    padding: '0 4px',
+                                    minHeight: 44,
+                                    textDecoration: 'underline',
+                                    textUnderlineOffset: 4,
                                 }}
                             >
-                                {isRegistering ? '→ Войти' : '→ Регистрация'}
+                                {isRegistering ? 'Войти' : 'Создать аккаунт'}
                             </button>
                         </div>
                     </div>
@@ -603,7 +579,7 @@ function GridHouseLoginPage({
             <footer
                 style={{
                     borderTop: GH_HAIRLINE,
-                    padding: narrow ? '16px 20px' : '16px 32px',
+                    padding: narrow ? '16px' : '16px 32px',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -619,80 +595,88 @@ function GridHouseLoginPage({
 }
 
 // ── Grid House form field ──
+// Подпись — настоящий <label htmlFor>, у поля id и autoComplete: браузер и
+// менеджеры паролей подставляют почту и пароль, диктор читает подпись.
 function GHField({
+    id,
     label,
     icon,
     type,
+    autoComplete,
     value,
     onChange,
     placeholder,
     required,
     trailing,
 }: {
+    id: string;
     label: string;
     icon: React.ReactNode;
     type: string;
+    autoComplete: string;
     value: string;
     onChange: (v: string) => void;
-    placeholder: string;
+    placeholder?: string;
     required?: boolean;
     trailing?: React.ReactNode;
 }) {
     const [focused, setFocused] = useState(false);
+    const inputStyle: React.CSSProperties = {
+        flex: 1,
+        minWidth: 0,
+        border: 'none',
+        outline: 'none',
+        background: 'transparent',
+        fontFamily: GH_SANS,
+        fontSize: 16,
+        color: GH.ink,
+        padding: 0,
+        minHeight: 32,
+    };
     return (
         <div style={{ marginBottom: 20 }}>
-            <div style={{ ...GH_MONO_LABEL, marginBottom: 8 }}>{label}</div>
+            <label htmlFor={id} style={{ ...GH_MONO_LABEL, display: 'block', marginBottom: 8 }}>{label}</label>
             <div
                 style={{
                     display: 'flex',
                     alignItems: 'center',
-                    borderBottom: `1px solid ${focused ? GH.ink : GH.ink30}`,
-                    paddingBottom: 10,
+                    // Нижняя линия поля — не бледнее 3:1 (было ink30, 2:1); фокус — ink.
+                    borderBottom: `${focused ? 2 : 1}px solid ${focused ? GH.ink : GH.ink60}`,
+                    paddingBottom: focused ? 7 : 8,
                     transition: 'border-color 0.15s ease',
                 }}
             >
-                <div style={{ color: GH.ink60, marginRight: 12, display: 'flex' }}>{icon}</div>
+                <div aria-hidden="true" style={{ color: GH.ink60, marginRight: 12, display: 'flex' }}>{icon}</div>
                 {type === 'tel' ? (
                     <PhoneInput
+                        id={id}
                         value={value}
                         onChange={onChange}
                         required={required}
                         placeholder={placeholder}
+                        autoComplete={autoComplete}
                         onFocus={() => setFocused(true)}
                         onBlur={() => setFocused(false)}
-                        style={{
-                            flex: 1,
-                            border: 'none',
-                            outline: 'none',
-                            background: 'transparent',
-                            fontFamily: GH_SANS,
-                            fontSize: 16,
-                            color: GH.ink,
-                            padding: 0,
-                        }}
+                        style={inputStyle}
                     />
                 ) : (
                     <input
+                        id={id}
+                        name={id.replace(/^login-/, '')}
                         type={type}
                         value={value}
                         required={required}
                         placeholder={placeholder}
+                        autoComplete={autoComplete}
+                        autoCapitalize={type === 'email' ? 'none' : undefined}
+                        spellCheck={type === 'email' ? false : undefined}
                         onChange={(e) => onChange(e.target.value)}
                         onFocus={() => setFocused(true)}
                         onBlur={() => setFocused(false)}
-                        style={{
-                            flex: 1,
-                            border: 'none',
-                            outline: 'none',
-                            background: 'transparent',
-                            fontFamily: GH_SANS,
-                            fontSize: 16,
-                            color: GH.ink,
-                            padding: 0,
-                        }}
+                        style={inputStyle}
                     />
                 )}
-                {trailing && <div style={{ marginLeft: 12 }}>{trailing}</div>}
+                {trailing && <div style={{ marginLeft: 12, display: 'flex' }}>{trailing}</div>}
             </div>
         </div>
     );

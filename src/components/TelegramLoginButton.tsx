@@ -9,6 +9,8 @@ interface TelegramLoginButtonProps {
     cornerRadius?: number;
     requestAccess?: boolean;
     usePic?: boolean;
+    /** Во всю ширину колонки — как кнопка Google над ней (G1-16). */
+    block?: boolean;
 }
 
 /**
@@ -41,6 +43,7 @@ interface TelegramLoginButtonProps {
  */
 export const TelegramLoginButton = ({
     botName,
+    block = false,
 }: TelegramLoginButtonProps) => {
     const [isLoading, setIsLoading] = useState(false);
 
@@ -67,6 +70,7 @@ export const TelegramLoginButton = ({
         <Button
             variant="secondary"
             size="touch"
+            block={block}
             onClick={handleClick}
             loading={isLoading}
             icon={<Send size={18} aria-hidden="true" />}
