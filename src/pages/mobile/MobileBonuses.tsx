@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Gift, Clock, Check, Info, X } from 'lucide-react';
+import { Gift, Clock, Check, Info, X } from 'lucide-react';
 import { parseISO } from 'date-fns';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
 import { COLOR, STATUS } from '../../design/tokens';
@@ -10,6 +9,7 @@ import { SkeletonList } from '../../components/ui/Skeleton';
 import { ErrorBar } from '../../components/ui/ErrorBar';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Chip } from '../../components/ui/Chip';
+import { MobilePageHeader } from '../../components/ui/PageHeader';
 
 type Filter = 'active' | 'used' | 'expired' | 'all';
 
@@ -34,7 +34,6 @@ const EMPTY_TITLE: Record<Filter, string> = {
  * the user needs to audit "where did my free hours go".
  */
 export function MobileBonuses() {
-    const navigate = useNavigate();
     const [bonuses, setBonuses] = useState<Bonus[]>([]);
     const [loading, setLoading] = useState(true);
     // Ошибка загрузки ≠ «бонусов нет»: раньше при сбое под тостом
@@ -78,22 +77,10 @@ export function MobileBonuses() {
     }, [bonuses]);
 
     return (
-        <div style={{ padding: '14px 14px 90px' }}>
-            <button
-                onClick={() => navigate(-1)}
-                style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: 'none', border: 'none', color: COLOR.ink60,
-                    minHeight: 44, padding: 0, cursor: 'pointer', fontSize: 13,
-                    fontFamily: 'inherit',
-                }}
-            >
-                <ArrowLeft size={14} /> Назад
-            </button>
-
-            <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, marginBottom: 14 }}>
-                Бонусы
-            </h1>
+        <div style={{ paddingBottom: 24 }}>
+            {/* X2-19: «Назад» без истории (открыли из Telegram) — в «Я», а не из приложения. */}
+            <MobilePageHeader title="Бонусы" fallbackTo="/m/me" />
+            <div style={{ padding: '8px 16px 0' }}>
 
             {/* Hero strip — total active hours. Wave 1: ровная поверхность
                 вместо жёлтого градиента — цвет только для статуса. */}
@@ -220,6 +207,7 @@ export function MobileBonuses() {
                     Сначала уходят те, что раньше сгорают. Приветственный бонус — 1 бесплатный час, действует 15 дней с регистрации
                     (точная дата «до …» — в списке выше).
                 </span>
+            </div>
             </div>
         </div>
     );
