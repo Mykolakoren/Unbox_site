@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Snowflake, Ticket, Plus, MessageCircle } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { fmtHours, reservedSubscriptionHours } from '../../utils/paymentPriority';
+import { fmtHours, reservedSubscriptionHours, subscriptionHours } from '../../utils/paymentPriority';
 import { canBookCabinets } from '../../utils/permissions';
 import { COLOR, RADIUS, STATUS, TEXT } from '../../design/tokens';
 import { formatDayMonth } from '../../utils/format';
@@ -75,7 +75,19 @@ export function MobileSubscription() {
                         action={{ label: 'Выбрать тариф', onClick: () => navigate('/m/tariffs') }}
                     />
                 ) : (() => {
-                    const free = Math.max(0, sub.remainingHours - reserved);
+                    // Пул сервера = часы тарифа + бонусные (у Профи+ 40 + 2).
+                    // Раньше знаменатель был только totalHours — «Свободно 42 ч из 40».
+                    const poolTotal = (Number(sub.totalHours) || 0) + (Number(sub.bonusHours) || 0);
+                    // «Свободно» — та же функция, что в оформлении (subscriptionHours →
+                    // subscriptionHoursLabel), чтобы цифры совпадали.
+                    const h = subscriptionHours(sub, {
+                        format: 'individual', bookingDate: new Date(), bookings, ownerEmail: currentUser.email,
+                    });
+                    const free = h.ok ? h.free : Math.max(0, sub.remainingHours - reserved);
+                    const usedRaw = Number((sub as any).usedHours);
+                    const usedHours = Number.isFinite(usedRaw) && (sub as any).usedHours != null
+                        ? usedRaw
+                        : Math.max(0, poolTotal - sub.remainingHours);
                     const used = Math.min(MAX_FREEZES, Math.max(0, sub.freezeCount || 0));
                     const freezesLeft = MAX_FREEZES - used;
                     return (
@@ -106,7 +118,7 @@ export function MobileSubscription() {
                                         {fmtHours(free)}
                                     </span>
                                     <span className="num" style={{ fontSize: TEXT.small }}>
-                                        из {fmtHours(sub.totalHours)}
+                                        из {fmtHours(poolTotal)}
                                     </span>
                                 </div>
                                 {reserved > 0.01 && (
@@ -128,7 +140,8 @@ export function MobileSubscription() {
                                 overflow: 'hidden',
                             }}>
                                 <InfoRow label="Действует до" value={formatDayMonth(sub.expiryDate, { withYear: 'auto' })} />
-                                <InfoRow label="Использовано" value={fmtHours(Math.max(0, sub.totalHours - sub.remainingHours))} />
+                                <InfoRow label="Осталось по абонементу" value={fmtHours(sub.remainingHours)} />
+                                <InfoRow label="Использовано" value={fmtHours(usedHours)} />
                                 {sub.freeReschedules > 0 && (
                                     <InfoRow label="Бесплатных переносов" value={String(sub.freeReschedules)} />
                                 )}

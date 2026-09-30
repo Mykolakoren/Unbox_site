@@ -25,7 +25,11 @@ export function priceLabel(b: BookingHistoryItem): string {
     const price = b.finalPrice ?? 0;
 
     if (method === 'subscription') {
-        return `${formatHours(hoursDeducted)} из абонемента`;
+        // У абонементной брони final_price = деньги сверх часов (пиковая
+        // надбавка, допуслуги) — сервер: subscription_peak_debt.
+        return price > 0
+            ? `${formatHours(hoursDeducted)} из абонемента + ${formatGel(price, { fraction: 0 })}`
+            : `${formatHours(hoursDeducted)} из абонемента`;
     }
     if (method === 'bonus') {
         return `${formatHours(hoursDeducted)} из бонусов`;

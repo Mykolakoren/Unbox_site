@@ -28,8 +28,9 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 import { MobilePageHeader } from '../../components/ui/PageHeader';
 import { Field as FormField, Input, Select } from '../../components/ui/Field';
-import { toastApiError } from '../../utils/errors';
+import { markErrorToastShown, toastApiError } from '../../utils/errors';
 import { catalogPath } from '../../utils/catalogPath';
+import { isBookingAdmin } from './crmAccess';
 
 /** Отказ require_can_book: «бронирование только для специалистов, подайте
  *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
@@ -519,13 +520,17 @@ export function MobileCheckout() {
                 await addBookings(newBookings as any);
                 useBookingStore.getState().reset();
                 setConfirmed(true);
-                setDone({ pending: isHotBooking });
+                // Мультислот (POST /bookings/multi-slot) сервер не отправляет
+                // на одобрение — брони сразу подтверждены; ответ addBookings
+                // сюда не приходит, поэтому «на одобрении» не обещаем.
+                setDone({ pending: false });
             }
         } catch (e: any) {
             if (isSpecialistOnlyRefusal(e)) {
                 showSpecialistGate();
                 return;
             }
+            if (newBookings.length > 1) markErrorToastShown(e);
             toastApiError(e, 'Не удалось забронировать');
         } finally {
             setSubmitting(false);
@@ -575,7 +580,14 @@ export function MobileCheckout() {
             ? `Абонемент · ${payLabel}`
             : isSeries && plan.subCovers
                 ? 'Сначала часы абонемента, остальное — с баланса'
-                : `С баланса · ${payLabel}`;
+                : isSeries
+                    ? (seriesQuote && seriesQuote.occurrences === effectiveOccurrences
+                        ? `С баланса · ${formatGel(seriesQuote.totalMoney, { fraction: 0 })} за серию`
+                        : `С баланса · ${payLabel} за встречу`)
+                    : `С баланса · ${payLabel}`;
+    // На одобрение сервер отправляет только одиночную бронь не-админа
+    // (routes.py: is_hot and not is_admin_or_above; у мультислота барьера нет).
+    const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser);
 
     return (
         <>
@@ -918,7 +930,7 @@ export function MobileCheckout() {
                 {!needsApplication && (
                 <Section title="Что произойдёт">
                     <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 8, fontSize: TEXT.small, lineHeight: 1.5, color: COLOR.ink }}>
-                        {isHotBooking ? (
+                        {expectApproval ? (
                             <li>
                                 <Hourglass size={14} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4, color: STATUS.pending.fg }} />
                                 <b>{(() => {
@@ -977,8 +989,10 @@ export function MobileCheckout() {
                             return (
                                 <li style={{ color: debt > 0 ? STATUS.danger.fg : COLOR.ink }}>
                                     {debt > 0
-                                        ? `Спишется сразу ${formatGel(priced.total, { fraction: 0 })}, из них ${formatGel(debt, { fraction: 0 })} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })})`
-                                        : `Спишется сразу ${formatGel(priced.total, { fraction: 0 })} с баланса, останется ${formatGel(after, { fraction: 0 })}`}
+                                        ? `${expectApproval ? 'Спишем после одобрения' : 'Спишется сразу'} ${formatGel(priced.total, { fraction: 0 })}, из них ${formatGel(debt, { fraction: 0 })} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })})`
+                                        : expectApproval
+                                            ? `Спишем после одобрения: ${formatGel(priced.total, { fraction: 0 })} с баланса`
+                                            : `Спишется сразу ${formatGel(priced.total, { fraction: 0 })} с баланса, останется ${formatGel(after, { fraction: 0 })}`}
                                 </li>
                             );
                         })()}
@@ -1008,7 +1022,7 @@ export function MobileCheckout() {
                         {moreThanDay && firstStart ? (
                             <li>Бесплатная отмена — до {formatChargeAt(firstStart)}, потом только «Пересдать».</li>
                         ) : (
-                            <li>До начала меньше суток — отменить бронь будет нельзя{isHotBooking ? '. Если планы изменятся, напишите администратору.' : ', только «Пересдать».'}</li>
+                            <li>До начала меньше суток — отменить бронь будет нельзя{expectApproval ? '. Если планы изменятся, напишите администратору.' : ', только «Пересдать».'}</li>
                         )}
                     </ul>
                 </Section>
@@ -1047,7 +1061,7 @@ export function MobileCheckout() {
                                 ? (effectiveOccurrences > 0
                                     ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['бронь', 'брони', 'броней'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences, { fraction: 0 })}`
                                     : 'Выберите число повторов или дату')
-                                : isHotBooking
+                                : expectApproval
                                     ? `Отправить на одобрение · ${payLabel}`
                                     : `Забронировать · ${payLabel}`}
                 </Button>
