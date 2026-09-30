@@ -587,7 +587,7 @@ export function MobileCheckout() {
                     : `С баланса · ${payLabel}`;
     // На одобрение сервер отправляет только одиночную бронь не-админа
     // (routes.py: is_hot and not is_admin_or_above; у мультислота барьера нет).
-    const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser);
+    const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser) && !isSeries; // серия создаётся сразу confirmed (барьер только у одиночного POST /bookings/)
 
     return (
         <>

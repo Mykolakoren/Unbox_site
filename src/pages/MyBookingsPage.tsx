@@ -2947,9 +2947,16 @@ function BookingCard({
     const payment = booking.paymentMethod === 'bonus'
         ? { Icon: Gift, label: 'Бонус', value: fmtHoursShort(hours) }
         : booking.paymentMethod === 'subscription'
-            ? { Icon: Ticket, label: 'Абонемент', value: fmtHoursShort(hours) }
+            ? { Icon: Ticket, label: 'Абонемент', value: Number(booking.finalPrice) > 0
+                ? `${fmtHoursShort(hours)} + ${formatGel(booking.finalPrice)}` // пик/допуслуги с баланса
+                : fmtHoursShort(hours) }
             : { Icon: Wallet, label: 'С баланса', value: formatGel(booking.finalPrice) };
-    const inDebt = booking.paymentMethod !== 'bonus' && booking.paymentMethod !== 'subscription' && booking.paymentSource === 'credit';
+    // payment_source='credit' ставится один раз при брони и не пересчитывается —
+    // «в долг» только у будущей ещё не оплаченной брони (ревью денег 30.09).
+    const inDebt = booking.paymentMethod !== 'bonus' && booking.paymentMethod !== 'subscription'
+        && booking.paymentSource === 'credit' && !isPast
+        && (booking.status === 'confirmed' || booking.status === 'pending_approval')
+        && booking.paymentStatus === 'pending';
 
     const addToCalendar = () => {
         if (!startAt) return;

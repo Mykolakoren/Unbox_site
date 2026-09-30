@@ -13,6 +13,8 @@ import { canBookCabinets } from '../utils/permissions';
 import { formatDayMonth, formatGel, formatRelativeDay, formatStartsIn } from '../utils/format';
 import { timeToMin } from '../utils/bookingHelpers';
 import type { BookingHistoryItem } from '../store/types';
+import { paymentLine } from './mobile/bookingView';
+import { activeBonusHours } from '../utils/paymentPriority';
 
 /**
  * «Обзор» кабинета клиента на компьютере (/dashboard).
@@ -48,20 +50,8 @@ function endFromDuration(start: string | null | undefined, durationMin: number |
 const fmtHours = (h: number) =>
     `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(Number(h) || 0)} ч`;
 
-/** Строка оплаты: «Оплачено: 1,5 ч из абонемента» / «Спишем за сутки до начала: 20 ₾». */
-function paymentLine(b: BookingHistoryItem): string {
-    if (b.status === 'pending_approval') return 'Ждём подтверждения администратора';
-    const hours = Number(b.hoursDeducted) || (b.duration || 0) / 60;
-    if (b.paymentMethod === 'bonus') return `Бонус: ${fmtHours(hours)} бесплатно`;
-    if (b.paymentMethod === 'subscription') {
-        return b.paymentStatus === 'pending'
-            ? `Спишем за сутки до начала: ${fmtHours(hours)} абонемента`
-            : `Оплачено: ${fmtHours(hours)} из абонемента`;
-    }
-    return b.paymentStatus === 'pending'
-        ? `Спишем с баланса за сутки до начала: ${formatGel(b.finalPrice)}`
-        : `Оплачено с баланса: ${formatGel(b.finalPrice)}`;
-}
+// Строка оплаты — общая с приложением (bookingView.paymentLine): абонемент + пик
+// «+ 5 ₾», «Без оплаты», бонус без «спишем» (ревью денег 30.09).
 
 export function DashboardOverview() {
     const { currentUser, bookings } = useUserStore();
@@ -101,8 +91,13 @@ export function DashboardOverview() {
     const isNegative = currentUser.balance < 0;
     const creditLimit = currentUser.creditLimit || 0;
     const availableCredit = creditLimit + currentUser.balance;
-    const activeBonuses = bonuses.filter(b => b.status === 'active');
-    const totalBonusHours = activeBonuses.reduce((sum, b) => sum + (b.quantity || 0), 0);
+    // Истёкшие бонусы сервер держит 'active', пока их не трогали (ленивое истечение) —
+    // считаем как бронь: только неистёкшие бонус-часы (activeBonusHours).
+    const nowTs = Date.now();
+    const activeBonuses = bonuses.filter(b => b.status === 'active'
+        && (b.type === 'free_hour' || (b.type as string) === 'freeHour')
+        && !(b.expiresAt && new Date(b.expiresAt).getTime() < nowTs));
+    const totalBonusHours = activeBonusHours(bonuses);
     const bonusExpiry = activeBonuses
         .map(b => b.expiresAt)
         .filter((d): d is string => !!d)
@@ -158,7 +153,7 @@ export function DashboardOverview() {
                                 {nextLoc?.address && (
                                     <div className="mt-1 text-small text-ink-60">{nextLoc.address}, Батуми</div>
                                 )}
-                                <div className="mt-3 text-small text-ink-80">{paymentLine(next.b)}</div>
+                                <div className="mt-3 text-small text-ink-80">{paymentLine(next.b, next.start)}</div>
                                 <div className="mt-5 flex flex-wrap gap-2">
                                     {nextLoc?.address && (
                                         <a
