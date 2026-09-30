@@ -91,7 +91,8 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
     const actualNum = parsedActual ?? 0;
     const amountError = !isMoneyInputBlank(actualBalance) && parsedActual === null ? MONEY_INPUT_ERROR : undefined;
     const expected = preview?.expected ?? systemBalance;
-    const drift = hasAmount ? actualNum - expected : 0;
+    // До тетри: без float-шума вида 0.1 + 0.2 в подписи расхождения.
+    const drift = hasAmount ? Math.round((actualNum - expected) * 100) / 100 : 0;
     const hasDrift = hasAmount && Math.abs(drift) >= 0.01;
     const canSubmit = allChecked && hasAmount && !submitting;
 

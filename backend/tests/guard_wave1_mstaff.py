@@ -243,7 +243,7 @@ def test_money_input_parser_cases():
         return
     if (major, minor) < (22, 6):
         return
-    cases = ["1 280,50", "1280,5", "1280.50", "1 280", "12abc", "1,2,3", "", "  ", "-5", "12.345", "0", "20"]
+    cases = ["1 280,50", "1280,5", "1280.50", "1 280", "12abc", "1,2,3", "", "  ", "-5", "12.345", "0", "20", "1000000", "12800000"]
     script = (
         f"import('./{PARSER}').then(m => console.log(JSON.stringify("
         f"{cases!r}.map(m.parseMoneyInput))));"
@@ -252,7 +252,7 @@ def test_money_input_parser_cases():
                        capture_output=True, text=True, cwd=str(ROOT), timeout=60)
     assert r.returncode == 0, f"parseMoneyInput не запустился в node: {r.stderr[:300]}"
     got = r.stdout.strip()
-    assert got == "[1280.5,1280.5,1280.5,1280,null,null,null,null,null,null,0,20]", \
+    assert got == "[1280.5,1280.5,1280.5,1280,null,null,null,null,null,null,0,20,1000000,null]", \
         f"разбор сумм сломан: {got}"
 
 

@@ -578,15 +578,19 @@ function AddTransactionSheet({
             return;
         }
         setSaving(true);
-        await onSubmit({
-            type,
-            amount: n,
-            payment_method: method,
-            branch: branch || undefined,
-            category_id: categoryId || undefined,
-            description: description.trim() || undefined,
-        });
-        setSaving(false);
+        try {
+            await onSubmit({
+                type,
+                amount: n,
+                payment_method: method,
+                branch: branch || undefined,
+                category_id: categoryId || undefined,
+                description: description.trim() || undefined,
+            });
+        } finally {
+            // Сбой запроса не должен оставлять кнопку в вечном «сохраняем».
+            setSaving(false);
+        }
     };
 
     const handleDelete = async () => {
