@@ -162,7 +162,9 @@ export function LoginPage() {
                 formData={formData}
                 setFormData={setFormData}
                 handleSubmit={handleSubmit}
-                notice={redirectTo === '/become-specialist'
+                // Анкета — и на сайте, и внутри /m (redirectTo уже прошёл
+                // safeRedirectPath, здесь только выбираем подсказку).
+                notice={redirectTo === '/become-specialist' || redirectTo === '/m/become-specialist'
                     ? 'Войдите или создайте аккаунт — затем откроется анкета специалиста'
                     : null}
                 onGoogleSuccess={async (credential: string) => {
