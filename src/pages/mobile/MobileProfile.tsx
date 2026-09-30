@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { ChevronRight, ClipboardCheck, LogOut, Send, MessageCircle, MapPin, Phone, Briefcase, Gift, HelpCircle } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, ClipboardCheck, LogOut, Send, MessageCircle, MapPin, Phone, Briefcase, Gift, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { api } from '../../api/client';
@@ -10,11 +10,14 @@ import { getFavoriteCabinet, setFavoriteCabinet } from './favoriteCabinet';
 import { reservedSubscriptionHours } from '../../utils/paymentPriority';
 import { resetTour } from './OnboardingTour';
 import { canBookCabinets } from '../../utils/permissions';
+import { COLOR, STATUS } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 
 const BOT_USERNAME = 'Unbox_Booking_G_Bot';
 const ADMIN_TG = 'UnboxCenter';
 const PHONE = '+995 599 324 668';
-const TG_BLUE = '#229ED9';
+// Wave 1: фирменный голубой Telegram убран — белое на #229ED9 давало 2.9:1,
+// а цвет в продукте только для статуса. Строки Telegram — как остальные.
 
 const LOC_ADDRESSES = [
     { name: 'Unbox One', address: 'Палиашвили, 4, Батуми', mapsQuery: 'Unbox+One+Palaiashvili+4+Batumi' },
@@ -59,7 +62,7 @@ export function MobileProfile() {
         try {
             const { data } = await api.post<{ url: string; expires_at: string }>('/telegram/link-token');
             window.open(data.url, '_blank', 'noopener,noreferrer');
-            toast.info('В Telegram нажми «Start». Когда вернёшься сюда — потяни вниз для обновления.', { duration: 6000 });
+            toast.info('В Telegram нажмите «Start», затем вернитесь сюда — статус обновится сам.', { duration: 6000 });
             // 2026-06-02: было 90 сек — мало, юзеры не успевали кликнуть Start.
             // Совпадает с backend LINK_TOKEN_TTL = 30 минут.
             const deadline = Date.now() + 30 * 60 * 1000;
@@ -73,7 +76,7 @@ export function MobileProfile() {
                 }
             }, 2500);
         } catch {
-            toast.error('Не удалось создать ссылку. Попробуй позже.');
+            toast.error('Не удалось создать ссылку. Попробуйте позже.');
         } finally {
             setTgBusy(false);
         }
@@ -91,12 +94,12 @@ export function MobileProfile() {
         }}>
             {/* Compact identity — just name (and role if admin), one line */}
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.2 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.2 }}>
                     {currentUser.name}
                 </h1>
-                <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
                     {currentUser.email}
-                    {isAdmin && <span style={{ marginLeft: 8, color: '#0E0E0E', fontWeight: 600 }}>· {currentUser.role}</span>}
+                    {isAdmin && <span style={{ marginLeft: 8, color: COLOR.ink, fontWeight: 600 }}>· {currentUser.role}</span>}
                 </div>
             </div>
 
@@ -104,13 +107,13 @@ export function MobileProfile() {
                 open full subscription page; profile card stays compact. */}
             <div style={{ padding: '0 16px' }}>
                 <div style={{
-                    background: '#F4F4F2',
+                    background: COLOR.sunken,
                     borderRadius: 14,
                     padding: 14,
                     display: 'flex',
                     gap: 12,
                 }}>
-                    <Stat label="Баланс" value={`${balance.toFixed(0)} ₾`} tone={debt > 0 ? 'danger' : undefined} />
+                    <Stat label="Баланс" value={formatGel(balance, { fraction: 0 })} tone={debt > 0 ? 'danger' : undefined} />
                     {sub && (
                         <button
                             onClick={() => window.location.assign('/m/subscription')}
@@ -131,20 +134,20 @@ export function MobileProfile() {
                             />
                         </button>
                     )}
-                    {debt > 0 && <Stat label="Долг" value={`${debt.toFixed(0)} ₾`} tone="danger" />}
+                    {debt > 0 && <Stat label="Долг" value={formatGel(debt, { fraction: 0 })} tone="danger" />}
                 </div>
             </div>
 
-            {/* Telegram bot — always Telegram blue */}
+            {/* Telegram bot */}
             <div style={{ padding: '0 16px' }}>
                 <button
                     onClick={tgConnected ? openInBot : connectTg}
                     disabled={tgBusy}
                     style={{
                         width: '100%',
-                        background: TG_BLUE,
-                        color: '#fff',
-                        border: 'none',
+                        background: COLOR.card,
+                        color: COLOR.ink,
+                        border: `1px solid ${COLOR.ink10}`,
                         borderRadius: 12,
                         padding: '14px 16px',
                         display: 'flex',
@@ -156,16 +159,16 @@ export function MobileProfile() {
                         opacity: tgBusy ? 0.7 : 1,
                     }}
                 >
-                    <Send size={18} />
+                    <Send size={18} aria-hidden="true" />
                     <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>
                             {tgConnected ? 'Открыть бота в Telegram' : 'Привязать Telegram'}
                         </div>
-                        <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
-                            {tgConnected ? 'Уведомления и быстрые команды' : 'Получать напоминания за 24ч'}
+                        <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
+                            {tgConnected ? 'Уведомления и быстрые команды' : 'Получать напоминания за 24 ч'}
                         </div>
                     </div>
-                    <span style={{ fontSize: 11, opacity: 0.7 }}>↗</span>
+                    <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
                 </button>
             </div>
 
@@ -176,7 +179,7 @@ export function MobileProfile() {
                 <div style={{ padding: '0 16px' }}>
                     <button
                         onClick={() => window.location.assign('/m/bonuses')}
-                        style={{ background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', display: 'block', width: '100%', textAlign: 'left' }}
+                        style={{ background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', minHeight: 44, width: '100%', textAlign: 'left', fontFamily: 'inherit' }}
                         aria-label="Открыть страницу бонусов"
                     >
                         <SectionTitle>
@@ -195,8 +198,8 @@ export function MobileProfile() {
                                 <div
                                     key={b.id}
                                     style={{
-                                        background: '#fff',
-                                        border: '1px solid rgba(0,0,0,0.08)',
+                                        background: COLOR.card,
+                                        border: `1px solid ${COLOR.ink08}`,
                                         borderRadius: 12,
                                         padding: '10px 14px',
                                         display: 'flex',
@@ -207,21 +210,21 @@ export function MobileProfile() {
                                     <div style={{
                                         width: 28, height: 28,
                                         borderRadius: 8,
-                                        background: tone === 'urgent' ? '#FEF2F2' : tone === 'warn' ? '#FEF3C7' : '#F4F4F2',
-                                        color: tone === 'urgent' ? '#C8253A' : tone === 'warn' ? '#8A5A00' : '#0E0E0E',
+                                        background: tone === 'urgent' ? STATUS.danger.bg : tone === 'warn' ? STATUS.pending.bg : COLOR.sunken,
+                                        color: tone === 'urgent' ? STATUS.danger.fg : tone === 'warn' ? STATUS.pending.fg : COLOR.ink,
                                         display: 'grid', placeItems: 'center',
                                         flexShrink: 0,
                                     }}>
                                         <Gift size={14} />
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>
                                             {b.quantity} ч {b.description ? `· ${b.description}` : ''}
                                         </div>
                                         {b.expiresAt && (
                                             <div style={{
-                                                fontSize: 11,
-                                                color: tone === 'urgent' ? '#C8253A' : tone === 'warn' ? '#8A5A00' : '#666',
+                                                fontSize: 12,
+                                                color: tone === 'urgent' ? STATUS.danger.fg : tone === 'warn' ? STATUS.pending.fg : COLOR.ink60,
                                                 marginTop: 2,
                                             }}>
                                                 {days == null
@@ -240,7 +243,7 @@ export function MobileProfile() {
                             );
                         })}
                         {bonuses.length > 5 && (
-                            <div style={{ fontSize: 11, color: '#999', textAlign: 'center', marginTop: 4 }}>
+                            <div style={{ fontSize: 12, color: COLOR.ink60, textAlign: 'center', marginTop: 4 }}>
                                 и ещё {bonuses.length - 5}…
                             </div>
                         )}
@@ -260,13 +263,13 @@ export function MobileProfile() {
                     }}
                     style={{
                         width: '100%',
-                        background: '#fff',
-                        border: '1px solid rgba(0,0,0,0.10)',
+                        background: COLOR.card,
+                        border: `1px solid ${COLOR.ink10}`,
                         borderRadius: 12,
                         padding: '12px 14px',
                         fontSize: 16,
                         fontFamily: 'inherit',
-                        color: '#0E0E0E',
+                        color: COLOR.ink,
                         appearance: 'none',
                         WebkitAppearance: 'none',
                     }}
@@ -283,7 +286,7 @@ export function MobileProfile() {
                             );
                         })}
                 </select>
-                <div style={{ fontSize: 11, color: '#999', marginTop: 6 }}>
+                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 6 }}>
                     Будет подсвечен первым при поиске свободного слота.
                 </div>
             </div>
@@ -312,7 +315,7 @@ export function MobileProfile() {
                     <NavRow
                         icon={<Briefcase size={16} />}
                         label="Админка (мобильная)"
-                        sub="Дашборд, юзеры, hot-booking заявки"
+                        sub="Дашборд, пользователи, срочные заявки"
                         onClick={() => navigate('/m/admin')}
                     />
                 )}
@@ -359,33 +362,33 @@ export function MobileProfile() {
                             rel="noopener noreferrer"
                             style={contactRowStyle}
                         >
-                            <MapPin size={16} color="#0E0E0E" />
+                            <MapPin size={16} color={COLOR.ink} aria-hidden="true" />
                             <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 14, fontWeight: 700 }}>{loc.name}</div>
-                                <div style={{ fontSize: 12, color: '#666', marginTop: 1 }}>{loc.address}</div>
+                                <div style={{ fontSize: 14, fontWeight: 600 }}>{loc.name}</div>
+                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 1 }}>{loc.address}</div>
                             </div>
-                            <span style={{ fontSize: 11, color: '#999' }}>↗</span>
+                            <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
                         </a>
                     ))}
                     <a href={`tel:${PHONE.replace(/\s/g, '')}`} style={contactRowStyle}>
-                        <Phone size={16} color="#0E0E0E" />
+                        <Phone size={16} color={COLOR.ink} />
                         <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700 }}>{PHONE}</div>
-                            <div style={{ fontSize: 12, color: '#666', marginTop: 1 }}>Звонок · WhatsApp</div>
+                            <div style={{ fontSize: 14, fontWeight: 600 }}>{PHONE}</div>
+                            <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 1 }}>Звонок · WhatsApp</div>
                         </div>
                     </a>
                     <a
                         href={`https://t.me/${ADMIN_TG}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{ ...contactRowStyle, background: TG_BLUE, color: '#fff', border: 'none' }}
+                        style={contactRowStyle}
                     >
-                        <MessageCircle size={16} color="#fff" />
+                        <MessageCircle size={16} color={COLOR.ink} aria-hidden="true" />
                         <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700 }}>Связь с администратором</div>
-                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 1 }}>Telegram · @{ADMIN_TG}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600 }}>Связь с администратором</div>
+                            <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 1 }}>Telegram · @{ADMIN_TG}</div>
                         </div>
-                        <span style={{ fontSize: 11, opacity: 0.85 }}>↗</span>
+                        <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
                     </a>
                 </div>
             </div>
@@ -397,7 +400,7 @@ export function MobileProfile() {
                     style={{
                         width: '100%',
                         background: 'transparent',
-                        color: '#C8253A',
+                        color: STATUS.danger.fg,
                         border: 'none',
                         padding: '12px 18px',
                         display: 'flex',
@@ -419,22 +422,22 @@ export function MobileProfile() {
 }
 
 const contactRowStyle: React.CSSProperties = {
-    background: '#fff',
-    border: '1px solid rgba(0,0,0,0.08)',
+    background: COLOR.card,
+    border: `1px solid ${COLOR.ink08}`,
     borderRadius: 12,
     padding: '12px 14px',
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    color: '#0E0E0E',
+    color: COLOR.ink,
     textDecoration: 'none',
 };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return (
         <div style={{
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: '#999',
+            fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+            textTransform: 'uppercase', color: COLOR.ink60,
             marginBottom: 8,
         }}>{children}</div>
     );
@@ -443,17 +446,17 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'danger' }) {
     return (
         <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10, color: '#999', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
+            <div style={{ fontSize: 12, color: COLOR.ink60, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
                 {label}
             </div>
             <div style={{
-                fontSize: 17, fontWeight: 700,
-                color: tone === 'danger' ? '#C8253A' : '#0E0E0E',
+                fontSize: 17, fontWeight: 600,
+                color: tone === 'danger' ? STATUS.danger.fg : COLOR.ink,
                 marginTop: 2,
                 lineHeight: 1.1,
             }}>
                 {value}
-                {sub && <span style={{ fontSize: 12, fontWeight: 500, color: '#999', marginLeft: 4 }}>{sub}</span>}
+                {sub && <span style={{ fontSize: 12, fontWeight: 500, color: COLOR.ink60, marginLeft: 4 }}>{sub}</span>}
             </div>
         </div>
     );
@@ -469,14 +472,14 @@ function NavRow({ icon, label, sub, onClick }: {
         <button
             onClick={onClick}
             style={{
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.08)',
+                background: COLOR.card,
+                border: `1px solid ${COLOR.ink08}`,
                 borderRadius: 12,
                 padding: '12px 14px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 10,
-                color: '#0E0E0E',
+                color: COLOR.ink,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 textAlign: 'left',
@@ -486,17 +489,17 @@ function NavRow({ icon, label, sub, onClick }: {
             <div style={{
                 width: 28, height: 28,
                 borderRadius: 8,
-                background: '#F4F4F2',
+                background: COLOR.sunken,
                 display: 'grid', placeItems: 'center',
                 flexShrink: 0,
             }}>
                 {icon}
             </div>
             <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>{label}</div>
-                {sub && <div style={{ fontSize: 11, color: '#666', marginTop: 1 }}>{sub}</div>}
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
+                {sub && <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 1 }}>{sub}</div>}
             </div>
-            <ChevronRight size={16} color="#999" />
+            <ChevronRight size={16} color={COLOR.ink60} />
         </button>
     );
 }

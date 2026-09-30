@@ -2,7 +2,7 @@ import { useLayoutEffect, useState } from 'react';
 import { useScrollLock } from './useScrollLock';
 import { ArrowRight, Calendar, CheckCircle2, Compass, Home, Search, Smartphone, User as UserIcon, X } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { FONT } from '../../design/tokens';
+import { COLOR, FONT } from '../../design/tokens';
 
 /**
  * First-visit onboarding tour for /m.
@@ -61,6 +61,8 @@ export interface Step {
     targetSelector?: string;
 }
 
+// Wave 1: обращение «вы» со строчной буквы, без жаргона («тап», «шорткаты»,
+// «хоумскрин», «PWA»).
 const STEPS: Step[] = [
     {
         icon: Compass,
@@ -68,8 +70,8 @@ const STEPS: Step[] = [
         pill: 'Знакомство',
         body: (
             <>
-                Это Ваш основной инструмент с телефона: <b>бронь кабинетов, Ваши сессии,
-                CRM-клиенты</b>. Покажем за полминуты, как тут всё устроено — тапайте «Дальше».
+                Это ваш основной инструмент с телефона: <b>бронь кабинетов, ваши сессии,
+                клиенты из CRM</b>. Покажем за полминуты, как тут всё устроено, — нажимайте «Дальше».
             </>
         ),
     },
@@ -80,8 +82,8 @@ const STEPS: Step[] = [
         targetSelector: '[data-tour="tab-today"]',
         body: (
             <>
-                Здесь Вы попадаете по умолчанию. На главной — <b>ближайшие сессии</b>, кнопка
-                «Забронировать», шорткаты «Повторить из последних» по Вашим последним кейсам.
+                Сюда вы попадаете по умолчанию. На главной — <b>ближайшие брони</b>, кнопка
+                «Забронировать» и «Повторить из последних» — быстрый повтор ваших недавних броней.
                 Если есть незакрытые задачи или предупреждение по балансу — увидите их сверху.
             </>
         ),
@@ -93,9 +95,9 @@ const STEPS: Step[] = [
         targetSelector: '[data-tour="tab-bookings"]',
         body: (
             <>
-                Все Ваши брони — будущие, серии и прошедшие. <b>Свайп влево</b> на карточке —
-                быстрые действия (отмена / пересдача). <b>Тап</b> — детальное окно с переносом,
-                продлением, привязкой клиента из CRM.
+                Все ваши брони — будущие, серии и прошедшие. <b>Свайп влево</b> по карточке —
+                быстрые действия (отменить / пересдать). <b>Нажмите</b> на карточку — откроется
+                окно с переносом, продлением и привязкой клиента из CRM.
             </>
         ),
     },
@@ -106,9 +108,9 @@ const STEPS: Step[] = [
         targetSelector: '[data-tour="tab-find"]',
         body: (
             <>
-                Найти свободный кабинет в <b>три тапа</b>: <i>когда → сколько → где</i>.
-                Поддерживается <b>любимый кабинет</b> (выставляется в профиле), кастомные даты
-                и разные типы помещений. Внизу — переход в полный календарь.
+                Свободный кабинет — в <b>три шага</b>: <i>когда → сколько → где</i>.
+                Можно отметить <b>любимый кабинет</b> (в профиле), выбрать любую дату
+                и тип помещения. Внизу — переход в полный календарь.
             </>
         ),
     },
@@ -120,20 +122,20 @@ const STEPS: Step[] = [
         body: (
             <>
                 Баланс, абонемент, бонусы. Привязка Telegram-бота. Любимый кабинет. Контакты
-                и связь с админом. Отсюда же — быстрый переход в <b>CRM</b> и (для админов)
-                в <b>Админку</b>. И эту экскурсию можно запустить заново.
+                и связь с администратором. Отсюда же — быстрый переход в <b>CRM</b> и (для
+                администраторов) в <b>Админку</b>. И этот обзор можно запустить заново.
             </>
         ),
     },
     {
         icon: Smartphone,
-        title: 'Поставьте на главный экран',
-        pill: '5 из 5 · PWA',
+        title: 'Добавьте на главный экран',
+        pill: '5 из 5 · Приложение',
         body: (
             <>
-                На «Сегодня» сверху Вы видите чёрный баннер «Поставь на главный экран» — тапните,
-                там пошаговая инструкция. Откроется как настоящее приложение: <b>без рамок
-                браузера, иконкой на хоумскрине</b>. Так удобнее всего.
+                На «Сегодня» сверху есть чёрная плашка «Добавьте на главный экран» — нажмите
+                на неё, там пошаговая инструкция. Unbox откроется как настоящее приложение:
+                <b> без рамок браузера, значком на главном экране</b>. Так удобнее всего.
             </>
         ),
     },
@@ -193,14 +195,15 @@ export function OnboardingTour({
                     position: 'absolute',
                     top: 'calc(16px + env(safe-area-inset-top, 0px))',
                     right: 16,
-                    background: 'rgba(255,255,255,0.15)',
+                    background: `${COLOR.onInk}26`,
                     border: 'none',
                     borderRadius: 999,
-                    color: '#fff',
+                    color: COLOR.onInk,
                     fontFamily: 'inherit',
                     fontSize: 12,
                     fontWeight: 600,
-                    padding: '8px 14px',
+                    minHeight: 44,
+                    padding: '0 16px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -216,8 +219,8 @@ export function OnboardingTour({
             <div
                 style={{
                     position: 'relative',
-                    background: '#fff',
-                    color: '#0E0E0E',
+                    background: COLOR.card,
+                    color: COLOR.ink,
                     borderRadius: '24px 24px 0 0',
                     padding: '24px 22px',
                     paddingBottom: 'calc(22px + env(safe-area-inset-bottom, 0px))',
@@ -247,7 +250,7 @@ export function OnboardingTour({
                                 flex: 1,
                                 height: 4,
                                 borderRadius: 2,
-                                background: i <= step ? '#0E0E0E' : 'rgba(0,0,0,0.10)',
+                                background: i <= step ? COLOR.ink : COLOR.ink10,
                                 transition: 'background 200ms',
                             }}
                         />
@@ -259,19 +262,19 @@ export function OnboardingTour({
                     <div style={{
                         width: 42, height: 42,
                         borderRadius: 12,
-                        background: '#E8F0EF',
-                        color: '#1C3835',
+                        background: COLOR.accentSoft,
+                        color: COLOR.accentInk,
                         display: 'grid', placeItems: 'center',
                     }}>
                         <Icon size={22} />
                     </div>
                     {current.pill && (
                         <div style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            letterSpacing: '0.10em',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            letterSpacing: '0.06em',
                             textTransform: 'uppercase',
-                            color: '#666',
+                            color: COLOR.ink60,
                         }}>
                             {current.pill}
                         </div>
@@ -281,7 +284,7 @@ export function OnboardingTour({
                 {/* Title */}
                 <h2 style={{
                     fontSize: 22,
-                    fontWeight: 700,
+                    fontWeight: 600,
                     letterSpacing: '-0.01em',
                     lineHeight: 1.2,
                     margin: 0,
@@ -293,7 +296,7 @@ export function OnboardingTour({
                 <p style={{
                     fontSize: 14,
                     lineHeight: 1.5,
-                    color: '#444',
+                    color: COLOR.ink80,
                     margin: 0,
                 }}>
                     {current.body}
@@ -311,11 +314,12 @@ export function OnboardingTour({
                             onClick={() => setStep(s => s - 1)}
                             style={{
                                 background: 'transparent',
-                                color: '#666',
+                                color: COLOR.ink60,
                                 border: 'none',
                                 fontSize: 13,
                                 fontWeight: 600,
-                                padding: '12px 4px',
+                                minHeight: 44,
+                                padding: '0 4px',
                                 cursor: 'pointer',
                                 fontFamily: 'inherit',
                             }}
@@ -330,13 +334,14 @@ export function OnboardingTour({
                         <button
                             onClick={() => setStep(s => s + 1)}
                             style={{
-                                background: '#0E0E0E',
-                                color: '#fff',
+                                background: COLOR.ink,
+                                color: COLOR.onInk,
                                 border: 'none',
                                 borderRadius: 12,
-                                padding: '12px 22px',
+                                minHeight: 44,
+                                padding: '0 22px',
                                 fontSize: 14,
-                                fontWeight: 700,
+                                fontWeight: 600,
                                 cursor: 'pointer',
                                 fontFamily: 'inherit',
                                 display: 'flex',
@@ -351,13 +356,14 @@ export function OnboardingTour({
                         <button
                             onClick={finish}
                             style={{
-                                background: '#0E0E0E',
-                                color: '#fff',
+                                background: COLOR.ink,
+                                color: COLOR.onInk,
                                 border: 'none',
                                 borderRadius: 12,
-                                padding: '12px 22px',
+                                minHeight: 44,
+                                padding: '0 22px',
                                 fontSize: 14,
-                                fontWeight: 700,
+                                fontWeight: 600,
                                 cursor: 'pointer',
                                 fontFamily: 'inherit',
                                 display: 'flex',
@@ -432,7 +438,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                 style={{
                     position: 'fixed',
                     inset: 0,
-                    background: 'rgba(0,0,0,0.75)',
+                    background: `${COLOR.ink}BF`,
                     zIndex: 301,
                 }}
             />
@@ -465,7 +471,7 @@ function Spotlight({ selector, onClickBackdrop }: { selector?: string; onClickBa
                     // The inset shadow draws a glowing rim; the wide outset
                     // shadow paints the rest of the screen dim. The viewport
                     // size cap (200vmax) ensures coverage on any device.
-                    boxShadow: '0 0 0 200vmax rgba(0,0,0,0.75), 0 0 0 3px rgba(255,255,255,0.9)',
+                    boxShadow: `0 0 0 200vmax ${COLOR.ink}BF, 0 0 0 3px ${COLOR.onInk}E6`,
                     transition: 'top 200ms ease, left 200ms ease, width 200ms ease, height 200ms ease',
                     zIndex: 301,
                 }}

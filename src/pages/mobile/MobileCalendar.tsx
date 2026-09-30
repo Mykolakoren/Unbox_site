@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addDays, format as fmtDate } from 'date-fns';
-import { ru } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Plus, List, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
@@ -10,6 +9,9 @@ import { LOCATIONS, RESOURCES } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
 import { getFavoriteCabinet } from './favoriteCabinet';
 import type { BookingHistoryItem } from '../../store/types';
+import { COLOR } from '../../design/tokens';
+import { formatDateLabel, formatDayMonth } from '../../utils/format';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 // Compact enough that 09:00–22:00 (13h) fits within 2 phone-screens worth of
 // scroll while still leaving each row tappable. Earlier 56px wasted vertical
@@ -119,19 +121,20 @@ export function MobileCalendar() {
                 display: 'flex', flexDirection: 'column', gap: 14,
             }}>
                 <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, flex: 1 }}>
+                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, flex: 1 }}>
                         Календарь
                     </h1>
                     {/* Mode toggle: room timeline vs schedule list */}
                     <div style={{
                         display: 'flex',
-                        background: '#F4F4F2',
+                        background: COLOR.sunken,
                         borderRadius: 10,
-                        padding: 3,
+                        padding: 2,
                     }}>
                         <button
                             onClick={() => setMode('room')}
                             aria-label="Кабинет"
+                            aria-pressed={mode === 'room'}
                             style={modeBtn(mode === 'room')}
                         >
                             <LayoutGrid size={16} />
@@ -139,6 +142,7 @@ export function MobileCalendar() {
                         <button
                             onClick={() => setMode('schedule')}
                             aria-label="Лента"
+                            aria-pressed={mode === 'schedule'}
                             style={modeBtn(mode === 'schedule')}
                         >
                             <List size={16} />
@@ -159,8 +163,7 @@ export function MobileCalendar() {
                         flex: 1,
                         textAlign: 'center',
                         fontSize: 14,
-                        fontWeight: 700,
-                        textTransform: 'capitalize',
+                        fontWeight: 600,
                     }}>
                         {dayLabel(targetDate, dayOffset)}
                     </div>
@@ -189,10 +192,11 @@ export function MobileCalendar() {
                                 return (
                                     <button
                                         key={r.id}
+                                        aria-pressed={active}
                                         onClick={() => setActiveResId(r.id)}
                                         style={{
-                                            background: active ? '#0E0E0E' : '#F4F4F2',
-                                            color: active ? '#fff' : '#0E0E0E',
+                                            background: active ? COLOR.ink : COLOR.sunken,
+                                            color: active ? COLOR.onInk : COLOR.ink,
                                             border: 'none',
                                             borderRadius: 10,
                                             padding: '8px 12px',
@@ -202,8 +206,8 @@ export function MobileCalendar() {
                                             textAlign: 'left',
                                         }}
                                     >
-                                        <div style={{ fontSize: 12, fontWeight: 700 }}>{r.name}</div>
-                                        <div style={{ fontSize: 10, opacity: 0.7, marginTop: 1 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</div>
+                                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 1 }}>
                                             {loc?.name?.replace('Unbox ', '')}
                                         </div>
                                     </button>
@@ -225,16 +229,7 @@ export function MobileCalendar() {
                     /* Schedule (all rooms, chronological) */
                     <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {dayBookings.length === 0 ? (
-                            <div style={{
-                                background: '#F4F4F2',
-                                borderRadius: 14,
-                                padding: 18,
-                                textAlign: 'center',
-                                color: '#666',
-                                fontSize: 14,
-                            }}>
-                                В этот день ничего не забронировано.
-                            </div>
+                            <EmptyState compact title="В этот день ничего не забронировано" />
                         ) : dayBookings.map(({ b, startMin, endMin }) => {
                             const own = isOwnBooking(b);
                             const r = RESOURCES.find(x => x.id === b.resourceId);
@@ -248,11 +243,11 @@ export function MobileCalendar() {
                                         // #476D6B from the favicon/landing). Reads
                                         // as "mine, active", not "blocked".
                                         // Others stay neutral light gray = "busy".
-                                        background: own ? '#E8F0EF' : '#F4F4F2',
-                                        color: own ? '#1C3835' : '#666',
+                                        background: own ? COLOR.accentSoft : COLOR.sunken,
+                                        color: own ? COLOR.accentInk : COLOR.ink60,
                                         border: own
-                                            ? '1px solid #476D6B'
-                                            : '1px solid rgba(0,0,0,0.06)',
+                                            ? `1px solid ${COLOR.accent}`
+                                            : `1px solid ${COLOR.ink05}`,
                                         borderRadius: 12,
                                         padding: '10px 12px',
                                         textAlign: 'left',
@@ -265,7 +260,7 @@ export function MobileCalendar() {
                                 >
                                     <div style={{
                                         fontSize: 14,
-                                        fontWeight: 700,
+                                        fontWeight: 600,
                                         minWidth: 88,
                                     }}>
                                         {minToHHMM(startMin)}–{minToHHMM(endMin)}
@@ -274,7 +269,8 @@ export function MobileCalendar() {
                                         <div style={{ fontSize: 13, fontWeight: 600 }}>
                                             {r?.name ?? b.resourceId}
                                         </div>
-                                        <div style={{ fontSize: 11, opacity: own ? 0.85 : 0.6, marginTop: 1 }}>
+                                        {/* Без прозрачности: ink-60 × 0.6 уходило ниже читаемого. */}
+                                        <div style={{ fontSize: 12, marginTop: 1 }}>
                                             {own ? 'Ваша бронь' : 'Занято'}
                                         </div>
                                     </div>
@@ -309,8 +305,8 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
         <div style={{
             position: 'relative',
             height: totalHeight,
-            background: '#fff',
-            border: '1px solid rgba(0,0,0,0.08)',
+            background: COLOR.card,
+            border: `1px solid ${COLOR.ink08}`,
             borderRadius: 14,
             overflow: 'hidden',
         }}>
@@ -329,7 +325,7 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
                             height: HOUR_PX,
                             background: 'transparent',
                             border: 'none',
-                            borderTop: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.06)',
+                            borderTop: i === 0 ? 'none' : `1px solid ${COLOR.ink05}`,
                             display: 'flex',
                             alignItems: 'flex-start',
                             cursor: 'pointer',
@@ -350,7 +346,7 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
             <div style={{
                 position: 'absolute',
                 top: 0, bottom: 0, left: TIME_RAIL_PX - 2,
-                width: 1, background: 'rgba(0,0,0,0.06)',
+                width: 1, background: COLOR.ink05,
                 pointerEvents: 'none',
             }} />
 
@@ -366,9 +362,9 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
                             position: 'absolute',
                             top: i * HOUR_PX + 4,
                             left: 8,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: 600,
-                            color: '#999',
+                            color: COLOR.ink60,
                             pointerEvents: 'none',
                         }}
                     >
@@ -402,9 +398,9 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
                             // Others — neutral gray = "busy" (replacing the
                             // earlier red, which felt too alarming for what's
                             // just a slot taken by a colleague).
-                            background: own ? '#E8F0EF' : '#F4F4F2',
-                            color: own ? '#1C3835' : '#666',
-                            border: own ? '1px solid #476D6B' : '1px solid rgba(0,0,0,0.08)',
+                            background: own ? COLOR.accentSoft : COLOR.sunken,
+                            color: own ? COLOR.accentInk : COLOR.ink60,
+                            border: own ? `1px solid ${COLOR.accent}` : `1px solid ${COLOR.ink08}`,
                             borderRadius: 8,
                             padding: '6px 10px',
                             textAlign: 'left',
@@ -416,10 +412,10 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
                             overflow: 'hidden',
                         }}
                     >
-                        <div style={{ fontSize: 12, fontWeight: 700 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>
                             {minToHHMM(startMin)}–{minToHHMM(endMin)}
                         </div>
-                        <div style={{ fontSize: 11, opacity: own ? 0.85 : 0.7 }}>
+                        <div style={{ fontSize: 12 }}>
                             {own ? 'Ваша бронь' : 'Занято'}
                         </div>
                     </button>
@@ -430,32 +426,35 @@ function Timeline({ bookings, isOwnBooking, onTapOwn, onTapEmpty }: {
 }
 
 const navBtn: React.CSSProperties = {
-    background: '#F4F4F2',
+    background: COLOR.sunken,
     border: 'none',
     borderRadius: 10,
-    width: 40, height: 40,
+    width: 44, height: 44,
     display: 'grid', placeItems: 'center',
     cursor: 'pointer',
-    color: '#0E0E0E',
+    color: COLOR.ink,
 };
 
 const modeBtn = (active: boolean): React.CSSProperties => ({
-    background: active ? '#fff' : 'transparent',
-    color: active ? '#0E0E0E' : '#999',
+    background: active ? COLOR.card : 'transparent',
+    color: active ? COLOR.ink : COLOR.ink60,
     border: 'none',
-    borderRadius: 7,
-    width: 32, height: 30,
+    borderRadius: 8,
+    width: 44, height: 44,
     display: 'grid', placeItems: 'center',
     cursor: 'pointer',
-    boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+    boxShadow: active ? `0 1px 2px ${COLOR.ink08}` : 'none',
     fontFamily: 'inherit',
 });
 
+/** «Сегодня · вт, 30 сентября», «Завтра · 1 октября», «Пт, 3 октября».
+ *  Wave 1: общий форматтер вместо date-fns + textTransform:'capitalize',
+ *  который писал «Сентября» с большой буквы. */
 function dayLabel(d: Date, offset: number): string {
-    if (offset === 0) return 'Сегодня · ' + fmtDate(d, 'd MMMM, EEEE', { locale: ru });
-    if (offset === 1) return 'Завтра · ' + fmtDate(d, 'd MMMM', { locale: ru });
-    if (offset === -1) return 'Вчера · ' + fmtDate(d, 'd MMMM', { locale: ru });
-    return fmtDate(d, 'EEEE, d MMMM', { locale: ru });
+    if (offset === 0) return 'Сегодня · ' + formatDateLabel(d);
+    if (offset === 1) return 'Завтра · ' + formatDayMonth(d);
+    if (offset === -1) return 'Вчера · ' + formatDayMonth(d);
+    return formatDateLabel(d, { capitalize: true });
 }
 
 function pad(n: number) { return n.toString().padStart(2, '0'); }

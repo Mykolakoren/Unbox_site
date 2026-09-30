@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { ChevronRight, MapPin } from 'lucide-react';
 import { LOCATIONS, RESOURCES } from '../../utils/data';
+import { COLOR } from '../../design/tokens';
+import { formatGel } from '../../utils/format';
 
 /**
  * Mobile listing of locations + cabinets.
@@ -18,11 +20,11 @@ export function MobilePlaces() {
     return (
         <div style={{ paddingTop: 12, paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                     Наши центры
                 </h1>
-                <p style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    Тапни на центр или конкретный кабинет — фото, описание, цена.
+                <p style={{ fontSize: 12, color: COLOR.ink60, marginTop: 4 }}>
+                    Нажмите на центр или кабинет — фото, описание, цена.
                 </p>
             </div>
 
@@ -35,8 +37,8 @@ export function MobilePlaces() {
                         <div
                             key={loc.id}
                             style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.08)',
+                                background: COLOR.card,
+                                border: `1px solid ${COLOR.ink08}`,
                                 borderRadius: 14,
                                 overflow: 'hidden',
                             }}
@@ -48,16 +50,16 @@ export function MobilePlaces() {
                                     alignItems: 'center',
                                     gap: 10,
                                     padding: '14px 16px',
-                                    background: '#0E0E0E',
-                                    color: '#fff',
+                                    background: COLOR.ink,
+                                    color: COLOR.onInk,
                                     textDecoration: 'none',
                                     fontFamily: 'inherit',
                                 }}
                             >
                                 <MapPin size={16} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 16, fontWeight: 700 }}>{loc.name}</div>
-                                    <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
+                                    <div style={{ fontSize: 16, fontWeight: 600 }}>{loc.name}</div>
+                                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
                                         {loc.address}
                                     </div>
                                 </div>
@@ -66,7 +68,7 @@ export function MobilePlaces() {
 
                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                 {cabinets.length === 0 && (
-                                    <div style={{ padding: 16, fontSize: 13, color: '#999' }}>
+                                    <div style={{ padding: 16, fontSize: 13, color: COLOR.ink60 }}>
                                         Кабинеты пока скрыты.
                                     </div>
                                 )}
@@ -79,8 +81,8 @@ export function MobilePlaces() {
                                             alignItems: 'center',
                                             gap: 10,
                                             padding: '12px 14px',
-                                            borderTop: '1px solid rgba(0,0,0,0.05)',
-                                            color: '#0E0E0E',
+                                            borderTop: `1px solid ${COLOR.ink05}`,
+                                            color: COLOR.ink,
                                             textDecoration: 'none',
                                             fontFamily: 'inherit',
                                         }}
@@ -88,21 +90,21 @@ export function MobilePlaces() {
                                         <div style={{
                                             width: 36, height: 36,
                                             borderRadius: 10,
-                                            background: '#F4F4F2',
+                                            background: COLOR.sunken,
                                             backgroundImage: r.photos?.[0] ? `url(${r.photos[0]})` : undefined,
                                             backgroundSize: 'cover',
                                             backgroundPosition: 'center',
                                             flexShrink: 0,
                                         }} />
                                         <div style={{ flex: 1, minWidth: 0 }}>
-                                            <div style={{ fontSize: 14, fontWeight: 700 }}>
+                                            <div style={{ fontSize: 14, fontWeight: 600 }}>
                                                 {r.name}
                                             </div>
-                                            <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
-                                                {r.area} м² · до {r.capacity} чел. · {r.hourlyRate} ₾/ч
+                                            <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
+                                                {r.area} м² · до {r.capacity} чел. · {formatGel(r.hourlyRate)}/ч
                                             </div>
                                         </div>
-                                        <ChevronRight size={14} style={{ color: '#999' }} />
+                                        <ChevronRight size={14} aria-hidden="true" style={{ color: COLOR.ink60 }} />
                                     </Link>
                                 ))}
                             </div>

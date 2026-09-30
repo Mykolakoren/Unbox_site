@@ -11,12 +11,18 @@ import { prepareRepeat } from './repeatBooking';
 import { priceLabel } from './priceLabel';
 import { ruPlural } from '../../utils/plural';
 import { formatBookingDuration } from '../../utils/bookingHelpers';
-import { formatDateLabel as formatDateLabelRu } from '../../utils/format';
+import { formatDateLabel as formatDateLabelRu, formatDayMonth } from '../../utils/format';
 import { SwipeRow } from './SwipeRow';
 import { useLongPress } from './useLongPress';
 import { bookingsApi } from '../../api/bookings';
 import { toast } from 'sonner';
 import type { BookingHistoryItem } from '../../store/types';
+import { COLOR, STATUS } from '../../design/tokens';
+import { useConfirmDialog } from '../../components/ui/ConfirmDialogProvider';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { Segmented } from '../../components/ui/Chip';
+import { Button } from '../../components/ui/Button';
 
 type Tab = 'upcoming' | 'series' | 'past';
 
@@ -36,8 +42,9 @@ export function MobileMyBookings() {
     // Подтверждение постановки на пересдачу: свайп — жест лёгкий, а действие
     // денежное (если слот заберут, вернётся 50%). «Отменить» подтверждение уже
     // спрашивает — здесь было несимметрично. Снятие с пересдачи не спрашиваем:
-    // оно безопасное и обратимое.
-    const [confirmReRent, setConfirmReRent] = useState<BookingHistoryItem | null>(null);
+    // оно безопасное и обратимое. Wave 1: общее окно подтверждения вместо
+    // самодельного оверлея.
+    const { confirm } = useConfirmDialog();
 
     const doToggleReRent = (b: BookingHistoryItem) => {
         bookingsApi.toggleReRent(b.id)
@@ -48,6 +55,15 @@ export function MobileMyBookings() {
                     : 'Снято с пересдачи');
             })
             .catch(() => toast.error('Не удалось обновить'));
+    };
+    const askReRent = async (b: BookingHistoryItem) => {
+        const ok = await confirm({
+            title: 'Пересдать бронь?',
+            body: 'Слот появится у других как свободный. Если его заберут — вернём 50% стоимости. Если не заберут — бронь останется за вами.',
+            confirmLabel: 'Пересдать',
+            cancelLabel: 'Оставить',
+        });
+        if (ok) doToggleReRent(b);
     };
     const [refreshing, setRefreshing] = useState(false);
     const pull = usePullToRefresh(async () => {
@@ -130,51 +146,27 @@ export function MobileMyBookings() {
             <PullIndicator distance={pull.distance} willRefresh={pull.willRefresh} refreshing={refreshing} />
 
             <div style={{ padding: '0 16px' }}>
-                <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                     Мои брони
                 </h1>
             </div>
 
             <div style={{ padding: '0 16px' }}>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    background: '#F4F4F2',
-                    borderRadius: 12,
-                    padding: 4,
-                    gap: 4,
-                }}>
-                    {([
-                        ['upcoming', loaded ? `Будущие · ${upcoming.length}` : 'Будущие'],
-                        ['series', loaded ? `Серии · ${series.length}` : 'Серии'],
-                        ['past', 'Прошедшие'],
-                    ] as Array<[Tab, string]>).map(([id, label]) => {
-                        const active = tab === id;
-                        return (
-                            <button
-                                key={id}
-                                onClick={() => setTab(id)}
-                                style={{
-                                    padding: '10px 4px',
-                                    fontSize: 13,
-                                    fontWeight: active ? 700 : 500,
-                                    background: active ? '#fff' : 'transparent',
-                                    color: active ? '#0E0E0E' : '#666',
-                                    border: 'none',
-                                    borderRadius: 9,
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                    boxShadow: active ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                                }}
-                            >
-                                {label}
-                            </button>
-                        );
-                    })}
-                </div>
+                {/* Wave 1: общий Segmented (44 px, aria-pressed) вместо самодельных вкладок. */}
+                <Segmented<Tab>
+                    aria-label="Какие брони показать"
+                    value={tab}
+                    onChange={setTab}
+                    options={[
+                        { value: 'upcoming', label: loaded ? `Будущие · ${upcoming.length}` : 'Будущие' },
+                        { value: 'series', label: loaded ? `Серии · ${series.length}` : 'Серии' },
+                        { value: 'past', label: 'Прошедшие' },
+                    ]}
+                />
             </div>
 
-            <div className="stagger-in" style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Wave 1: без «лесенки» появления — экран открывают слишком часто. */}
+            <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <StaleBar status={bookingsStatus} loadedAt={bookingsLoadedAt} onRetry={() => { fetchBookings(); }} />
                 {!loaded && bookingsStatus !== 'error' && <SkeletonRows height={118} />}
                 {!loaded && bookingsStatus === 'error' && (
@@ -187,28 +179,11 @@ export function MobileMyBookings() {
                 {loaded && tab === 'upcoming' && (
                     upcoming.length === 0
                         ? (
-                            <Empty>
-                                Будущих броней пока нет
-                                <div>
-                                    <button
-                                        onClick={() => navigate('/m/find')}
-                                        style={{
-                                            marginTop: 12,
-                                            background: '#0E0E0E',
-                                            color: '#fff',
-                                            border: 'none',
-                                            borderRadius: 10,
-                                            padding: '10px 18px',
-                                            fontSize: 14,
-                                            fontWeight: 700,
-                                            cursor: 'pointer',
-                                            fontFamily: 'inherit',
-                                        }}
-                                    >
-                                        Найти время
-                                    </button>
-                                </div>
-                            </Empty>
+                            <EmptyState
+                                title="Будущих броней пока нет"
+                                hint="Выберите свободное время — займёт минуту."
+                                action={{ label: 'Найти время', onClick: () => navigate('/m/find') }}
+                            />
                         )
                         : upcoming.map(({ b, dt }) => {
                             const hoursToStart = (dt!.getTime() - Date.now()) / 3600000;
@@ -217,23 +192,23 @@ export function MobileMyBookings() {
                             // the "Re-rent" action as the primary instead.
                             const primary = within24h
                                 ? {
-                                    label: '↪ Пересдать',
-                                    color: '#0E0E0E',
+                                    label: 'Пересдать',
+                                    color: COLOR.ink,
                                     onAction: () => {
                                         // На пересдачу — только через подтверждение
                                         // (денежное действие). Снятие — сразу.
                                         if ((b as any).isReRentListed) doToggleReRent(b);
-                                        else setConfirmReRent(b);
+                                        else void askReRent(b);
                                     },
                                 }
                                 : {
-                                    label: '✕ Отменить',
-                                    color: '#C8253A',
+                                    label: 'Отменить',
+                                    color: STATUS.danger.fg,
                                     onAction: () => setOpenBooking(b),
                                 };
                             const secondary = {
                                 label: 'Детали',
-                                color: '#666',
+                                color: COLOR.ink60,
                                 onAction: () => setOpenBooking(b),
                             };
                             return (
@@ -245,7 +220,7 @@ export function MobileMyBookings() {
                 )}
                 {loaded && tab === 'series' && (
                     series.length === 0
-                        ? <Empty>Активных серий нет</Empty>
+                        ? <EmptyState title="Активных серий нет" />
                         : series.map(s => (
                             <SeriesRow
                                 key={s.id}
@@ -265,7 +240,7 @@ export function MobileMyBookings() {
                 )}
                 {loaded && tab === 'past' && (
                     past.length === 0
-                        ? <Empty>Истории нет</Empty>
+                        ? <EmptyState title="Прошедших броней пока нет" />
                         : past.map(({ b, dt }) => (
                             <Row
                                 key={b.id}
@@ -288,39 +263,6 @@ export function MobileMyBookings() {
                 />
             )}
 
-            {confirmReRent && (
-                <div
-                    onClick={() => setConfirmReRent(null)}
-                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200,
-                             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-                >
-                    <div
-                        onClick={e => e.stopPropagation()}
-                        style={{ background: '#fff', borderRadius: 18, padding: 20, width: '100%', maxWidth: 380,
-                                 display: 'flex', flexDirection: 'column', gap: 12 }}
-                    >
-                        <div style={{ fontSize: 17, fontWeight: 800 }}>Выставить на пересдачу?</div>
-                        <div style={{ fontSize: 14, color: '#555', lineHeight: 1.5 }}>
-                            Слот появится у других как свободный. Если его заберут — вам вернётся
-                            <b> 50% стоимости</b>. Если не заберут — бронь останется за вами.
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                            <button
-                                onClick={() => setConfirmReRent(null)}
-                                style={{ flex: 1, padding: '13px 0', borderRadius: 12, fontFamily: 'inherit',
-                                         fontSize: 15, fontWeight: 700, cursor: 'pointer',
-                                         border: '1px solid rgba(0,0,0,0.12)', background: '#fff' }}
-                            >Отмена</button>
-                            <button
-                                onClick={() => { doToggleReRent(confirmReRent); setConfirmReRent(null); }}
-                                style={{ flex: 1, padding: '13px 0', borderRadius: 12, fontFamily: 'inherit',
-                                         fontSize: 15, fontWeight: 700, cursor: 'pointer',
-                                         border: 'none', background: '#0E0E0E', color: '#fff' }}
-                            >Выставить</button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
@@ -346,63 +288,54 @@ function Row({ booking, dt, dimmed, onTap, onRepeat }: {
         <div
             className="press"
             style={{
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.08)',
+                background: COLOR.card,
+                border: `1px solid ${COLOR.ink08}`,
                 borderRadius: 14,
                 padding: 14,
-                opacity: dimmed ? 0.6 : 1,
                 cursor: 'pointer',
             }}
             onClick={onTap}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(); } }}
             role="button"
+            tabIndex={0}
             {...(onRepeat ? longPressProps : {})}
         >
+            {/* Прошедшие приглушаем цветом, а не прозрачностью: opacity .6
+                роняла вторичный текст ниже читаемого (3:1). */}
             <div style={{
                 fontSize: 22,
-                fontWeight: 800,
+                fontWeight: 600,
                 letterSpacing: '-0.01em',
                 lineHeight: 1.1,
-                color: '#0E0E0E',
+                color: dimmed ? COLOR.ink60 : COLOR.ink,
             }}>
                 {dateLabel}
             </div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#444', marginTop: 4 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: dimmed ? COLOR.ink60 : COLOR.ink80, marginTop: 4 }}>
                 {booking.startTime}–{endStr}
             </div>
-            <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
+            <div style={{ fontSize: 13, color: COLOR.ink60, marginTop: 4 }}>
                 {resource?.name ?? booking.resourceId}
-                {location && <span style={{ color: '#999' }}> · {location.name}</span>}
-                <span style={{ color: '#999' }}> · {formatBookingDuration(booking.duration ?? 60)}</span>
+                {location && <span style={{ color: COLOR.ink60 }}> · {location.name}</span>}
+                <span style={{ color: COLOR.ink60 }}> · {formatBookingDuration(booking.duration ?? 60)}</span>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{priceLabel(booking)}</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{priceLabel(booking)}</span>
                 <PaymentBadge status={booking.paymentStatus} />
-                {(booking as any).recurringGroupId && <Tag>серия</Tag>}
-                {booking.isReRentListed && <Tag tone="warn">на пересдаче</Tag>}
+                {(booking as any).recurringGroupId && <Tag>Серия</Tag>}
+                {booking.isReRentListed && <Tag tone="warn">На пересдаче</Tag>}
                 {onRepeat ? (
-                    <button
+                    <Button
+                        variant="secondary"
+                        icon={<Repeat size={16} aria-hidden="true" />}
                         onClick={(e) => { e.stopPropagation(); onRepeat(); }}
-                        style={{
-                            marginLeft: 'auto',
-                            background: '#0E0E0E',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: 8,
-                            padding: '6px 12px',
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            fontFamily: 'inherit',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 5,
-                        }}
+                        style={{ marginLeft: 'auto' }}
                     >
-                        <Repeat size={12} />
                         Повторить
-                    </button>
+                    </Button>
                 ) : (
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#999' }}>тапни →</span>
+                    // Карточка и так нажимается — хватит шеврона (было «тапни →»).
+                    <ChevronRight size={18} color={COLOR.ink60} aria-hidden="true" style={{ marginLeft: 'auto' }} />
                 )}
             </div>
         </div>
@@ -428,76 +361,60 @@ function SeriesRow({ items, onTap }: { items: BookingHistoryItem[]; onTap?: () =
 
     const dt0 = bookingStartDate(first);
     const dtN = bookingStartDate(last);
-    const fmt = (d: Date | null) => d ? d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '?';
+    const fmt = (d: Date | null) => d ? formatDayMonth(d) : '?';
 
     return (
         <button
             onClick={onTap}
             style={{
                 width: '100%',
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.08)',
+                background: COLOR.card,
+                border: `1px solid ${COLOR.ink08}`,
                 borderRadius: 14,
                 padding: 14,
                 cursor: onTap ? 'pointer' : 'default',
                 fontFamily: 'inherit',
                 textAlign: 'left',
-                color: '#0E0E0E',
+                color: COLOR.ink,
             }}
         >
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#999' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
                 Серия · {sorted.length} {ruPlural(sorted.length, ['сессия', 'сессии', 'сессий'])}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
                 {resource?.name} · {first?.startTime}
             </div>
-            <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
+            <div style={{ fontSize: 13, color: COLOR.ink60, marginTop: 4 }}>
                 {fmt(dt0)} → {fmt(dtN)}
             </div>
-            <div style={{ marginTop: 8, fontSize: 12, color: '#666', display: 'flex', alignItems: 'center', gap: 4 }}>
-                Тапни — продлить или отменить серию
+            <div style={{ marginTop: 8, fontSize: 12, color: COLOR.ink60, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Нажмите, чтобы продлить или отменить серию
                 <ChevronRight size={14} />
             </div>
         </button>
     );
 }
 
+/** Статус оплаты — слова и цвета только из общего словаря (statuses.ts). */
 function PaymentBadge({ status }: { status?: 'pending' | 'paid' | 'waived' | null }) {
-    if (status === 'paid') return <Tag tone="ok">Оплачено</Tag>;
-    if (status === 'pending') return <Tag tone="warn">Не списано</Tag>;
-    if (status === 'waived') return <Tag tone="muted">Без счёта</Tag>;
-    return null;
+    if (!status) return null;
+    return <StatusBadge kind="payment" status={status} />;
 }
 
 function Tag({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'ok' | 'warn' | 'muted' }) {
     const colors: Record<string, { bg: string; fg: string }> = {
-        ok: { bg: '#E6F4EA', fg: '#1B6E36' },
-        warn: { bg: '#FEF3C7', fg: '#8A5A00' },
-        muted: { bg: '#EEE', fg: '#666' },
+        ok: { bg: STATUS.ok.bg, fg: STATUS.ok.fg },
+        warn: { bg: STATUS.pending.bg, fg: STATUS.pending.fg },
+        muted: { bg: STATUS.muted.bg, fg: STATUS.muted.fg },
     };
     const c = colors[tone];
     return (
         <span style={{
             background: c.bg, color: c.fg,
-            fontSize: 11, fontWeight: 700,
+            fontSize: 12, fontWeight: 600,
             padding: '2px 7px', borderRadius: 999,
             whiteSpace: 'nowrap',
         }}>{children}</span>
-    );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-    return (
-        <div style={{
-            background: '#F4F4F2',
-            borderRadius: 14,
-            padding: 24,
-            textAlign: 'center',
-            color: '#666',
-            fontSize: 14,
-        }}>
-            {children}
-        </div>
     );
 }
 

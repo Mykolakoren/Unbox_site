@@ -1,4 +1,5 @@
 import type { BookingHistoryItem } from '../../store/types';
+import { formatGel } from '../../utils/format';
 
 /**
  * Booking price label, payment-method-aware.
@@ -14,7 +15,7 @@ import type { BookingHistoryItem } from '../../store/types';
  * Rules:
  *   - paymentMethod === 'subscription' → "1.5 ч из абонемента"
  *   - paymentMethod === 'bonus'        → "1 ч из бонусов"
- *   - else (balance / unknown legacy)  → "60 ₾"
+ *   - else (balance / unknown legacy)  → "60 ₾" (общий formatGel: «1 250 ₾»)
  *   - if finalPrice is 0 (admin-zero / promo)        → "Бесплатно"
  */
 export function priceLabel(b: BookingHistoryItem): string {
@@ -29,7 +30,7 @@ export function priceLabel(b: BookingHistoryItem): string {
         return `${formatHours(hoursDeducted)} из бонусов`;
     }
     if (price <= 0) return 'Бесплатно';
-    return `${price.toFixed(0)} ₾`;
+    return formatGel(price, { fraction: 0 });
 }
 
 function formatHours(h: number): string {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Check, ExternalLink, Link as LinkIcon, Loader2, Move, Repeat, X } from 'lucide-react';
+import { ArrowRight, CalendarDays, Check, ExternalLink, Link as LinkIcon, Loader2, Move, Repeat, X } from 'lucide-react';
 import { addDays, format as fmtDate } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -16,6 +16,10 @@ import type { BookingHistoryItem } from '../../store/types';
 import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
+import { COLOR, STATUS, Z } from '../../design/tokens';
+import { formatDayMonth, formatGel } from '../../utils/format';
+import { formatBookingDuration } from '../../utils/bookingHelpers';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 type SpaceType = 'individual' | 'group' | 'capsule';
 
@@ -322,7 +326,7 @@ export function MobileFind() {
         if (rescheduleId) {
             toast.error(rescheduleLookupFailed
                 ? 'Бронь для переноса не найдена — возможно, её уже отменили. Обновите список броней.'
-                : 'Загружаю бронь для переноса — попробуйте через секунду.');
+                : 'Загружаем бронь для переноса — попробуйте через секунду.');
             return;
         }
 
@@ -335,7 +339,7 @@ export function MobileFind() {
             } else if (applicationStatus === 'approved') {
                 toast.info('Анкета одобрена — доступ к бронированию скоро откроет администратор');
             } else {
-                toast.info('Чтобы бронировать, заполни анкету специалиста', {
+                toast.info('Чтобы бронировать, заполните анкету специалиста', {
                     action: { label: 'Анкета', onClick: () => navigate(SPECIALIST_APPLICATION_PATH) },
                 });
             }
@@ -366,18 +370,18 @@ export function MobileFind() {
                 display: 'flex', flexDirection: 'column', gap: 18,
             }}>
                 <div style={{ padding: '0 16px' }}>
-                    <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                    <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                         {linkSessionMeta ? 'Привязать кабинет' : rescheduleId ? 'Перенести' : 'Свободно'}
                     </h1>
-                    <p style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
+                    <p style={{ fontSize: 13, color: COLOR.ink60, marginTop: 4 }}>
                         {linkSessionMeta
                             ? 'Выберите свободный слот — забронируем и привяжем к сессии.'
                             : rescheduleId
-                                ? 'Выбери новое время — старый слот освободится'
-                                : 'Когда · сколько · где — три тапа.'}
+                                ? 'Выберите новое время — старый слот освободится.'
+                                : 'Выберите день, длительность и место.'}
                     </p>
                     {!linkSessionMeta && !rescheduleId && (
-                        <p style={{ fontSize: 12, color: '#8a6d1f', marginTop: 4 }}>
+                        <p style={{ fontSize: 12, color: STATUS.pending.fg, marginTop: 4 }}>
                             Пиковые часы 09–10 и 20–22: +5 ₾ за каждый час пика.
                         </p>
                     )}
@@ -395,7 +399,7 @@ export function MobileFind() {
                     FAB из /m/admin/bookings, чтобы создать бронь от имени
                     клиента. UI поиска слота идентичен клиентскому, поэтому
                     подскажем что admin-flow продолжится — picker «За кого
-                    бронируешь?» появится на /m/checkout. Без подсказки
+                    бронируете?» появится на /m/checkout. Без подсказки
                     админ ловит когнитивный диссонанс «куда меня кинуло».
                     Не показываем для reschedule/linkSession — у них свои
                     баннеры. */}
@@ -407,18 +411,18 @@ export function MobileFind() {
                 ) && (
                     <div style={{ padding: '0 16px' }}>
                         <div style={{
-                            background: '#FEF3C7',
-                            border: '1px solid #FCD34D',
-                            color: '#8A5A00',
+                            background: STATUS.pending.bg,
+                            border: `1px solid ${STATUS.pending.fg}33`,
+                            color: STATUS.pending.fg,
                             borderRadius: 12,
                             padding: '10px 12px',
                             fontSize: 12,
                             lineHeight: 1.4,
                         }}>
-                            <strong>Админ-бронь.</strong> Выбери слот — на
+                            <strong>Админ-бронь.</strong> Выберите слот — на
                             следующем шаге появится поле «За кого
-                            бронируешь?». Если бронишь себе — просто оставь
-                            его пустым.
+                            бронируете?». Если бронируете для себя — просто
+                            оставьте его пустым.
                         </div>
                     </div>
                 )}
@@ -427,9 +431,9 @@ export function MobileFind() {
                 {rescheduleBooking && (
                     <div style={{ padding: '0 16px' }}>
                         <div style={{
-                            background: '#FEF3C7',
-                            border: '1px solid #FCD34D',
-                            color: '#8A5A00',
+                            background: STATUS.pending.bg,
+                            border: `1px solid ${STATUS.pending.fg}33`,
+                            color: STATUS.pending.fg,
                             borderRadius: 12,
                             padding: '10px 12px',
                             display: 'flex',
@@ -439,7 +443,7 @@ export function MobileFind() {
                             <Move size={18} />
                             <div style={{ flex: 1, fontSize: 13, lineHeight: 1.35 }}>
                                 <b>Переносим:</b>{' '}
-                                {rescheduleBooking.date && new Date(rescheduleBooking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                                {rescheduleBooking.date && formatDayMonth(rescheduleBooking.date)}
                                 {' '}в {rescheduleBooking.startTime}
                                 {' · '}
                                 {RESOURCES.find(r => r.id === rescheduleBooking.resourceId)?.name ?? rescheduleBooking.resourceId}
@@ -447,15 +451,9 @@ export function MobileFind() {
                             <button
                                 onClick={() => navigate('/m/bookings')}
                                 aria-label="Отменить перенос"
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    color: '#8A5A00',
-                                    padding: 4,
-                                }}
+                                style={{ ...bannerCloseBtn, color: STATUS.pending.fg }}
                             >
-                                <X size={16} />
+                                <X size={18} />
                             </button>
                         </div>
                     </div>
@@ -466,9 +464,9 @@ export function MobileFind() {
                 {linkSessionMeta && (
                     <div style={{ padding: '0 16px' }}>
                         <div style={{
-                            background: '#E0F2FE',
-                            border: '1px solid #7DD3FC',
-                            color: '#0369A1',
+                            background: STATUS.info.bg,
+                            border: `1px solid ${STATUS.info.fg}33`,
+                            color: STATUS.info.fg,
                             borderRadius: 12,
                             padding: '10px 12px',
                             display: 'flex',
@@ -478,20 +476,14 @@ export function MobileFind() {
                             <LinkIcon size={18} />
                             <div style={{ flex: 1, fontSize: 13, lineHeight: 1.35 }}>
                                 <b>Привязываем кабинет к сессии:</b>{' '}
-                                {linkSessionMeta.date} в {linkSessionMeta.time} · {linkSessionMeta.duration} мин
+                                {linkSessionMeta.date ? formatDayMonth(linkSessionMeta.date) : ''} в {linkSessionMeta.time} · {linkSessionMeta.duration} мин
                             </div>
                             <button
                                 onClick={() => navigate(`/m/crm/today${linkSessionMeta.date ? `?date=${linkSessionMeta.date}` : ''}`)}
                                 aria-label="Отменить привязку"
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    color: '#0369A1',
-                                    padding: 4,
-                                }}
+                                style={{ ...bannerCloseBtn, color: STATUS.info.fg }}
                             >
-                                <X size={16} />
+                                <X size={18} />
                             </button>
                         </div>
                     </div>
@@ -504,15 +496,16 @@ export function MobileFind() {
                         {[0, 1].map(off => {
                             const d = addDays(new Date(), off);
                             const top = off === 0 ? 'Сегодня' : 'Завтра';
-                            const bot = fmtDate(d, 'd MMMM', { locale: ru });
+                            const bot = formatDayMonth(d);
                             const active = dayOffset === off;
                             return (
                                 <button
                                     key={off}
+                                    aria-pressed={active}
                                     onClick={() => setDayOffset(off)}
                                     style={{
-                                        background: active ? '#0E0E0E' : '#F4F4F2',
-                                        color: active ? '#fff' : '#0E0E0E',
+                                        background: active ? COLOR.ink : COLOR.sunken,
+                                        color: active ? COLOR.onInk : COLOR.ink,
                                         border: 'none',
                                         borderRadius: 14,
                                         padding: '14px 16px',
@@ -521,7 +514,7 @@ export function MobileFind() {
                                         textAlign: 'left',
                                     }}
                                 >
-                                    <div style={{ fontSize: 16, fontWeight: 700 }}>{top}</div>
+                                    <div style={{ fontSize: 16, fontWeight: 600 }}>{top}</div>
                                     <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{bot}</div>
                                 </button>
                             );
@@ -537,10 +530,11 @@ export function MobileFind() {
                             return (
                                 <button
                                     key={off}
+                                    aria-pressed={active}
                                     onClick={() => { setDayOffset(off); setCustomDate(null); }}
                                     style={{
-                                        background: active ? '#0E0E0E' : '#F4F4F2',
-                                        color: active ? '#fff' : '#0E0E0E',
+                                        background: active ? COLOR.ink : COLOR.sunken,
+                                        color: active ? COLOR.onInk : COLOR.ink,
                                         border: 'none',
                                         borderRadius: 12,
                                         padding: '10px 12px',
@@ -551,8 +545,8 @@ export function MobileFind() {
                                         minWidth: 64,
                                     }}
                                 >
-                                    <div style={{ fontSize: 12, fontWeight: 700 }}>{wd}</div>
-                                    <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{dayLabel}</div>
+                                    <div style={{ fontSize: 12, fontWeight: 600 }}>{wd}</div>
+                                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{dayLabel}</div>
                                 </button>
                             );
                         })}
@@ -562,8 +556,8 @@ export function MobileFind() {
                             popping the OS date picker on tap. */}
                         <label
                             style={{
-                                background: dayOffset === -1 ? '#0E0E0E' : '#F4F4F2',
-                                color: dayOffset === -1 ? '#fff' : '#0E0E0E',
+                                background: dayOffset === -1 ? COLOR.ink : COLOR.sunken,
+                                color: dayOffset === -1 ? COLOR.onInk : COLOR.ink,
                                 borderRadius: 12,
                                 padding: '10px 12px',
                                 cursor: 'pointer',
@@ -574,8 +568,10 @@ export function MobileFind() {
                                 position: 'relative',
                             }}
                         >
-                            <div style={{ fontSize: 12, fontWeight: 700 }}>📅 Другой</div>
-                            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <CalendarDays size={14} aria-hidden="true" /> Другой
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
                                 {dayOffset === -1 && customDate
                                     ? fmtDate(customDate, 'd MMM', { locale: ru })
                                     : 'день'}
@@ -615,20 +611,22 @@ export function MobileFind() {
                             return (
                                 <button
                                     key={d}
+                                    aria-pressed={active}
                                     onClick={() => setDuration(d)}
                                     style={{
-                                        background: active ? '#0E0E0E' : '#F4F4F2',
-                                        color: active ? '#fff' : '#0E0E0E',
+                                        background: active ? COLOR.ink : COLOR.sunken,
+                                        color: active ? COLOR.onInk : COLOR.ink,
                                         border: 'none',
                                         borderRadius: 12,
-                                        padding: '10px 16px',
+                                        minHeight: 44,
+                                        padding: '0 16px',
                                         cursor: 'pointer',
                                         fontFamily: 'inherit',
                                         flex: '0 0 auto',
                                     }}
                                 >
-                                    <span style={{ fontWeight: 700, fontSize: 14 }}>
-                                        {d % 60 === 0 ? `${d / 60}ч` : `${(d / 60).toFixed(1)}ч`}
+                                    <span style={{ fontWeight: 600, fontSize: 14 }}>
+                                        {formatBookingDuration(d)}
                                     </span>
                                 </button>
                             );
@@ -657,7 +655,7 @@ export function MobileFind() {
                         <CheckCard
                             checked={spaces.has('individual')}
                             onClick={() => toggleSpace('individual')}
-                            title="Индивид"
+                            title="Кабинет"
                             sub="до 4 чел."
                         />
                         <CheckCard
@@ -678,7 +676,7 @@ export function MobileFind() {
                 {/* Results. Чипы — только когда занятость загружена: пока
                     грузится — заглушки, при сбое — ошибка с «Повторить». */}
                 <div style={{ padding: '0 16px' }}>
-                    <SectionTitle>
+                    <SectionTitle live>
                         {!occupancyReady
                             ? (occupancyStatus === 'error' ? 'Занятость не загрузилась' : 'Проверяем занятость…')
                             : slots.length === 0 ? 'Свободных окон нет' : `Найдено: ${slots.length}`}
@@ -689,7 +687,7 @@ export function MobileFind() {
                     {chipsBusy && (
                         <div role="status" style={{
                             display: 'flex', alignItems: 'center', gap: 6,
-                            fontSize: 13, color: '#666', marginBottom: 8,
+                            fontSize: 13, color: COLOR.ink60, marginBottom: 8,
                         }}>
                             <Loader2 size={14} className="animate-spin" />
                             {linking ? 'Создаём бронь и привязываем…' : 'Переносим…'}
@@ -698,7 +696,7 @@ export function MobileFind() {
                     {occupancyStatus === 'error' && (
                         <LoadErrorCard
                             title="Не удалось проверить, что свободно"
-                            text="Без этого легко выбрать уже занятое время. Подожди немного и повтори."
+                            text="Без этого легко выбрать уже занятое время. Подождите немного и нажмите «Повторить»."
                             onRetry={() => { fetchBookings(); }}
                         />
                     )}
@@ -713,8 +711,8 @@ export function MobileFind() {
                             <div
                                 key={s.startMin}
                                 style={{
-                                    background: '#fff',
-                                    border: '1px solid rgba(0,0,0,0.10)',
+                                    background: COLOR.card,
+                                    border: `1px solid ${COLOR.ink10}`,
                                     borderRadius: 14,
                                     padding: '12px 14px',
                                     display: 'flex',
@@ -722,7 +720,7 @@ export function MobileFind() {
                                     gap: 8,
                                 }}
                             >
-                                <div style={{ fontSize: 18, fontWeight: 700, color: '#0E0E0E' }}>
+                                <div style={{ fontSize: 18, fontWeight: 600, color: COLOR.ink }}>
                                     {minsToHm(s.startMin)}
                                 </div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -737,43 +735,45 @@ export function MobileFind() {
                                                 disabled={chipsBusy}
                                                 aria-busy={isPending || undefined}
                                                 className="press"
-                                                title={isReRent ? 'Слот на переаренде — кто-то освободил, можно забрать' : undefined}
+                                                title={isReRent ? 'Слот на пересдаче — кто-то освободил, можно забрать' : undefined}
                                                 style={{
-                                                    // Переаренда — amber-обводка вместо
+                                                    // Пересдача — янтарная обводка вместо
                                                     // чёрной заливки: визуально «особый»
                                                     // слот, отличается от обычных свободных.
-                                                    background: isReRent ? '#FFF7E6' : '#0E0E0E',
-                                                    color: isReRent ? '#8A5A00' : '#fff',
-                                                    border: isReRent ? '1px solid #F2C94C' : 'none',
+                                                    background: isReRent ? STATUS.pending.bg : COLOR.ink,
+                                                    color: isReRent ? STATUS.pending.fg : COLOR.onInk,
+                                                    border: isReRent ? `1px solid ${STATUS.pending.fg}4D` : 'none',
                                                     borderRadius: 999,
-                                                    padding: '7px 12px',
-                                                    fontSize: 12,
-                                                    fontWeight: 700,
+                                                    // Главный тап брони — цель 44 px (было 32).
+                                                    minHeight: 44,
+                                                    padding: '0 14px',
+                                                    fontSize: 14,
+                                                    fontWeight: 600,
                                                     cursor: chipsBusy ? 'default' : 'pointer',
                                                     fontFamily: 'inherit',
                                                     display: 'inline-flex',
                                                     alignItems: 'center',
-                                                    gap: 5,
+                                                    gap: 6,
                                                     // Пока идёт запрос — все чипы
                                                     // неактивны, нажатый остаётся ярким.
                                                     opacity: chipsBusy && !isPending ? 0.5 : 1,
                                                     pointerEvents: chipsBusy ? 'none' : undefined,
                                                 }}
                                             >
-                                                {isReRent && <Repeat size={11} />}
+                                                {isReRent && <Repeat size={14} aria-hidden="true" />}
                                                 {r?.name ?? rid}
                                                 {/* Ставка прямо на чипе: цена не должна
                                                     появляться впервые только на оформлении. */}
                                                 {r?.hourlyRate != null && (
-                                                    <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.75 }}>
-                                                        {r.hourlyRate}₾/ч
+                                                    <span style={{ fontSize: 12, fontWeight: 500 }}>
+                                                        {formatGel(r.hourlyRate)}/ч
                                                     </span>
                                                 )}
                                                 {isPending
                                                     ? <Loader2 size={11} className="animate-spin" />
                                                     : isReRent
-                                                        ? <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>переаренда</span>
-                                                        : <ArrowRight size={11} />}
+                                                        ? <span style={{ fontSize: 12, fontWeight: 600 }}>пересдача</span>
+                                                        : <ArrowRight size={14} aria-hidden="true" />}
                                             </button>
                                         );
                                     })}
@@ -782,28 +782,18 @@ export function MobileFind() {
                         ))}
                     </div>
                     {occupancyReady && slots.length === 0 && (locs.size === 0 || spaces.size === 0) && (
-                        <div style={{
-                            background: '#F4F4F2',
-                            borderRadius: 14,
-                            padding: 18,
-                            textAlign: 'center',
-                            color: '#666',
-                            fontSize: 14,
-                        }}>
-                            Выбери хотя бы одну локацию и тип помещения.
-                        </div>
+                        <EmptyState
+                            compact
+                            title="Не выбрано, где искать"
+                            hint="Выберите хотя бы один центр и тип помещения."
+                        />
                     )}
                     {occupancyReady && slots.length === 0 && locs.size > 0 && spaces.size > 0 && (
-                        <div style={{
-                            background: '#F4F4F2',
-                            borderRadius: 14,
-                            padding: 18,
-                            textAlign: 'center',
-                            color: '#666',
-                            fontSize: 14,
-                        }}>
-                            Попробуй другой день, длительность или фильтры.
-                        </div>
+                        <EmptyState
+                            compact
+                            title="В этот день всё занято"
+                            hint="Попробуйте другой день, длительность или фильтры."
+                        />
                     )}
                 </div>
             </div>
@@ -817,8 +807,8 @@ export function MobileFind() {
                 width: '100%',
                 maxWidth: 480,
                 padding: '8px 16px',
-                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 30%)',
-                zIndex: 90,
+                background: `linear-gradient(to bottom, ${COLOR.card}00 0%, ${COLOR.card} 30%)`,
+                zIndex: Z.sticky,
                 pointerEvents: 'none',
             }}>
                 <button
@@ -826,9 +816,9 @@ export function MobileFind() {
                     style={{
                         pointerEvents: 'auto',
                         width: '100%',
-                        background: '#fff',
-                        color: '#0E0E0E',
-                        border: '1px solid #0E0E0E',
+                        background: COLOR.card,
+                        color: COLOR.ink,
+                        border: `1px solid ${COLOR.ink}`,
                         borderRadius: 12,
                         padding: '12px 18px',
                         display: 'flex',
@@ -838,8 +828,8 @@ export function MobileFind() {
                         cursor: 'pointer',
                         fontFamily: 'inherit',
                         fontSize: 14,
-                        fontWeight: 700,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+                        fontWeight: 600,
+                        boxShadow: `0 4px 16px ${COLOR.ink05}`,
                     }}
                 >
                     Календарь
@@ -859,14 +849,15 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
     );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+/** live — диктор зачитывает изменения («Найдено: 13»). */
+function SectionTitle({ children, live }: { children: React.ReactNode; live?: boolean }) {
     return (
-        <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.12em',
+        <div aria-live={live ? 'polite' : undefined} style={{
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: '0.06em',
             textTransform: 'uppercase',
-            color: '#999',
+            color: COLOR.ink60,
             marginBottom: 8,
         }}>{children}</div>
     );
@@ -898,10 +889,11 @@ function CheckCard({ checked, onClick, title, sub }: {
     return (
         <button
             onClick={onClick}
+            aria-pressed={checked}
             style={{
-                background: '#fff',
-                color: '#0E0E0E',
-                border: `1px solid ${checked ? '#0E0E0E' : 'rgba(0,0,0,0.10)'}`,
+                background: COLOR.card,
+                color: COLOR.ink,
+                border: `1px solid ${checked ? COLOR.ink : COLOR.ink10}`,
                 borderRadius: 12,
                 padding: '12px 12px 12px 14px',
                 cursor: 'pointer',
@@ -914,11 +906,11 @@ function CheckCard({ checked, onClick, title, sub }: {
             }}
         >
             <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>
                     {title}
                 </div>
                 {sub && (
-                    <div style={{ fontSize: 11, color: '#666', marginTop: 2, lineHeight: 1.3 }}>
+                    <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2, lineHeight: 1.3 }}>
                         {sub}
                     </div>
                 )}
@@ -926,10 +918,10 @@ function CheckCard({ checked, onClick, title, sub }: {
             <div style={{
                 width: 20, height: 20,
                 borderRadius: 6,
-                border: `1.5px solid ${checked ? '#0E0E0E' : 'rgba(0,0,0,0.20)'}`,
-                background: checked ? '#0E0E0E' : 'transparent',
+                border: `1.5px solid ${checked ? COLOR.ink : COLOR.ink20}`,
+                background: checked ? COLOR.ink : 'transparent',
                 display: 'grid', placeItems: 'center',
-                color: '#fff',
+                color: COLOR.onInk,
                 flexShrink: 0,
                 marginTop: 1,
             }}>
@@ -938,6 +930,20 @@ function CheckCard({ checked, onClick, title, sub }: {
         </button>
     );
 }
+
+/** Крестик в плашке режима — цель касания 44×44. */
+const bannerCloseBtn: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    width: 44,
+    height: 44,
+    margin: '-10px -8px -10px 0',
+    padding: 0,
+    flexShrink: 0,
+    display: 'grid',
+    placeItems: 'center',
+};
 
 // ─── availability math ────────────────────────────────────────────
 function minsToHHMM(m: number) {

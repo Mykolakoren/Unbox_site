@@ -1,4 +1,5 @@
 import { Loader2, ArrowDown } from 'lucide-react';
+import { COLOR } from '../../design/tokens';
 
 /**
  * Pull-to-refresh visual: shows arrow while pulling, then spinner while
@@ -17,7 +18,7 @@ export function PullIndicator({ distance, willRefresh, refreshing }: {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: willRefresh ? '#0E0E0E' : '#999',
+            color: willRefresh ? COLOR.ink : COLOR.ink60,
             opacity: visible ? opacity : 0,
             transition: refreshing ? 'height 0.2s ease' : undefined,
             fontSize: 12,
@@ -25,8 +26,8 @@ export function PullIndicator({ distance, willRefresh, refreshing }: {
             gap: 6,
         }}>
             {refreshing
-                ? <><Loader2 size={14} className="animate-spin" /> Обновляю</>
-                : <><ArrowDown size={14} style={{ transform: willRefresh ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} /> {willRefresh ? 'Отпусти' : 'Потяни'}</>
+                ? <><Loader2 size={14} className="animate-spin" /> Обновляем</>
+                : <><ArrowDown size={14} style={{ transform: willRefresh ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} /> {willRefresh ? 'Отпустите' : 'Потяните'}</>
             }
         </div>
     );

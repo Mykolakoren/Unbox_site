@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Download, Share, X, ArrowDown } from 'lucide-react';
+import { COLOR } from '../../design/tokens';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button } from '../../components/ui/Button';
 
 const DISMISS_KEY = 'unbox.mobile.installDismissedAt';
 const DISMISS_TTL_MS = 7 * 24 * 3600 * 1000; // remind a week later
@@ -79,11 +82,9 @@ export function InstallBanner() {
 
     if (hidden) return null;
 
-    const subText = hint === 'ios'
-        ? 'Тапни сюда — покажу как (за 3 шага)'
-        : hint === 'samsung'
-            ? 'Тапни сюда — покажу как (за 3 шага)'
-            : 'Откроется как приложение, без рамок браузера';
+    const subText = hint
+        ? 'Нажмите — покажем как, за 3 шага'
+        : 'Откроется как приложение, без рамок браузера';
 
     const showInstallButton = !hint && deferred;
 
@@ -91,10 +92,13 @@ export function InstallBanner() {
         <>
             <div
                 onClick={hint ? () => setHelpOpen(true) : undefined}
+                role={hint ? 'button' : undefined}
+                tabIndex={hint ? 0 : undefined}
+                onKeyDown={hint ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHelpOpen(true); } } : undefined}
                 style={{
                     margin: '12px 16px 0',
-                    background: '#0E0E0E',
-                    color: '#fff',
+                    background: COLOR.ink,
+                    color: COLOR.onInk,
                     borderRadius: 14,
                     padding: '14px 16px',
                     display: 'flex',
@@ -106,17 +110,17 @@ export function InstallBanner() {
                 <div style={{
                     width: 38, height: 38,
                     borderRadius: 10,
-                    background: 'rgba(255,255,255,0.12)',
+                    background: `${COLOR.onInk}1F`,
                     display: 'grid', placeItems: 'center',
                     flexShrink: 0,
                 }}>
                     {hint ? <Share size={18} /> : <Download size={18} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2 }}>
-                        Поставь на главный экран
+                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2 }}>
+                        Добавьте на главный экран
                     </div>
-                    <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2, lineHeight: 1.3 }}>
+                    <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2, lineHeight: 1.3 }}>
                         {subText}
                     </div>
                 </div>
@@ -124,13 +128,14 @@ export function InstallBanner() {
                     <button
                         onClick={(e) => { e.stopPropagation(); install(); }}
                         style={{
-                            background: '#fff',
-                            color: '#0E0E0E',
+                            background: COLOR.card,
+                            color: COLOR.ink,
                             border: 'none',
                             borderRadius: 10,
-                            padding: '8px 14px',
+                            minHeight: 44,
+                            padding: '0 14px',
                             fontSize: 13,
-                            fontWeight: 700,
+                            fontWeight: 600,
                             cursor: 'pointer',
                             fontFamily: 'inherit',
                         }}
@@ -145,17 +150,21 @@ export function InstallBanner() {
                         background: 'transparent',
                         border: 'none',
                         cursor: 'pointer',
-                        color: 'rgba(255,255,255,0.6)',
-                        padding: 4,
+                        color: `${COLOR.onInk}B3`,
+                        // Цель касания 44×44; отрицательный отступ — плашка не растёт.
+                        width: 44, height: 44,
+                        margin: '-10px -10px -10px 0',
+                        padding: 0,
+                        display: 'grid', placeItems: 'center',
                         flexShrink: 0,
                     }}
                 >
-                    <X size={16} />
+                    <X size={18} />
                 </button>
             </div>
 
-            {helpOpen && hint && (
-                <InstallHelpSheet hint={hint} onClose={() => setHelpOpen(false)} />
+            {hint && (
+                <InstallHelpSheet open={helpOpen} hint={hint} onClose={() => setHelpOpen(false)} />
             )}
         </>
     );
@@ -169,119 +178,66 @@ export function InstallBanner() {
  * install button. Here each step is a numbered card with a visual cue
  * pointing at the actual control they need to use.
  */
-function InstallHelpSheet({ hint, onClose }: { hint: 'ios' | 'samsung'; onClose: () => void }) {
+function InstallHelpSheet({ open, hint, onClose }: { open: boolean; hint: 'ios' | 'samsung'; onClose: () => void }) {
+    // Wave 1: общая шторка Sheet (Esc, свайп вниз, фокус, выше нижнего меню).
     return (
-        <div
-            onClick={onClose}
-            style={{
-                position: 'fixed', inset: 0,
-                background: 'rgba(0,0,0,0.6)',
-                zIndex: 220,
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'center',
-            }}
+        <Sheet
+            open={open}
+            onClose={onClose}
+            title="Добавьте Unbox на главный экран"
+            description="Откроется как настоящее приложение, без рамок браузера."
+            footer={<Button block onClick={onClose}>Понятно</Button>}
         >
-            <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                    width: '100%',
-                    maxWidth: 480,
-                    background: '#fff',
-                    borderRadius: '20px 20px 0 0',
-                    padding: 22,
-                    paddingBottom: 'calc(22px + env(safe-area-inset-bottom, 0px))',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 16,
-                    maxHeight: '85vh',
-                    overflow: 'auto',
-                }}
-            >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                        <h3 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
-                            Поставь Unbox на главный экран
-                        </h3>
-                        <p style={{ fontSize: 13, color: '#666', margin: '6px 0 0' }}>
-                            Откроется как настоящее приложение, без рамок браузера.
-                        </p>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        aria-label="Закрыть"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#666', padding: 4 }}
-                    >
-                        <X size={22} />
-                    </button>
-                </div>
-
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {hint === 'ios' ? (
                     <>
                         <Step
                             n={1}
-                            title="Найди кнопку «Поделиться» внизу Safari"
+                            title="Найдите кнопку «Поделиться» внизу Safari"
                             body={
-                                <span>Это квадратик со стрелкой вверх (<span style={{ display: 'inline-flex', verticalAlign: 'middle', width: 22, height: 22, borderRadius: 4, background: '#F4F4F2', alignItems: 'center', justifyContent: 'center' }}>􀈂</span>) в нижней панели браузера.</span>
+                                <span>Это квадратик со стрелкой вверх (<Share size={14} aria-hidden="true" style={{ verticalAlign: '-2px' }} />) в нижней панели браузера.</span>
                             }
                         />
                         <Step
                             n={2}
-                            title={'Прокрути меню вниз и выбери «На экран „Домой"»'}
-                            body="Если такого пункта нет — листай ниже, он внизу списка."
+                            title={'Прокрутите меню вниз и выберите «На экран „Домой"»'}
+                            body="Если такого пункта не видно — пролистайте ниже, он внизу списка."
                         />
                         <Step
                             n={3}
-                            title="Тапни «Добавить» в правом верхнем углу"
-                            body="На главном экране появится иконка Unbox. Открывай её — это твой мобильный кабинет."
+                            title="Нажмите «Добавить» в правом верхнем углу"
+                            body="На главном экране появится значок Unbox. Открывайте его — это ваш мобильный кабинет."
                         />
-                        <ArrowHint label="Кнопка «Поделиться» — внизу экрана, тыкаем туда" />
+                        <ArrowHint label="Кнопка «Поделиться» — внизу экрана" />
                     </>
                 ) : (
                     <>
                         <Step
                             n={1}
-                            title="Открой меню Samsung Internet"
+                            title="Откройте меню Samsung Internet"
                             body={'Это три полоски (≡) в правом нижнем углу.'}
                         />
                         <Step
                             n={2}
-                            title="Выбери «Добавить страницу на»"
+                            title="Выберите «Добавить страницу на»"
                             body="Появится подменю с вариантами."
                         />
                         <Step
                             n={3}
-                            title="Тапни «Главный экран»"
-                            body="Если будет диалог Play Защиты — выбери «Все равно установить» или открой ту же ссылку в Chrome (там процесс чище)."
+                            title="Нажмите «Главный экран»"
+                            body="Если появится окно Play Защиты — выберите «Все равно установить» или откройте ту же ссылку в Chrome (там установка проще)."
                         />
                     </>
                 )}
-
-                <button
-                    onClick={onClose}
-                    style={{
-                        background: '#0E0E0E',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 12,
-                        padding: '14px 18px',
-                        fontSize: 14, fontWeight: 700,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        marginTop: 6,
-                    }}
-                >
-                    Понятно
-                </button>
             </div>
-        </div>
+        </Sheet>
     );
 }
 
 function Step({ n, title, body }: { n: number; title: string; body: React.ReactNode }) {
     return (
         <div style={{
-            background: '#F4F4F2',
+            background: COLOR.sunken,
             borderRadius: 12,
             padding: '12px 14px',
             display: 'flex',
@@ -291,18 +247,18 @@ function Step({ n, title, body }: { n: number; title: string; body: React.ReactN
                 flexShrink: 0,
                 width: 28, height: 28,
                 borderRadius: 999,
-                background: '#0E0E0E',
-                color: '#fff',
+                background: COLOR.ink,
+                color: COLOR.onInk,
                 display: 'grid', placeItems: 'center',
-                fontSize: 14, fontWeight: 700,
+                fontSize: 14, fontWeight: 600,
             }}>
                 {n}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.3 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>
                     {title}
                 </div>
-                <div style={{ fontSize: 12, color: '#666', marginTop: 4, lineHeight: 1.45 }}>
+                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 4, lineHeight: 1.45 }}>
                     {body}
                 </div>
             </div>
@@ -322,13 +278,12 @@ function ArrowHint({ label }: { label: string }) {
             alignItems: 'center',
             gap: 6,
             padding: '8px 0',
-            color: '#0E0E0E',
+            color: COLOR.ink,
         }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#666', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.ink60, textAlign: 'center' }}>
                 {label}
             </div>
-            <ArrowDown size={28} strokeWidth={2.4} />
-            <div style={{ fontSize: 11, color: '#999' }}>↓ ↓ ↓</div>
+            <ArrowDown size={28} strokeWidth={2.4} aria-hidden="true" />
         </div>
     );
 }

@@ -3,7 +3,7 @@ import { formatChargeAt } from '../../utils/chargeTime';
 import { useNavigate } from 'react-router-dom';
 import { format as fmtDate, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { ArrowLeft, Check, Clock, MapPin, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Clock, Hourglass, MapPin, Loader2, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../../store/userStore';
 import { useBookingStore } from '../../store/bookingStore';
@@ -22,6 +22,11 @@ import type { Format } from '../../types';
 import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard, SPECIALIST_APPLICATION_PATH } from '../../components/SpecialistGate';
+import { COLOR, STATUS, Z } from '../../design/tokens';
+import { formatDateLabel, formatGel, formatTime } from '../../utils/format';
+import { formatBookingDuration } from '../../utils/bookingHelpers';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button } from '../../components/ui/Button';
 
 /** Отказ require_can_book: «бронирование только для специалистов, подайте
  *  анкету». Узнаём по 403 и тексту, чтобы не спутать с другими 403. */
@@ -361,13 +366,13 @@ export function MobileCheckout() {
     // При абонементе деньгами идут только пиковая надбавка и допуслуги.
     const subMoney = peakTotal + extrasTotal;
     const subMoneyNote = subMoney > 0
-        ? ` (+${subMoney.toFixed(0)} ₾ ${peakTotal > 0 && extrasTotal > 0 ? 'за пиковые часы и допуслуги' : peakTotal > 0 ? 'за пиковые часы' : 'за допуслуги'})`
+        ? ` (+${formatGel(subMoney, { fraction: 0 })} ${peakTotal > 0 && extrasTotal > 0 ? 'за пиковые часы и допуслуги' : peakTotal > 0 ? 'за пиковые часы' : 'за допуслуги'})`
         : '';
     const payLabel = payMethod === 'bonus'
         ? `${fmtHours(totalDurationHours)} из бонусов`
         : payMethod === 'subscription'
-            ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${subMoney.toFixed(0)} ₾` : ''}`
-            : `${priced.total.toFixed(0)} ₾`;
+            ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney, { fraction: 0 })}` : ''}`
+            : formatGel(priced.total, { fraction: 0 });
     const payName = payMethod === 'bonus' ? 'бонусные часы' : payMethod === 'subscription' ? 'абонемент' : 'баланс';
     const payChoices = (['bonus', 'subscription', 'balance'] as PayMethod[])
         .filter(m => isSelectable(m, plan, isSeries)).length;
@@ -378,7 +383,7 @@ export function MobileCheckout() {
     const createSeries = async (skipConflicts: boolean) => {
         if (!firstSlot) return;
         if (effectiveOccurrences < 1) {
-            toast.error('Выбери число повторов или дату «до»');
+            toast.error('Выберите число повторов или дату «до»');
             return;
         }
         setSubmitting(true);
@@ -405,7 +410,7 @@ export function MobileCheckout() {
                 ? ` · пропущено занятых: ${result.skipped.length}`
                 : '';
             toast.success(
-                `Серия создана: ${result.created} ${ruPlural(result.created, ['сессия', 'сессии', 'сессий'])} · ${result.totalCost.toFixed(0)} ₾${skippedNote}`,
+                `Серия создана: ${result.created} ${ruPlural(result.created, ['сессия', 'сессии', 'сессий'])} · ${formatGel(result.totalCost, { fraction: 0 })}${skippedNote}`,
                 { duration: 6000 },
             );
             // Navigate immediately — the toast container lives at app
@@ -451,7 +456,8 @@ export function MobileCheckout() {
             const limit = effectiveUser.creditLimit ?? 0;
             if (projected < -limit) {
                 const shortfall = Math.abs(projected + limit);
-                toast.error(`Не хватает ${shortfall.toFixed(0)} ₾. Пополни баланс или попроси админа поднять кредитный лимит.`, { duration: 6000 });
+                const shortfallGel = formatGel(shortfall, { fraction: 0 });
+                toast.error(`Не хватает ${shortfallGel}. Пополните баланс или попросите администратора поднять кредитный лимит.`, { duration: 6000 });
                 return;
             }
         }
@@ -498,7 +504,7 @@ export function MobileCheckout() {
                 setConfirmed(true);
                 if ((created as any).status === 'pending_approval') {
                     toast.success(
-                        '⏳ Заявка отправлена на согласование. Админ одобрит её в ближайшее время — мы пришлём уведомление.',
+                        'Заявка отправлена на согласование. Администратор одобрит её в ближайшее время — мы пришлём уведомление.',
                         { duration: 7000 },
                     );
                 } else {
@@ -549,18 +555,19 @@ export function MobileCheckout() {
                 <div style={{ padding: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <button
                         onClick={() => navigate(-1)}
+                        aria-label="Назад"
                         style={{
-                            background: '#F4F4F2',
+                            background: COLOR.sunken,
                             border: 'none',
                             borderRadius: 10,
-                            width: 36, height: 36,
+                            width: 44, height: 44,
                             display: 'grid', placeItems: 'center',
                             cursor: 'pointer',
                         }}
                     >
                         <ArrowLeft size={18} />
                     </button>
-                    <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
+                    <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', margin: 0 }}>
                         Подтверждение
                     </h1>
                 </div>
@@ -574,19 +581,19 @@ export function MobileCheckout() {
                 {/* Admin-proxy specialist picker — visible only to admins. */}
                 {isAdminActor && specialistChoices.length > 0 && (
                     <div style={{ padding: '0 16px' }}>
-                        <Section title="За кого бронируешь?">
+                        <Section title="За кого бронируете?">
                             <select
                                 value={state.bookingForUser || ''}
                                 onChange={e => useBookingStore.setState({ bookingForUser: e.target.value || null })}
                                 style={{
                                     width: '100%',
-                                    background: '#fff',
-                                    border: '1px solid rgba(0,0,0,0.10)',
+                                    background: COLOR.card,
+                                    border: `1px solid ${COLOR.ink10}`,
                                     borderRadius: 12,
                                     padding: '12px 14px',
                                     fontSize: 16,
                                     fontFamily: 'inherit',
-                                    color: '#0E0E0E',
+                                    color: COLOR.ink,
                                     appearance: 'none',
                                     WebkitAppearance: 'none',
                                 }}
@@ -599,7 +606,7 @@ export function MobileCheckout() {
                                     ))}
                             </select>
                             {state.bookingForUser && (
-                                <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
+                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 6 }}>
                                     Списание/абонемент уйдут с {effectiveUser?.name || state.bookingForUser}.
                                 </div>
                             )}
@@ -611,21 +618,22 @@ export function MobileCheckout() {
                 {isHotBooking && (
                     <div style={{ padding: '0 16px' }}>
                         <div style={{
-                            background: '#FEF3C7',
-                            border: '1px solid #FCD34D',
-                            color: '#8A5A00',
+                            background: STATUS.pending.bg,
+                            border: `1px solid ${STATUS.pending.fg}33`,
+                            color: STATUS.pending.fg,
                             borderRadius: 12,
                             padding: '10px 12px',
                             fontSize: 13,
                             lineHeight: 1.4,
                         }}>
-                            ⏳ <b>{(() => {
+                            <Hourglass size={14} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4 }} />
+                            <b>{(() => {
                                 const f = priced.items[0];
                                 if (!f) return 'Скоро старт';
                                 const d = f.start.getDay();
-                                return (d === 0 || d === 6) ? 'Меньше 24ч до старта (выходной)' : 'Меньше 12ч до старта';
-                            })()}</b> — бронь уйдёт админу на одобрение.
-                            Слот закрепится за тобой только после подтверждения.
+                                return (d === 0 || d === 6) ? 'Меньше 24 ч до начала (выходной)' : 'Меньше 12 ч до начала';
+                            })()}</b> — бронь уйдёт администратору на одобрение.
+                            Слот закрепится за вами только после подтверждения.
                         </div>
                     </div>
                 )}
@@ -636,29 +644,29 @@ export function MobileCheckout() {
                     with the same date/duration so user can re-pick. */}
                 <div style={{ padding: '0 16px' }}>
                     <div style={{
-                        background: '#0E0E0E',
-                        color: '#fff',
+                        background: COLOR.ink,
+                        color: COLOR.onInk,
                         borderRadius: 14,
                         padding: 16,
                         display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                            {fmtDate(state.date, 'EEEE, d MMMM', { locale: ru })}
+                        <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            {formatDateLabel(state.date)}
                         </div>
-                        <div style={{ fontSize: 20, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontSize: 20, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Clock size={18} />
-                            {firstSlot.startTime}–{priced.items[priced.items.length - 1].end.toTimeString().slice(0, 5)}
+                            {firstSlot.startTime}–{formatTime(priced.items[priced.items.length - 1].end)}
                             <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.7 }}>
-                                · {totalDurationHours.toFixed(1)}ч
+                                · {formatBookingDuration(Math.round(totalDurationHours * 60))}
                             </span>
                         </div>
                         <div style={{
                             fontSize: 15,
-                            fontWeight: 700,
+                            fontWeight: 600,
                             display: 'flex',
                             alignItems: 'center',
                             gap: 6,
-                            background: 'rgba(255,255,255,0.10)',
+                            background: `${COLOR.onInk}1A`,
                             padding: '8px 10px',
                             borderRadius: 8,
                         }}>
@@ -671,11 +679,12 @@ export function MobileCheckout() {
                                 marginTop: 2,
                                 alignSelf: 'flex-start',
                                 background: 'transparent',
-                                color: '#fff',
-                                border: '1px solid rgba(255,255,255,0.30)',
+                                color: COLOR.onInk,
+                                border: `1px solid ${COLOR.onInk}4D`,
                                 borderRadius: 8,
-                                padding: '6px 10px',
-                                fontSize: 11,
+                                minHeight: 44,
+                                padding: '0 12px',
+                                fontSize: 12,
                                 fontWeight: 600,
                                 cursor: 'pointer',
                                 fontFamily: 'inherit',
@@ -695,8 +704,8 @@ export function MobileCheckout() {
                             onChange={e => setSelectedCrmClientId(e.target.value)}
                             style={{
                                 width: '100%', padding: '12px 14px', borderRadius: 12,
-                                border: '1px solid rgba(0,0,0,0.12)', background: '#fff',
-                                fontFamily: 'inherit', fontSize: 14, color: '#0E0E0E',
+                                border: `1px solid ${COLOR.ink10}`, background: COLOR.card,
+                                fontFamily: 'inherit', fontSize: 14, color: COLOR.ink,
                             }}
                         >
                             <option value="">Без привязки к клиенту</option>
@@ -704,7 +713,7 @@ export function MobileCheckout() {
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                         </select>
-                        <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+                        <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 8 }}>
                             Бронь будет помечена клиентом — видно в шахматке и в CRM.
                         </div>
                     </Section>
@@ -719,29 +728,31 @@ export function MobileCheckout() {
                                 <button
                                     onClick={() => applyTime(curStartMin - 30, curDurMin)}
                                     disabled={!isFree(curStartMin - 30, curDurMin)}
+                                    aria-label="Начать на 30 минут раньше"
                                     style={{
-                                        width: 96, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
-                                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                                        border: '1px solid rgba(0,0,0,0.12)', background: '#fff',
+                                        width: 96, minHeight: 44, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
+                                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                                        border: `1px solid ${COLOR.ink10}`, background: COLOR.card,
                                         opacity: isFree(curStartMin - 30, curDurMin) ? 1 : 0.35,
                                     }}
-                                >− 30 мин</button>
+                                >← Раньше</button>
                                 <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+                                    <div style={{ fontSize: 22, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                                         {mmToHHMM(curStartMin)}–{mmToHHMM(curStartMin + curDurMin)}
                                     </div>
-                                    <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>начало · окончание</div>
+                                    <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>начало · окончание</div>
                                 </div>
                                 <button
                                     onClick={() => applyTime(curStartMin + 30, curDurMin)}
                                     disabled={!isFree(curStartMin + 30, curDurMin)}
+                                    aria-label="Начать на 30 минут позже"
                                     style={{
-                                        width: 96, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
-                                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                                        border: '1px solid rgba(0,0,0,0.12)', background: '#fff',
+                                        width: 96, minHeight: 44, padding: '12px 0', borderRadius: 12, fontFamily: 'inherit',
+                                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                                        border: `1px solid ${COLOR.ink10}`, background: COLOR.card,
                                         opacity: isFree(curStartMin + 30, curDurMin) ? 1 : 0.35,
                                     }}
-                                >+ 30 мин</button>
+                                >Позже →</button>
                             </div>
                             <div style={{ display: 'flex', gap: 8 }}>
                                 {[60, 90, 120, 180].map(d => {
@@ -752,21 +763,22 @@ export function MobileCheckout() {
                                             key={d}
                                             onClick={() => ok && applyTime(curStartMin, d)}
                                             disabled={!ok}
+                                            aria-pressed={active}
                                             style={{
-                                                flex: 1, padding: '12px 0', borderRadius: 12, cursor: ok ? 'pointer' : 'default',
-                                                fontFamily: 'inherit', fontSize: 14, fontWeight: 700,
-                                                border: active ? 'none' : '1px solid rgba(0,0,0,0.12)',
-                                                background: active ? '#0E0E0E' : '#fff',
-                                                color: active ? '#fff' : '#0E0E0E',
+                                                flex: 1, minHeight: 44, padding: '12px 0', borderRadius: 12, cursor: ok ? 'pointer' : 'default',
+                                                fontFamily: 'inherit', fontSize: 14, fontWeight: 600,
+                                                border: active ? 'none' : `1px solid ${COLOR.ink10}`,
+                                                background: active ? COLOR.ink : COLOR.card,
+                                                color: active ? COLOR.onInk : COLOR.ink,
                                                 opacity: ok ? 1 : 0.35,
                                             }}
                                         >
-                                            {d % 60 === 0 ? `${d / 60}ч` : `${Math.floor(d / 60)}.5ч`}
+                                            {formatBookingDuration(d)}
                                         </button>
                                     );
                                 })}
                             </div>
-                            <div style={{ fontSize: 12, color: '#888' }}>
+                            <div style={{ fontSize: 12, color: COLOR.ink60 }}>
                                 Серым — время, которое уже занято или выходит за 09:00–22:00.
                             </div>
                         </div>
@@ -792,11 +804,12 @@ export function MobileCheckout() {
                                 <button
                                     key={id}
                                     disabled={!supported}
+                                    aria-pressed={active}
                                     onClick={() => useBookingStore.setState({ format: id })}
                                     style={{
-                                        background: active ? '#0E0E0E' : '#fff',
-                                        color: active ? '#fff' : '#0E0E0E',
-                                        border: active ? 'none' : '1px solid rgba(0,0,0,0.10)',
+                                        background: active ? COLOR.ink : COLOR.card,
+                                        color: active ? COLOR.onInk : COLOR.ink,
+                                        border: active ? 'none' : `1px solid ${COLOR.ink10}`,
                                         borderRadius: 12,
                                         padding: '12px 8px',
                                         fontFamily: 'inherit',
@@ -806,8 +819,8 @@ export function MobileCheckout() {
                                         display: 'flex', flexDirection: 'column', gap: 2,
                                     }}
                                 >
-                                    <span style={{ fontSize: 12, fontWeight: 700 }}>{label}</span>
-                                    <span style={{ fontSize: 10, opacity: 0.7 }}>{sub}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
+                                    <span style={{ fontSize: 12, opacity: 0.7 }}>{sub}</span>
                                 </button>
                             );
                         })}
@@ -824,10 +837,12 @@ export function MobileCheckout() {
                                 return (
                                     <button
                                         key={e.id}
+                                        role="checkbox"
+                                        aria-checked={active}
                                         onClick={() => state.toggleExtra(e.id)}
                                         style={{
-                                            background: '#fff',
-                                            border: `1px solid ${active ? '#0E0E0E' : 'rgba(0,0,0,0.10)'}`,
+                                            background: COLOR.card,
+                                            border: `1px solid ${active ? COLOR.ink : COLOR.ink10}`,
                                             borderRadius: 12,
                                             padding: '12px 14px',
                                             display: 'flex',
@@ -836,22 +851,22 @@ export function MobileCheckout() {
                                             cursor: 'pointer',
                                             fontFamily: 'inherit',
                                             textAlign: 'left',
-                                            color: '#0E0E0E',
+                                            color: COLOR.ink,
                                         }}
                                     >
                                         <div style={{
                                             width: 22, height: 22,
                                             borderRadius: 6,
-                                            background: active ? '#0E0E0E' : 'transparent',
-                                            border: `1.5px solid ${active ? '#0E0E0E' : 'rgba(0,0,0,0.20)'}`,
+                                            background: active ? COLOR.ink : 'transparent',
+                                            border: `1.5px solid ${active ? COLOR.ink : COLOR.ink20}`,
                                             display: 'grid', placeItems: 'center',
-                                            color: '#fff',
+                                            color: COLOR.onInk,
                                             flexShrink: 0,
                                         }}>
                                             {active && <Check size={14} />}
                                         </div>
                                         <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{e.name}</span>
-                                        <span style={{ fontSize: 13, color: '#666' }}>+{e.price}₾</span>
+                                        <span style={{ fontSize: 13, color: COLOR.ink60 }}>{e.price > 0 ? `+${formatGel(e.price)}` : 'бесплатно'}</span>
                                     </button>
                                 );
                             })}
@@ -866,13 +881,14 @@ export function MobileCheckout() {
                         <button
                             onClick={() => setRecurOpen(true)}
                             style={{
-                                width: '100%', padding: '12px 14px', borderRadius: 12,
-                                border: '1px dashed rgba(0,0,0,0.18)', background: 'transparent',
+                                width: '100%', minHeight: 44, padding: '12px 14px', borderRadius: 12,
+                                border: `1px dashed ${COLOR.ink20}`, background: 'transparent',
                                 fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-                                color: '#555', cursor: 'pointer', textAlign: 'left',
+                                color: COLOR.ink80, cursor: 'pointer', textAlign: 'left',
+                                display: 'flex', alignItems: 'center', gap: 8,
                             }}
                         >
-                            🔁 Повторять регулярно →
+                            <Repeat size={16} aria-hidden="true" /> Повторять регулярно →
                         </button>
                     </div>
                 ) : (
@@ -888,17 +904,19 @@ export function MobileCheckout() {
                             return (
                                 <button
                                     key={id}
+                                    aria-pressed={active}
                                     onClick={() => setRecurPattern(id)}
                                     style={{
-                                        background: active ? '#0E0E0E' : '#F4F4F2',
-                                        color: active ? '#fff' : '#0E0E0E',
+                                        background: active ? COLOR.ink : COLOR.sunken,
+                                        color: active ? COLOR.onInk : COLOR.ink,
                                         border: 'none',
                                         borderRadius: 10,
-                                        padding: '8px 12px',
+                                        minHeight: 44,
+                                        padding: '0 12px',
                                         cursor: 'pointer',
                                         fontFamily: 'inherit',
                                         fontSize: 12,
-                                        fontWeight: 700,
+                                        fontWeight: 600,
                                     }}
                                 >
                                     {label}
@@ -919,18 +937,20 @@ export function MobileCheckout() {
                                     return (
                                         <button
                                             key={id}
+                                            aria-pressed={active}
                                             onClick={() => setRecurMode(id)}
                                             style={{
                                                 flex: 1,
-                                                background: active ? '#fff' : 'transparent',
-                                                color: '#0E0E0E',
-                                                border: `1px solid ${active ? '#0E0E0E' : 'rgba(0,0,0,0.12)'}`,
+                                                background: active ? COLOR.card : 'transparent',
+                                                color: COLOR.ink,
+                                                border: `1px solid ${active ? COLOR.ink : COLOR.ink10}`,
                                                 borderRadius: 10,
-                                                padding: '6px 10px',
+                                                minHeight: 44,
+                                                padding: '0 10px',
                                                 cursor: 'pointer',
                                                 fontFamily: 'inherit',
                                                 fontSize: 12,
-                                                fontWeight: 700,
+                                                fontWeight: 600,
                                             }}
                                         >
                                             {label}
@@ -946,17 +966,20 @@ export function MobileCheckout() {
                                         return (
                                             <button
                                                 key={n}
+                                                aria-pressed={active}
                                                 onClick={() => setRecurOccurrences(n)}
                                                 style={{
-                                                    background: active ? '#0E0E0E' : '#F4F4F2',
-                                                    color: active ? '#fff' : '#0E0E0E',
+                                                    background: active ? COLOR.ink : COLOR.sunken,
+                                                    color: active ? COLOR.onInk : COLOR.ink,
                                                     border: 'none',
                                                     borderRadius: 10,
-                                                    padding: '8px 14px',
+                                                    minWidth: 44,
+                                                    minHeight: 44,
+                                                    padding: '0 14px',
                                                     cursor: 'pointer',
                                                     fontFamily: 'inherit',
                                                     fontSize: 13,
-                                                    fontWeight: 700,
+                                                    fontWeight: 600,
                                                 }}
                                             >
                                                 {n}
@@ -973,13 +996,13 @@ export function MobileCheckout() {
                                         onChange={e => setRecurUntil(e.target.value)}
                                         style={{
                                             width: '100%',
-                                            background: '#fff',
-                                            border: '1px solid rgba(0,0,0,0.10)',
+                                            background: COLOR.card,
+                                            border: `1px solid ${COLOR.ink10}`,
                                             borderRadius: 10,
                                             padding: '10px 12px',
                                             fontFamily: 'inherit',
                                             fontSize: 16,
-                                            color: '#0E0E0E',
+                                            color: COLOR.ink,
                                         }}
                                     />
                                 </div>
@@ -988,11 +1011,11 @@ export function MobileCheckout() {
                             {recurDates.length > 0 && (
                                 <div style={{
                                     marginTop: 10,
-                                    background: '#F4F4F2',
+                                    background: COLOR.sunken,
                                     borderRadius: 10,
                                     padding: '10px 12px',
                                     fontSize: 12,
-                                    color: '#444',
+                                    color: COLOR.ink80,
                                     lineHeight: 1.5,
                                 }}>
                                     <b>Создастся {recurDates.length} {ruPlural(recurDates.length, ['сессия', 'сессии', 'сессий'])}:</b>{' '}
@@ -1046,7 +1069,7 @@ export function MobileCheckout() {
                             // или абонемент, сервер деньги не возьмёт — вариант
                             // недоступен, и мы говорим почему.
                             sub={(() => {
-                                const bal = effectiveUser ? `${(effectiveUser.balance ?? 0).toFixed(0)} ₾` : '';
+                                const bal = effectiveUser ? formatGel(effectiveUser.balance ?? 0, { fraction: 0 }) : '';
                                 if (!isSelectable('balance', plan, isSeries)) {
                                     return `${bal} · ${balanceLockedReason(plan).toLowerCase()}`;
                                 }
@@ -1064,38 +1087,38 @@ export function MobileCheckout() {
                 {/* Price summary */}
                 <div style={{ padding: '0 16px' }}>
                     <div style={{
-                        background: '#F4F4F2',
+                        background: COLOR.sunken,
                         borderRadius: 14,
                         padding: 16,
                         display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
-                        <Row label="База" value={`${priced.items.reduce((s, i) => s + i.price.basePrice, 0).toFixed(0)} ₾`} />
+                        <Row label="База" value={formatGel(priced.items.reduce((s, i) => s + i.price.basePrice, 0), { fraction: 0 })} />
                         {/* Пик (09–10, 20–22) уже внутри «Базы» — раньше клиент видел
                             на карточке кабинета «20 ₾/ч», а здесь 25 ₾ без объяснения. */}
                         {priced.items.some(i => (i.price.peakSurcharge ?? 0) > 0) && (
                             <Row
                                 label="в т.ч. пиковые часы"
-                                value={`+${priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0).toFixed(0)} ₾`}
+                                value={`+${formatGel(priced.items.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0), { fraction: 0 })}`}
                             />
                         )}
                         {priced.items.some(i => i.price.extrasPrice > 0) && (
-                            <Row label="Допуслуги" value={`${priced.items.reduce((s, i) => s + i.price.extrasPrice, 0).toFixed(0)} ₾`} />
+                            <Row label="Допуслуги" value={formatGel(priced.items.reduce((s, i) => s + i.price.extrasPrice, 0), { fraction: 0 })} />
                         )}
                         {priced.items.some(i => i.price.discountAmount > 0) && (
                             <Row
                                 label="Скидка"
-                                value={`−${priced.items.reduce((s, i) => s + i.price.discountAmount, 0).toFixed(0)} ₾`}
+                                value={`−${formatGel(priced.items.reduce((s, i) => s + i.price.discountAmount, 0), { fraction: 0 })}`}
                                 tone="ok"
                             />
                         )}
-                        <div style={{ height: 1, background: 'rgba(0,0,0,0.08)', margin: '4px 0' }} />
+                        <div style={{ height: 1, background: COLOR.ink08, margin: '4px 0' }} />
                         <Row
                             label="Итого"
                             value={isSeries || payMethod === 'balance'
-                                ? `${priced.total.toFixed(0)} ₾`
+                                ? formatGel(priced.total, { fraction: 0 })
                                 : payMethod === 'bonus'
-                                    ? '0 ₾'
-                                    : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${subMoney.toFixed(0)} ₾` : ''}`}
+                                    ? formatGel(0)
+                                    : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney, { fraction: 0 })}` : ''}`}
                             bold
                         />
                         {!isSeries && payMethod === 'subscription' && (() => {
@@ -1103,7 +1126,7 @@ export function MobileCheckout() {
                             const deferred = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
                             return (
                                 <>
-                                    <div style={{ fontSize: 12, color: '#666' }}>
+                                    <div style={{ fontSize: 12, color: COLOR.ink60 }}>
                                         Спишется {fmtHours(totalDurationHours)} абонемента{subMoneyNote}
                                         {deferred && firstStart ? ` — ${formatChargeAt(firstStart)}, за сутки до начала.` : '.'}
                                     </div>
@@ -1111,7 +1134,7 @@ export function MobileCheckout() {
                                         говорим, что при нехватке часов крон за сутки до
                                         встречи возьмёт деньги (billing_defer). */}
                                     {!plan.subFreeCovers && (
-                                        <div style={{ fontSize: 12, color: '#b3453a' }}>
+                                        <div style={{ fontSize: 12, color: STATUS.danger.fg }}>
                                             Свободно только {fmtHours(subHours.free)}: {fmtHours(subHours.reserved)} уже в других бронях.
                                             {' '}Если к списанию часов не хватит, одна из броней спишется с баланса по обычной цене.
                                         </div>
@@ -1120,8 +1143,8 @@ export function MobileCheckout() {
                             );
                         })()}
                         {!isSeries && payMethod === 'bonus' && (
-                            <div style={{ fontSize: 12, color: '#666' }}>
-                                Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса 0 ₾
+                            <div style={{ fontSize: 12, color: COLOR.ink60 }}>
+                                Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}
                             </div>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
@@ -1138,38 +1161,38 @@ export function MobileCheckout() {
                             const deferred = !!firstStart && firstStart.getTime() - Date.now() > 24 * 3600 * 1000;
                             if (deferred) {
                                 return (
-                                    <div style={{ fontSize: 12, color: debt > 0 ? '#b3453a' : '#666' }}>
-                                        Спишется с баланса {formatChargeAt(firstStart)} (за сутки до начала): {priced.total.toFixed(0)} ₾.
-                                        {' '}Сейчас на балансе {bal.toFixed(0)} ₾
-                                        {debt > 0 ? ` — не хватает ${debt.toFixed(0)} ₾, уйдёт в долг (лимит ${(effectiveUser.creditLimit ?? 0).toFixed(0)} ₾), если не пополнить.` : '.'}
+                                    <div style={{ fontSize: 12, color: debt > 0 ? STATUS.danger.fg : COLOR.ink60 }}>
+                                        Спишется с баланса {formatChargeAt(firstStart)} (за сутки до начала): {formatGel(priced.total, { fraction: 0 })}.
+                                        {' '}Сейчас на балансе {formatGel(bal, { fraction: 0 })}
+                                        {debt > 0 ? ` — не хватает ${formatGel(debt, { fraction: 0 })}, уйдёт в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })}), если не пополнить.` : '.'}
                                     </div>
                                 );
                             }
                             return (
-                                <div style={{ fontSize: 12, color: debt > 0 ? '#b3453a' : '#666' }}>
+                                <div style={{ fontSize: 12, color: debt > 0 ? STATUS.danger.fg : COLOR.ink60 }}>
                                     {debt > 0
-                                        ? `Спишется сразу ${priced.total.toFixed(0)} ₾, из них ${debt.toFixed(0)} ₾ — в долг (лимит ${(effectiveUser.creditLimit ?? 0).toFixed(0)} ₾)`
-                                        : `Спишется сразу ${priced.total.toFixed(0)} ₾ с баланса, останется ${after.toFixed(0)} ₾`}
+                                        ? `Спишется сразу ${formatGel(priced.total, { fraction: 0 })}, из них ${formatGel(debt, { fraction: 0 })} — в долг (лимит ${formatGel(effectiveUser.creditLimit ?? 0, { fraction: 0 })})`
+                                        : `Спишется сразу ${formatGel(priced.total, { fraction: 0 })} с баланса, останется ${formatGel(after, { fraction: 0 })}`}
                                 </div>
                             );
                         })()}
                         {recurPattern !== 'once' && effectiveOccurrences > 1 && (
                             seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? (
                                 <>
-                                    <div style={{ fontSize: 12, color: '#666' }}>
-                                        Серия из {seriesQuote.occurrences}: точно {seriesQuote.totalMoney.toFixed(0)} ₾
+                                    <div style={{ fontSize: 12, color: COLOR.ink60 }}>
+                                        Серия из {seriesQuote.occurrences}: точно {formatGel(seriesQuote.totalMoney, { fraction: 0 })}
                                         {seriesQuote.totalHours > 0 ? ` + ${fmtHours(seriesQuote.totalHours)} с абонемента` : ''}
                                         {(seriesQuote.totalBonusHours ?? 0) > 0 ? ` + ${fmtHours(seriesQuote.totalBonusHours ?? 0)} из бонусов` : ''}
                                     </div>
                                     {(seriesQuote.subscriptionShortDates?.length ?? 0) > 0 && (
-                                        <div style={{ fontSize: 12, color: '#b3453a' }}>
+                                        <div style={{ fontSize: 12, color: STATUS.danger.fg }}>
                                             Абонемента хватит не на все даты ({seriesQuote.subscriptionShortDates.length} из {seriesQuote.occurrences} — мимо).
-                                            Выбери оплату балансом или уменьши число повторов, иначе серия не создастся.
+                                            Выберите оплату балансом или уменьшите число повторов, иначе серия не создастся.
                                         </div>
                                     )}
                                 </>
                             ) : (
-                                <div style={{ fontSize: 11, color: '#999' }}>
+                                <div style={{ fontSize: 12, color: COLOR.ink60 }}>
                                     Сумма серии ориентировочная — уточняем расчёт по каждой дате…
                                 </div>
                             )
@@ -1187,8 +1210,8 @@ export function MobileCheckout() {
                 width: '100%',
                 maxWidth: 480,
                 padding: '8px 16px',
-                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 30%)',
-                zIndex: 90,
+                background: `linear-gradient(to bottom, ${COLOR.card}00 0%, ${COLOR.card} 30%)`,
+                zIndex: Z.sticky,
                 pointerEvents: 'none',
             }}>
                 {/* Способ оплаты виден у кнопки — сам блок «Оплата» ниже первого
@@ -1197,17 +1220,19 @@ export function MobileCheckout() {
                     <div style={{
                         pointerEvents: 'auto',
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                        background: '#fff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10,
-                        padding: '6px 10px', marginBottom: 6, fontSize: 12, color: '#555',
+                        background: COLOR.card, border: `1px solid ${COLOR.ink08}`, borderRadius: 10,
+                        padding: '6px 10px', marginBottom: 6, fontSize: 12, color: COLOR.ink80,
                     }}>
-                        <span>Оплата: <b style={{ color: '#0E0E0E' }}>{payName}</b></span>
+                        <span>Оплата: <b style={{ color: COLOR.ink }}>{payName}</b></span>
                         {payChoices > 1 && (
                             <button
                                 onClick={() => document.getElementById('m-checkout-pay')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                                 style={{
-                                    background: 'none', border: 'none', padding: 4, cursor: 'pointer',
+                                    background: 'none', border: 'none', cursor: 'pointer',
+                                    // Цель 44 px; отрицательный отступ — плашка не растёт.
+                                    minHeight: 44, padding: '0 6px', margin: '-12px -6px',
                                     fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-                                    color: '#0E0E0E', textDecoration: 'underline',
+                                    color: COLOR.ink, textDecoration: 'underline',
                                 }}
                             >
                                 Изменить
@@ -1223,8 +1248,8 @@ export function MobileCheckout() {
                     style={{
                         pointerEvents: 'auto',
                         width: '100%',
-                        background: '#0E0E0E',
-                        color: '#fff',
+                        background: COLOR.ink,
+                        color: COLOR.onInk,
                         border: 'none',
                         borderRadius: 12,
                         padding: '16px 18px',
@@ -1235,8 +1260,8 @@ export function MobileCheckout() {
                         cursor: submitting ? 'wait' : 'pointer',
                         fontFamily: 'inherit',
                         fontSize: 16,
-                        fontWeight: 700,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                        fontWeight: 600,
+                        boxShadow: `0 4px 16px ${COLOR.ink20}`,
                         opacity: submitting ? 0.7 : 1,
                         // Asymmetric: пока submitting текст слегка размыт, на
                         // финальный «Готово» резко в фокусе. Маскирует
@@ -1255,8 +1280,8 @@ export function MobileCheckout() {
                             ? (recurPattern !== 'once' ? 'Создаём серию…' : 'Бронируем…')
                             : recurPattern !== 'once'
                                 ? (effectiveOccurrences > 0
-                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['сессию', 'сессии', 'сессий'])} · ${(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences).toFixed(0)} ₾`
-                                    : 'Выбери число повторов или дату')
+                                    ? `Создать ${effectiveOccurrences} ${ruPlural(effectiveOccurrences, ['сессию', 'сессии', 'сессий'])} · ${formatGel(seriesQuote && seriesQuote.occurrences === effectiveOccurrences ? seriesQuote.totalMoney : priced.total * effectiveOccurrences, { fraction: 0 })}`
+                                    : 'Выберите число повторов или дату')
                                 : isHotBooking
                                     ? `Отправить на одобрение · ${payLabel}`
                                     : `Забронировать · ${payLabel}`}
@@ -1265,61 +1290,44 @@ export function MobileCheckout() {
 
             {/* Конфликты серии: показываем занятые даты и даём создать остальные,
                 вместо того чтобы валить всю пачку одним тостом. */}
-            {seriesConflicts && (
-                <div
-                    onClick={() => setSeriesConflicts(null)}
-                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 220,
-                             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-                >
-                    <div
-                        onClick={e => e.stopPropagation()}
-                        style={{ background: '#fff', borderRadius: 18, padding: 20, width: '100%', maxWidth: 400,
-                                 display: 'flex', flexDirection: 'column', gap: 12 }}
-                    >
-                        <div style={{ fontSize: 17, fontWeight: 800 }}>
-                            Часть дат занята
-                        </div>
-                        <div style={{ fontSize: 14, color: '#555', lineHeight: 1.5 }}>
+            <Sheet
+                open={!!seriesConflicts}
+                onClose={() => setSeriesConflicts(null)}
+                title="Часть дат занята"
+                width={400}
+                footer={seriesConflicts ? (
+                    <>
+                        <Button
+                            block
+                            onClick={() => createSeries(true)}
+                            loading={submitting}
+                            disabled={seriesConflicts.length >= effectiveOccurrences}
+                        >
+                            {`Создать остальные (${Math.max(0, effectiveOccurrences - seriesConflicts.length)})`}
+                        </Button>
+                        <Button variant="secondary" block onClick={() => setSeriesConflicts(null)}>
+                            Изменить время
+                        </Button>
+                    </>
+                ) : undefined}
+            >
+                {seriesConflicts && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ fontSize: 14, color: COLOR.ink80, lineHeight: 1.5 }}>
                             Занято {seriesConflicts.length} из {effectiveOccurrences}:
                         </div>
-                        <div style={{ maxHeight: 160, overflowY: 'auto', background: '#F4F4F2', borderRadius: 12,
+                        <div style={{ maxHeight: 160, overflowY: 'auto', background: COLOR.sunken, borderRadius: 12,
                                       padding: '10px 12px', fontSize: 13, lineHeight: 1.7 }}>
                             {seriesConflicts.map(c => (
-                                <div key={c.date}>
-                                    {(() => {
-                                        const [y, m, d] = c.date.split('-').map(Number);
-                                        return fmtDate(new Date(y, m - 1, d), 'd MMMM, EEEE', { locale: ru });
-                                    })()}
-                                </div>
+                                <div key={c.date}>{formatDateLabel(c.date, { capitalize: true })}</div>
                             ))}
                         </div>
-                        <div style={{ fontSize: 13, color: '#777' }}>
+                        <div style={{ fontSize: 13, color: COLOR.ink60 }}>
                             Можно создать серию без этих дат — остальные встречи забронируются.
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                            <button
-                                onClick={() => createSeries(true)}
-                                disabled={submitting || seriesConflicts.length >= effectiveOccurrences}
-                                style={{ padding: '14px 0', borderRadius: 12, fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
-                                         border: 'none', color: '#fff',
-                                         background: seriesConflicts.length >= effectiveOccurrences ? '#BBB' : '#0E0E0E',
-                                         cursor: seriesConflicts.length >= effectiveOccurrences ? 'default' : 'pointer' }}
-                            >
-                                {submitting
-                                    ? 'Создаём…'
-                                    : `Создать остальные (${Math.max(0, effectiveOccurrences - seriesConflicts.length)})`}
-                            </button>
-                            <button
-                                onClick={() => setSeriesConflicts(null)}
-                                style={{ padding: '13px 0', borderRadius: 12, fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
-                                         border: '1px solid rgba(0,0,0,0.12)', background: '#fff', cursor: 'pointer' }}
-                            >
-                                Изменить время
-                            </button>
-                        </div>
                     </div>
-                </div>
-            )}
+                )}
+            </Sheet>
         </>
     );
 }
@@ -1328,8 +1336,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     return (
         <div style={{ padding: '0 16px' }}>
             <div style={{
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: '#999',
+                fontSize: 12, fontWeight: 600, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: COLOR.ink60,
                 marginBottom: 8,
             }}>{title}</div>
             {children}
@@ -1340,11 +1348,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Row({ label, value, bold, tone }: { label: string; value: string; bold?: boolean; tone?: 'ok' }) {
     return (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ fontSize: bold ? 15 : 13, fontWeight: bold ? 700 : 500, color: '#444' }}>{label}</span>
+            <span style={{ fontSize: bold ? 15 : 13, fontWeight: bold ? 600 : 500, color: COLOR.ink80 }}>{label}</span>
             <span style={{
                 fontSize: bold ? 18 : 14,
-                fontWeight: bold ? 700 : 600,
-                color: tone === 'ok' ? '#1B6E36' : '#0E0E0E',
+                fontWeight: 600,
+                color: tone === 'ok' ? STATUS.ok.fg : COLOR.ink,
             }}>{value}</span>
         </div>
     );
@@ -1364,8 +1372,8 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
             role="radio"
             aria-checked={active && !disabled}
             style={{
-                background: '#fff',
-                border: `1px solid ${active && !disabled ? '#0E0E0E' : 'rgba(0,0,0,0.10)'}`,
+                background: COLOR.card,
+                border: `1px solid ${active && !disabled ? COLOR.ink : COLOR.ink10}`,
                 borderRadius: 12,
                 padding: '12px 14px',
                 display: 'flex',
@@ -1379,15 +1387,15 @@ function PaymentRow({ label, sub, active, disabled, onClick }: {
         >
             <div style={{
                 width: 20, height: 20, borderRadius: 999,
-                border: `2px solid ${active && !disabled ? '#0E0E0E' : 'rgba(0,0,0,0.25)'}`,
+                border: `2px solid ${active && !disabled ? COLOR.ink : COLOR.ink20}`,
                 display: 'grid', placeItems: 'center',
                 flexShrink: 0,
             }}>
-                {active && !disabled && <div style={{ width: 10, height: 10, borderRadius: 999, background: '#0E0E0E' }} />}
+                {active && !disabled && <div style={{ width: 10, height: 10, borderRadius: 999, background: COLOR.ink }} />}
             </div>
             <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0E0E0E' }}>{label}</div>
-                {sub && <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{sub}</div>}
+                <div style={{ fontSize: 14, fontWeight: 600, color: COLOR.ink }}>{label}</div>
+                {sub && <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>{sub}</div>}
             </div>
         </button>
     );

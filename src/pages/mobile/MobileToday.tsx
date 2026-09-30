@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Briefcase, CheckSquare, ChevronDown, Clock, MapPin, MessageCircle, Plus, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ArrowUpRight, Briefcase, Check, CheckSquare, ChevronDown, Clock, MapPin, MessageCircle, Plus, Repeat, ShieldCheck } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { RESOURCES, LOCATIONS } from '../../utils/data';
 import { BookingDetailSheet } from './BookingDetailSheet';
@@ -18,6 +18,9 @@ import type { BookingHistoryItem } from '../../store/types';
 import { canBookCabinets } from '../../utils/permissions';
 import { useSpecialistApplicationStatus } from '../../hooks/useSpecialistApplication';
 import { SpecialistGateCard } from '../../components/SpecialistGate';
+import { COLOR, STATUS, Z } from '../../design/tokens';
+import { formatDateLabel, formatDayMonth, formatGel } from '../../utils/format';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 const sectionPad: React.CSSProperties = { padding: '0 16px' };
 
@@ -70,7 +73,7 @@ export function MobileToday() {
         try {
             await adminTasksApi.update(id, { status: 'DONE' });
             setMyTasks(prev => prev.filter(t => t.id !== id));
-            toast.success('Готово ✓');
+            toast.success('Готово');
             // Auto-spawn next iteration for recurring tasks. Same logic as in
             // /m/admin/tasks — keeps both surfaces consistent.
             if (task) {
@@ -220,12 +223,12 @@ export function MobileToday() {
     if (credit > 0 && debt > 0) {
         const ratio = debt / credit;
         if (ratio > 1.0) {
-            creditWarn = { tone: 'urgent', text: `Долг ${debt.toFixed(0)} ₾ превысил кредитный лимит. Пополни баланс — следующая бронь может уйти на одобрение.` };
+            creditWarn = { tone: 'urgent', text: `Долг ${formatGel(debt, { fraction: 0 })} превысил кредитный лимит. Пополните баланс — иначе следующая бронь уйдёт на одобрение.` };
         } else if (ratio >= 0.8) {
-            creditWarn = { tone: 'warn', text: `Использовано ${Math.round(ratio * 100)}% кредитного лимита (долг ${debt.toFixed(0)} ₾). Лучше пополнить заранее.` };
+            creditWarn = { tone: 'warn', text: `Использовано ${Math.round(ratio * 100)}% кредитного лимита (долг ${formatGel(debt, { fraction: 0 })}). Лучше пополнить заранее.` };
         }
     } else if (credit === 0 && debt > 0) {
-        creditWarn = { tone: 'urgent', text: `Баланс минусовой (−${debt.toFixed(0)} ₾) и кредитного лимита нет. Пополни баланс перед следующей бронью.` };
+        creditWarn = { tone: 'urgent', text: `Баланс в минусе (${formatGel(-debt, { fraction: 0 })}), кредитного лимита нет. Пополните баланс перед следующей бронью.` };
     }
 
     const repeatBooking = (booking: BookingHistoryItem) => {
@@ -245,10 +248,10 @@ export function MobileToday() {
                 {/* Header */}
                 <div style={{ ...sectionPad, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: '#666', fontWeight: 500 }}>
+                        <div style={{ fontSize: 13, color: COLOR.ink60, fontWeight: 500 }}>
                             Привет, {currentUser.name?.split(' ')[0]}
                         </div>
-                        <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', margin: '4px 0 0' }}>
+                        <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', margin: '4px 0 0' }}>
                             Сегодня
                         </h1>
                     </div>
@@ -291,9 +294,9 @@ export function MobileToday() {
                 {creditWarn && (
                     <div style={sectionPad}>
                         <div style={{
-                            background: creditWarn.tone === 'urgent' ? '#FEF2F2' : '#FEF3C7',
-                            border: `1px solid ${creditWarn.tone === 'urgent' ? '#FCA5A5' : '#FCD34D'}`,
-                            color: creditWarn.tone === 'urgent' ? '#991B1B' : '#8A5A00',
+                            background: creditWarn.tone === 'urgent' ? STATUS.danger.bg : STATUS.pending.bg,
+                            border: `1px solid ${creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg}33`,
+                            color: creditWarn.tone === 'urgent' ? STATUS.danger.fg : STATUS.pending.fg,
                             borderRadius: 12,
                             padding: '10px 12px',
                             display: 'flex',
@@ -327,11 +330,15 @@ export function MobileToday() {
                                     style={{
                                         background: 'transparent',
                                         border: 'none',
-                                        color: '#666',
-                                        fontSize: 11,
+                                        color: COLOR.ink60,
+                                        fontSize: 12,
                                         fontWeight: 600,
                                         cursor: 'pointer',
-                                        padding: 0,
+                                        // Цель касания 44 px; отрицательный отступ — чтобы строка не выросла.
+                                        minHeight: 44,
+                                        padding: '0 8px',
+                                        margin: '-12px -8px -12px 0',
+                                        fontFamily: 'inherit',
                                     }}
                                 >
                                     Все →
@@ -343,8 +350,8 @@ export function MobileToday() {
                                 const overdue = t.deadline && new Date(t.deadline).getTime() < Date.now();
                                 return (
                                     <div key={t.id} style={{
-                                        background: '#fff',
-                                        border: `1px solid ${overdue ? '#FCA5A5' : 'rgba(0,0,0,0.06)'}`,
+                                        background: COLOR.card,
+                                        border: `1px solid ${overdue ? `${STATUS.danger.fg}4D` : COLOR.ink08}`,
                                         borderRadius: 10,
                                         padding: '6px 10px',
                                         display: 'flex',
@@ -363,42 +370,52 @@ export function MobileToday() {
                                                 flex: 1,
                                                 minWidth: 0,
                                             }}>
-                                                {t.priority === 'HIGH' && <span style={{ color: '#C8253A' }}>⚠ </span>}
+                                                {t.priority === 'HIGH' && (
+                                                    <AlertTriangle size={12} aria-label="Важно" style={{ color: STATUS.danger.fg, verticalAlign: '-1px', marginRight: 4 }} />
+                                                )}
                                                 {t.title}
                                             </div>
                                             {t.deadline && (
                                                 <span style={{
-                                                    fontSize: 10,
-                                                    color: overdue ? '#C8253A' : '#888',
-                                                    fontWeight: overdue ? 700 : 500,
+                                                    fontSize: 12,
+                                                    color: overdue ? STATUS.danger.fg : COLOR.ink60,
+                                                    fontWeight: overdue ? 600 : 500,
                                                     flexShrink: 0,
                                                 }}>
                                                     {overdue
                                                         ? 'просрочена'
-                                                        : new Date(t.deadline).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                                                        : formatDayMonth(t.deadline)}
                                                 </span>
                                             )}
                                         </div>
+                                        {/* Кнопка 44×44 (цель касания), видимый квадрат — 24. */}
                                         <button
                                             onClick={() => completeTask(t.id)}
                                             style={{
-                                                background: '#0E0E0E',
-                                                color: '#fff',
+                                                background: 'transparent',
                                                 border: 'none',
-                                                borderRadius: 6,
-                                                width: 22,
-                                                height: 22,
-                                                fontSize: 12,
-                                                fontWeight: 700,
+                                                width: 44,
+                                                height: 44,
+                                                margin: '-10px -10px -10px 0',
+                                                padding: 0,
                                                 cursor: 'pointer',
-                                                fontFamily: 'inherit',
                                                 flexShrink: 0,
                                                 display: 'grid',
                                                 placeItems: 'center',
                                             }}
                                             aria-label="Пометить выполненной"
                                         >
-                                            ✓
+                                            <span style={{
+                                                background: COLOR.ink,
+                                                color: COLOR.onInk,
+                                                borderRadius: 6,
+                                                width: 24,
+                                                height: 24,
+                                                display: 'grid',
+                                                placeItems: 'center',
+                                            }}>
+                                                <Check size={14} strokeWidth={2.5} aria-hidden="true" />
+                                            </span>
                                         </button>
                                     </div>
                                 );
@@ -409,10 +426,11 @@ export function MobileToday() {
                                     style={{
                                         background: 'transparent',
                                         border: 'none',
-                                        color: '#666',
-                                        fontSize: 11,
+                                        color: COLOR.ink60,
+                                        fontSize: 12,
                                         cursor: 'pointer',
-                                        padding: '2px 0',
+                                        minHeight: 44,
+                                        padding: 0,
                                         textAlign: 'center',
                                         fontFamily: 'inherit',
                                     }}
@@ -441,9 +459,11 @@ export function MobileToday() {
                             onClick={() => repeatBooking(regularSlot.booking)}
                             style={{
                                 width: '100%',
-                                background: 'linear-gradient(135deg, #1B7430, #2B9447)',
-                                color: '#fff',
-                                border: 'none',
+                                // Wave 1: ровная карточка вместо зелёного градиента —
+                                // цвет только для статуса.
+                                background: COLOR.card,
+                                color: COLOR.ink,
+                                border: `1px solid ${COLOR.ink10}`,
                                 borderRadius: 14,
                                 padding: '14px 16px',
                                 display: 'flex',
@@ -456,23 +476,23 @@ export function MobileToday() {
                         >
                             <div style={{
                                 width: 38, height: 38, borderRadius: 10,
-                                background: 'rgba(255,255,255,0.2)',
+                                background: COLOR.sunken,
                                 display: 'grid', placeItems: 'center',
-                                flexShrink: 0, fontSize: 18,
+                                flexShrink: 0,
                             }}>
-                                🔁
+                                <Repeat size={18} aria-hidden="true" />
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 600, marginBottom: 2 }}>
+                                <div style={{ fontSize: 12, color: COLOR.ink60, fontWeight: 600, marginBottom: 2 }}>
                                     Ваш постоянный слот · {regularSlot.count}× за 2 мес.
                                 </div>
-                                <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25 }}>
+                                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25 }}>
                                     {(RESOURCES.find(r => r.id === regularSlot.booking.resourceId)?.name) || regularSlot.booking.resourceId}
                                     {' · '}
                                     {regularSlot.booking.startTime}
                                 </div>
-                                <div style={{ fontSize: 12, opacity: 0.95, marginTop: 2 }}>
-                                    Забронировать на {regularSlot.nextDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' })}
+                                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
+                                    Забронировать на {formatDateLabel(regularSlot.nextDate)}
                                 </div>
                             </div>
                             <ArrowRight size={18} />
@@ -488,8 +508,8 @@ export function MobileToday() {
                         onClick={goToFind}
                         style={{
                             width: '100%',
-                            background: '#0E0E0E',
-                            color: '#fff',
+                            background: COLOR.ink,
+                            color: COLOR.onInk,
                             border: 'none',
                             borderRadius: 14,
                             padding: '18px 20px',
@@ -501,7 +521,7 @@ export function MobileToday() {
                             fontFamily: 'inherit',
                             textAlign: 'left',
                             fontSize: 17,
-                            fontWeight: 700,
+                            fontWeight: 600,
                         }}
                     >
                         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -514,7 +534,7 @@ export function MobileToday() {
                     {lastFive.length > 0 && (
                         <div style={{
                             marginTop: 8,
-                            background: '#F4F4F2',
+                            background: COLOR.sunken,
                             borderRadius: 12,
                             overflow: 'hidden',
                         }}>
@@ -532,7 +552,7 @@ export function MobileToday() {
                                     fontFamily: 'inherit',
                                     fontSize: 14,
                                     fontWeight: 600,
-                                    color: '#0E0E0E',
+                                    color: COLOR.ink,
                                 }}
                             >
                                 Повторить из последних
@@ -546,7 +566,7 @@ export function MobileToday() {
                                 />
                             </button>
                             {repeatOpen && (
-                                <div style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                                <div style={{ borderTop: `1px solid ${COLOR.ink05}` }}>
                                     {lastFive.map(({ b, dt }) => (
                                         <RepeatRow key={b.id} booking={b} dt={dt} onPick={() => repeatBooking(b)} />
                                     ))}
@@ -557,9 +577,10 @@ export function MobileToday() {
                 </div>
                 )}
 
-                {/* Admin contact — small Telegram-blue link, always visible
-                    so users can ping support when something's off without
-                    digging into the Profile tab. */}
+                {/* Admin contact — always visible so users can ping support
+                    when something's off without digging into the Profile tab.
+                    Wave 1: тихая строка на карточке вместо голубой плашки
+                    Telegram (белое на #229ED9 — 2.9:1, и цвет не статус). */}
                 <div style={sectionPad}>
                     <a
                         href="https://t.me/UnboxCenter"
@@ -570,22 +591,24 @@ export function MobileToday() {
                             alignItems: 'center',
                             gap: 10,
                             padding: '12px 14px',
-                            background: '#229ED9',
-                            color: '#fff',
+                            minHeight: 44,
+                            background: COLOR.card,
+                            color: COLOR.ink,
+                            border: `1px solid ${COLOR.ink10}`,
                             borderRadius: 12,
                             textDecoration: 'none',
                             fontFamily: 'inherit',
                             fontSize: 14,
-                            fontWeight: 700,
+                            fontWeight: 600,
                         }}
                     >
-                        <MessageCircle size={16} />
+                        <MessageCircle size={16} aria-hidden="true" />
                         <span style={{ flex: 1 }}>Связь с администратором</span>
-                        <span style={{ fontSize: 12, opacity: 0.85 }}>↗</span>
+                        <ArrowUpRight size={16} color={COLOR.ink60} aria-hidden="true" />
                     </a>
                 </div>
 
-                {/* Upcoming. «Ближайших сессий нет» — только когда брони
+                {/* Upcoming. «Ближайших броней нет» — только когда брони
                     реально пришли с сервера. Пока грузятся — заглушки, при
                     сбое — ошибка с «Повторить» (раньше в обоих случаях
                     писали «нет», и клиент думал, что бронь слетела). */}
@@ -601,16 +624,11 @@ export function MobileToday() {
                             onRetry={() => { fetchBookings(); }}
                         />
                     ) : upcoming.length === 0 ? (
-                        <div style={{
-                            background: '#F4F4F2',
-                            borderRadius: 14,
-                            padding: 18,
-                            textAlign: 'center',
-                            color: '#666',
-                            fontSize: 14,
-                        }}>
-                            Ближайших сессий нет
-                        </div>
+                        <EmptyState
+                            compact
+                            title="Ближайших броней нет"
+                            hint={canBook ? 'Свободное время — на вкладке «Свободно».' : undefined}
+                        />
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {upcoming.map(({ b, dt }) => (
@@ -632,8 +650,9 @@ export function MobileToday() {
                 width: '100%',
                 maxWidth: 480,
                 padding: '8px 16px',
-                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 30%)',
-                zIndex: 90,
+                // Плавный переход от ленты к кнопке — тем же цветом карточки.
+                background: `linear-gradient(to bottom, ${COLOR.card}00 0%, ${COLOR.card} 30%)`,
+                zIndex: Z.sticky,
                 pointerEvents: 'none',
             }}>
                 <button
@@ -641,9 +660,9 @@ export function MobileToday() {
                     style={{
                         pointerEvents: 'auto',
                         width: '100%',
-                        background: '#fff',
-                        color: '#0E0E0E',
-                        border: '1px solid #0E0E0E',
+                        background: COLOR.card,
+                        color: COLOR.ink,
+                        border: `1px solid ${COLOR.ink}`,
                         borderRadius: 12,
                         padding: '14px 18px',
                         display: 'flex',
@@ -653,8 +672,8 @@ export function MobileToday() {
                         cursor: 'pointer',
                         fontFamily: 'inherit',
                         fontSize: 15,
-                        fontWeight: 700,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                        fontWeight: 600,
+                        boxShadow: `0 4px 16px ${COLOR.ink08}`,
                     }}
                 >
                     Найти свободный кабинет
@@ -676,11 +695,11 @@ export function MobileToday() {
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return (
         <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.12em',
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: '0.06em',
             textTransform: 'uppercase',
-            color: '#999',
+            color: COLOR.ink60,
             marginBottom: 8,
         }}>
             {children}
@@ -698,8 +717,8 @@ function ActiveCard({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: 
             onClick={onOpen}
             style={{
                 width: '100%',
-                background: '#0E0E0E',
-                color: '#fff',
+                background: COLOR.ink,
+                color: COLOR.onInk,
                 border: 'none',
                 borderRadius: 14,
                 padding: '14px 16px',
@@ -711,10 +730,10 @@ function ActiveCard({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: 
                 textAlign: 'left',
             }}
         >
-            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.7, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 Идёт сейчас
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Clock size={16} /> {booking.startTime}–{endStr}
             </div>
             <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, opacity: 0.85 }}>
@@ -729,16 +748,16 @@ function ActiveCard({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: 
 function CompactRow({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: Date; onOpen: () => void }) {
     const resource = RESOURCES.find(r => r.id === booking.resourceId);
     const location = LOCATIONS.find(l => l.id === resource?.locationId);
-    const dateStr = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-    const weekday = dt.toLocaleDateString('ru-RU', { weekday: 'short' }).toUpperCase().replace('.', '');
+    // «Вт, 29 сентября» — общий форматтер дат (было «29.09, ВТ»).
+    const dateStr = formatDateLabel(dt, { capitalize: true });
 
     return (
         <button
             onClick={onOpen}
             style={{
                 width: '100%',
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.08)',
+                background: COLOR.card,
+                border: `1px solid ${COLOR.ink08}`,
                 borderRadius: 12,
                 padding: '12px 14px',
                 display: 'flex',
@@ -747,22 +766,22 @@ function CompactRow({ booking, dt, onOpen }: { booking: BookingHistoryItem; dt: 
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 textAlign: 'left',
-                color: '#0E0E0E',
+                color: COLOR.ink,
             }}
         >
-            <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.25 }}>
-                {dateStr}, {weekday}, {booking.startTime}, {resource?.name ?? booking.resourceId}
+            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25 }}>
+                {dateStr} · {booking.startTime} · {resource?.name ?? booking.resourceId}
                 {booking.isReRentListed && (
                     <span style={{
                         marginLeft: 6,
-                        background: '#FEF3C7', color: '#8A5A00',
-                        fontSize: 10, fontWeight: 700,
+                        background: STATUS.pending.bg, color: STATUS.pending.fg,
+                        fontSize: 12, fontWeight: 600,
                         padding: '2px 6px', borderRadius: 999,
                         verticalAlign: 'middle',
-                    }}>на пересдаче</span>
+                    }}>На пересдаче</span>
                 )}
             </div>
-            <div style={{ fontSize: 12, color: '#666', lineHeight: 1.3 }}>
+            <div style={{ fontSize: 12, color: COLOR.ink60, lineHeight: 1.3 }}>
                 {location?.address ?? '—'}
                 {' · '}{priceLabel(booking)}
             </div>
@@ -781,7 +800,7 @@ function RepeatRow({ booking, dt, onPick }: { booking: BookingHistoryItem; dt: D
                 width: '100%',
                 background: 'transparent',
                 border: 'none',
-                borderTop: '1px solid rgba(0,0,0,0.04)',
+                borderTop: `1px solid ${COLOR.ink05}`,
                 padding: '12px 14px',
                 display: 'flex',
                 alignItems: 'center',
@@ -790,19 +809,19 @@ function RepeatRow({ booking, dt, onPick }: { booking: BookingHistoryItem; dt: D
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 fontSize: 13,
-                color: '#0E0E0E',
+                color: COLOR.ink,
                 textAlign: 'left',
             }}
         >
             <div>
-                <div style={{ fontWeight: 700 }}>
+                <div style={{ fontWeight: 600 }}>
                     {weekday}, {booking.startTime}
                 </div>
-                <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 2 }}>
                     {resource?.name ?? booking.resourceId} · {formatBookingDuration(booking.duration ?? 60)}
                 </div>
             </div>
-            <ArrowRight size={16} color="#999" />
+            <ArrowRight size={16} color={COLOR.ink60} />
         </button>
     );
 }
@@ -825,13 +844,14 @@ function formatHHMM(d: Date) {
 }
 
 const workspaceChip: React.CSSProperties = {
-    background: '#0E0E0E',
-    color: '#fff',
+    background: COLOR.ink,
+    color: COLOR.onInk,
     border: 'none',
     borderRadius: 999,
-    padding: '8px 14px',
+    minHeight: 44,
+    padding: '0 16px',
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 600,
     cursor: 'pointer',
     fontFamily: 'inherit',
     display: 'inline-flex',

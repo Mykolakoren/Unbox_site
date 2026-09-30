@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { COLOR } from '../../design/tokens';
 
 /**
  * Swipe-left action wrapper.
@@ -9,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
  * pattern — familiar on mobile.
  *
  * Usage:
- *   <SwipeRow primary={{ label: 'Отменить', color: '#C8253A', onAction: ... }}>
+ *   <SwipeRow primary={{ label: 'Отменить', color: STATUS.danger.fg, onAction: ... }}>
  *       <BookingCard ... />
  *   </SwipeRow>
  */
@@ -105,8 +106,10 @@ export function SwipeRow({
 
     return (
         <div ref={ref} style={{ position: 'relative', overflow: 'hidden', borderRadius: 14, touchAction: 'pan-y' }}>
-            {/* Action layer (revealed by swipe) */}
-            <div style={{
+            {/* Action layer (revealed by swipe). Пока ряд закрыт, кнопки
+                спрятаны и от диктора, и от Tab — доступный путь к тем же
+                действиям идёт через шторку брони. */}
+            <div aria-hidden={dx === 0 ? true : undefined} style={{
                 position: 'absolute',
                 top: 0, right: 0, bottom: 0,
                 display: 'flex',
@@ -115,14 +118,15 @@ export function SwipeRow({
             }}>
                 {secondary && (
                     <button
+                        tabIndex={dx === 0 ? -1 : undefined}
                         onClick={() => { setDx(0); secondary.onAction(); }}
                         style={{
                             background: secondary.color,
-                            color: '#fff',
+                            color: COLOR.onInk,
                             border: 'none',
                             padding: '0 18px',
                             fontSize: 13,
-                            fontWeight: 700,
+                            fontWeight: 600,
                             cursor: 'pointer',
                             fontFamily: 'inherit',
                             opacity: dx < -maxOpen / 2 ? 1 : 0,
@@ -133,14 +137,15 @@ export function SwipeRow({
                     </button>
                 )}
                 <button
+                    tabIndex={dx === 0 ? -1 : undefined}
                     onClick={() => { setDx(0); primary.onAction(); }}
                     style={{
                         background: primary.color,
-                        color: '#fff',
+                        color: COLOR.onInk,
                         border: 'none',
                         padding: '0 22px',
                         fontSize: 13,
-                        fontWeight: 700,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         fontFamily: 'inherit',
                         opacity: dx < -maxOpen / 2 ? 1 : 0,
@@ -156,7 +161,7 @@ export function SwipeRow({
                 style={{
                     transform: `translateX(${dx}px)`,
                     transition: startX.current === null ? 'transform 0.18s ease' : 'none',
-                    background: '#fff',
+                    background: COLOR.card,
                     opacity: committing ? 0.5 : 1,
                 }}
             >

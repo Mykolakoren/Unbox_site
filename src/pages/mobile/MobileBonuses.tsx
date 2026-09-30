@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, ArrowLeft, Gift, Clock, Check, X } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { toast } from 'sonner';
+import { ArrowLeft, Gift, Clock, Check, Info, X } from 'lucide-react';
+import { parseISO } from 'date-fns';
 import { bonusesApi, type Bonus } from '../../api/bonuses';
+import { COLOR, STATUS } from '../../design/tokens';
+import { formatDayMonth } from '../../utils/format';
+import { ruPlural } from '../../utils/plural';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { ErrorBar } from '../../components/ui/ErrorBar';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { Chip } from '../../components/ui/Chip';
 
 type Filter = 'active' | 'used' | 'expired' | 'all';
 
@@ -13,6 +18,14 @@ const FILTER_LABEL: Record<Filter, string> = {
     used: 'Использованные',
     expired: 'Истёкшие',
     all: 'Все',
+};
+
+/** Пусто — своя фраза для каждого фильтра. */
+const EMPTY_TITLE: Record<Filter, string> = {
+    active: 'Активных бонусов нет',
+    used: 'Использованных бонусов нет',
+    expired: 'Истёкших бонусов нет',
+    all: 'Бонусов пока нет',
 };
 
 /**
@@ -24,6 +37,9 @@ export function MobileBonuses() {
     const navigate = useNavigate();
     const [bonuses, setBonuses] = useState<Bonus[]>([]);
     const [loading, setLoading] = useState(true);
+    // Ошибка загрузки ≠ «бонусов нет»: раньше при сбое под тостом
+    // оставалось «Нет бонусов в этом фильтре».
+    const [loadFailed, setLoadFailed] = useState(false);
     const [filter, setFilter] = useState<Filter>('active');
 
     const load = async () => {
@@ -31,8 +47,9 @@ export function MobileBonuses() {
         try {
             const list = await bonusesApi.getMyBonuses();
             setBonuses(list);
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || 'Не удалось загрузить');
+            setLoadFailed(false);
+        } catch {
+            setLoadFailed(true);
         } finally {
             setLoading(false);
         }
@@ -66,22 +83,23 @@ export function MobileBonuses() {
                 onClick={() => navigate(-1)}
                 style={{
                     display: 'flex', alignItems: 'center', gap: 6,
-                    background: 'none', border: 'none', color: '#666',
-                    padding: '6px 0', cursor: 'pointer', fontSize: 13,
-                    marginBottom: 8,
+                    background: 'none', border: 'none', color: COLOR.ink60,
+                    minHeight: 44, padding: 0, cursor: 'pointer', fontSize: 13,
+                    fontFamily: 'inherit',
                 }}
             >
                 <ArrowLeft size={14} /> Назад
             </button>
 
-            <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, marginBottom: 14 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, marginBottom: 14 }}>
                 Бонусы
             </h1>
 
-            {/* Hero strip — total active hours */}
+            {/* Hero strip — total active hours. Wave 1: ровная поверхность
+                вместо жёлтого градиента — цвет только для статуса. */}
             <div style={{
-                background: 'linear-gradient(135deg, #FEF3C7, #FCD34D)',
-                color: '#78350F',
+                background: COLOR.sunken,
+                color: COLOR.ink,
                 borderRadius: 14,
                 padding: '16px 18px',
                 marginBottom: 14,
@@ -89,95 +107,87 @@ export function MobileBonuses() {
             }}>
                 <Gift size={28} />
                 <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.75 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: COLOR.ink60 }}>
                         Активных бонусов
                     </div>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-                        <span style={{ fontSize: 26, fontWeight: 800, fontFamily: 'ui-monospace, "SF Mono", monospace' }}>
-                            {totals.totalActiveHours}
-                        </span>
-                        <span style={{ fontSize: 13 }}>ч</span>
-                        <span style={{ fontSize: 12, opacity: 0.75, marginLeft: 6 }}>
-                            ({totals.activeCount})
-                        </span>
+                        {loading ? (
+                            <span style={{ fontSize: 14, color: COLOR.ink60 }}>Загружаем…</span>
+                        ) : loadFailed ? (
+                            <span style={{ fontSize: 14, color: COLOR.ink60 }}>—</span>
+                        ) : (
+                            <>
+                                <span className="num" style={{ fontSize: 28, fontWeight: 600 }}>
+                                    {totals.totalActiveHours}
+                                </span>
+                                <span style={{ fontSize: 13 }}>ч</span>
+                                <span style={{ fontSize: 12, color: COLOR.ink60, marginLeft: 6 }}>
+                                    · {totals.activeCount} {ruPlural(totals.activeCount, ['бонус', 'бонуса', 'бонусов'])}
+                                </span>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
 
             {/* Filter chips */}
-            <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+            {/* Wave 1: общие Chip (44 px, aria-pressed) с переносом. */}
+            <div className="ui-chip-row" role="group" aria-label="Какие бонусы показать" style={{ marginBottom: 12 }}>
                 {(['active', 'used', 'expired', 'all'] as Filter[]).map(f => (
-                    <button
-                        key={f}
-                        onClick={() => setFilter(f)}
-                        style={{
-                            flex: 1,
-                            padding: '7px 0',
-                            background: filter === f ? '#0E0E0E' : 'rgba(0,0,0,0.04)',
-                            color: filter === f ? '#fff' : '#0E0E0E',
-                            border: 'none',
-                            borderRadius: 8,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                        }}
-                    >
+                    <Chip key={f} selected={filter === f} onClick={() => setFilter(f)}>
                         {FILTER_LABEL[f]}
-                    </button>
+                    </Chip>
                 ))}
             </div>
 
             {loading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-                    <Loader2 size={20} className="animate-spin" style={{ color: '#888' }} />
-                </div>
+                <SkeletonList count={3} cardHeight={56} label="Загружаем бонусы" />
+            ) : loadFailed ? (
+                <ErrorBar message="Не удалось загрузить бонусы" onRetry={() => { void load(); }} />
             ) : filtered.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 32, color: '#888', fontSize: 13 }}>
-                    Нет бонусов в этом фильтре
-                </div>
+                <EmptyState compact title={EMPTY_TITLE[filter]} />
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                     {filtered.map(b => {
                         const status = b.status;
+                        // Цвета — только статусные токены: активен = ок,
+                        // использован = прошло, истёк = сгорел.
                         const palette = status === 'active'
-                            ? { bg: 'rgba(252,211,77,0.20)', fg: '#78350F', label: 'Активен' }
+                            ? { bg: STATUS.ok.bg, fg: STATUS.ok.fg, label: 'Активен' }
                             : status === 'used'
-                                ? { bg: 'rgba(0,0,0,0.04)', fg: '#0E0E0E', label: 'Использован' }
-                                : { bg: 'rgba(179,38,30,0.08)', fg: '#B3261E', label: 'Истёк' };
+                                ? { bg: STATUS.muted.bg, fg: STATUS.muted.fg, label: 'Использован' }
+                                : { bg: STATUS.danger.bg, fg: STATUS.danger.fg, label: 'Истёк' };
                         const StatusIcon = status === 'active' ? Gift : status === 'used' ? Check : X;
-                        const expiryStr = b.expiresAt
-                            ? format(parseISO(b.expiresAt), 'd MMM', { locale: ru })
-                            : null;
+                        const expiryStr = b.expiresAt ? formatDayMonth(b.expiresAt) : null;
                         return (
                             <div key={b.id} style={{
-                                background: '#fff',
-                                border: '1px solid rgba(0,0,0,0.06)',
+                                background: COLOR.card,
+                                border: `1px solid ${COLOR.ink05}`,
                                 borderRadius: 11,
                                 padding: '11px 12px',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 10,
-                                opacity: status === 'expired' ? 0.55 : 1,
                             }}>
                                 <div style={{
                                     width: 32, height: 32, borderRadius: 8,
                                     background: palette.bg, color: palette.fg,
                                     display: 'grid', placeItems: 'center', flexShrink: 0,
                                 }}>
-                                    <StatusIcon size={14} />
+                                    <StatusIcon size={14} aria-hidden="true" />
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: '#0E0E0E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: COLOR.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {b.description || b.type || 'Бонус'} · {b.quantity} ч
                                     </div>
-                                    <div style={{ fontSize: 11, color: '#888', marginTop: 1, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                        <span style={{ color: palette.fg, fontWeight: 700 }}>{palette.label}</span>
+                                    <div style={{ fontSize: 12, color: COLOR.ink60, marginTop: 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                        <span style={{ color: palette.fg, fontWeight: 600 }}>{palette.label}</span>
                                         <span>·</span>
-                                        <span>{format(parseISO(b.createdAt), 'd MMM yyyy', { locale: ru })}</span>
+                                        <span>{formatDayMonth(b.createdAt, { withYear: 'auto' })}</span>
                                         {expiryStr && status === 'active' && (
                                             <>
                                                 <span>·</span>
-                                                <Clock size={10} />
+                                                <Clock size={12} aria-hidden="true" />
                                                 <span>до {expiryStr}</span>
                                             </>
                                         )}
@@ -192,18 +202,24 @@ export function MobileBonuses() {
             <div style={{
                 marginTop: 16,
                 padding: 12,
-                background: 'rgba(252,211,77,0.10)',
+                background: COLOR.sunken,
                 borderRadius: 10,
-                fontSize: 11,
-                color: '#78350F',
+                fontSize: 12,
+                color: COLOR.ink80,
                 lineHeight: 1.5,
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
             }}>
+                <Info size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1, color: COLOR.ink60 }} />
                 {/* X3-02: на сервере приветственный час живёт 15 дней
                     (auth.py WELCOME_BONUS_EXPIRY_DAYS), а тут было написано 90 —
                     клиент откладывал час, и тот сгорал. */}
-                💡 Если бонусных часов хватает на всю бронь, они тратятся первыми — раньше абонемента и баланса.
-                Сначала уходят те, что раньше сгорают. Приветственный бонус — 1 бесплатный час, действует 15 дней с регистрации
-                (точная дата «до …» — в списке выше).
+                <span>
+                    Если бонусных часов хватает на всю бронь, они тратятся первыми — раньше абонемента и баланса.
+                    Сначала уходят те, что раньше сгорают. Приветственный бонус — 1 бесплатный час, действует 15 дней с регистрации
+                    (точная дата «до …» — в списке выше).
+                </span>
             </div>
         </div>
     );
