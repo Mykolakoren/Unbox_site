@@ -47,7 +47,8 @@ import { Field, Input } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDateLabel, formatDayMonth, formatGel, formatRelativeDay, formatStartsIn, formatTime } from '../utils/format';
 import { ruCountWord } from '../utils/plural';
-import { hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
+import { clientCanModifyBooking, hoursUntilBookingStart, lateRescheduleLabel, lateRescheduleLeft } from '../utils/subscription';
+import { ADMIN_ROLES } from '../utils/permissions';
 
 /** «На пересдаче» — подтверждённая бронь, которую клиент выставил на
  *  пересдачу (флаг isReRentListed, не отдельный статус). Вид — как у
@@ -293,19 +294,8 @@ function BookingsChessboard({
     // Convert that to a real UTC instant (subtract 4h) before comparing with
     // Date.now() — without this we overestimated the gap by 4h and the cancel
     // button stayed visible too long.
-    const canModify = (b: BookingHistoryItem) => {
-        if (b.status !== 'confirmed' || !b.startTime) return false;
-        const [h, m] = b.startTime.split(':').map(Number);
-        const datePart = parseUTC(b.date);
-        // Build Tbilisi-instant: same Y-M-D from datePart, h:m Tbilisi, then -4h to UTC
-        const startUTC = Date.UTC(
-            datePart.getUTCFullYear(),
-            datePart.getUTCMonth(),
-            datePart.getUTCDate(),
-            h - 4, m, 0, 0,
-        );
-        return (startUTC - Date.now()) > 24 * 60 * 60 * 1000;
-    };
+    // Один расчёт с карточками «Моих броней» (utils/subscription).
+    const canModify = (b: BookingHistoryItem) => clientCanModifyBooking(b);
     // Позже суток — перенос только бесплатным переносом абонемента (владелец
     // 01.10: Тёплый 1, Регулярный 2, Профи+ 3; не позже чем за 3 ч). Сколько
     // осталось — 0, если сейчас такой перенос недоступен.
@@ -2177,6 +2167,10 @@ function BookingsChessboard({
 
             {seriesMoveTarget && (
                 <RescheduleScopeChoiceModal
+                    // Клиенту позже суток «эту и следующие» не предлагаем —
+                    // сервер даст 400 (бесплатный перенос — только для одной брони).
+                    allowSeries={ADMIN_ROLES.includes(useUserStore.getState().currentUser?.role || '')
+                        || clientCanModifyBooking(seriesMoveTarget.booking)}
                     bookingId={seriesMoveTarget.booking.id}
                     newDate={seriesMoveTarget.newDate}
                     newStartTime={seriesMoveTarget.newStartTime}
@@ -2867,13 +2861,10 @@ function BookingCard({
             setDismissing(false);
         }
     };
-    const canMod = (() => {
-        if (booking.status !== 'confirmed' || !booking.startTime) return false;
-        const [h, m] = booking.startTime.split(':').map(Number);
-        const start = parseUTC(booking.date);
-        start.setUTCHours(h, m, 0, 0);
-        return (start.getTime() - Date.now()) > 24 * 60 * 60 * 1000;
-    })();
+    // Больше суток до начала — по Батуми (UTC+4), тот же расчёт, что в
+    // шахматке. Раньше тут не вычитали 4 ч, и в последние 4 ч суток клиент
+    // видел обычный «Перенести» и молча тратил бесплатный перенос (ревью 01.10).
+    const canMod = clientCanModifyBooking(booking);
     // Позже суток — бесплатный перенос абонемента (владелец 01.10).
     const cardSub = useUserStore(s => s.currentUser?.subscription);
     const lateLeft = booking.status === 'confirmed' && !canMod

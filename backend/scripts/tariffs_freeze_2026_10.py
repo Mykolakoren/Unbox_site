@@ -8,10 +8,10 @@
 Что делает скрипт (только действующие и замороженные, истёкшие не трогает):
   * freeze_days_total — по тарифу (plan_id); тариф не из каталога → 0;
   * пауза уже была (freeze_count ≥ 1) и сейчас не идёт → freeze_days_used = 7;
-  * сейчас на паузе → frozen_until пересчитывается от frozen_at на остаток
-    бюджета, НО не короче уже выданной паузы (чтобы клиент не потерял дни,
-    которые ему дали по старым правилам — их видно в отчёте);
-  * freeze_days_left — для экрана.
+  * freeze_days_left — для экрана;
+  * идущие сейчас паузы НЕ трогает (ревью 01.10) — только показывает в отчёте:
+    это старые паузы, их снимает администратор, и срок продлевается по-старому
+    на полный факт паузы (subscription_perks.end_freeze).
 
   cd /var/www/unbox/backend && venv/bin/python3 scripts/tariffs_freeze_2026_10.py --dry-run
   cd /var/www/unbox/backend && venv/bin/python3 scripts/tariffs_freeze_2026_10.py --apply
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -53,17 +53,12 @@ def plan_changes(sub: dict | None, now: datetime) -> tuple[dict, str] | None:
     note = f"бюджет {total:g} дн., израсходовано {used:g}, осталось {left:g}"
 
     if frozen:
+        # Идущую паузу не трогаем — только в отчёт (пустые поля = не писать).
         at = subscription_pool._parse_dt(subscription_pool.get(sub, "frozen_at"))
         until = subscription_pool._parse_dt(subscription_pool.get(sub, "frozen_until"))
-        if at is not None:
-            already = perks._days((until - at).total_seconds() / 86400) if until else 0.0
-            stored_grant = subscription_pool.get(sub, "frozen_days_granted")
-            grant = perks._days(stored_grant) if stored_grant is not None else max(left, already)
-            fields["frozen_days_granted"] = grant
-            fields["frozen_until"] = (at + timedelta(days=grant)).isoformat()
-            note += f"; на паузе: до {(at + timedelta(days=grant)):%d.%m} ({grant:g} дн.)"
-            if grant > left + 0.001:
-                note += f" — по новому правилу было бы {left:g} дн., оставлено выданное ранее"
+        kind = "новая (по бюджету)" if perks.is_budget_pause(sub) else "старая (до 01.10)"
+        return {}, (f"НА ПАУЗЕ, не трогаем: {kind}, с {at:%d.%m} " if at else f"НА ПАУЗЕ, не трогаем: {kind} ") + \
+            (f"до {until:%d.%m}" if until else "без срока") + f"; бюджет тарифа {total:g} дн."
 
     same = all(
         (subscription_pool.get(sub, k) == v) if not isinstance(v, float)
@@ -82,13 +77,13 @@ def run(apply: bool) -> int:
             if ch is None:
                 continue
             rows.append((u.email, subscription_pool.get(u.subscription, "plan_id") or "—", ch[1]))
-            if apply:
+            if apply and ch[0]:
                 locked = session.exec(
                     select(User).where(User.id == u.id).with_for_update()
                     .execution_options(populate_existing=True)
                 ).one()
                 ch = plan_changes(locked.subscription, now)
-                if ch is None:
+                if ch is None or not ch[0]:
                     continue
                 locked.subscription = subscription_pool.update(locked.subscription, **ch[0])
                 session.add(locked)

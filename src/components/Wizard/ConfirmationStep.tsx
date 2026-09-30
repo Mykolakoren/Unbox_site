@@ -34,7 +34,7 @@ import { Button as UiButton } from '../ui/Button';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
-    balanceLockedReason, bonusMoneyDue, fmtHours, isSelectable, paymentPlan, resolveFinalMethod,
+    balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, paymentPlan, resolveFinalMethod,
     subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 
@@ -287,8 +287,12 @@ export function ConfirmationStep() {
         excludeBookingId: state.editBookingId,
     }), [effectiveUser, state.format, state.date, bookings, state.editBookingId]);
     const plan = useMemo(
-        () => paymentPlan({ hours: totalBookingHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: totalPrice }),
-        [totalBookingHours, totalBonusHours, subHours, isSeries, totalPrice],
+        () => paymentPlan({
+            hours: totalBookingHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: totalPrice,
+            // Слоты — в порядке отправки на сервер (бонус тратится по слотам).
+            items: cartDetails.map(i => ({ hours: i.duration / 60, price: i.price.finalPrice })),
+        }),
+        [totalBookingHours, totalBonusHours, subHours, isSeries, totalPrice, cartDetails],
     );
     const isSubscriptionEligible = plan.subCovers;
     // Бонус можно выбрать, если покрывает бронь целиком — или частично, когда
@@ -1050,7 +1054,7 @@ export function ConfirmationStep() {
                                     </div>
                                     {plan.bonusPartial ? (
                                         <span className="num font-semibold text-ink text-right">
-                                            {fmtHours(plan.bonusCovered)} бонусом + {formatGel(plan.bonusMoney)}
+                                            {fmtHours(plan.bonusCovered)} бонусом + {bonusMoneyText(plan, formatGel)}
                                         </span>
                                     ) : (
                                         <span className="font-semibold text-[var(--status-ok-fg)]">Бесплатно</span>
@@ -1059,7 +1063,10 @@ export function ConfirmationStep() {
                                 <div className="ml-7 text-xs text-ink-60 mt-1 font-medium">
                                     Бесплатные бонусные часы: {fmtHours(totalBonusHours)}
                                     {plan.bonusPartial && (
-                                        <span className="text-ink ml-1">· остальное ({fmtHours(totalBookingHours - plan.bonusCovered)}) — с баланса</span>
+                                        <span className="text-ink ml-1">
+                                            · остальное ({fmtHours(totalBookingHours - plan.bonusCovered)}) — с баланса
+                                            {plan.bonusApprox ? '; точная сумма — после брони' : ''}
+                                        </span>
                                     )}
                                     {!isBonusEligible && (
                                         <span className="text-ink ml-1">
@@ -1340,7 +1347,7 @@ export function ConfirmationStep() {
                                         ? `Создать серию · ${ruCountWord(recurringOccurrences, ['бронь', 'брони', 'броней'])}`
                                         : payMethod === 'bonus'
                                             ? (plan.bonusPartial
-                                                ? `Оплатить ${formatGel(plan.bonusMoney)} + ${fmtHours(plan.bonusCovered)} бонусом`
+                                                ? `Оплатить ${bonusMoneyText(plan, formatGel)} + ${fmtHours(plan.bonusCovered)} бонусом`
                                                 : 'Забронировать бесплатно')
                                             : payMethod === 'subscription'
                                                 ? `Списать ${fmtHours(totalBookingHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`

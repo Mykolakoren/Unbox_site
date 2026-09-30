@@ -3459,7 +3459,23 @@ def reschedule_booking(
 
     free_reschedule_used = False
     free_reschedules_left_after: Optional[int] = None
-    if late_for_client:
+    # Слот фактически не меняется (та же дата, время, кабинет) — бесплатный
+    # перенос НЕ тратим (ревью 01.10). Проверка — до траты счётчика.
+    _late_same_slot = late_for_client and (
+        new_date.date() == booking.date.date()
+        and data.new_start_time == booking.start_time
+        and (data.new_resource_id or booking.resource_id) == booking.resource_id
+    )
+    if _late_same_slot:
+        _late_new_dur = int(data.new_duration) if data.new_duration is not None else booking.duration
+        if _late_new_dur != booking.duration:
+            # Длительность позже суток клиент не меняет — прежнее правило 24 ч.
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Перенос невозможен менее чем за 24 часа до начала (осталось {hours_until:.1f} ч). "
+                        f"Можно выставить бронь на переаренду или написать администратору."),
+            )
+    if late_for_client and not _late_same_slot:
         from app.services import subscription_perks
         try:
             _nh, _nm = map(int, data.new_start_time.split(":"))

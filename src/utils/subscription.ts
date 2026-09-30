@@ -114,6 +114,18 @@ export function fmtFreezeDays(days: number): string {
   return `${String(d).replace('.', ',')} дня`;
 }
 
+/** Клиент может сам перенести/отменить бронь обычным порядком: подтверждена
+ *  и до начала (по Батуми) больше 24 ч. Один расчёт для шахматки и карточек
+ *  «Моих броней» — раньше карточка считала время без −4 ч и показывала
+ *  обычный «Перенести» в последние 4 часа суток (ревью 01.10). */
+export function clientCanModifyBooking(
+  b: { status?: string; date: string | Date; startTime?: string | null },
+  now: number = Date.now(),
+): boolean {
+  if (b.status !== 'confirmed' || !b.startTime) return false;
+  return hoursUntilBookingStart(b, now) > 24;
+}
+
 /** Плашка статуса: подпись + tailwind-классы. */
 export function subscriptionBadge(sub: SubLike | null | undefined): {
   label: string;

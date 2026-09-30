@@ -11,7 +11,7 @@ import { startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { COLOR, STATUS } from '../design/tokens';
 import { formatDateLabel, formatGel, formatTimeRange } from '../utils/format';
 import { useActiveBonusHours } from '../hooks/useActiveBonusHours';
-import { fmtHours } from '../utils/paymentPriority';
+import { bonusBySlots, fmtHours } from '../utils/paymentPriority';
 
 const DISCOUNT_INFO: Record<PricingResult['discountType'], { label: string; Icon: React.ElementType } | null> = {
     none:     null,
@@ -289,13 +289,17 @@ export function Summary() {
                         ? `${Number(cartBookings.reduce((s, b) => s + b.duration / 60, 0).toFixed(1))} ч${total.finalPrice > 0 ? ` + ${formatGel(total.finalPrice)}` : ''}`
                         : state.paymentMethod === 'bonus'
                             ? (() => {
-                                // Бонус покрывает свою долю брони, остальное — деньгами
-                                // (та же формула, что _resolve_with_bonus на сервере).
+                                // Бонус по слотам, как сервер: первые слоты — бонусом,
+                                // слот, где бонуса меньше, — остаток деньгами, дальше деньги.
+                                // Несколько слотов — «≈»: сервер ещё пересчитает цепочку
+                                // смежных часов, точная сумма — после брони.
                                 const hrs = cartBookings.reduce((s, b) => s + b.duration / 60, 0);
-                                const covered = Math.min(bonusHours, hrs);
+                                const { covered, money } = bonusBySlots(
+                                    cartBookings.map(b => ({ hours: b.duration / 60, price: b.price.finalPrice })),
+                                    bonusHours,
+                                );
                                 if (hrs <= 0 || covered >= hrs - 0.01) return formatGel(0);
-                                const money = Math.round(total.finalPrice * ((hrs - covered) / hrs) * 100) / 100;
-                                return `${fmtHours(covered)} бонусом + ${formatGel(money)}`;
+                                return `${fmtHours(covered)} бонусом + ${cartBookings.length > 1 ? '≈ ' : ''}${formatGel(money)}`;
                             })()
                             : formatGel(total.finalPrice)}</span>
                 </div>

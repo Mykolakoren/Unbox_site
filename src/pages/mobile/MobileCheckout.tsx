@@ -10,7 +10,7 @@ import { useCrmStore } from '../../store/crmStore';
 import { bookingsApi } from '../../api/bookings';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
-    balanceLockedReason, bonusMoneyDue, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
+    balanceLockedReason, bonusMoneyDue, bonusMoneyText, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
     subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../utils/data';
@@ -232,8 +232,10 @@ export function MobileCheckout() {
     // Серию бонусом явно не оплачиваем: сервер сам потратит бонус на первые
     // даты, если его хватит на встречу целиком (это видно в «примерке» серии).
     const plan = useMemo(
-        () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total }),
-        [totalDurationHours, totalBonusHours, subHours, isSeries, priced.total],
+        // Слоты (items) — в порядке отправки на сервер: бонус тратится по слотам.
+        () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total,
+            items: priced.items.map(i => ({ hours: i.duration / 60, price: i.price.finalPrice })) }),
+        [totalDurationHours, totalBonusHours, subHours, isSeries, priced.total, priced.items],
     );
 
     // Способ по умолчанию — тот, что выберет сервер. Раньше стоял «Баланс»,
@@ -381,7 +383,7 @@ export function MobileCheckout() {
     // Частичный бонус (без абонемента, владелец 01.10): «1 ч бонусом + 20 ₾».
     const payLabel = payMethod === 'bonus'
         ? (plan.bonusPartial
-            ? `${fmtHours(plan.bonusCovered)} бонусом + ${formatGel(plan.bonusMoney)}`
+            ? `${fmtHours(plan.bonusCovered)} бонусом + ${bonusMoneyText(plan, formatGel)}`
             : `${fmtHours(totalDurationHours)} из бонусов`)
         : payMethod === 'subscription'
             ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
@@ -745,7 +747,7 @@ export function MobileCheckout() {
                                     ? formatGel(priced.total)
                                     : payMethod === 'bonus'
                                         ? (plan.bonusPartial
-                                            ? `${fmtHours(plan.bonusCovered)} + ${formatGel(plan.bonusMoney)}`
+                                            ? `${fmtHours(plan.bonusCovered)} + ${bonusMoneyText(plan, formatGel)}`
                                             : formatGel(0))
                                         : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`}
                                 bold
@@ -972,7 +974,7 @@ export function MobileCheckout() {
                         })()}
                         {!isSeries && payMethod === 'bonus' && (
                             plan.bonusPartial
-                                ? <li>Спишется {fmtHours(plan.bonusCovered)} из бонусов, остальное — {formatGel(plan.bonusMoney)} с баланса.</li>
+                                ? <li>Спишется {fmtHours(plan.bonusCovered)} из бонусов, остальное — {bonusMoneyText(plan, formatGel)} с баланса{plan.bonusApprox ? ' (точная сумма — после брони)' : ''}.</li>
                                 : <li>Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}.</li>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
@@ -1157,7 +1159,7 @@ export function MobileCheckout() {
                             sub={plan.bonusCovers
                                 ? `${fmtHours(totalBonusHours)} бесплатно`
                                 : plan.bonusPartial
-                                    ? `${fmtHours(plan.bonusCovered)} бесплатно + ${formatGel(plan.bonusMoney)} с баланса`
+                                    ? `${fmtHours(plan.bonusCovered)} бесплатно + ${bonusMoneyText(plan, formatGel)} с баланса`
                                     : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${subHours.active ? ' — при абонементе только на бронь целиком' : ''}`}
                             disabled={!plan.bonusCovers && !plan.bonusPartial}
                             active={payMethod === 'bonus'}

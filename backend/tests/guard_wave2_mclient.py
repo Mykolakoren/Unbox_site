@@ -25,7 +25,9 @@ import sys
 
 # Эталон денежных блоков MobileCheckout.tsx (как в main до волны 2).
 MONEY_SNIPPETS = {
-    'PLAN': '    const plan = useMemo(\n        () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total }),\n        [totalDurationHours, totalBonusHours, subHours, isSeries, priced.total],\n    );\n',
+    # 01.10 (ревью тарифов): план получает слоты корзины (items) — частичный
+    # бонус считается по слотам, как на сервере. Эталон обновлён.
+    'PLAN': '    const plan = useMemo(\n        // Слоты (items) — в порядке отправки на сервер: бонус тратится по слотам.\n        () => paymentPlan({ hours: totalDurationHours, bonusHours: totalBonusHours, sub: subHours, isSeries, moneyPrice: priced.total,\n            items: priced.items.map(i => ({ hours: i.duration / 60, price: i.price.finalPrice })) }),\n        [totalDurationHours, totalBonusHours, subHours, isSeries, priced.total, priced.items],\n    );\n',
     'USERPICK': "    const userPickedPay = useRef(false);\n    useEffect(() => {\n        const cur: PayMethod = state.paymentMethod ?? 'balance';\n        const want: PayMethod = isSeries ? 'balance' : plan.auto;\n        if (userPickedPay.current && isSelectable(cur, plan, isSeries)) return;\n        userPickedPay.current = false;\n        if (cur !== want) useBookingStore.setState({ paymentMethod: want });\n    }, [plan, isSeries, state.paymentMethod]);\n    const pickPay = (m: PayMethod) => {\n        if (!isSelectable(m, plan, isSeries)) return;\n        userPickedPay.current = true;\n        useBookingStore.setState({ paymentMethod: m });\n    };\n",
     'RESOLVE': '    const resolveFinalMethod = (): PayMethod => resolvePayMethod(state.paymentMethod, plan, isSeries);\n',
     # 01.10 (решение владельца, шаг 1 тарифов): проверка баланса учитывает

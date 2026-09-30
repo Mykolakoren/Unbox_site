@@ -23,6 +23,8 @@ import { apiErrorMessage } from '../../utils/errors';
 import { CancelBookingChoiceModal } from '../CancelBookingChoiceModal';
 import { TrimBookingModal } from '../TrimBookingModal';
 import { RescheduleScopeChoiceModal } from '../RescheduleScopeChoiceModal';
+import { clientCanModifyBooking } from '../../utils/subscription';
+import { ADMIN_ROLES } from '../../utils/permissions';
 import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { tbilisiNow } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
@@ -2144,6 +2146,9 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
 
             {seriesMoveTarget && (
                 <RescheduleScopeChoiceModal
+                    // Позже суток серию целиком переносит только администратор.
+                    allowSeries={ADMIN_ROLES.includes(currentUser?.role || '')
+                        || clientCanModifyBooking(seriesMoveTarget.booking)}
                     bookingId={seriesMoveTarget.booking.id}
                     newDate={seriesMoveTarget.newDate}
                     newStartTime={seriesMoveTarget.newStartTime}

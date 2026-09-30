@@ -31,7 +31,11 @@ export function RescheduleScopeChoiceModal({
     newResourceId,
     onClose,
     onCompleted,
+    allowSeries = true,
 }: {
+    /** false — клиенту позже суток до начала: только «эту» (сервер на серию
+     *  даст 400; бесплатный перенос абонемента — для одной брони). */
+    allowSeries?: boolean;
     bookingId: string;
     newDate: string;
     newStartTime: string;
@@ -98,7 +102,9 @@ export function RescheduleScopeChoiceModal({
                     </button>
                 </div>
                 <div className="px-4 py-3 text-sm text-ink-80 space-y-1">
-                    <p>Перенести только эту бронь или эту и все следующие в серии?</p>
+                    <p>{allowSeries
+                        ? 'Перенести только эту бронь или эту и все следующие в серии?'
+                        : 'До начала меньше суток — перенести можно только эту бронь.'}</p>
                     <p className="text-xs text-ink-60">
                         Новое время: <span className="num font-medium text-ink">{newStartTime}</span>
                         {newDate && <> · {formatDayMonth(newDate)}</>}
@@ -113,14 +119,14 @@ export function RescheduleScopeChoiceModal({
                         {busy === 'this' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
                         Перенести только эту
                     </button>
-                    <button
+                    {allowSeries && <button
                         onClick={moveSeries}
                         disabled={busy !== null}
                         className="w-full min-h-11 py-2 text-sm font-medium rounded-lg bg-accent hover:bg-accent-hover text-on-accent disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {busy === 'series' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
                         Перенести эту и следующие
-                    </button>
+                    </button>}
                     <button
                         onClick={onClose}
                         disabled={busy !== null}

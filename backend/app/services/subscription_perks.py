@@ -143,19 +143,21 @@ def freeze_days_left(sub: Optional[dict]) -> float:
     return _days(freeze_days_total(sub) - freeze_days_used(sub))
 
 
+def is_budget_pause(sub: Optional[dict]) -> bool:
+    """Пауза поставлена НОВЫМ кодом (по бюджету тарифа, с 01.10): у неё есть
+    frozen_days_granted. Старые паузы (до деплоя) этого поля не имеют — для
+    них действуют прежние правила: не снимаются сами, при ручном снятии срок
+    продлевается на полный факт паузы (ревью 01.10)."""
+    return (bool(subscription_pool.get(sub, "is_frozen", False))
+            and subscription_pool.get(sub, "frozen_days_granted") is not None)
+
+
 def _granted_days(sub: Optional[dict]) -> float:
-    """Сколько дней выдано на ТЕКУЩУЮ паузу. Старая пауза (до 01.10) без поля —
-    как её выдали: frozen_until − frozen_at, но не меньше остатка бюджета."""
-    stored = subscription_pool.get(sub, "frozen_days_granted")
-    if stored is not None:
-        try:
-            return _days(stored)
-        except (TypeError, ValueError):
-            pass
-    at = subscription_pool._parse_dt(subscription_pool.get(sub, "frozen_at"))
-    until = subscription_pool._parse_dt(subscription_pool.get(sub, "frozen_until"))
-    legacy = _days((until - at).total_seconds() / 86400) if at and until else 0.0
-    return max(legacy, freeze_days_left(sub))
+    """Сколько дней выдано на текущую (новую) паузу."""
+    try:
+        return _days(subscription_pool.get(sub, "frozen_days_granted"))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def with_freeze_budget(sub: Optional[dict]) -> dict:
@@ -220,16 +222,17 @@ def start_freeze(sub: Optional[dict], now: datetime, days: Optional[float] = Non
 def end_freeze(sub: Optional[dict], now: datetime) -> tuple[dict, float, float]:
     """Снять паузу. Возвращает (пул, дней на паузе, на сколько продлён срок).
 
-    Срок абонемента сдвигается на min(факт, выдано на эту паузу); в бюджет
-    записывается израсходованное — тоже не больше выданного (если крон снял
-    паузу позже её срока, лишнее время клиенту в бюджет не засчитывается)."""
+    Новая пауза (по бюджету): срок абонемента сдвигается на min(факт, выдано
+    на эту паузу); в бюджет записывается столько же (если крон снял паузу
+    позже срока, лишнее время в бюджет не засчитывается).
+    Старая пауза (до 01.10, без frozen_days_granted): как было до этих правил —
+    срок продлевается на полный факт паузы; в бюджет записывается факт."""
     from datetime import timedelta
     if not sub or not subscription_pool.get(sub, "is_frozen", False):
         raise FreezeError("Абонемент не на паузе")
     at = subscription_pool._parse_dt(subscription_pool.get(sub, "frozen_at"))
     fact = _days((now - at).total_seconds() / 86400) if at else 0.0
-    granted = _granted_days(sub)
-    extend = min(fact, granted)
+    extend = min(fact, _granted_days(sub)) if is_budget_pause(sub) else fact
     total = freeze_days_total(sub)
     used = _days(freeze_days_used(sub) + extend)
     fields: dict[str, Any] = dict(
@@ -243,43 +246,67 @@ def end_freeze(sub: Optional[dict], now: datetime) -> tuple[dict, float, float]:
 
 
 def freeze_is_over(sub: Optional[dict], now: datetime) -> bool:
-    """Пауза идёт, и её срок (frozen_until) уже прошёл."""
-    if not subscription_pool.get(sub, "is_frozen", False):
+    """НОВАЯ пауза идёт, и её срок (frozen_until) уже прошёл. Старые паузы
+    (до 01.10) сами не снимаются — их снимает администратор."""
+    if not is_budget_pause(sub):
         return False
     until = subscription_pool._parse_dt(subscription_pool.get(sub, "frozen_until"))
     return until is not None and until <= now
 
 
 def auto_unfreeze_expired(session, now: datetime) -> list[dict]:
-    """Снять паузы, чей срок вышел (крон charge-due).
+    """Снять НОВЫЕ паузы, чей срок вышел (крон charge-due). Старые паузы
+    (до 01.10) не трогаем — их снимает администратор по прежним правилам.
 
     Каждая строка — под замком (SELECT … FOR UPDATE), чтобы не столкнуться
     с ручным снятием паузы администратором в ту же секунду. Коммит — по
-    одному клиенту вместе с событием (timeline.log_event коммитит сам)."""
+    одному клиенту вместе с событием (timeline.log_event коммитит сам).
+    Сбой на одном клиенте откатывается и не обрывает остальных."""
+    import logging
     from sqlmodel import select
     from app.models.user import User
     from app.services.timeline import SYSTEM_ACTOR_ID, timeline_service
+    log = logging.getLogger(__name__)
     done: list[dict] = []
-    for u in session.exec(select(User).where(User.subscription.is_not(None))).all():  # type: ignore[union-attr]
-        if not freeze_is_over(u.subscription, now):
-            continue
-        locked = session.exec(
-            select(User).where(User.id == u.id).with_for_update()
-            .execution_options(populate_existing=True)
-        ).one()
-        if not freeze_is_over(locked.subscription, now):
-            continue
-        new_sub, fact, extend = end_freeze(locked.subscription, now)
-        locked.subscription = new_sub
-        session.add(locked)
-        row = {"user_id": str(locked.id), "email": locked.email, "fact_days": fact,
-               "extended_days": extend, "expiry_date": subscription_pool.get(new_sub, "expiry_date"),
-               "freeze_days_left": subscription_pool.get(new_sub, "freeze_days_left")}
-        timeline_service.log_event(
-            session=session, actor_id=SYSTEM_ACTOR_ID, actor_role="system",
-            target_id=str(locked.id), target_type="user", event_type="subscription_freeze",
-            description=f"Пауза снята автоматически по сроку, срок абонемента +{extend:g} дн.",
-            metadata={"action": "AutoUnfreezing", **row},
-        )
-        done.append(row)
+
+    # Выборка сужена по признаку новой паузы в JSON: frozen_days_granted
+    # не NULL (Postgres: subscription ->> 'frozen_days_granted', SQLite:
+    # JSON_EXTRACT; у JSON-null оба дают SQL NULL). Если диалект не справится —
+    # полный перебор, дальше всё равно фильтр в Python.
+    try:
+        rows = session.exec(select(User).where(
+            User.subscription["frozen_days_granted"].as_string().is_not(None)  # type: ignore[index]
+        )).all()
+    except Exception:
+        session.rollback()
+        log.warning("[freeze] узкая выборка не сработала — полный перебор", exc_info=True)
+        rows = session.exec(select(User).where(User.subscription.is_not(None))).all()  # type: ignore[union-attr]
+    ids = [u.id for u in rows if freeze_is_over(u.subscription, now)]
+
+    for uid in ids:
+        try:
+            locked = session.exec(
+                select(User).where(User.id == uid).with_for_update()
+                .execution_options(populate_existing=True)
+            ).one()
+            if not freeze_is_over(locked.subscription, now):
+                session.rollback()
+                continue
+            new_sub, fact, extend = end_freeze(locked.subscription, now)
+            locked.subscription = new_sub
+            session.add(locked)
+            row = {"user_id": str(locked.id), "email": locked.email, "fact_days": fact,
+                   "extended_days": extend, "expiry_date": subscription_pool.get(new_sub, "expiry_date"),
+                   "freeze_days_left": subscription_pool.get(new_sub, "freeze_days_left")}
+            timeline_service.log_event(
+                session=session, actor_id=SYSTEM_ACTOR_ID, actor_role="system",
+                target_id=str(locked.id), target_type="user", event_type="subscription_freeze",
+                description=f"Пауза снята автоматически по сроку, срок абонемента +{extend:g} дн.",
+                metadata={"action": "AutoUnfreezing", **row},
+            )
+            session.commit()
+            done.append(row)
+        except Exception:
+            session.rollback()
+            log.exception("[freeze] автоснятие паузы у %s не удалось — пропускаю", uid)
     return done

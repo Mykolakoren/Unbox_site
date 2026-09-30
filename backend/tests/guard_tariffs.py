@@ -173,7 +173,7 @@ def test_frontend_plan_mirrors_server():
     assert "!plan.bonusCovers && !plan.subCovers && !plan.bonusPartial" in pp
     for rel in ("src/components/Wizard/ConfirmationStep.tsx", "src/pages/mobile/MobileCheckout.tsx"):
         src = _read(rel)
-        assert "бонусом + ${formatGel(plan.bonusMoney)}" in src or "бонусом + {formatGel(plan.bonusMoney)}" in src, \
+        assert "бонусом + ${bonusMoneyText(plan, formatGel)}" in src or "бонусом + {bonusMoneyText(plan, formatGel)}" in src, \
             f"{rel}: нет подписи «N ч бонусом + M ₾»"
         assert "bonusMoneyDue(plan)" in src, f"{rel}: проверка баланса не учитывает остаток частичного бонуса"
 
@@ -448,8 +448,9 @@ def test_freeze_budget_is_shared_and_extension_capped():
 
 
 def test_freeze_legacy_pools():
-    """Старые пулы без полей: пауза уже была → израсходовано 7; идущая старая
-    пауза на 7 дней у Тёплого (бюджет 0) — продлевается на выданные 7."""
+    """Старые пулы без полей: пауза уже была → израсходовано 7; идущая СТАРАЯ
+    пауза (до 01.10, без frozen_days_granted) при ручном снятии продлевает
+    срок по-старому — на полный факт (10 дн.), а не на 7 и не на бюджет."""
     from app.services import subscription_perks as perks
     now = datetime.utcnow()
     old = {k: v for k, v in _active_sub("PRO_PLUS", freeze_count=1).items() if "freeze_days" not in k
@@ -463,8 +464,9 @@ def test_freeze_legacy_pools():
                                           frozen_at=_iso(at), frozen_until=_iso(at + timedelta(days=7))).items()
             if "freeze_days" not in k and "freezeDays" not in k}
     exp0 = subscription_pool._parse_dt(warm["expiry_date"])
+    assert not perks.is_budget_pause(warm)
     new, fact, ext = perks.end_freeze(warm, now)
-    assert ext == 7.0 and subscription_pool._parse_dt(new["expiry_date"]) == exp0 + timedelta(days=7)
+    assert ext == 10.0 and subscription_pool._parse_dt(new["expiry_date"]) == exp0 + timedelta(days=10), ext
 
 
 def test_freeze_endpoint_budget_and_override():
@@ -539,19 +541,122 @@ def test_freeze_migration_script():
     assert f == {"freeze_days_total": 30.0, "freeze_days_used": 7.0, "freeze_days_left": 23.0}, f
     f, _ = mod.plan_changes(legacy("REGULAR_PRACTITIONER"), now)
     assert f["freeze_days_left"] == 7.0
+    # Идущие паузы скрипт НЕ трогает (ревью 01.10) — только показывает в отчёте.
     at = now - timedelta(days=2)
-    f, note = mod.plan_changes(legacy("PRO_PLUS", is_frozen=True, freeze_count=1, frozen_at=_iso(at),
-                                      frozen_until=_iso(at + timedelta(days=7))), now)
-    assert f["frozen_days_granted"] == 30.0 and f["frozen_until"] == _iso(at + timedelta(days=30)), f
-    f, note = mod.plan_changes(legacy("WARM_START", is_frozen=True, freeze_count=1, frozen_at=_iso(at),
-                                      frozen_until=_iso(at + timedelta(days=7))), now)
-    assert f["frozen_days_granted"] == 7.0 and "оставлено выданное ранее" in note, (f, note)
+    for plan in ("PRO_PLUS", "WARM_START"):
+        f, note = mod.plan_changes(legacy(plan, is_frozen=True, freeze_count=1, frozen_at=_iso(at),
+                                          frozen_until=_iso(at + timedelta(days=7))), now)
+        assert f == {} and "НА ПАУЗЕ, не трогаем" in note and "старая" in note, (plan, f, note)
+    src = _read("backend/scripts/tariffs_freeze_2026_10.py")
+    assert "if apply and ch[0]:" in src and "if ch is None or not ch[0]:" in src, "скрипт пишет идущие паузы"
     expired = legacy("PRO_PLUS", expiry_date=_iso(now - timedelta(days=1)))
     assert mod.plan_changes(expired, now) is None
     fixed = subscription_pool.update(legacy("PRO_PLUS", freeze_count=1),
                                      **mod.plan_changes(legacy("PRO_PLUS", freeze_count=1), now)[0])
     assert mod.plan_changes(fixed, now) is None, "скрипт не идемпотентен"
     assert mod.plan_changes(_active_sub("PRO_PLUS"), now) is None, "новый пул не должен меняться"
+
+
+def test_legacy_pause_not_auto_unfrozen_and_manual_unfreeze_old_way():
+    """Ревью 01.10: паузы, поставленные до деплоя, крон НЕ снимает (иначе
+    давно забытые паузы снялись бы с +7 дн. вместо факта и абонемент мог
+    сразу истечь). Ручное снятие админом — срок + полный факт, как раньше."""
+    from app.api.v1 import billing
+    from app.api.v1.users.admin import toggle_subscription_freeze as toggle
+    s = _db()
+    now = datetime.utcnow()
+    at = now - timedelta(days=40)
+    old = {k: v for k, v in _active_sub("REGULAR_PRACTITIONER", is_frozen=True, freeze_count=1,
+                                        frozen_at=_iso(at), frozen_until=_iso(at + timedelta(days=7))).items()
+           if "freeze_days" not in k and "freezeDays" not in k}
+    exp0 = subscription_pool._parse_dt(old["expiry_date"])
+    u = _user(s, sub=old)
+    out = billing._sweep_due_bookings(s)
+    assert out["unfrozen"] == 0 and _pool(s, u)["isFrozen"] is True, "крон снял старую паузу"
+    user = toggle(user_id=str(u.id), payload=None, session=s, current_user=_staff(s))
+    ext = subscription_pool._parse_dt(user.subscription["expiry_date"]) - exp0
+    assert abs(ext.total_seconds() / 86400 - 40) < 0.02, f"старая пауза продлена не на факт: {ext}"
+
+
+def test_auto_unfreeze_one_broken_client_does_not_stop_others():
+    import app.services.subscription_perks as perks
+    s = _db()
+    at = datetime.utcnow() - timedelta(days=9)
+    a = _user(s, sub=perks.start_freeze(_active_sub("REGULAR_PRACTITIONER"), at), email="a-broken@x.ge")
+    b = _user(s, sub=perks.start_freeze(_active_sub("REGULAR_PRACTITIONER"), at), email="b-ok@x.ge")
+    saved = perks.end_freeze
+
+    def flaky(sub, now):
+        if subscription_pool.get(sub, "id") == a.subscription["id"]:
+            raise RuntimeError("битая запись")
+        return saved(sub, now)
+    perks.end_freeze = flaky
+    try:
+        done = perks.auto_unfreeze_expired(s, datetime.utcnow())
+    finally:
+        perks.end_freeze = saved
+    assert [d["email"] for d in done] == ["b-ok@x.ge"], done
+    assert _pool(s, a)["isFrozen"] is True and _pool(s, b)["isFrozen"] is False
+    src = _read("backend/app/services/subscription_perks.py")
+    body = src[src.index("def auto_unfreeze_expired"):]
+    assert 'User.subscription["frozen_days_granted"]' in body, "выборка автоснятия не сужена"
+
+
+def test_late_reschedule_same_slot_does_not_spend():
+    """Ревью 01.10: «перенос» на тот же слот (дата, время, кабинет) не тратит
+    бесплатный перенос; смена одной длительности позже суток — 400."""
+    s = _db()
+    u = _user(s, sub=_active_sub("REGULAR_PRACTITIONER"))
+    b = _booking(s, u, hours_ahead=10)
+    out = _move(s, b, u, days=0)
+    assert not hasattr(out, "status_code"), getattr(out, "detail", out)
+    assert subscription_pool.get_float(_pool(s, u), "free_reschedules") == 2, "тот же слот съел перенос"
+    from fastapi import BackgroundTasks, HTTPException
+    from app.api.v1.bookings import routes
+    b = s.get(type(b), b.id)
+    try:
+        routes.reschedule_booking(
+            booking_id=str(b.id),
+            data=routes.RescheduleRequest(new_date=b.date.strftime("%Y-%m-%d"), new_start_time=b.start_time,
+                                          new_duration=90),
+            background_tasks=BackgroundTasks(), session=s, current_user=u)
+        raise AssertionError("длительность позже суток поменялась")
+    except HTTPException as e:
+        s.rollback()
+        assert e.status_code == 400
+    assert subscription_pool.get_float(_pool(s, u), "free_reschedules") == 2
+    src = _read("backend/app/api/v1/bookings/routes.py")
+    body = src[src.index("def reschedule_booking("):]
+    assert body.index("_late_same_slot = ") < body.index("spend_free_reschedule("), "проверка слота после траты"
+
+
+def test_frontend_one_24h_rule_and_series_modal():
+    util = _read("src/utils/subscription.ts")
+    assert "export function clientCanModifyBooking(" in util and "hoursUntilBookingStart(b, now) > 24" in util
+    page = _read("src/pages/MyBookingsPage.tsx")
+    assert "const canMod = clientCanModifyBooking(booking);" in page, "карточка считает сутки не по Батуми"
+    assert "clientCanModifyBooking(b)" in page and "start.setUTCHours(h, m, 0, 0)" not in page
+    modal = _read("src/components/RescheduleScopeChoiceModal.tsx")
+    assert "allowSeries = true" in modal and "{allowSeries && <button" in modal
+    for rel in ("src/pages/MyBookingsPage.tsx", "src/components/crm/CrmChessboardView.tsx"):
+        src = _read(rel)
+        assert "allowSeries={ADMIN_ROLES.includes(" in src and "clientCanModifyBooking(seriesMoveTarget.booking)" in src, \
+            f"{rel}: клиенту позже суток снова предлагают «эту и следующие»"
+
+
+def test_frontend_multislot_bonus_by_slots():
+    """Ревью 01.10: мультислот с частичным бонусом — экран идёт по слотам, как
+    сервер (бонус закрывает первые слоты), и честно пишет «≈ … точная сумма —
+    после брони» (сервер потом пересчитывает цепочку смежных часов)."""
+    pp = _read("src/utils/paymentPriority.ts")
+    assert "export function bonusBySlots(" in pp and "bonusBySlots(opts.items!, bonusHours).money" in pp
+    assert "const bonusApprox = bonusPartial && multi;" in pp and "plan.bonusApprox ? '≈ ' : ''" in pp
+    for rel in ("src/components/Wizard/ConfirmationStep.tsx", "src/pages/mobile/MobileCheckout.tsx"):
+        src = _read(rel)
+        assert "items: " in src and "price: i.price.finalPrice" in src, f"{rel}: слоты не передаются в план"
+        assert "bonusMoneyText(plan, formatGel)" in src and "точная сумма — после брони" in src, rel
+    summ = _read("src/components/Summary.tsx")
+    assert "bonusBySlots(" in summ and "cartBookings.length > 1 ? '≈ ' : ''" in summ
 
 
 def test_frontend_freeze_from_budget():

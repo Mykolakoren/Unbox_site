@@ -177,6 +177,11 @@ export interface PaymentPlan {
     /** Сколько деньгами при оплате бонусом: непокрытая доля цены (0 при
      *  полном покрытии). Та же формула, что _resolve_with_bonus. */
     bonusMoney: number;
+    /** Несколько слотов и частичный бонус: сумма — оценка (≈). Сервер идёт по
+     *  слотам (бонус целиком закрывает первые, остальные — деньгами) и после
+     *  создания пересчитывает цепочку смежных часов (consecutive_pricing) —
+     *  точная сумма видна после брони. */
+    bonusApprox: boolean;
     sub: SubscriptionHours;
     /** Сервер возьмёт бронь абонементом (его проверка — по остатку пула). */
     subCovers: boolean;
@@ -195,6 +200,9 @@ export function paymentPlan(opts: {
     isSeries?: boolean;
     /** Цена брони деньгами (без абонемента). 0 — бронь бесплатна. */
     moneyPrice?: number;
+    /** Слоты корзины в порядке отправки на сервер (часы и цена деньгами).
+     *  Бонус тратится по слотам так же, как на сервере. */
+    items?: Array<{ hours: number; price: number }>;
 }): PaymentPlan {
     const { hours, bonusHours, sub } = opts;
     const subCovers = sub.ok && hours > 0 && sub.remaining >= hours - 0.01;
@@ -208,12 +216,42 @@ export function paymentPlan(opts: {
     const bonusPartial = !opts.isSeries && !bonusCovers && !sub.active && !free
         && hours > 0 && bonusHours > 0.001 && moneyPrice > 0;
     const bonusCovered = bonusCovers ? hours : bonusPartial ? Math.min(bonusHours, hours) : 0;
-    const bonusMoney = bonusPartial
-        ? Math.round(moneyPrice * ((hours - bonusCovered) / hours) * 100) / 100
-        : 0;
+    const multi = (opts.items?.length ?? 0) > 1;
+    const bonusMoney = !bonusPartial
+        ? 0
+        : multi
+            ? bonusBySlots(opts.items!, bonusHours).money
+            : Math.round(moneyPrice * ((hours - bonusCovered) / hours) * 100) / 100;
+    const bonusApprox = bonusPartial && multi;
     const subFreeCovers = subCovers && sub.free >= hours - 0.01;
     const auto: PayMethod = bonusCovers ? 'bonus' : subCovers ? 'subscription' : bonusPartial ? 'bonus' : 'balance';
-    return { hours, bonusHours, free, bonusCovers, bonusPartial, bonusCovered, bonusMoney, sub, subCovers, subFreeCovers, auto };
+    return { hours, bonusHours, free, bonusCovers, bonusPartial, bonusCovered, bonusMoney, bonusApprox, sub, subCovers, subFreeCovers, auto };
+}
+
+/** Бонус по слотам, как сервер (multi-slot / по одной брони подряд): слот,
+ *  который бонус покрывает целиком, — бесплатно; слот, где бонуса меньше, —
+ *  бонус-часы бесплатно, остаток его цены деньгами; дальше — деньгами. */
+export function bonusBySlots(
+    items: Array<{ hours: number; price: number }>,
+    bonusHours: number,
+): { covered: number; money: number } {
+    let left = Math.max(0, bonusHours);
+    let covered = 0;
+    let money = 0;
+    for (const it of items) {
+        const h = Math.max(0, it.hours);
+        const price = Math.max(0, it.price);
+        const c = h > 0 ? Math.min(left, h) : 0;
+        left -= c;
+        covered += c;
+        money += h > 0 ? price * ((h - c) / h) : price;
+    }
+    return { covered: Math.round(covered * 100) / 100, money: Math.round(money * 100) / 100 };
+}
+
+/** «20 ₾» или «≈ 20 ₾» (мультислот с частичным бонусом — точная после брони). */
+export function bonusMoneyText(plan: PaymentPlan, gel: (n: number) => string): string {
+    return `${plan.bonusApprox ? '≈ ' : ''}${gel(plan.bonusMoney)}`;
 }
 
 /** Можно ли выбрать способ. «Баланс» разовой брони доступен, только когда
