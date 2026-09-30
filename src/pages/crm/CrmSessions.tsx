@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import {
@@ -1017,8 +1017,29 @@ interface GHSessionsProps {
 const ghsMono = { fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: GH.ink60 };
 const ghsHairline = `1px solid ${GH.ink10}`;
 // Колонки таблицы сессий: шапка и строки — одна сетка. Кнопки в строке —
-// полными словами 12 px (раньше «Pay / +Каб / Ред. / Уд.» 8 px в 120 px).
-const GH_ROW_COLUMNS = '64px minmax(0, 1fr) 56px 96px 170px 248px';
+// 12 px (раньше «Pay / +Каб / Ред. / Уд.» 8 px в 120 px).
+// Минимум сетки: 52 + 140 (клиент) + 44 + 84 + 130 + 236 + 5×8 зазоров = 726 px.
+// Уже GH_TABLE_MIN — строки складываются в карточки (меряем контейнер, а не
+// окно: сайдбар CRM съедает 260 px, и на окнах 960–1200 таблица не влезала).
+const GH_ROW_COLUMNS = '52px minmax(140px, 1fr) 44px 84px 130px 236px';
+const GH_ROW_GAP = 8;
+const GH_TABLE_MIN = 760;
+
+/** Ширина элемента через ResizeObserver. Первый замер — до отрисовки
+ *  (useLayoutEffect), чтобы таблица не мигала карточками. */
+function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
+    const [el, setEl] = useState<T | null>(null);
+    const [w, setW] = useState(0);
+    useLayoutEffect(() => {
+        if (!el) return;
+        setW(el.getBoundingClientRect().width);
+        if (typeof ResizeObserver === 'undefined') return;
+        const ro = new ResizeObserver(entries => setW(entries[0].contentRect.width));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [el]);
+    return [setEl, w];
+}
 
 function useGHNarrow(bp = 768) {
     const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
@@ -1028,6 +1049,9 @@ function useGHNarrow(bp = 768) {
 
 function GridHouseCrmSessions(p: GHSessionsProps) {
     const ghNarrow = useGHNarrow();
+    const [listRef, listW] = useElementWidth<HTMLDivElement>();
+    // Карточки вместо таблицы, если контейнер списка уже минимума сетки.
+    const tableNarrow = ghNarrow || listW < GH_TABLE_MIN;
     const VIEW_MODES: { key: ViewMode; label: string }[] = [
         { key: 'list', label: 'Список' },
         { key: 'week', label: 'Неделя' },
@@ -1204,7 +1228,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                         />
                     </div>
                 ) : (
-                    <>
+                    <div ref={listRef}>
                         {/* Month nav + status filters */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: 24, paddingBottom: 12, borderBottom: ghsHairline }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1252,9 +1276,9 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                             />
                         )}
 
-                        {!p.loading && allRows.length > 0 && !ghNarrow && (
+                        {!p.loading && allRows.length > 0 && !tableNarrow && (
                             <div style={{
-                                display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: 12,
+                                display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: GH_ROW_GAP,
                                 padding: '8px 0', borderBottom: ghsHairline,
                             }}>
                                 {['Время', 'Клиент', 'Длит.', 'Цена', 'Статус', ''].map(h => (
@@ -1309,14 +1333,15 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
                                                     quickPaySession={p.quickPaySession}
                                                     onBookCab={p.handleBookCab}
                                                     navigate={p.navigate}
-                                                    narrow={ghNarrow}
+                                                    narrow={tableNarrow}
+                                                    touch={ghNarrow}
                                                 />
                                             ))}
                                     </div>
                                 ))}
                             </div>
                         )}
-                    </>
+                    </div>
                 )}
             </div>
 
@@ -1442,7 +1467,7 @@ function GridHouseCrmSessions(p: GHSessionsProps) {
 
 // ─── GH: Строка сессии ───────────────────────────────────────────────────────
 
-function GHSessionRow({ session, client, isEditing, setEditingId, updateSession, deleteSession, quickPaySession, onBookCab, navigate, narrow }: {
+function GHSessionRow({ session, client, isEditing, setEditingId, updateSession, deleteSession, quickPaySession, onBookCab, navigate, narrow, touch: touchScreen }: {
     session: CrmSession; client?: CrmClient;
     isEditing: boolean; setEditingId: (id: string | null) => void;
     updateSession: (id: string, data: CrmSessionUpdate) => Promise<CrmSession>;
@@ -1450,20 +1475,25 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     quickPaySession: (id: string, account?: string) => Promise<{ amount: number; currency: string }>;
     onBookCab: (session: CrmSession, clientName: string) => void;
     navigate: ReturnType<typeof useNavigate>;
+    /** Карточка вместо строки таблицы (узкий контейнер). */
     narrow?: boolean;
+    /** Телефон: цели касания 44 px. */
+    touch?: boolean;
 }) {
     const dt = parseSessionDate(session.date);
     const effectiveStatus = getEffectiveStatus(session);
     const isCancelled = effectiveStatus === 'CANCELLED_CLIENT' || effectiveStatus === 'CANCELLED_THERAPIST';
     // Одни слова для оплаты во всей CRM (G5-06): «Оплачено» — статус,
     // «Отметить оплату» — действие.
+    // В узкой колонке таблицы длинный статус («Отменил специалист») переносится.
+    const badgeClass = narrow ? undefined : 'whitespace-normal';
     const statusBadge = session.isPaid
-        ? <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" />
-        : <StatusBadge kind="session" status={effectiveStatus} audience="staff" variant="dot" />;
+        ? <StatusBadge kind="payment" status="paid" audience="staff" variant="dot" className={badgeClass} />
+        : <StatusBadge kind="session" status={effectiveStatus} audience="staff" variant="dot" className={badgeClass} />;
     const price = formatMoney(session.price ?? client?.basePrice, { currency: client?.currency });
 
     // Кнопки строки: Plex Sans 12 px, без капса; на узком экране — 44 px (rule 9).
-    const touch = narrow ? 44 : 32;
+    const touch = touchScreen ? 44 : 32;
     const textBtnStyle: React.CSSProperties = {
         fontFamily: GH_SANS, fontSize: 12, fontWeight: 500, minHeight: touch, padding: '0 10px',
         display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
@@ -1495,8 +1525,9 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
     const actions = (
         <>
             {!session.isPaid && !isCancelled && (
-                <button onClick={handleQuickPay} style={{ ...textBtnStyle, background: GH.ink, color: GH.paper, border: 'none' }}>
-                    <Banknote size={14} aria-hidden="true" /> Отметить оплату
+                <button onClick={handleQuickPay} title="Отметить оплату" style={{ ...textBtnStyle, background: GH.ink, color: GH.paper, border: 'none' }}>
+                    {/* В таблице — без значка, чтобы колонка действий влезала в 236 px. */}
+                    {narrow && <Banknote size={14} aria-hidden="true" />} Отметить оплату
                 </button>
             )}
             {!session.isBooked && !isCancelled && (
@@ -1552,7 +1583,7 @@ function GHSessionRow({ session, client, isEditing, setEditingId, updateSession,
                 /* ── Desktop: grid row ── */
                 <div
                     style={{
-                        display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: 12,
+                        display: 'grid', gridTemplateColumns: GH_ROW_COLUMNS, columnGap: GH_ROW_GAP,
                         alignItems: 'center', padding: '8px 0', borderBottom: ghsHairline,
                         color: isCancelled ? GH.ink60 : undefined, transition: 'background 120ms',
                     }}

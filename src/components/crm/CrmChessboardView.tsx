@@ -27,6 +27,7 @@ import { WaitlistSubscribeModal } from '../ui/WaitlistSubscribeModal';
 import { tbilisiNow } from '../../utils/dateUtils';
 import { CURRENCIES } from '../../utils/currency';
 import { formatDayMonth } from '../../utils/format';
+import { ruPlural } from '../../utils/plural';
 import { useConfirmDialog } from '../ui/ConfirmDialogProvider';
 
 /** «GEL» → «₾» в подписях полей («Стоимость, ₾»). */
@@ -206,7 +207,7 @@ function CrmQuickBookModal({
                     {/* CRM Client picker (optional) */}
                     <div>
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                            <Link2 size={11} />
+                            <Link2 size={12} />
                             Привязать клиента CRM <span className="font-normal text-ink-60">(необязательно)</span>
                         </div>
                         <div className="relative mb-2">
@@ -1550,7 +1551,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                 title="Убрать этот период"
                                 aria-label="Убрать этот период"
                             >
-                                <X size={11} className="text-[var(--status-danger-fg)]" />
+                                <X size={12} className="text-[var(--status-danger-fg)]" />
                             </button>
                         </div>
                     );
@@ -1641,7 +1642,7 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                             <div className="text-xs truncate">
                                 {isMine
                                     ? (linkedSessions.length > 1
-                                        ? `${linkedSessions.length} клиента`
+                                        ? `${linkedSessions.length} ${ruPlural(linkedSessions.length, ['клиент', 'клиента', 'клиентов'])}`
                                         : linkedClient?.name || 'Привязать клиента')
                                     : claimable
                                         ? 'На пересдаче — нажмите, чтобы забрать'
@@ -1985,10 +1986,10 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                 Виден и владельцу, и админу/наблюдателю. */}
                                                             {booking.recurringGroupId && (
                                                                 <span className="shrink-0 inline-flex" title="Постоянная бронь (серия)">
-                                                                    <Repeat size={10} aria-label="Постоянная бронь (серия)" />
+                                                                    <Repeat size={12} aria-label="Постоянная бронь (серия)" />
                                                                 </span>
                                                             )}
-                                                            {isMine && !linkedClient && <Check size={10} className="shrink-0" aria-hidden="true" />}
+                                                            {isMine && !linkedClient && <Check size={12} className="shrink-0" aria-hidden="true" />}
                                                             <span className="truncate flex-1">
                                                                 {isMine
                                                                     ? (linkedClient ? linkedClient.name : 'Моё')
@@ -1996,11 +1997,11 @@ export function CrmChessboardView({ initialDate }: { initialDate?: Date } = {}) 
                                                                         ? 'На пересдаче'
                                                                         : 'Занято'}
                                                             </span>
-                                                            {claimable && <ArrowLeftRight size={10} className="shrink-0" aria-hidden="true" />}
-                                                            {!isMine && !claimable && <Bell size={10} className="text-gray-500 shrink-0" aria-hidden="true" />}
+                                                            {claimable && <ArrowLeftRight size={12} className="shrink-0" aria-hidden="true" />}
+                                                            {!isMine && !claimable && <Bell size={12} className="text-gray-500 shrink-0" aria-hidden="true" />}
                                                             {isMine && (
                                                                 <UserPlus
-                                                                    size={10}
+                                                                    size={12}
                                                                     className={clsx(
                                                                         'shrink-0 transition-opacity',
                                                                         linkedClient ? 'opacity-0 group-hover:opacity-60' : 'opacity-40 group-hover:opacity-100'

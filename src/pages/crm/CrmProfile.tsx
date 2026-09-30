@@ -382,7 +382,7 @@ function GridHouseCrmProfile({
                                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.paper, padding: 0, display: 'flex' }}
                                 aria-label={`Убрать ${spec}`}
                             >
-                                <X size={11} />
+                                <X size={12} />
                             </button>
                         </span>
                     ))}

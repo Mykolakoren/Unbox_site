@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCrmStore } from '../../store/crmStore';
 import { crmApi } from '../../api/crm';
@@ -28,6 +28,26 @@ function moneyParts(amount: number, currency?: string): [string, string] {
     const i = s.lastIndexOf('\u00A0');
     return i === -1 ? [s, ''] : [s.slice(0, i), s.slice(i + 1)];
 }
+
+/** Ширина элемента через ResizeObserver (первый замер — до отрисовки).
+ *  Историю сессий раскладываем по ширине её колонки, а не окна: рядом
+ *  сайдбар CRM (260 px) и колонка «Финансы». */
+function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
+    const [el, setEl] = useState<T | null>(null);
+    const [w, setW] = useState(0);
+    useLayoutEffect(() => {
+        if (!el) return;
+        setW(el.getBoundingClientRect().width);
+        if (typeof ResizeObserver === 'undefined') return;
+        const ro = new ResizeObserver(entries => setW(entries[0].contentRect.width));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [el]);
+    return [setEl, w];
+}
+
+/** Минимум сетки истории: 140 (дата) + 150 (статус) + 250 (сумма, кнопки) + 2×12. */
+const HISTORY_TABLE_MIN = 580;
 
 /** «5 октября, 09:00» (год — только если не текущий). */
 function dayTime(d: Date | string): string {
@@ -588,8 +608,11 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
 
     // История сессий: шапка и строки — одна сетка с фиксированными колонками,
     // иначе у каждой строки своя ширина «auto» и статус наезжал на сумму (M4).
-    // На телефоне — одна колонка: дата, под ней статус, под ним сумма.
-    const historyColumns = narrow ? '1fr' : 'minmax(0, 1fr) 160px 250px';
+    // Если колонка уже минимума сетки (телефон, окно ~1024–1300 с сайдбаром) —
+    // одна колонка: дата, под ней статус, под ним сумма.
+    const [historyRef, historyW] = useElementWidth<HTMLDivElement>();
+    const historyStacked = narrow || historyW < HISTORY_TABLE_MIN;
+    const historyColumns = historyStacked ? '1fr' : 'minmax(140px, 1fr) 150px 250px';
 
     const ghInput: React.CSSProperties = {
         fontFamily: GH_SANS, fontSize: 13, padding: '8px 12px',
@@ -975,7 +998,7 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                     )}
 
                     {/* Session history */}
-                    <div style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
+                    <div ref={historyRef} style={{ padding: narrow ? '24px 0' : '24px 24px 24px 0' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div style={ghMono}>История сессий</div>
                             <div style={{ position: 'relative' }}>
@@ -1068,9 +1091,9 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                     display: 'grid', gridTemplateColumns: historyColumns, columnGap: 12,
                                     padding: '8px 0', borderBottom: `2px solid ${GH.ink}`,
                                 }}>
-                                    <div style={{ ...ghMono, fontSize: 12 }}>{narrow ? 'Дата · статус · ставка' : 'Дата'}</div>
-                                    {!narrow && <div style={{ ...ghMono, fontSize: 12, textAlign: 'center' }}>Статус</div>}
-                                    {!narrow && <div style={{ ...ghMono, fontSize: 12, textAlign: 'right' }}>Ставка</div>}
+                                    <div style={{ ...ghMono, fontSize: 12 }}>{historyStacked ? 'Дата · статус · ставка' : 'Дата'}</div>
+                                    {!historyStacked && <div style={{ ...ghMono, fontSize: 12, textAlign: 'center' }}>Статус</div>}
+                                    {!historyStacked && <div style={{ ...ghMono, fontSize: 12, textAlign: 'right' }}>Ставка</div>}
                                 </div>
 
                                 {/* Rows */}
@@ -1108,9 +1131,11 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                             display: 'flex', alignItems: 'center', gap: 4,
                                                             background: 'transparent', border: 'none', cursor: 'pointer',
                                                             marginTop: 4, padding: 0, color: GH.ink60, fontSize: 12,
+                                                            // На телефоне — палец, 44 px (rule 9).
+                                                            minHeight: narrow ? 44 : undefined,
                                                         }}
                                                     >
-                                                        <StickyNote size={11} />
+                                                        <StickyNote size={12} aria-hidden="true" />
                                                         {notesBySession.has(session.id)
                                                             ? <span style={{ color: GH.accent, fontStyle: 'italic', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
                                                                 {notesBySession.get(session.id)?.content}
@@ -1133,13 +1158,18 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                                     disabled={savingSessionNote || !sessionNoteText.trim()}
                                                                     style={{
                                                                         ...ghMono, fontSize: 12, padding: '4px 10px',
+                                                                        minHeight: narrow ? 44 : undefined,
                                                                         background: GH.accent, color: GH.paper, border: 'none',
                                                                         cursor: 'pointer', opacity: savingSessionNote || !sessionNoteText.trim() ? 0.4 : 1,
                                                                     }}
                                                                 >
                                                                     {savingSessionNote ? 'Сохраняем…' : 'Сохранить'}
                                                                 </button>
-                                                                <button onClick={() => setSessionNoteId(null)} aria-label="Закрыть заметку" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60 }}>
+                                                                <button onClick={() => setSessionNoteId(null)} aria-label="Закрыть заметку" style={{
+                                                                    background: 'transparent', border: 'none', cursor: 'pointer', color: GH.ink60,
+                                                                    width: narrow ? 44 : undefined, height: narrow ? 44 : undefined,
+                                                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                                                }}>
                                                                     <X size={12} />
                                                                 </button>
                                                             </div>
@@ -1148,13 +1178,13 @@ function GridHouseCrmClientDetail(props: GHClientDetailProps) {
                                                 </div>
 
                                                 {/* Status */}
-                                                <div style={{ display: 'flex', justifyContent: narrow ? 'flex-start' : 'center' }}>
-                                                    <StatusBadge kind="session" status={session.status} audience="staff" />
+                                                <div style={{ display: 'flex', justifyContent: historyStacked ? 'flex-start' : 'center', minWidth: 0 }}>
+                                                    <StatusBadge kind="session" status={session.status} audience="staff" className="whitespace-normal" />
                                                 </div>
 
                                                 {/* Price + actions */}
-                                                <div style={{ textAlign: narrow ? 'left' : 'right' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: narrow ? 'flex-start' : 'flex-end', gap: 8 }}>
+                                                <div style={{ textAlign: historyStacked ? 'left' : 'right' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: historyStacked ? 'flex-start' : 'flex-end', gap: 8 }}>
                                                         <span style={{ fontFamily: GH_MONO, fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
                                                             {formatMoney(sessionPrice, { currency: session.currency ?? client.currency })}
                                                         </span>

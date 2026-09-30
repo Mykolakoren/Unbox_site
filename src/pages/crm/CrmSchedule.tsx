@@ -1004,7 +1004,7 @@ function GridHouseDayRow({
                                 marginTop: 2,
                             }}
                         >
-                            <Plus size={11} /> Диапазон
+                            <Plus size={12} /> Диапазон
                         </button>
                     </>
                 ) : (

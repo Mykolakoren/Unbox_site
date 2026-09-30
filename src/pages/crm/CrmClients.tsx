@@ -1028,7 +1028,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                         <GHSortHeader field="unpaidSum" current={sortField} dir={sortDir} onSort={toggleSort}>Долг</GHSortHeader>
                         <div style={GHC_MONO_LABEL}>Контакты</div>
                         <GHSortHeader field="basePrice" current={sortField} dir={sortDir} onSort={toggleSort}>Ставка</GHSortHeader>
-                        <GHSortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort}>Оплачено всего</GHSortHeader>
+                        <GHSortHeader field="totalPaid" current={sortField} dir={sortDir} onSort={toggleSort}>Всего оплачено</GHSortHeader>
                         <GHSortHeader field="lastSessionDate" current={sortField} dir={sortDir} onSort={toggleSort}>Посл. сессия</GHSortHeader>
                         <div style={{ ...GHC_MONO_LABEL, textAlign: 'right' }}>Действия</div>
                     </div>
@@ -1086,7 +1086,7 @@ function GridHouseCrmClients(props: GridHouseCrmClientsProps) {
                                                 justifyContent: 'center',
                                             }}
                                         >
-                                            {isSelected && <Check size={11} color={GH.paper} />}
+                                            {isSelected && <Check size={12} color={GH.paper} />}
                                         </div>
                                     </div>
                                 )}

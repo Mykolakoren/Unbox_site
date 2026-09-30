@@ -51,6 +51,12 @@ export function CrmDashboard() {
     const isThisMonth = format(new Date(), 'yyyy-MM') === monthStr;
     // Ошибку показываем только после своей попытки загрузки, а не чужую из стора.
     const [dashTried, setDashTried] = useState(false);
+    // Когда цифры на экране были свежими — для полосы «Показаны данные на 14:05».
+    const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+    const reloadDashboard = () => fetchDashboard(monthStr).finally(() => {
+        setDashTried(true);
+        if (!useCrmStore.getState().error) setLoadedAt(new Date());
+    });
 
     useEffect(() => {
         // Auto-complete past PLANNED sessions, then load dashboard
@@ -60,7 +66,7 @@ export function CrmDashboard() {
                 toast.info(`${n} ${sessionsWord(n)} ${n === 1 ? 'отмечена прошедшей' : 'отмечены прошедшими'}`);
             }
         }).catch(() => {}).finally(() => {
-            fetchDashboard(monthStr).finally(() => setDashTried(true));
+            reloadDashboard();
         });
         crmApi.getSettings().then((s) => {
             setCalendarIdSaved(s.calendarId);
@@ -71,7 +77,7 @@ export function CrmDashboard() {
     // «0 ₾» и «нет сессий»; если запрос упал — полоса с «Повторить».
     if (!dashboard) {
         if (error && !loading && dashTried) {
-            return <ErrorBar message="Не удалось загрузить кабинет" onRetry={() => fetchDashboard(monthStr)} />;
+            return <ErrorBar message="Не удалось загрузить кабинет" onRetry={reloadDashboard} />;
         }
         return (
             <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -84,8 +90,19 @@ export function CrmDashboard() {
     }
 
     // ─── GRID HOUSE variant ───────────────────────────────────────────────
+    // Новый месяц не загрузился, а на экране остались прежние цифры — не
+    // прячем их, а честно говорим над ними, что они не обновились.
+    const staleError = !!error && !loading && dashTried;
     return (
-
+        <>
+            {staleError && (
+                <ErrorBar
+                    message={`Не удалось загрузить ${formatMonthLabel(currentMonth)}`}
+                    onRetry={reloadDashboard}
+                    staleAt={loadedAt ?? undefined}
+                    className="mb-6"
+                />
+            )}
             <GridHouseDashboard
                 dashboard={dashboard}
                 currentMonth={currentMonth}
@@ -94,7 +111,8 @@ export function CrmDashboard() {
                 navigate={navigate}
                 calendarIdSaved={calendarIdSaved}
             />
-        );
+        </>
+    );
 }
 
 
@@ -469,6 +487,8 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                         background: 'transparent', border: `1px solid ${GH.ink10}`,
                                                         fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                                         textTransform: 'uppercase', padding: '8px 12px',
+                                                        // На телефоне — палец, 44 px (rule 9).
+                                                        minHeight: ghNarrow ? 44 : undefined,
                                                         cursor: 'pointer', color: GH.ink60,
                                                     }}
                                                 >
@@ -481,6 +501,7 @@ function GridHouseDashboard({ dashboard, currentMonth, setCurrentMonth, isThisMo
                                                         background: GH.ink, border: 'none',
                                                         fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em',
                                                         textTransform: 'uppercase', padding: '8px 14px',
+                                                        minHeight: ghNarrow ? 44 : undefined,
                                                         cursor: mergingId === pair.sessionId ? 'default' : 'pointer',
                                                         color: GH.paper,
                                                         opacity: mergingId === pair.sessionId ? 0.5 : 1,

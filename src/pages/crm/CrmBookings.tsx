@@ -12,7 +12,7 @@ import {
     X,
     Search,
     Link2,
-    Repeat2,
+    Repeat,
     AlertTriangle,
 } from 'lucide-react';
 import { bookingsApi } from '../../api/bookings';
@@ -1114,7 +1114,7 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
                 <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', display: 'flex', alignItems: 'center', gap: 4 }}>
                     {booking.recurringGroupId && (
                         <span style={{ display: 'inline-flex' }} title="Постоянная бронь (серия)">
-                            <Repeat2 size={12} aria-label="Постоянная бронь (серия)" />
+                            <Repeat size={12} aria-label="Постоянная бронь (серия)" />
                         </span>
                     )}
                     {dateObj ? formatDayMonth(dateObj) : '—'}
@@ -1206,7 +1206,8 @@ function GHBookingRow({ booking, index, linkedClient, linkedSessionId, linkedSes
                             padding: '4px 8px', background: 'transparent', border: ghHairline, color: GH.ink60, cursor: 'pointer',
                             display: 'inline-flex', alignItems: 'center', gap: 4,
                         }}>
-                        <Repeat2 size={12} aria-hidden="true" /> {booking.format === 'group' ? 'В индивидуальный' : 'В групповой'}
+                        {/* Без значка: Repeat во всей CRM значит «серия», а здесь смена формата. */}
+                        {booking.format === 'group' ? 'В индивидуальный' : 'В групповой'}
                     </button>
                 )}
             </div>

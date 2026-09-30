@@ -305,7 +305,7 @@ function GridHouseCrmFinances(p: GHFinProps) {
                             onClick={() => p.setAnchor(new Date())}
                             style={{ fontFamily: GH_MONO, fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase', background: 'transparent', color: GH.ink, border: `1px solid ${GH.ink10}`, padding: '8px 14px', cursor: 'pointer' }}
                         >
-                            <Calendar size={11} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                            <Calendar size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} />
                             Сейчас
                         </button>
                     )}
