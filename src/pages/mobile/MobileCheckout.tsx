@@ -10,7 +10,7 @@ import { useCrmStore } from '../../store/crmStore';
 import { bookingsApi } from '../../api/bookings';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
-    balanceLockedReason, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
+    balanceLockedReason, bonusMoneyDue, fmtHours, isSelectable, paymentPlan, resolveFinalMethod as resolvePayMethod,
     subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 import { RESOURCES, LOCATIONS, EXTRAS, availableExtrasForResource } from '../../utils/data';
@@ -378,8 +378,11 @@ export function MobileCheckout() {
     const subMoneyNote = subMoney > 0
         ? ` (+${formatGel(subMoney)} ${peakTotal > 0 && extrasTotal > 0 ? 'за пиковые часы и допуслуги' : peakTotal > 0 ? 'за пиковые часы' : 'за допуслуги'})`
         : '';
+    // Частичный бонус (без абонемента, владелец 01.10): «1 ч бонусом + 20 ₾».
     const payLabel = payMethod === 'bonus'
-        ? `${fmtHours(totalDurationHours)} из бонусов`
+        ? (plan.bonusPartial
+            ? `${fmtHours(plan.bonusCovered)} бонусом + ${formatGel(plan.bonusMoney)}`
+            : `${fmtHours(totalDurationHours)} из бонусов`)
         : payMethod === 'subscription'
             ? `${fmtHours(totalDurationHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
             : formatGel(priced.total);
@@ -458,12 +461,14 @@ export function MobileCheckout() {
         // сервер спишет часами — раньше владелец абонемента с малым балансом
         // получал «Не хватает 45 ₾», хотя деньги бы не понадобились (G4-01).
         // We check the *effective* user (target if admin-proxy, else current user).
-        if (finalMethod === 'balance' && priced.total > 0 && effectiveUser?.email === currentUser.email) {
+        // Частичный бонус: деньгами — только непокрытый остаток.
+        const moneyDue = finalMethod === 'balance' ? priced.total : finalMethod === 'bonus' ? bonusMoneyDue(plan) : 0;
+        if (finalMethod === 'balance' || finalMethod === 'bonus') {
             // Skip the projected-balance gate when admin is booking for someone
             // else — let the backend enforce against the target's wallet.
-            const projected = (effectiveUser.balance ?? 0) - priced.total;
-            const limit = effectiveUser.creditLimit ?? 0;
-            if (projected < -limit) {
+            const projected = (effectiveUser?.balance ?? 0) - moneyDue;
+            const limit = effectiveUser?.creditLimit ?? 0;
+            if (moneyDue > 0 && effectiveUser?.email === currentUser.email && projected < -limit) {
                 const shortfall = Math.abs(projected + limit);
                 const shortfallGel = formatGel(shortfall, { fraction: 0 });
                 toast.error(`Не хватает ${shortfallGel}. Пополните баланс или попросите администратора поднять кредитный лимит.`, { duration: 6000 });
@@ -739,7 +744,9 @@ export function MobileCheckout() {
                                 value={isSeries || payMethod === 'balance'
                                     ? formatGel(priced.total)
                                     : payMethod === 'bonus'
-                                        ? formatGel(0)
+                                        ? (plan.bonusPartial
+                                            ? `${fmtHours(plan.bonusCovered)} + ${formatGel(plan.bonusMoney)}`
+                                            : formatGel(0))
                                         : `${fmtHours(totalDurationHours)}${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`}
                                 bold
                             />
@@ -964,7 +971,9 @@ export function MobileCheckout() {
                             );
                         })()}
                         {!isSeries && payMethod === 'bonus' && (
-                            <li>Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}.</li>
+                            plan.bonusPartial
+                                ? <li>Спишется {fmtHours(plan.bonusCovered)} из бонусов, остальное — {formatGel(plan.bonusMoney)} с баланса.</li>
+                                : <li>Спишется {fmtHours(totalDurationHours)} из бонусов — с баланса {formatGel(0)}.</li>
                         )}
                         {/* Оплата балансом: говорим явно, сколько спишется, и
                             честно предупреждаем про уход в долг — раньше клиент
@@ -1147,8 +1156,10 @@ export function MobileCheckout() {
                             label="Бонусные часы"
                             sub={plan.bonusCovers
                                 ? `${fmtHours(totalBonusHours)} бесплатно`
-                                : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}`}
-                            disabled={!plan.bonusCovers}
+                                : plan.bonusPartial
+                                    ? `${fmtHours(plan.bonusCovered)} бесплатно + ${formatGel(plan.bonusMoney)} с баланса`
+                                    : `Нужно ${fmtHours(totalDurationHours)}, есть ${fmtHours(totalBonusHours)}${subHours.active ? ' — при абонементе только на бронь целиком' : ''}`}
+                            disabled={!plan.bonusCovers && !plan.bonusPartial}
                             active={payMethod === 'bonus'}
                             onClick={() => pickPay('bonus')}
                         />

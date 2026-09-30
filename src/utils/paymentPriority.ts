@@ -6,6 +6,10 @@
  *   2) иначе абонемент — если он покрывает бронь;
  *   3) иначе баланс.
  *
+ * Приветственный час без абонемента (владелец 01.10): если действующего
+ * абонемента нет, бонус тратится сам и ЧАСТИЧНО — «1 ч бонусом + 20 ₾».
+ * При действующем абонементе — только если покрывает бронь целиком.
+ *
  * Клиент может сам переключиться между бонусами и абонементом — сервер
  * уважает явный выбор. «Баланс» для сервера значит «реши сам»: пока бонусы
  * или абонемент покрывают бронь, деньги с баланса он не возьмёт. Поэтому
@@ -48,6 +52,10 @@ function mondayKey(d: Date): string {
 export interface SubscriptionHours {
     /** Абонемент может покрыть бронь: есть, не на паузе, не истёк, формат входит. */
     ok: boolean;
+    /** Абонемент действует (есть, не на паузе, не истёк) — формат и остаток
+     *  не важны. Как subscription_pool.is_active на сервере: при действующем
+     *  абонементе бонус частично сам не тратится. */
+    active: boolean;
     /** Почему не может (для подписи). */
     reason: string;
     /** Остаток пула — ровно то, что видит сервер при создании брони. */
@@ -107,15 +115,16 @@ export function subscriptionHours(
     },
 ): SubscriptionHours {
     const empty = { remaining: 0, pool: 0, reserved: 0, free: 0 };
-    if (!sub) return { ok: false, reason: 'Нет абонемента', ...empty };
+    if (!sub) return { ok: false, active: false, reason: 'Нет абонемента', ...empty };
     const life = subscriptionLifecycle(sub as any, opts.now);
-    if (life === 'frozen') return { ok: false, reason: 'Абонемент заморожен', ...empty };
-    if (life === 'completed') return { ok: false, reason: 'Срок абонемента закончился', ...empty };
+    if (life === 'frozen') return { ok: false, active: false, reason: 'Абонемент заморожен', ...empty };
+    if (life === 'completed') return { ok: false, active: false, reason: 'Срок абонемента закончился', ...empty };
     const formats = sub.includedFormats || ['individual'];
     const remaining = Math.max(0, Number(sub.remainingHours) || 0);
     if (!formats.includes(opts.format)) {
         return {
             ok: false,
+            active: true,
             reason: `Абонемент только для ${formats.includes('individual') ? 'индивидуальной' : 'групповой'} работы`,
             remaining, pool: remaining, reserved: 0, free: remaining,
         };
@@ -135,6 +144,7 @@ export function subscriptionHours(
 
     return {
         ok: true,
+        active: true,
         reason: '',
         remaining,
         pool,
@@ -157,8 +167,16 @@ export interface PaymentPlan {
     /** Бронь и так ничего не стоит (персональные 100 %) — бонус на неё
      *  сервер не тратит, и мы его не предлагаем. */
     free: boolean;
-    /** Бонусов хватает на всю бронь (частичный бонус не предлагаем). */
+    /** Бонусов хватает на всю бронь. */
     bonusCovers: boolean;
+    /** Бонусов меньше, чем бронь, и действующего абонемента нет — сервер сам
+     *  потратит их частично: бонус-часы бесплатно, остальное деньгами. */
+    bonusPartial: boolean;
+    /** Сколько часов брони покроет бонус (0, если бонус не пойдёт). */
+    bonusCovered: number;
+    /** Сколько деньгами при оплате бонусом: непокрытая доля цены (0 при
+     *  полном покрытии). Та же формула, что _resolve_with_bonus. */
+    bonusMoney: number;
     sub: SubscriptionHours;
     /** Сервер возьмёт бронь абонементом (его проверка — по остатку пула). */
     subCovers: boolean;
@@ -184,18 +202,27 @@ export function paymentPlan(opts: {
     // бронь, которая ничего не стоит, — если её не покрывает абонемент.
     const free = !subCovers && opts.moneyPrice !== undefined && opts.moneyPrice <= 0;
     const bonusCovers = !opts.isSeries && !free && hours > 0 && bonusHours > 0 && bonusHours >= hours - 0.01;
+    // Как на сервере (владелец 01.10): без действующего абонемента бонус идёт
+    // и частично, если бронь чего-то стоит. Серию считает «примерка» сервера.
+    const moneyPrice = Math.max(0, opts.moneyPrice ?? 0);
+    const bonusPartial = !opts.isSeries && !bonusCovers && !sub.active && !free
+        && hours > 0 && bonusHours > 0.001 && moneyPrice > 0;
+    const bonusCovered = bonusCovers ? hours : bonusPartial ? Math.min(bonusHours, hours) : 0;
+    const bonusMoney = bonusPartial
+        ? Math.round(moneyPrice * ((hours - bonusCovered) / hours) * 100) / 100
+        : 0;
     const subFreeCovers = subCovers && sub.free >= hours - 0.01;
-    const auto: PayMethod = bonusCovers ? 'bonus' : subCovers ? 'subscription' : 'balance';
-    return { hours, bonusHours, free, bonusCovers, sub, subCovers, subFreeCovers, auto };
+    const auto: PayMethod = bonusCovers ? 'bonus' : subCovers ? 'subscription' : bonusPartial ? 'bonus' : 'balance';
+    return { hours, bonusHours, free, bonusCovers, bonusPartial, bonusCovered, bonusMoney, sub, subCovers, subFreeCovers, auto };
 }
 
 /** Можно ли выбрать способ. «Баланс» разовой брони доступен, только когда
  *  ни бонусы, ни абонемент её не покрывают — иначе сервер всё равно возьмёт
  *  их. В серии «Баланс» = «реши сам»: сначала бонусы и абонемент, потом деньги. */
 export function isSelectable(method: PayMethod, plan: PaymentPlan, isSeries = false): boolean {
-    if (method === 'bonus') return plan.bonusCovers;
+    if (method === 'bonus') return plan.bonusCovers || plan.bonusPartial;
     if (method === 'subscription') return plan.subCovers;
-    return isSeries || (!plan.bonusCovers && !plan.subCovers);
+    return isSeries || (!plan.bonusCovers && !plan.subCovers && !plan.bonusPartial);
 }
 
 /** Способ, который уйдёт на сервер: выбранный, если он доступен, иначе тот,
@@ -208,7 +235,13 @@ export function resolveFinalMethod(selected: PayMethod | undefined, plan: Paymen
 
 /** Почему «Баланс» сейчас недоступен (подпись под вариантом). */
 export function balanceLockedReason(plan: PaymentPlan): string {
-    if (plan.bonusCovers) return 'Сначала тратятся бонусные часы';
+    if (plan.bonusCovers || plan.bonusPartial) return 'Сначала тратятся бонусные часы';
     if (plan.subCovers) return 'Сначала тратятся часы абонемента';
     return '';
+}
+
+/** Деньгами при оплате бонусом (частичный бонус) — для итога, проверки
+ *  баланса и подписи. 0 — бронь целиком бонусом. */
+export function bonusMoneyDue(plan: PaymentPlan): number {
+    return plan.bonusPartial ? plan.bonusMoney : 0;
 }

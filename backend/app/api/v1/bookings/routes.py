@@ -717,6 +717,8 @@ def _resolve_with_bonus(
     Порядок (владелец 29.09): 1) бонусные часы, если их хватает на ВСЮ бронь;
     2) абонемент, если покрывает; 3) баланс. Явный выбор бонуса уважаем —
     раньше сервер молча менял его на абонемент (см. resolve_payment_method).
+    Без действующего абонемента (владелец 01.10) бонус тратится и частично:
+    бонус-часы бесплатно, остаток — деньгами по обычной цене.
 
     Бонусную бронь перекотируем БЕЗ абонемента: иначе непокрытый остаток
     посчитался бы по абонементной цене 0 ₾ (утечка 1630 ₾), а в брони остались
@@ -727,7 +729,11 @@ def _resolve_with_bonus(
     без записи: покрытие считается из `bonus_left`, пул бонусов не трогаем.
     """
     from app.services.pricing import resolve_payment_method
-    method = resolve_payment_method(requested, quote, bonus_hours_available=bonus_left)
+    # Владелец 01.10: без действующего абонемента приветственный час тратится
+    # сам и частично (остаток — деньгами, ниже); с абонементом — только целиком.
+    sub_active = subscription_pool.is_active(getattr(owner, "subscription", None), datetime.utcnow())
+    method = resolve_payment_method(requested, quote, bonus_hours_available=bonus_left,
+                                    has_active_subscription=sub_active)
     if method != "bonus":
         return method, quote, 0.0
     if quote.applied_rule == "SUBSCRIPTION":

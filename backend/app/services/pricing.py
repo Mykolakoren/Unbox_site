@@ -58,6 +58,7 @@ def resolve_payment_method(
     requested: Optional[str],
     quote: PriceBreakdown,
     bonus_hours_available: float = 0.0,
+    has_active_subscription: Optional[bool] = None,
 ) -> str:
     """Привести ярлык оплаты брони в соответствие с котировкой.
 
@@ -65,6 +66,14 @@ def resolve_payment_method(
       1) бонусные часы — если их хватает на ВСЮ бронь;
       2) иначе абонемент — если он покрывает слот;
       3) иначе баланс.
+
+    Приветственный час без абонемента (владелец 01.10): если действующего
+    абонемента нет, бонусные часы тратятся автоматически и ЧАСТИЧНО — бронь
+    2 ч при 1 ч бонуса = 1 ч бесплатно + 1 ч деньгами (остаток считает
+    `_resolve_with_bonus`). При действующем абонементе — как раньше: бонус
+    только если покрывает бронь целиком (сайт: «при действующем абонементе
+    приветственный час тратится на бронь до 1 часа»).
+    `has_active_subscription=None` — вывести из котировки (правило SUBSCRIPTION*).
     `balance` значит «реши сам» (так шлёт и Telegram-бот), поэтому к нему
     применяется весь порядок. Явный выбор `bonus` уважаем: раньше сервер
     молча менял его на абонемент, и бесплатные часы сгорали. Явный
@@ -96,6 +105,16 @@ def resolve_payment_method(
         return "bonus"
     if quote.applied_rule == "SUBSCRIPTION":
         return "subscription"
+    # Частичный бонус «сам» — только без абонемента и только за деньги:
+    # абонементную котировку сюда не пускаем НИКОГДА (утечка 1630 ₾ —
+    # остаток ушёл бы по цене 0 ₾ с ярлыком не-subscription).
+    rule = str(quote.applied_rule or "")
+    sub_active = (has_active_subscription if has_active_subscription is not None
+                  else rule.startswith("SUBSCRIPTION"))
+    if (method == "balance" and not sub_active and not rule.startswith("SUBSCRIPTION")
+            and float(quote.final_price or 0) > 0
+            and float(bonus_hours_available or 0) > 0.001):
+        return "bonus"
     return method
 
 

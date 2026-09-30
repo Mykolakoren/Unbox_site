@@ -349,7 +349,8 @@ function GridHouseSubscriptions() {
                                 При регистрации мы дарим <strong style={{ color: GH.ink, fontWeight: 600 }}>1 бесплатный час</strong> аренды.
                                 Им можно оплатить <strong style={{ color: GH.ink, fontWeight: 600 }}>любую</strong> бронь — кабинет, капсулу
                                 или групповой формат: один час брони будет бесплатным. Если бронь длиннее —
-                                остальные часы оплачиваются как обычно.
+                                остальное оплачивается как обычно. При действующем абонементе приветственный
+                                час тратится на бронь до 1 часа.
                             </div>
                             <div style={{ display: 'flex', gap: 24, alignItems: 'baseline', flexWrap: 'wrap' }}>
                                 <div>

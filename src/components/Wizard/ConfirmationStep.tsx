@@ -34,7 +34,7 @@ import { Button as UiButton } from '../ui/Button';
 import { BookingConflictDialog, type ConflictItem } from '../BookingConflictDialog';
 import { useActiveBonusHours } from '../../hooks/useActiveBonusHours';
 import {
-    balanceLockedReason, fmtHours, isSelectable, paymentPlan, resolveFinalMethod,
+    balanceLockedReason, bonusMoneyDue, fmtHours, isSelectable, paymentPlan, resolveFinalMethod,
     subscriptionHours, subscriptionHoursLabel, type PayMethod,
 } from '../../utils/paymentPriority';
 
@@ -291,7 +291,9 @@ export function ConfirmationStep() {
         [totalBookingHours, totalBonusHours, subHours, isSeries, totalPrice],
     );
     const isSubscriptionEligible = plan.subCovers;
-    const isBonusEligible = plan.bonusCovers;
+    // Бонус можно выбрать, если покрывает бронь целиком — или частично, когда
+    // действующего абонемента нет (владелец 01.10: «1 ч бонусом + N ₾»).
+    const isBonusEligible = plan.bonusCovers || plan.bonusPartial;
     // Что реально уйдёт на сервер (и что обещают подписи и кнопка).
     const payMethod: PayMethod = resolveFinalMethod(state.paymentMethod, plan, isSeries);
     const peakTotal = cartDetails.reduce((s, i) => s + (i.price.peakSurcharge ?? 0), 0);
@@ -470,8 +472,10 @@ export function ConfirmationStep() {
             const chargesMoney = isRescheduling
                 ? (oldBooking?.paymentMethod ?? 'balance') !== 'subscription'
                 : finalMethod === 'balance';
-            if (effectiveUser && chargesMoney && !isBookingForOther) {
-                let netPrice = totalPrice;
+            // Частичный бонус (без абонемента): остаток сверх бонус-часов — деньги.
+            const partialBonusMoney = !isRescheduling && finalMethod === 'bonus' ? bonusMoneyDue(plan) : 0;
+            if (effectiveUser && (chargesMoney || partialBonusMoney > 0) && !isBookingForOther) {
+                let netPrice = partialBonusMoney > 0 ? partialBonusMoney : totalPrice;
                 if (isRescheduling && oldBooking && effectiveUser) {
                     netPrice = rescheduleDiff;
                 }
@@ -1044,11 +1048,24 @@ export function ConfirmationStep() {
                                         <Gift size={16} className="text-ink-60" aria-hidden="true" />
                                         <span className="font-semibold text-ink">Бонус</span>
                                     </div>
-                                    <span className="font-semibold text-[var(--status-ok-fg)]">Бесплатно</span>
+                                    {plan.bonusPartial ? (
+                                        <span className="num font-semibold text-ink text-right">
+                                            {fmtHours(plan.bonusCovered)} бонусом + {formatGel(plan.bonusMoney)}
+                                        </span>
+                                    ) : (
+                                        <span className="font-semibold text-[var(--status-ok-fg)]">Бесплатно</span>
+                                    )}
                                 </div>
                                 <div className="ml-7 text-xs text-ink-60 mt-1 font-medium">
                                     Бесплатные бонусные часы: {fmtHours(totalBonusHours)}
-                                    {!isBonusEligible && <span className="text-ink ml-1">(нужно {fmtHours(totalBookingHours)})</span>}
+                                    {plan.bonusPartial && (
+                                        <span className="text-ink ml-1">· остальное ({fmtHours(totalBookingHours - plan.bonusCovered)}) — с баланса</span>
+                                    )}
+                                    {!isBonusEligible && (
+                                        <span className="text-ink ml-1">
+                                            (нужно {fmtHours(totalBookingHours)}{subHours.active ? ' — при абонементе бонус идёт только на бронь целиком' : ''})
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1322,7 +1339,9 @@ export function ConfirmationStep() {
                                     : recurringPattern
                                         ? `Создать серию · ${ruCountWord(recurringOccurrences, ['бронь', 'брони', 'броней'])}`
                                         : payMethod === 'bonus'
-                                            ? 'Забронировать бесплатно'
+                                            ? (plan.bonusPartial
+                                                ? `Оплатить ${formatGel(plan.bonusMoney)} + ${fmtHours(plan.bonusCovered)} бонусом`
+                                                : 'Забронировать бесплатно')
                                             : payMethod === 'subscription'
                                                 ? `Списать ${fmtHours(totalBookingHours)} абонемента${subMoney > 0 ? ` + ${formatGel(subMoney)}` : ''}`
                                                 : `Оплатить ${formatGel(totalPrice)}`

@@ -10,6 +10,8 @@ import { groupSlotsIntoBookings } from '../utils/cartHelpers';
 import { startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { COLOR, STATUS } from '../design/tokens';
 import { formatDateLabel, formatGel, formatTimeRange } from '../utils/format';
+import { useActiveBonusHours } from '../hooks/useActiveBonusHours';
+import { fmtHours } from '../utils/paymentPriority';
 
 const DISCOUNT_INFO: Record<PricingResult['discountType'], { label: string; Icon: React.ElementType } | null> = {
     none:     null,
@@ -28,6 +30,10 @@ export function Summary() {
     const effectiveUser = state.bookingForUser
         ? users.find(u => u.email === state.bookingForUser) || currentUser
         : currentUser;
+    // Бонус-часы того, за кого бронь: частичный бонус (без абонемента,
+    // владелец 01.10) — «1 ч бонусом + N ₾», а не «0 ₾».
+    const isProxy = !!state.bookingForUser && state.bookingForUser !== currentUser?.email;
+    const bonusHours = useActiveBonusHours(effectiveUser?.id, isProxy);
 
     // Calculate Accumulated Weekly Hours (Same logic as ConfirmationStep)
     const accumulatedWeeklyHours = useMemo(() => {
@@ -277,11 +283,21 @@ export function Summary() {
                 })()}
                 <div className="flex justify-between items-center pt-2 text-xl font-semibold">
                     <span>Итого</span>
-                    {/* Бонусные часы покрывают бронь целиком (иначе их не выбрать);
-                        абонемент платит часами — деньгами только пиковая доплата. */}
+                    {/* Бонус: его часы бесплатно, остальное деньгами (частично — только
+                        без абонемента); абонемент платит часами — деньгами только пиковая доплата. */}
                     <span className="num">{state.paymentMethod === 'subscription'
                         ? `${Number(cartBookings.reduce((s, b) => s + b.duration / 60, 0).toFixed(1))} ч${total.finalPrice > 0 ? ` + ${formatGel(total.finalPrice)}` : ''}`
-                        : formatGel(state.paymentMethod === 'bonus' ? 0 : total.finalPrice)}</span>
+                        : state.paymentMethod === 'bonus'
+                            ? (() => {
+                                // Бонус покрывает свою долю брони, остальное — деньгами
+                                // (та же формула, что _resolve_with_bonus на сервере).
+                                const hrs = cartBookings.reduce((s, b) => s + b.duration / 60, 0);
+                                const covered = Math.min(bonusHours, hrs);
+                                if (hrs <= 0 || covered >= hrs - 0.01) return formatGel(0);
+                                const money = Math.round(total.finalPrice * ((hrs - covered) / hrs) * 100) / 100;
+                                return `${fmtHours(covered)} бонусом + ${formatGel(money)}`;
+                            })()
+                            : formatGel(total.finalPrice)}</span>
                 </div>
             </div>
 

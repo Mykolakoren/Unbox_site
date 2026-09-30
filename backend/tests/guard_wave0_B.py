@@ -76,8 +76,14 @@ def test_partial_bonus_never_preempts_subscription():
     assert resolve_payment_method("balance", q, bonus_hours_available=1.0) == "subscription"
     assert resolve_payment_method("bonus", q, bonus_hours_available=1.0) == "subscription"
     assert resolve_payment_method("bonus", q) == "subscription"
-    # Без абонемента и без бонуса ярлык денежный.
-    assert resolve_payment_method("balance", _quote("NONE", 40, hours=2.0), bonus_hours_available=1.0) == "balance"
+    # Решение владельца 01.10: БЕЗ абонемента приветственный час тратится сам
+    # и частично — 1 ч бесплатно + 1 ч деньгами (раньше здесь ждали 'balance',
+    # и час сгорал неиспользованным). С абонементом — как было выше.
+    assert resolve_payment_method("balance", _quote("NONE", 40, hours=2.0), bonus_hours_available=1.0) == "bonus"
+    assert resolve_payment_method("balance", _quote("NONE", 40, hours=2.0), bonus_hours_available=1.0,
+                                  has_active_subscription=True) == "balance"
+    # Без бонуса ярлык денежный.
+    assert resolve_payment_method("balance", _quote("NONE", 40, hours=2.0)) == "balance"
 
 
 def test_explicit_bonus_is_respected_over_subscription():
@@ -241,7 +247,9 @@ def test_frontend_default_follows_server_priority():
     """Экран выбирает по умолчанию то же, что сервер: бонус → абонемент → баланс
     (раньше по умолчанию стоял «Баланс», а сервер брал часы — G4-01)."""
     pp = _read("src/utils/paymentPriority.ts")
-    assert "bonusCovers ? 'bonus' : subCovers ? 'subscription' : 'balance'" in pp, \
+    # 01.10 (владелец): без абонемента бонус идёт и частично — после
+    # абонемента, перед балансом (как resolve_payment_method на сервере).
+    assert "bonusCovers ? 'bonus' : subCovers ? 'subscription' : bonusPartial ? 'bonus' : 'balance'" in pp, \
         "порядок по умолчанию на фронте разошёлся с сервером"
     for rel in ("src/components/Wizard/ConfirmationStep.tsx", "src/pages/mobile/MobileCheckout.tsx"):
         assert "plan.auto" in _read(rel), f"{rel}: способ по умолчанию не следует порядку оплаты"
