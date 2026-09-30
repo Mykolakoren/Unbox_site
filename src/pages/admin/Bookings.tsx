@@ -401,7 +401,7 @@ export function AdminBookings() {
                 onClose={() => setPriceBooking(null)}
                 // fetchAllBookings, а не fetchBookings: тот грузит только «мои + публичные»
                 // и после правки цены список админа терял чужие брони.
-                onSaved={() => useUserStore.getState().fetchAllBookings()}
+                onSaved={async () => { await useUserStore.getState().fetchAllBookings(); }}
             />
             <ExtendBookingModal
                 bookingId={extendModalId}

@@ -3,7 +3,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useBookingStore } from '../store/bookingStore';
 import { useUserStore } from '../store/userStore';
 import { useLocations } from '../hooks/useLocations';
-import { JoinWaitlistModal } from '../components/JoinWaitlistModal';
 import { TeamSection } from '../components/TeamSection';
 import { SpecialistsSection } from '../components/SpecialistsSection';
 import { WelcomeOverlay } from '../components/WelcomeOverlay';

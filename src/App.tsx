@@ -4,7 +4,6 @@ import { MinimalLayout } from './components/MinimalLayout';
 import { Summary } from './components/Summary';
 // Wizard Steps
 import { ChessboardStep } from './components/Wizard/ChessboardStep';
-import { OptionsStep } from './components/Wizard/OptionsStep';
 import { ConfirmationStep } from './components/Wizard/ConfirmationStep';
 // Store
 import { useBookingStore } from './store/bookingStore';

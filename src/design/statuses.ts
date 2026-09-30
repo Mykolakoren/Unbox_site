@@ -36,6 +36,11 @@ export const STATUS_DICTIONARY: Record<StatusKind, Record<string, StatusDef>> = 
         cancelled:        { label: 'Отменена', tone: 'danger', icon: 'x' },
         rescheduled:      { label: 'Перенесена', tone: 'muted', icon: 'move' },
         're-rented':      { label: 'Пересдана', tone: 'muted', icon: 'repeat' },
+        // Псевдостатус: НЕ приходит с сервера. Это флаг isReRentListed на
+        // подтверждённой (confirmed) брони — владелец выставил время
+        // «Пересдать», пока его никто не забрал. Экраны передают этот код
+        // сами, когда хотят показать «На пересдаче» вместо «Подтверждена».
+        're-rent-listed': { label: 'На пересдаче', tone: 'pending', icon: 'repeat' },
         no_show:          { label: 'Неявка', tone: 'danger', icon: 'alert' },
     },
     // Оплата (booking.paymentStatus, оплата сессии CRM, долги)
