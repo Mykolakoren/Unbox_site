@@ -1,201 +1,101 @@
 import { Link } from 'react-router-dom';
-import { Gift, Clock, TrendingUp, Trophy, Users } from 'lucide-react';
-import { GH, GH_SANS, GH_MONO } from '../hooks/useDesignFlag';
+import { Gift, Clock, ArrowRight } from 'lucide-react';
 import { PRICING_CONFIG } from '../utils/pricingConfig';
 
 /**
- * Excel #20 — клиенту нужно где-то увидеть, какие скидки и бонусы у нас есть.
- * Кнопка «Получить бонусы» из dashboard'а раньше вела сюда в 404.
+ * «Скидки и бонусы» — что клиент реально получит.
  *
- * Источник правды по числам — `src/utils/pricingConfig.ts`. Если поменяют
- * проценты в pricing config, эта страница автоматически обновится.
+ * Решение владельца 30.09: на странице только то, что работает —
+ * приветственный час (15 дней) и скидка за длительность брони 10/15/20 %.
+ * Недельная скидка отключена (weekly_progressive = 0 %), «бонусы на 60 дней»
+ * и «приведите коллегу» — не действуют; их здесь больше нет. Сервер не менялся.
+ *
+ * Проценты берутся из src/utils/pricingConfig.ts — поменяют там, обновится и тут.
  */
+
+/** «от 2 ч» — длительность брони для строки скидки. */
+function fromHours(h: number): string {
+    return `от ${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(h)} ч`;
+}
+
 export function BonusesInfoPage() {
     const duration = PRICING_CONFIG.discounts.duration;
-    const weekly = PRICING_CONFIG.discounts.weekly_progressive;
-
-    const sectionStyle: React.CSSProperties = {
-        borderTop: `2px solid ${GH.ink}`,
-        paddingTop: 24,
-        marginBottom: 36,
-    };
-    const monoLabel: React.CSSProperties = {
-        fontFamily: GH_MONO,
-        fontSize: 12,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: GH.ink60,
-        marginBottom: 12,
-    };
 
     return (
-        <div style={{ fontFamily: GH_SANS, color: GH.ink, maxWidth: 920, margin: '0 auto', padding: '32px 24px 80px' }}>
-            <div style={{ borderBottom: `2px solid ${GH.ink}`, paddingBottom: 24, marginBottom: 32 }}>
-                <p style={{ ...monoLabel, marginBottom: 8 }}>Скидки · Бонусы</p>
-                <h1 style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1, margin: 0 }}>
-                    Скидки и&nbsp;бонусы.
-                </h1>
-                <p style={{ marginTop: 12, fontSize: 16, color: GH.ink60, maxWidth: 640 }}>
-                    Чем больше и&nbsp;стабильнее вы&nbsp;арендуете кабинет — тем меньше платите.
-                    Скидки считаются автоматически при бронировании.
+        <div className="mx-auto max-w-3xl text-ink">
+            <header className="mb-8 border-b border-ink-10 pb-4">
+                <h1 className="m-0 text-heading font-semibold">Скидки и бонусы</h1>
+                <p className="mt-2 max-w-xl text-body text-ink-60">
+                    Скидки считаются сами при бронировании — ничего вводить не нужно.
                 </p>
-            </div>
+            </header>
 
-            {/* Первый час бесплатно */}
-            <section style={sectionStyle}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                    <Gift size={28} style={{ color: GH.accent, marginTop: 4 }} />
+            {/* Приветственный час */}
+            <section aria-labelledby="welcome-title" className="mb-6 border border-ink-10 bg-card p-6">
+                <div className="flex items-start gap-4">
+                    <Gift size={24} className="mt-1 shrink-0 text-ink-60" aria-hidden="true" />
                     <div>
-                        <h2 style={{ fontSize: 'clamp(20px, 2.4vw, 28px)', fontWeight: 800, margin: 0, marginBottom: 8 }}>
+                        <h2 id="welcome-title" className="m-0 mb-2 text-title font-semibold">
                             Первый час — бесплатно
                         </h2>
-                        <p style={{ fontSize: 15, color: GH.ink60, margin: 0, marginBottom: 8 }}>
-                            Если вы&nbsp;ещё не&nbsp;арендовали у&nbsp;нас кабинет — первая
-                            бронь часа включена в&nbsp;«пробу». Платите только за&nbsp;последующее время.
+                        <p className="m-0 mb-2 text-body text-ink-80">
+                            После регистрации на вашем счету появляется один бесплатный час аренды.
+                            Он спишется сам при первой брони.
                         </p>
                         {/* X3-02: срок приветственного часа — 15 дней
                             (auth.py WELCOME_BONUS_EXPIRY_DAYS), потом он сгорает. */}
-                        <p style={{ fontSize: 13, color: GH.ink60, margin: 0 }}>
-                            Действует 15&nbsp;дней после регистрации. Применяется один раз, к&nbsp;первому бронированию через сайт.
+                        <p className="m-0 text-small text-ink-60">
+                            Действует 15&nbsp;дней после регистрации, один раз.
                         </p>
                     </div>
                 </div>
             </section>
 
-            {/* Скидка за продолжительность */}
-            <section style={sectionStyle}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                    <Clock size={28} style={{ color: GH.accent, marginTop: 4 }} />
-                    <div style={{ flex: 1 }}>
-                        <h2 style={{ fontSize: 'clamp(20px, 2.4vw, 28px)', fontWeight: 800, margin: 0, marginBottom: 8 }}>
-                            Скидка за&nbsp;часы подряд
+            {/* Скидка за длительность */}
+            <section aria-labelledby="duration-title" className="mb-6 border border-ink-10 bg-card p-6">
+                <div className="flex items-start gap-4">
+                    <Clock size={24} className="mt-1 shrink-0 text-ink-60" aria-hidden="true" />
+                    <div className="flex-1">
+                        <h2 id="duration-title" className="m-0 mb-2 text-title font-semibold">
+                            Скидка за&nbsp;длительность
                         </h2>
-                        <p style={{ fontSize: 15, color: GH.ink60, margin: 0, marginBottom: 16 }}>
-                            Бронируете несколько часов в&nbsp;один заход — получаете скидку
-                            на&nbsp;всё бронирование.
+                        <p className="m-0 mb-4 text-body text-ink-80">
+                            Бронируете несколько часов подряд — скидка на&nbsp;всю бронь.
                         </p>
-                        <div style={{ border: `1px solid ${GH.ink10}` }}>
-                            {duration.map((d, i) => (
-                                <div
-                                    key={i}
-                                    style={{
-                                        display: 'flex', justifyContent: 'space-between',
-                                        padding: '12px 16px',
-                                        borderBottom: i < duration.length - 1 ? `1px solid ${GH.ink10}` : 'none',
-                                    }}
-                                >
-                                    <span style={{ fontSize: 14, color: GH.ink }}>
-                                        {d.max >= 9999 ? `от ${d.min} часов` : `${d.min}–${d.max} часа`}
-                                    </span>
-                                    <span style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 14, color: GH.accent }}>
-                                        −{d.percent}%
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* Прогрессивная еженедельная */}
-            <section style={sectionStyle}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                    <TrendingUp size={28} style={{ color: GH.accent, marginTop: 4 }} />
-                    <div style={{ flex: 1 }}>
-                        <h2 style={{ fontSize: 'clamp(20px, 2.4vw, 28px)', fontWeight: 800, margin: 0, marginBottom: 8 }}>
-                            Прогрессивная скидка по&nbsp;неделе
-                        </h2>
-                        <p style={{ fontSize: 15, color: GH.ink60, margin: 0, marginBottom: 16 }}>
-                            Чем больше часов в&nbsp;неделю — тем выше скидка ретроспективно.
-                            В&nbsp;воскресенье вечером мы&nbsp;считаем сумму часов и&nbsp;возвращаем разницу
-                            бонусным балансом (можно тратить на&nbsp;следующие брони).
-                        </p>
-                        <div style={{ border: `1px solid ${GH.ink10}` }}>
-                            {weekly
-                                .filter(w => w.percent > 0)
-                                .map((w, i, arr) => (
-                                    <div
-                                        key={i}
-                                        style={{
-                                            display: 'flex', justifyContent: 'space-between',
-                                            padding: '12px 16px',
-                                            borderBottom: i < arr.length - 1 ? `1px solid ${GH.ink10}` : 'none',
-                                        }}
-                                    >
-                                        <span style={{ fontSize: 14, color: GH.ink }}>
-                                            {w.max >= 9999 ? `от ${w.min} часов в неделю` : `${w.min}–${Math.floor(w.max)} часов в неделю`}
-                                        </span>
-                                        <span style={{ fontFamily: GH_MONO, fontWeight: 700, fontSize: 14, color: GH.accent }}>
-                                            −{w.percent}%
-                                        </span>
-                                    </div>
+                        <table className="w-full border-collapse text-body">
+                            <caption className="sr-only">Скидка в зависимости от длительности брони</caption>
+                            <thead>
+                                <tr className="border-b border-ink-10 text-left text-small text-ink-60">
+                                    <th scope="col" className="py-2 font-medium">Длительность брони</th>
+                                    <th scope="col" className="py-2 text-right font-medium">Скидка</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {duration.map(d => (
+                                    <tr key={d.min} className="border-b border-ink-10 last:border-b-0">
+                                        <td className="py-3">{fromHours(d.min)}</td>
+                                        <td className="num py-3 text-right font-semibold">−{d.percent}&nbsp;%</td>
+                                    </tr>
                                 ))}
-                        </div>
-                        <p style={{ fontSize: 12, color: GH.ink60, marginTop: 8 }}>
-                            Бонусы действуют 60&nbsp;дней с&nbsp;момента начисления.
+                            </tbody>
+                        </table>
+                        <p className="m-0 mt-3 text-small text-ink-60">
+                            Скидка не действует на&nbsp;пиковые часы (9:00–10:00 и&nbsp;20:00–22:00).
                         </p>
                     </div>
                 </div>
             </section>
 
-            {/* Абонементы */}
-            <section style={sectionStyle}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                    <Trophy size={28} style={{ color: GH.accent, marginTop: 4 }} />
-                    <div style={{ flex: 1 }}>
-                        <h2 style={{ fontSize: 'clamp(20px, 2.4vw, 28px)', fontWeight: 800, margin: 0, marginBottom: 8 }}>
-                            Абонементы — самая выгодная цена
-                        </h2>
-                        <p style={{ fontSize: 15, color: GH.ink60, margin: 0, marginBottom: 16 }}>
-                            Покупаете пакет часов разом со&nbsp;скидкой 25–35%, тратите
-                            в&nbsp;течение 60&nbsp;дней. Подходит, если у&nbsp;вас регулярная практика.
-                        </p>
-                        <Link
-                            to="/subscriptions"
-                            style={{
-                                display: 'inline-block',
-                                padding: '12px 24px',
-                                background: GH.ink,
-                                color: GH.paper,
-                                fontFamily: GH_MONO,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                letterSpacing: '0.16em',
-                                textTransform: 'uppercase',
-                                textDecoration: 'none',
-                            }}
-                        >
-                            Посмотреть абонементы →
-                        </Link>
-                    </div>
-                </div>
-            </section>
-
-            {/* Приведите коллегу */}
-            <section style={sectionStyle}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                    <Users size={28} style={{ color: GH.accent, marginTop: 4 }} />
-                    <div style={{ flex: 1 }}>
-                        <h2 style={{ fontSize: 'clamp(20px, 2.4vw, 28px)', fontWeight: 800, margin: 0, marginBottom: 8 }}>
-                            Приведите коллегу
-                        </h2>
-                        <p style={{ fontSize: 15, color: GH.ink60, margin: 0 }}>
-                            Если по&nbsp;вашей рекомендации у&nbsp;нас начнёт работать другой специалист
-                            — оба получите бонус 50&nbsp;₾ на&nbsp;баланс после его первого
-                            бронирования. Напишите администратору в&nbsp;Telegram{' '}
-                            <a href="https://t.me/UnboxCenter" target="_blank" rel="noreferrer" style={{ color: GH.ink, textDecoration: 'underline' }}>
-                                @UnboxCenter
-                            </a>{' '}
-                            для оформления.
-                        </p>
-                    </div>
-                </div>
-            </section>
-
-            <div style={{ borderTop: `2px solid ${GH.ink}`, paddingTop: 16, fontFamily: GH_MONO, fontSize: 12, color: GH.ink60 }}>
-                Все скидки складываются по&nbsp;приоритету: подписка&nbsp;→ ручная корректировка →
-                прогрессивная неделя&nbsp;→ часы подряд. Применяется самая выгодная.
-            </div>
+            {/* Абонементы — только ссылка, без процентов (решение владельца: выгода — цена часа на тарифах). */}
+            <Link
+                to="/subscriptions"
+                className="flex min-h-11 items-center justify-between gap-3 border border-ink-10 bg-card px-6 py-4 text-body font-medium text-ink no-underline hover:bg-ink-05"
+            >
+                <span>
+                    Бронируете регулярно? Посмотрите абонементы — час в&nbsp;них дешевле.
+                </span>
+                <ArrowRight size={18} aria-hidden="true" className="shrink-0" />
+            </Link>
         </div>
     );
 }
