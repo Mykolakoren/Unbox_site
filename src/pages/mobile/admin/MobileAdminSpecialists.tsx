@@ -8,6 +8,7 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
+import { DesktopLink } from './DesktopLink';
 
 interface SpecialistRow {
     id: string;
@@ -214,7 +215,7 @@ export function MobileAdminSpecialists() {
                                     {r.firstName[0]?.toUpperCase()}{r.lastName[0]?.toUpperCase()}
                                 </div>
                             )}
-                            <div style={{ flex: 1, minWidth: 0, opacity: r.isVerified ? 1 : 0.75 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{
                                     fontWeight: 600, fontSize: 14, color: 'var(--color-ink)',
                                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -228,8 +229,10 @@ export function MobileAdminSpecialists() {
                                     marginTop: 1,
                                 }}>
                                     {CATEGORY_LABEL[r.category || ''] || '—'}
-                                    {r.applicationStatus === 'pending' && (
+                                    {r.applicationStatus === 'pending' ? (
                                         <span style={{ marginLeft: 6, color: 'var(--status-pending-fg)', fontWeight: 600 }}>· ждёт проверки</span>
+                                    ) : !r.isVerified && (
+                                        <span style={{ marginLeft: 6 }}>· скрыт с сайта</span>
                                     )}
                                 </div>
                             </div>
@@ -262,8 +265,9 @@ export function MobileAdminSpecialists() {
             }}>
                 <GripVertical size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-ink-60)' }} />
                 <span>
-                    Порядок карточек, фото и текст анкеты удобнее менять на компьютере:
-                    unbox.com.ge/admin/specialists
+                    Порядок карточек, фото и текст анкеты удобнее менять в полной версии.
+                    <br />
+                    <DesktopLink href="/admin/specialists">Открыть полную версию →</DesktopLink>
                 </span>
             </div>
         </div>

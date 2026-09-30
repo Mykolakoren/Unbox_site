@@ -181,7 +181,7 @@ function CabinetsTab() {
                                 alignItems: 'center',
                                 gap: 8,
                             }}>
-                                <div style={{ flex: 1, minWidth: 0, opacity: isActive ? 1 : 0.7 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
                                         {loc.name}
                                         {!isActive && (
@@ -241,7 +241,7 @@ function CabinetsTab() {
                                 }}>
                                     <MapPin size={16} aria-hidden="true" />
                                 </div>
-                                <div style={{ flex: 1, minWidth: 0, opacity: isActive ? 1 : 0.7 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {r.name}
                                     </div>

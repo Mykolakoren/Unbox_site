@@ -17,6 +17,7 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDayMonth, formatGel, formatMonthLabel, formatTime } from '../../../utils/format';
+import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 
 const BRANCHES = ['all', 'Unbox Uni', 'Unbox One', 'Neo School'] as const;
 type Branch = typeof BRANCHES[number];
@@ -47,7 +48,7 @@ function getRange(period: Period, offset: number): { from: Date; to: Date; label
         return {
             from: startOfDay(base),
             to: endOfDay(base),
-            label: offset === 0 ? 'Сегодня' : offset === -1 ? 'Вчера' : formatDayMonth(base),
+            label: offset === 0 ? 'Сегодня' : offset === -1 ? 'Вчера' : formatDayMonth(base, { timeZone: BATUMI_TZ }),
         };
     }
     if (period === 'week') {
@@ -55,14 +56,14 @@ function getRange(period: Period, offset: number): { from: Date; to: Date; label
         const e = endOfWeek(addWeeks(now, offset), { locale: ru });
         return {
             from: s, to: e,
-            label: offset === 0 ? 'Эта неделя' : offset === -1 ? 'Прошлая неделя' : `${formatDayMonth(s)} – ${formatDayMonth(e)}`,
+            label: offset === 0 ? 'Эта неделя' : offset === -1 ? 'Прошлая неделя' : `${formatDayMonth(s, { timeZone: BATUMI_TZ })} – ${formatDayMonth(e, { timeZone: BATUMI_TZ })}`,
         };
     }
     const s = startOfMonth(addMonths(now, offset));
     const e = endOfMonth(addMonths(now, offset));
     return {
         from: s, to: e,
-        label: formatMonthLabel(s, { capitalize: true }),
+        label: formatMonthLabel(s, { capitalize: true, timeZone: BATUMI_TZ }),
     };
 }
 
@@ -549,6 +550,9 @@ function AddTransactionSheet({
     const [deleting, setDeleting] = useState(false);
     const isEdit = !!initial;
     const { confirm } = useConfirmDialog();
+    // Сумма — общий разбор («1 280,50» → 1280.5; «12abc» — ошибка под полем).
+    const parsedAmount = parseMoneyInput(amount);
+    const amountError = !isMoneyInputBlank(amount) && parsedAmount === null ? MONEY_INPUT_ERROR : undefined;
 
     // Flatten categories for the picker, scoped to the chosen type.
     const flatCats = useMemo(() => {
@@ -568,9 +572,8 @@ function AddTransactionSheet({
     }, [categories, type]);
 
     const handleSave = async () => {
-        // Поле суммы теперь текстовое (цифровая клавиатура) — принимаем и запятую.
-        const n = parseFloat(amount.replace(',', '.'));
-        if (!n || n <= 0) {
+        const n = parsedAmount;
+        if (n === null || n <= 0) {
             toast.error('Введите сумму больше 0');
             return;
         }
@@ -660,7 +663,7 @@ function AddTransactionSheet({
                         onChange={t => { setType(t); setCategoryId(''); }}
                     />
 
-                    <Field label="Сумма">
+                    <Field label="Сумма" error={amountError}>
                         <Input
                             kind="money"
                             suffix="₾"
@@ -710,7 +713,7 @@ function AddTransactionSheet({
                     <Button
                         block
                         loading={saving}
-                        disabled={!amount}
+                        disabled={!parsedAmount}
                         icon={<Check size={16} aria-hidden="true" />}
                         onClick={handleSave}
                     >

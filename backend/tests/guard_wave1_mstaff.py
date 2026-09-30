@@ -210,6 +210,96 @@ def test_loading_error_empty_are_distinct():
         "при сбое «Заявки» снова пишут «Все заявки разобраны»"
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Ревью 77087bf: разбор сумм, время кассы по Батуми, кнопка шага в подвале,
+# ссылки на полную версию, «Выключить» в «Команде».
+# ─────────────────────────────────────────────────────────────────────────
+
+PARSER = "src/pages/mobile/admin/parseMoneyInput.ts"
+MONEY_FIELDS = (
+    "src/pages/mobile/admin/MobileCloseShiftSheet.tsx",   # факт в кассе
+    "src/pages/mobile/admin/MobileAdminUsers.tsx",        # пополнение баланса
+    "src/pages/mobile/admin/MobileAdminFinance.tsx",      # операция кассы
+    "src/pages/mobile/admin/bookingSheets.tsx",           # цена брони
+    "src/pages/mobile/crm/SessionActionSheet.tsx",        # цена сессии CRM
+)
+
+
+def test_money_input_parser_cases():
+    """«1 280,50» было 1.28 ₾ при закрытии смены. Живая проверка через node
+    (≥ 22.6 умеет .ts); без node — проверки по исходникам ниже."""
+    import shutil
+    import subprocess
+    src = (ROOT / PARSER).read_text(encoding="utf-8")
+    assert "export function parseMoneyInput" in src and "import " not in src, \
+        "parseMoneyInput должен быть модулем без импортов (сторож гоняет его через node)"
+    node = shutil.which("node")
+    if not node:
+        return
+    ver = subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip().lstrip("v")
+    try:
+        major, minor = (int(x) for x in ver.split(".")[:2])
+    except ValueError:
+        return
+    if (major, minor) < (22, 6):
+        return
+    cases = ["1 280,50", "1280,5", "1280.50", "1 280", "12abc", "1,2,3", "", "  ", "-5", "12.345", "0", "20"]
+    script = (
+        f"import('./{PARSER}').then(m => console.log(JSON.stringify("
+        f"{cases!r}.map(m.parseMoneyInput))));"
+    ).replace("'", '"')
+    r = subprocess.run([node, "--experimental-strip-types", "--no-warnings", "-e", script],
+                       capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+    assert r.returncode == 0, f"parseMoneyInput не запустился в node: {r.stderr[:300]}"
+    got = r.stdout.strip()
+    assert got == "[1280.5,1280.5,1280.5,1280,null,null,null,null,null,null,0,20]", \
+        f"разбор сумм сломан: {got}"
+
+
+def test_money_inputs_use_shared_parser():
+    for rel in MONEY_FIELDS:
+        code = _strip_comments((ROOT / rel).read_text(encoding="utf-8"))
+        assert "parseMoneyInput(" in code, f"{rel}: сумма разбирается мимо parseMoneyInput"
+        assert "MONEY_INPUT_ERROR" in code, f"{rel}: нет понятной ошибки под полем суммы"
+        assert "replace(/[\\s,]/g, '.')" not in code, f"{rel}: вернулся разбор, делавший «1 280,50» → 1.28"
+        assert not re.search(r"parseFloat\([^)]*(?:amount|price|raw|actualBalance)", code), \
+            f"{rel}: сумма снова через parseFloat"
+    sheet = _strip_comments((ROOT / "src/pages/mobile/crm/SessionActionSheet.tsx").read_text(encoding="utf-8"))
+    assert "|| 0)" not in sheet, "пустая цена сессии снова сохраняется как 0"
+    assert "disabled={parsedPrice === null}" in sheet, "«Сохранить цену» активна при пустом поле"
+
+
+def test_cashbox_times_in_batumi():
+    code = _code(ROOT / "src/pages/mobile/admin/MobileAdminFinance.tsx")
+    i = code.find("function TransactionRow")
+    row = code[i:code.find("\nfunction ", i + 10)]
+    assert "parseUTC(tx.date)" in row and "timeZone: BATUMI_TZ" in row, \
+        "время операции кассы снова в поясе браузера (десктоп показывает по Батуми)"
+    rng = code[code.find("function getRange"):code.find("\nexport function MobileAdminFinance")]
+    assert rng.count("timeZone: BATUMI_TZ") >= 4, "подписи периода кассы не по Батуми"
+
+
+def test_session_sheet_step_action_in_footer():
+    code = _code(ROOT / "src/pages/mobile/crm/SessionActionSheet.tsx")
+    assert "footer={footer}" in code, "кнопка шага шторки сессии не в подвале"
+    for fn in ("function RescheduleForm", "function PriceForm", "function NotesForm"):
+        i = code.find(fn)
+        body = code[i:code.find("\nfunction ", i + 10)]
+        assert "<Button block" not in body, f"{fn}: главная кнопка снова в прокручиваемом теле"
+
+
+def test_desktop_links_and_team_wording():
+    link = _code(ROOT / "src/pages/mobile/admin/DesktopLink.tsx")
+    assert "forceDesktop=1" in link and "minHeight: 44" in link, \
+        "ссылка на полную версию без ?forceDesktop=1 уводит по кругу / меньше 44 px"
+    kb = _code(ROOT / "src/pages/mobile/admin/MobileAdminKB.tsx")
+    assert '<DesktopLink href="/admin/knowledge-base">Открыть полную статью →</DesktopLink>' in kb
+    team = _code(ROOT / "src/pages/mobile/admin/MobileAdminTeam.tsx")
+    assert "'Выключить' : 'Включить'" in team and "Отключить" not in team
+    assert "opacity: m.isActive" not in team, "имя и роль выключенного сотрудника снова бледнее ink-60"
+    assert '<DesktopLink href="/admin/team">' in team
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

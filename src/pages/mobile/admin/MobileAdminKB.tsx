@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, BookOpen, Clock, Wallet, Sparkles, Sun, ListChecks } from 'lucide-react';
+import { DesktopLink } from './DesktopLink';
 
 type SectionId = 'pricing' | 'rules' | 'morning' | 'day' | 'evening';
 
@@ -25,8 +26,9 @@ const SECTIONS: Section[] = [
  * "Утренний чек-лист" and read the short version.
  *
  * Wave 1: ссылка «Открыть полную статью →» вела на /admin/knowledge-base,
- * а телефон оттуда перенаправляет обратно на главную админки — тупик по
- * кругу (аудит G9-06). Теперь честная подсказка: полная статья — на компьютере.
+ * а телефон оттуда перенаправлял обратно на главную админки — тупик по
+ * кругу (аудит G9-06). Теперь она идёт с ?forceDesktop=1 (DesktopLink) и
+ * правда открывает полную статью.
  */
 export function MobileAdminKB() {
     const [expandedId, setExpandedId] = useState<SectionId | null>(null);
@@ -116,8 +118,9 @@ export function MobileAdminKB() {
             }}>
                 <ListChecks size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-ink-60)' }} />
                 <span>
-                    Здесь — короткие версии. Полные тексты и таблицы удобнее читать
-                    на компьютере: unbox.com.ge/admin/knowledge-base
+                    Здесь — короткие версии. Полные тексты и таблицы — в полной версии базы знаний.
+                    <br />
+                    <DesktopLink href="/admin/knowledge-base">Открыть базу знаний →</DesktopLink>
                 </span>
             </div>
         </div>
@@ -155,10 +158,8 @@ function SectionPreview({ section }: { section: Section }) {
             color: 'var(--color-ink-80)',
             lineHeight: 1.55,
         }}>
-            <p style={{ margin: '0 0 8px' }}>{snippet}</p>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--color-ink-60)' }}>
-                Полная статья — на компьютере, в разделе «База знаний».
-            </p>
+            <p style={{ margin: '0 0 4px' }}>{snippet}</p>
+            <DesktopLink href="/admin/knowledge-base">Открыть полную статью →</DesktopLink>
         </div>
     );
 }

@@ -7,6 +7,7 @@ import { Button } from '../../../components/ui/Button';
 import { Field, Input, TextArea } from '../../../components/ui/Field';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatGel } from '../../../utils/format';
+import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 
 /**
  * Mobile close-shift flow — упрощённая версия десктопной 2-шаговой модалки.
@@ -83,8 +84,12 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
     }, [branch]);
 
     const allChecked = CHECKLIST.every(i => checked[i.key]);
-    const actualNum = parseFloat(actualBalance.replace(/[\s,]/g, '.').replace(/[^\d.-]/g, ''));
-    const hasAmount = actualBalance.trim() !== '' && Number.isFinite(actualNum);
+    // Ревью 30.09: раньше replace(/[\s,]/g, '.') превращал «1 280,50» в 1.28 ₾.
+    // Общий разбор: пробелы убираем, одна запятая или точка, остальное — ошибка.
+    const parsedActual = parseMoneyInput(actualBalance);
+    const hasAmount = parsedActual !== null;
+    const actualNum = parsedActual ?? 0;
+    const amountError = !isMoneyInputBlank(actualBalance) && parsedActual === null ? MONEY_INPUT_ERROR : undefined;
     const expected = preview?.expected ?? systemBalance;
     const drift = hasAmount ? actualNum - expected : 0;
     const hasDrift = hasAmount && Math.abs(drift) >= 0.01;
@@ -93,13 +98,15 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
     const branchLabel = branch;
 
     // Подсказка под кнопкой — что именно мешает закрыть смену.
-    const missingHint = !allChecked && !hasAmount
-        ? 'Отметьте все пункты чек-листа и введите сумму в кассе'
-        : !allChecked
-            ? 'Отметьте все пункты чек-листа'
-            : !hasAmount
-                ? 'Введите, сколько наличных в кассе'
-                : null;
+    const missingHint = amountError
+        ? 'Проверьте сумму в кассе'
+        : !allChecked && !hasAmount
+            ? 'Отметьте все пункты чек-листа и введите сумму в кассе'
+            : !allChecked
+                ? 'Отметьте все пункты чек-листа'
+                : !hasAmount
+                    ? 'Введите, сколько наличных в кассе'
+                    : null;
 
     const handleSubmit = async () => {
         if (!canSubmit) return;
@@ -214,7 +221,7 @@ export function MobileCloseShiftSheet({ branch, systemBalance, onClose, onClosed
                     )}
                 </div>
 
-                <Field label="Фактически в кассе">
+                <Field label="Фактически в кассе" error={amountError}>
                     <Input
                         kind="money"
                         suffix="₾"

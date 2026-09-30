@@ -12,6 +12,7 @@ import { Field, Input } from '../../../components/ui/Field';
 import { Segmented } from '../../../components/ui/Chip';
 import { useConfirmDialog } from '../../../components/ui/ConfirmDialogProvider';
 import { formatDayMonth, formatGel } from '../../../utils/format';
+import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 
 /**
  * Шторки брони мобильной админки — ОДНИ на «Брони» и на «Дашборд».
@@ -476,8 +477,10 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
     const current = booking.finalPrice ?? 0;
     const [raw, setRaw] = useState(String(current));
     const [reason, setReason] = useState('');
-    const num = parseFloat(raw.replace(',', '.'));
-    const valid = Number.isFinite(num) && num >= 0 && num !== current;
+    // Общий разбор суммы: «1 280,50» → 1280.5, «12abc» → null (ошибка под полем).
+    const num = parseMoneyInput(raw);
+    const valid = num !== null && num !== current;
+    const priceError = !isMoneyInputBlank(raw) && num === null ? MONEY_INPUT_ERROR : undefined;
     return (
         <Sheet
             open
@@ -486,7 +489,7 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
             description={`${formatDayMonth(booking.date as any)}, ${booking.startTime} · ${userName} · сейчас ${formatGel(current)}`}
             footer={
                 <>
-                    <Button block loading={busy} disabled={!valid} onClick={() => onConfirm(num, reason.trim())}>
+                    <Button block loading={busy} disabled={!valid} onClick={() => { if (num !== null) onConfirm(num, reason.trim()); }}>
                         {valid ? `Сохранить ${formatGel(num)}` : 'Сохранить'}
                     </Button>
                     <Button variant="secondary" block disabled={busy} onClick={onClose}>
@@ -496,7 +499,7 @@ function EditPriceSheet({ booking, userName, busy, onClose, onConfirm }: {
             }
         >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <Field label="Новая цена">
+                <Field label="Новая цена" error={priceError}>
                     <Input kind="money" suffix="₾" value={raw} onChange={e => setRaw(e.target.value)} />
                 </Field>
                 <Field label="Причина" optional>

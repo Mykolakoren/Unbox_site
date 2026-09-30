@@ -18,6 +18,7 @@ import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { COLOR } from '../../../design/tokens';
 import { formatDateLabel, formatDayMonth, formatMoney, formatTime } from '../../../utils/format';
 import type { BookingHistoryItem } from '../../../store/types';
+import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from '../admin/parseMoneyInput';
 
 /** Resolve the active currency for a session: session.currency overrides
  * client.currency (frozen at payment time), default to GEL. */
@@ -45,6 +46,8 @@ const TZ = { timeZone: BATUMI_TZ };
  * крестик «Закрыть», фокус внутри, появление 220 мс). Оплата — вся строка
  * кнопка (раньше системный чекбокс 22×22 внутри кнопки), снятие оплаты
  * спрашивает подтверждение. Поля и кнопки — общие Field/Button.
+ * Главная кнопка шагов «Перенос», «Цена», «Заметки» — в подвале шторки
+ * (всегда видна над клавиатурой), поэтому поля этих шагов живут в родителе.
  */
 
 interface Props {
@@ -65,6 +68,12 @@ const SITE_REQUEST_MARK = 'Заявка через публичный сайт';
 export function SessionActionSheet({ session, client, onClose, onChange, onDeleted }: Props) {
     const [mode, setMode] = useState<Mode>('main');
     const [busy, setBusy] = useState(false);
+    // Поля шагов живут здесь: кнопка шага — в подвале общей шторки.
+    const [resDate, setResDate] = useState('');
+    const [resTime, setResTime] = useState('');
+    const [resDur, setResDur] = useState(60);
+    const [priceRaw, setPriceRaw] = useState('');
+    const [noteText, setNoteText] = useState('');
     const { confirm } = useConfirmDialog();
 
     // Заметки к сессии — это те же записи (TherapistNote), что во вкладке
@@ -227,12 +236,57 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
 
     // Drag-to-dismiss, лок прокрутки, Esc и фокус — теперь у общего Sheet.
 
+    /** Переход на шаг: поля шага заполняются заново из сессии. */
+    const openMode = (m: Mode) => {
+        if (m === 'reschedule') {
+            setResDate(formatBatumi(session.date, 'yyyy-MM-dd'));
+            setResTime(formatBatumi(session.date, 'HH:mm'));
+            setResDur(session.durationMinutes ?? 60);
+        }
+        if (m === 'price') setPriceRaw((session.price ?? 0).toString());
+        if (m === 'notes') setNoteText('');
+        setMode(m);
+    };
+
+    // Цена — общий разбор суммы. Пустое или кривое поле не сохраняем
+    // (раньше пустое поле через «|| 0» записывало цену 0).
+    const parsedPrice = parseMoneyInput(priceRaw);
+    const priceError = !isMoneyInputBlank(priceRaw) && parsedPrice === null ? MONEY_INPUT_ERROR : undefined;
+
+    const submitReschedule = async () => {
+        // Build a Tbilisi wall-clock ISO; backend converts to UTC.
+        const iso = `${resDate}T${resTime}:00`;
+        try { await update({ date: iso, durationMinutes: resDur }, 'Сессия перенесена'); setMode('main'); } catch { /* toast already shown */ }
+    };
+    const submitPrice = async () => {
+        if (parsedPrice === null) return;
+        try { await update({ price: parsedPrice }, 'Цена обновлена'); setMode('main'); } catch { /* toast already shown */ }
+    };
+    const submitNote = async () => {
+        if (await handleAddNote(noteText)) setMode('main');
+    };
+
+    const footer = mode === 'reschedule' ? (
+        <Button block loading={busy} disabled={!resDate || !resTime} onClick={submitReschedule}>
+            Перенести сессию
+        </Button>
+    ) : mode === 'price' ? (
+        <Button block loading={busy} disabled={parsedPrice === null} onClick={submitPrice}>
+            Сохранить цену
+        </Button>
+    ) : mode === 'notes' ? (
+        <Button block loading={busy} disabled={!noteText.trim()} onClick={submitNote}>
+            Сохранить заметку
+        </Button>
+    ) : undefined;
+
     return (
         <Sheet
             open
             onClose={onClose}
             title={client?.name ?? 'Клиент…'}
             description={`${dateLabel}, ${time} · ${session.durationMinutes ?? 60} мин`}
+            footer={footer}
         >
             {mode === 'main' && (
                 <Main
@@ -243,20 +297,21 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                     legacyNote={legacyNote}
                     onStatus={handleStatus}
                     onPaid={handlePaid}
-                    onPrice={() => setMode('price')}
-                    onNotes={() => setMode('notes')}
-                    onReschedule={() => setMode('reschedule')}
-                    onDelete={() => setMode('delete')}
-                    onCabinet={() => setMode('cabinet')}
+                    onPrice={() => openMode('price')}
+                    onNotes={() => openMode('notes')}
+                    onReschedule={() => openMode('reschedule')}
+                    onDelete={() => openMode('delete')}
+                    onCabinet={() => openMode('cabinet')}
                 />
             )}
             {mode === 'reschedule' && (
                 <RescheduleForm
-                    session={session}
-                    busy={busy}
-                    onSubmit={async (newDate, dur) => {
-                        try { await update({ date: newDate, durationMinutes: dur }, 'Сессия перенесена'); setMode('main'); } catch { /* */ }
-                    }}
+                    date={resDate}
+                    time={resTime}
+                    dur={resDur}
+                    onDate={setResDate}
+                    onTime={setResTime}
+                    onDur={setResDur}
                     onBack={() => setMode('main')}
                 />
             )}
@@ -264,23 +319,21 @@ export function SessionActionSheet({ session, client, onClose, onChange, onDelet
                 <PriceForm
                     session={session}
                     client={client}
-                    busy={busy}
-                    onSubmit={async (price) => {
-                        try { await update({ price }, 'Цена обновлена'); setMode('main'); } catch { /* */ }
-                    }}
+                    value={priceRaw}
+                    error={priceError}
+                    onChange={setPriceRaw}
                     onBack={() => setMode('main')}
                 />
             )}
             {mode === 'notes' && (
                 <NotesForm
                     busy={busy}
+                    text={noteText}
+                    onText={setNoteText}
                     notes={sessionNotes}
                     failed={notesFailed}
                     legacyNote={legacyNote}
                     onRetry={loadNotes}
-                    onAdd={async (text) => {
-                        if (await handleAddNote(text)) setMode('main');
-                    }}
                     onMoveLegacy={(text) => { handleAddNote(text); }}
                     onDeleteNote={handleDeleteNote}
                     onBack={() => setMode('main')}
@@ -418,103 +471,82 @@ function Main({
     );
 }
 
-function RescheduleForm({ session, busy, onSubmit, onBack }: {
-    session: CrmSession;
-    busy: boolean;
-    onSubmit: (date: string, dur: number) => void;
+function RescheduleForm({ date, time, dur, onDate, onTime, onDur, onBack }: {
+    date: string;
+    time: string;
+    dur: number;
+    onDate: (v: string) => void;
+    onTime: (v: string) => void;
+    onDur: (v: number) => void;
     onBack: () => void;
 }) {
-    const initialDate = formatBatumi(session.date, 'yyyy-MM-dd');
-    const initialTime = formatBatumi(session.date, 'HH:mm');
-    const [date, setDate] = useState(initialDate);
-    const [time, setTime] = useState(initialTime);
-    const [dur, setDur] = useState(session.durationMinutes ?? 60);
-
+    // Кнопка «Перенести сессию» — в подвале шторки (SessionActionSheet).
     return (
         <FormShell title="Перенос сессии" onBack={onBack}>
             <Field label="Дата">
-                <Input kind="date" value={date} onChange={e => setDate(e.target.value)} />
+                <Input kind="date" value={date} onChange={e => onDate(e.target.value)} />
             </Field>
             <Field label="Время (Батуми)">
-                <Input kind="time" value={time} onChange={e => setTime(e.target.value)} />
+                <Input kind="time" value={time} onChange={e => onTime(e.target.value)} />
             </Field>
             <Field label="Длительность">
-                <Select value={dur} onChange={e => setDur(parseInt(e.target.value))}>
+                <Select value={dur} onChange={e => onDur(parseInt(e.target.value))}>
                     {[30, 45, 60, 75, 90, 120].map(n => <option key={n} value={n}>{n} мин</option>)}
                 </Select>
             </Field>
-            <Button
-                block
-                loading={busy}
-                onClick={() => {
-                    // Build a Tbilisi wall-clock ISO; backend converts to UTC.
-                    const iso = `${date}T${time}:00`;
-                    onSubmit(iso, dur);
-                }}
-            >
-                Перенести сессию
-            </Button>
         </FormShell>
     );
 }
 
-function PriceForm({ session, client, busy, onSubmit, onBack }: {
-    session: CrmSession; client?: CrmClient; busy: boolean;
-    onSubmit: (price: number) => void; onBack: () => void;
+function PriceForm({ session, client, value, error, onChange, onBack }: {
+    session: CrmSession; client?: CrmClient;
+    value: string; error?: string;
+    onChange: (v: string) => void; onBack: () => void;
 }) {
-    const [price, setPrice] = useState((session.price ?? 0).toString());
     const symbol = currencySymbol(sessionCurrency(session, client));
+    // Кнопка «Сохранить цену» — в подвале шторки, неактивна при пустом поле.
     return (
         <FormShell title="Цена сессии" onBack={onBack}>
-            <Field label="Цена">
+            <Field label="Цена" error={error}>
                 <Input
                     kind="money"
                     suffix={symbol}
-                    value={price}
-                    onChange={e => setPrice(e.target.value)}
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
                 />
             </Field>
-            <Button
-                block
-                loading={busy}
-                onClick={() => onSubmit(parseFloat(price.replace(',', '.')) || 0)}
-            >
-                Сохранить цену
-            </Button>
         </FormShell>
     );
 }
 
 /** Заметки к сессии: список (новые сверху) + поле для новой. Пишутся
  *  в общие Заметки, поэтому видны во вкладке «Заметки», в истории клиента
- *  и на компьютере. Правки на сервере нет — только добавить или удалить. */
-function NotesForm({ busy, notes, failed, legacyNote, onRetry, onAdd, onMoveLegacy, onDeleteNote, onBack }: {
+ *  и на компьютере. Правки на сервере нет — только добавить или удалить.
+ *  Кнопка «Сохранить заметку» — в подвале шторки. */
+function NotesForm({ busy, text, onText, notes, failed, legacyNote, onRetry, onMoveLegacy, onDeleteNote, onBack }: {
     busy: boolean;
+    text: string;
+    onText: (v: string) => void;
     notes: CrmNote[] | null;
     failed: boolean;
     legacyNote: string | null;
     onRetry: () => void;
-    onAdd: (text: string) => void;
     onMoveLegacy: (text: string) => void;
     onDeleteNote: (note: CrmNote) => void;
     onBack: () => void;
 }) {
-    const [text, setText] = useState('');
     const isSiteMark = !!legacyNote && legacyNote.startsWith(SITE_REQUEST_MARK);
     return (
         <FormShell title="Заметки к сессии" onBack={onBack}>
             <Field label="Новая заметка" hint="Появится во вкладке «Заметки» и в истории клиента.">
                 <TextArea
                     value={text}
-                    onChange={e => setText(e.target.value)}
+                    onChange={e => onText(e.target.value)}
                     rows={5}
                     placeholder="О чём говорили, домашнее задание, наблюдения…"
                     style={{ minHeight: 110 }}
                 />
             </Field>
-            <Button block loading={busy} disabled={!text.trim()} onClick={() => onAdd(text)}>
-                Сохранить заметку
-            </Button>
 
             {failed && (
                 <div style={{ marginTop: 12 }}>

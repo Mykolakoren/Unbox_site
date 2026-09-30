@@ -13,6 +13,7 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonList } from '../../../components/ui/Skeleton';
 import { COLOR } from '../../../design/tokens';
 import { formatGel } from '../../../utils/format';
+import { parseMoneyInput, isMoneyInputBlank, MONEY_INPUT_ERROR } from './parseMoneyInput';
 
 /**
  * Mobile admin — users search & quick view.
@@ -300,8 +301,10 @@ function TopupSheet({ user, onClose, onDone }: {
     const [method, setMethod] = useState<'cash' | 'card_tbc' | 'card_bog'>('cash');
     const [branch, setBranch] = useState<string>('Unbox Uni');
     const [saving, setSaving] = useState(false);
-    // Поле текстовое (цифровая клавиатура) — принимаем и запятую.
-    const value = Number(amount.replace(',', '.')) || 0;
+    // Поле текстовое (цифровая клавиатура): «1 280,50», «20.5» — общий разбор.
+    const parsed = parseMoneyInput(amount);
+    const value = parsed ?? 0;
+    const amountError = !isMoneyInputBlank(amount) && parsed === null ? MONEY_INPUT_ERROR : undefined;
 
     const submit = async () => {
         if (value <= 0) { toast.error('Введите сумму больше 0'); return; }
@@ -377,7 +380,7 @@ function TopupSheet({ user, onClose, onDone }: {
                             </Chip>
                         )}
                     </div>
-                    <Field label="Сумма">
+                    <Field label="Сумма" error={amountError}>
                         <Input kind="money" suffix="₾" value={amount} onChange={e => setAmount(e.target.value)} />
                     </Field>
                 </div>

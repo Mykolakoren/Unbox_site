@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorBar } from '../../../components/ui/ErrorBar';
 import { SkeletonList } from '../../../components/ui/Skeleton';
+import { DesktopLink } from './DesktopLink';
 
 const ROLE_LABEL: Record<string, string> = {
     founder: 'Основатель',
@@ -21,7 +22,8 @@ const ROLE_LABEL: Record<string, string> = {
  * (e.g. when someone is on leave).
  *
  * Wave 1: роль — нейтральной плашкой (раньше зелёная/синяя для красоты),
- * кнопка называет действие («Отключить» / «Включить»), а не состояние.
+ * кнопка называет действие («Выключить» / «Включить», как у кабинетов),
+ * а не состояние; выключенный сотрудник помечен словом «Выключен ·».
  */
 export function MobileAdminTeam() {
     const [members, setMembers] = useState<TeamMember[]>([]);
@@ -60,7 +62,7 @@ export function MobileAdminTeam() {
         try {
             await teamApi.update(m.id, { is_active: !m.isActive });
             await load();
-            toast.success(m.isActive ? `${m.name}: отключён` : `${m.name}: включён`);
+            toast.success(m.isActive ? `${m.name}: выключен` : `${m.name}: включён`);
         } catch {
             toast.error('Не удалось обновить. Попробуйте ещё раз');
         } finally {
@@ -121,7 +123,7 @@ export function MobileAdminTeam() {
                                         {m.name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}
                                     </div>
                                 )}
-                                <div style={{ flex: 1, minWidth: 0, opacity: m.isActive ? 1 : 0.7 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {m.name}
                                     </div>
@@ -130,7 +132,7 @@ export function MobileAdminTeam() {
                                             {ROLE_LABEL[m.roleType] || 'Другое'}
                                         </span>
                                         <span style={{ fontSize: 12, color: 'var(--color-ink-60)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {!m.isActive && 'Отключён · '}{m.role}
+                                            {!m.isActive && 'Выключен · '}{m.role}
                                         </span>
                                     </div>
                                 </div>
@@ -140,9 +142,9 @@ export function MobileAdminTeam() {
                                     loading={busyId === m.id}
                                     icon={<Power size={16} aria-hidden="true" />}
                                     onClick={() => handleToggle(m)}
-                                    aria-label={`${m.isActive ? 'Отключить' : 'Включить'}: ${m.name}`}
+                                    aria-label={`${m.isActive ? 'Выключить' : 'Включить'}: ${m.name}`}
                                 >
-                                    {m.isActive ? 'Отключить' : 'Включить'}
+                                    {m.isActive ? 'Выключить' : 'Включить'}
                                 </Button>
                             </div>
                         );
@@ -164,8 +166,9 @@ export function MobileAdminTeam() {
             }}>
                 <UsersIcon size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-ink-60)' }} />
                 <span>
-                    Фото, описание, роль и новых сотрудников удобнее менять на компьютере:
-                    unbox.com.ge/admin/team
+                    Фото, описание, роль и новых сотрудников удобнее менять в полной версии.
+                    <br />
+                    <DesktopLink href="/admin/team">Открыть полную версию →</DesktopLink>
                 </span>
             </div>
         </div>
