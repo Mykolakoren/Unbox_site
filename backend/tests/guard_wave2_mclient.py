@@ -80,7 +80,9 @@ def test_approval_promised_only_by_server():
     src = _code("src/pages/mobile/MobileCheckout.tsx")
     assert "setDone({ pending: isHotBooking" not in src, "мультислот снова обещает одобрение по догадке экрана"
     assert src.count("setDone({") == 2 and "setDone({ pending: false })" in src
-    assert "const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser);" in src
+    # Серия создаётся сразу confirmed (ревью денег 30.09) — одобрение не обещаем.
+    assert "const expectApproval = isHotBooking && priced.items.length === 1 && !isBookingAdmin(currentUser) && !isSeries;" in src, \
+        "expectApproval снова обещает одобрение серии или мультислоту"
     render = src[src.index("if (done) {"):]
     assert "isHotBooking ?" not in render and ": isHotBooking" not in render, \
         "тексты «на одобрение» снова по isHotBooking — нужно expectApproval"
